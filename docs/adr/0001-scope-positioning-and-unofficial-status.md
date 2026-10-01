@@ -33,8 +33,7 @@ OVHcloud's own docs define five pillars: IAM, networking, security, billing, obs
 independently releasable, so the library hedge is never lost.
 
 **Purpose:** establish a credible, inspectable OVHcloud landing-zone reference baseline through
-building and learning. The maintainer's employee perspective informs the independent project;
-it does not change its ownership, endorsement or support status. Adoption and wider discussion
+building and learning. Adoption and wider discussion
 are desired outcomes; lack of customer/adoption evidence does not block a bounded experiment.
 Useful modules, explained decisions and reproducible checks retain value without full adoption.
 

@@ -1,15 +1,17 @@
-<!-- Sync impact: constitution 1.2.0, 2026-10-01. Reference-baseline purpose,
-substantive differentiators, usable operations and reasoned challenge added;
-project overrides and command guidance synchronized. Docs-only work remains exempt.
-Existing ADR statuses remain Proposed; naming interface proposals remain undecided. -->
+<!-- Sync impact: constitution 1.2.0 -> 1.2.1, 2026-10-01.
+Reason: operator-requested removal of employment disclosure from Purpose.
+Principles I-VIII unchanged; no sections added or removed; no deferred placeholders.
+README and ADR-0001 synchronized. Templates/commands read the constitution at runtime
+and contain no matching disclosure, so no template or command edits are needed.
+Ratification, test/evidence, safety and authority requirements remain unchanged. -->
 # OVHcloud Landing Zone Accelerator constitution
-Version: 1.2.0 · Ratified: 2026-10-01 · Last amended: 2026-10-01
+Version: 1.2.1 · Ratified: 2026-10-01 · Last amended: 2026-10-01
 
 ## Purpose
 Build an inspectable reference baseline for an OVHcloud landing zone through useful
 experiments. Learning, visible technical contributions and a credible comparison point
 are outcomes in their own right; adoption is a desired outcome, not a prerequisite for
-starting. The maintainer's OVHcloud experience informs the design; official ownership
+starting. Official ownership
 and support are governed separately by ADR-0001. Do not require customer research or
 adoption evidence before building a bounded increment.
 
