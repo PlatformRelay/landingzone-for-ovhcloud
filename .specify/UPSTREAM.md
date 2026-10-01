@@ -10,5 +10,8 @@ Project-authored constitution and template overrides follow the repository's lic
 Core templates/scripts are retained. Project overrides in `templates/overrides/` and
 project guidance in four command files add predefined verification and documentation
 exemption. Refresh with the recorded version/commit, then retain/review these overrides.
+Refresh governance: no current task or owner maps this path; refreshing the vendored
+scaffold is an explicit operator action, and every changed upstream script must be
+reviewed before commit — never refreshed automatically or silently.
 No extensions or automatic workflow execution were added. Use the per-feature flow in
 specs/README.md; the bundled generic workflow is not permission to deploy a draft spec.

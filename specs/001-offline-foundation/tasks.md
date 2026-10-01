@@ -182,11 +182,10 @@ requires real forge evidence and whole-suite latency.
 
 ## Parallel opportunities
 
-No [P] flags are used across incomplete test/implementation dependencies. After common
-prerequisites, independent fixture/guide authoring can run on distinct files: 001 naming
-versus forge setup after T009; 002 binding-fixture authoring versus authority-fixture
-authoring after interfaces stabilize; 003 state versus identity probes after T008 only
-with independent approved leases and no shared live writers.
+No [P] flags are used across incomplete test/implementation dependencies. Within this
+feature, naming authoring (T013–T016) versus forge adapter qualification (T010–T012) can
+proceed in parallel after T009, on distinct files; diagnostics and guides (T017–T019)
+follow T014 and T016. Other phases' parallelism is described in their own tasks.md.
 
 ## Completion
 

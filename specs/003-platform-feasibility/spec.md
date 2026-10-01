@@ -3,7 +3,8 @@ Created: 2026-10-01 · Status: draft · ADRs: 0004, 0006, 0008, 0009, 0011, 0018
 
 ## Why and scope
 Observe the load-bearing cloud claims before building a landing zone. Cover ranked
-spikes 1, 3, 5, 6 and 7 and the cloud isolation portion of spike 2; spike 4 belongs to 002.
+spikes 1, 3, 5, 6 and 7 and the cloud isolation portion of spike 2; spike 4 belongs to 002
+(canonical register: [plan.md](plan.md) "Ranked spike register").
 No general module/runtime release, automatic purchase, production deny policy or
 unattended deployment is included. Unsupported routes stay explicitly blocked.
 
@@ -60,7 +61,7 @@ check has run. Evidence below is initially `not-run`; paths are under `.local/ev
 
 ## Success Criteria
 - **SC-001**: Admission and every failure drill leave no unaccounted owned resource and no new admission above the EUR 200 monthly exposure ceiling (V001–V002).
-- **SC-002**: Each of the top-seven spikes has observed evidence or a specific refuted/blocked result with a downstream stop gate; no UNVERIFIED control is called supported (V008 and phase 002).
+- **SC-002**: Each of the top-seven spikes has observed evidence or a specific refuted/blocked result with a downstream stop gate; no UNVERIFIED control is called supported (V008 and phase 002; the top-seven list is the "Ranked spike register" in plan.md).
 
 ## Edge cases
 Delayed billing; unknown recurring charges; two leases exceeding headroom; reservation retry;

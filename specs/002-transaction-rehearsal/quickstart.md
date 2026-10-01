@@ -13,6 +13,7 @@ Do not run acceptance commands until their implementation and prerequisites have
 6. Keep absent tools, unavailable forge/credentials and unobserved mechanisms blocked.
 7. Complete independent review and record every non-docs check before changing to done.
 
-For 003, approved sandbox setup, numerical RunConfig and tested cleanup health gate every
-live target. A planning document is not permission for a purchase, deletion or IAM change.
-Docs-only tasks need content review, not invented acceptance tests.
+For this phase, actual assent adapters on both forges gate the race qualification; an
+unavailable adapter is a recorded blocker, not simulated support. A planning document is
+not permission for a purchase, deletion or IAM change. Docs-only tasks need content
+review, not invented acceptance tests.

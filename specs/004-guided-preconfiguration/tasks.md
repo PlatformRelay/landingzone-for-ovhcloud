@@ -1,7 +1,7 @@
 # Tasks: Friendly, resumable repository preconfiguration
 Status: planned · Input: spec.md, plan.md, research.md, data-model.md, contracts/checks.md
 All boxes are open. Targets are planned until their creating tasks land; evidence starts `not-run`.
-Independent plan review: CLEAN (2026-10-01); optional provenance/refresh/write-scope notes included.
+Adversarial plan review: CLEAN (2026-10-01); optional provenance/refresh/write-scope notes included.
 Real exports require actual schema/catalogue creators and any dependent joint naming decision.
 
 ## Setup and bounded renderer experiment

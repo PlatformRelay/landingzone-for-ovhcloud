@@ -1,6 +1,9 @@
 # Naming and labelling: interface exploration and behavioral contract
 
-Status: interface **pending joint decision**. Flexible conventions and verified behavior are
+Status: interface **pending joint decision**. The operator (maintainer) owns the joint decision and
+must record it before phase 001's naming implementation tasks (001/T013 onward) start; an
+unresolved decision blocks those tasks with a recorded stop decision, never silent ratification.
+Flexible conventions and verified behavior are
 approved direction; a configuration vector is a hypothesis, not an instruction. This document
 elaborates [ADR-0003](../adr/0003-layered-taxonomy-and-module-naming.md). No module exists yet.
 

@@ -4,7 +4,8 @@ Created: 2026-10-01 · Status: draft · ADRs: 0004, 0005, 0006, 0007, 0008, 0021
 ## Why and scope
 Prove the most expensive control-plane seams with local disposable state and artefacts,
 then qualify the forge adapter protocol in disposable repositories on both forges.
-This covers the offline portions of ranked spikes 2 and 4. Exclude OVH deployment,
+This covers the offline portions of ranked spikes 2 and 4 (canonical register:
+specs/003-platform-feasibility/plan.md, "Ranked spike register"). Exclude OVH deployment,
 project orders, production merging and full tenant-repo release readiness.
 
 ## User Scenarios & Testing

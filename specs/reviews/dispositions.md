@@ -4,8 +4,8 @@
 
 | Review finding | Disposition | Concrete verification tasks |
 | --- | --- | --- |
-| Plan C1: saved-plan encryption omitted from recovery outcome | Accepted; 003 FR-004/V003, plan and contract now require actual state/plan key controls, enforced plaintext refusal, separate enforcement mutants and private canary scan | 003 T009, T010; completeness T021/T022 |
-| Plan C2: floor shedding and tag-envelope escape omitted | Accepted; 003 FR-006/V006 and per-route records now require floor/policy self-removal, missing/present tags, cross-tenant retagging and applicable child operations; absent subcontrol blocks the authority claim | 003 T015–T017; completeness T021/T022 |
+| Plan C1: saved-plan encryption omitted from recovery outcome | Accepted; 003 FR-004/V003, plan and contract now require actual state/plan key controls, enforced plaintext refusal, separate enforcement mutants and private canary scan | 003 T009, T010; completeness T021–T023 |
+| Plan C2: floor shedding and tag-envelope escape omitted | Accepted; 003 FR-006/V006 and per-route records now require floor/policy self-removal, missing/present tags, cross-tenant retagging and applicable child operations; absent subcontrol blocks the authority claim | 003 T015–T017; completeness T021–T023 |
 | Plan W1: candidate controlled its isolation launcher | Accepted; 001 uses protected approved-base dispatch, candidate archive as data, candidate-independent image/mount/launch configuration and protected result origin | 001 T002/T003, T010–T012 |
 | Latency command absent from initial SC-001 mapping | Added explicit planned `task verify:latency`, complete-layer/discovery requirement and creators | 001 T020/T021 |
 
@@ -16,7 +16,7 @@ planning omissions; each implementation proof remains not-run until its task exe
 | Technical task finding | Disposition | Concrete verification tasks |
 | --- | --- | --- |
 | P2: promised L0 had no concrete creator | Accepted; 001 FR-007/V006 and contracts now name real fmt/validate/tflint and schema checks, actual valid/offence/discovery controls and clause mutants; latency consumes actual results. Pure-module resource scans are not-applicable; docs-only tests remain exempt | 001 T008/T009, T016; T020/T021/T022 depend on those results |
-| P2: missing forge adapter blocked local MVP preparation | Accepted; 002 T001 closes on tool-owned offline CLI fixtures; adapter availability is recorded separately and gates only real T018/T019/V007 qualification | 002 T001, T018/T019 |
+| P2: missing forge adapter blocked local MVP preparation | Accepted; 002 T001 closes on tool-owned offline CLI fixtures; adapter availability is recorded separately and gates only real T018/T019/V007 qualification. This de-gates only the assent adapters: 002/T001 still depends on 001/T022, whose verify requires phase-001 forge evidence, so the phase-2 start order and the serial phase gate are unchanged | 002 T001, T018/T019 |
 
 Task packet paths and acceptance-check packet paths are explicitly related, and success
 criteria now point to their earlier concrete creators as well as the final exit task.
@@ -42,6 +42,11 @@ equal-value resume, dirty-content and outside-root/interrupted-export controls.
 | TR-D3: early human-rubric source implicit | Applied; T009 points to existing plan/ADR/SC-001 criteria; T012 expands later | Reference and dependency read; no invented future human-review evidence |
 
 Focused technical re-review is APPROVE. Updated read-only analysis covers 47 requirements,
-28 checks, 79 tasks, 74 non-doc verification contracts and five docs exemptions, plus 43 mapped
+28 checks, 80 tasks, 75 non-doc verification contracts and five docs exemptions, plus 43 mapped
 acceptance target creators. This extends the historical three-phase analysis, without claiming
 implemented modules, wizard, terminal qualification, cloud support or completed acceptance checks.
+
+| External threefold adversarial review finding (2026-10-01; three independent model legs, verdict fix-then-merge) | Disposition | Concrete verification tasks |
+| --- | --- | --- |
+| V1 review independence not demonstrable; V2 004 header/task ADR mismatch; V3 shared parallel sections with unqualified ids; V4 top-seven spikes unenumerated; V5 constitution references unshipped AGENTS.md; V6 003/T021 merged authoring and implementation; V7 001/002 exit gates without blocked escape or named decision owner | Applied on one branch: softened README/review-provenance wording with recorded provenance; 004 header ADRs reconciled to task citations; per-feature parallel sections; committed "Ranked spike register" in 003 plan with citations; committed root `AGENTS.md` and constitution pointer; 003/T021 split (authoring T021, implementation T022); blocked-escape clauses and named owner/trigger for the joint naming decision | Header/task ADR union, cross-references, spike-register completeness and `git diff --check` rerun on the branch; counts and mapping updated |
+| V8–V12 notes: phase-003 closing paragraphs in 001/002 quickstarts; 004 surface missing limits.yaml; "existing tools module" wording; overstated adapter de-gating; unowned `.specify/` refresh path | Applied: per-phase quickstart closings; limits.yaml added to the 004 surface; module wording points at 001/T001; this row's wording qualified; refresh governance note added to `.specify/UPSTREAM.md` | Affected files re-read for internal consistency |

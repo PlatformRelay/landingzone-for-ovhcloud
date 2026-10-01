@@ -7,7 +7,7 @@ cleanup qualification comes first; then recovery, state and identity probes on d
 fixtures. A failed premise stops its dependent implementation and revises the Proposed ADR.
 
 ## Technical Context
-- Go probe helpers and Task targets in the existing tools module; pinned OpenTofu 1.13.0,
+- Go probe helpers and Task targets in the tools module (created by phase 001 T001); pinned OpenTofu 1.13.0,
   ovh/ovh 2.21.0, OpenStack provider/version and OKMS key helper chosen/pinned only after
   primary-source review. Test suites separate tests/live from offline discovery.
 - Execution: protected trusted runner, explicit approved sandbox ids and credential class;
@@ -96,6 +96,27 @@ For every live step: owned fixture/project → approved lease+cleanup gate → p
 Cleanup/revocation remains authorized by the approved experiment even when admission fails.
 Revocation-before-replica-promotion is a hard edge. Native recovery-before-floor-binding
 is a hard edge. Unsupported/revocation-unproven routes cannot gain deployment authority.
+
+## Ranked spike register
+
+Canonical enumeration for "ranked spikes 1–7" (003 spec scope, SC-002, V008,
+contracts/checks.md and the T021–T023 oracle/aggregate tasks). The numbered probes come
+from the ADR verification sections, ranked by the recorded review; 002 owns the offline
+portions of spikes 2 and 4, the rest are 003-only.
+
+| # | Probe | Owning spec and checks | Source ADR |
+| --- | --- | --- | --- |
+| 1 | Fresh-operator key-loss recovery of the disposable fixture without the original key service, via the escrow backup; the PBKDF2-fallback idea must fail | 003 V003 (T009–T010) | 0009 |
+| 2 | Two-tenant isolation without remote-state access: cloud state read/write/decrypt denial (003) and offline two-tenant artefact/graph rehearsal (002) | 003 V004 (T011–T012); 002 V001–V004 (local rehearsal) | 0004 |
+| 3 | Deny-floor route matrix: positive control plus attributable denial per supported principal route; floor not sheddable by supported tenant credentials; tag-conditioned envelope; native recovery during federation failure | 003 V006 (T015–T017) | 0006 |
+| 4 | Assent gate integrity under tampering (owner/policy edits, forged approvals, stale base and merge candidates, waiver scope changes, stale retirement authorisations) plus aggregate reservation under simultaneous requests on both forges | 002 V006–V007 (T015–T019) | 0005 |
+| 5 | Issuer credential lifecycle with already-issued credentials: authentication, refresh, expiry, failed cleanup, revocation within recorded residual windows; bridge qualification | 003 V007 (T018–T019) | 0009 |
+| 6 | Sandbox admission refusal and cleanup convergence: unknown/unsafe inputs cannot admit; canary cleanup then crash/partial-create/reaper-outage drills reconcile without tag reliance | 003 V001–V002 (T002–T008) | 0024 (reserved; authored by 003/T001) |
+| 7 | Locking and promotion fencing: concurrent writers serialize; owner death precedes stale-lock recovery; promotion fences all old write paths before replica activation; bounded replica lag | 003 V005 (T013–T014) | 0009 |
+
+Spike 2 is split: its cloud isolation portion stays in 003 and its offline rehearsals
+belong to 002; spike 4 belongs to 002 entirely. Unnumbered or higher-ranked probes in the
+ADRs (rate limits, cost preview, ranked 11–20) are outside the top-seven register.
 
 ## Complexity tracking
 Start with the external inventory and scoped reaper before buying compute or deploying KMS.

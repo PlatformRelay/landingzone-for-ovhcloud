@@ -21,5 +21,6 @@ Federation
 requires a disposable account-level scope; no singleton replacement in ordinary account.
 Each issuer-specific case uses already-issued credentials; residual windows are recorded
 numerically from approved config and measured. A fallback must pass the same probes.
-Qualification records ranked spike outcomes 1–7 (2/4 include 002), per-route exclusions,
+Qualification records ranked spike outcomes 1–7 per the "Ranked spike register" in
+[../plan.md](../plan.md) (2/4 include 002), per-route exclusions,
 resource cleanup, actual/exposure costs and whether each dependent implementation may start.

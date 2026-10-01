@@ -6,7 +6,8 @@
 > only to say which platform the code targets.
 
 **Status: design phase.** No modules exist yet. The design documents come first and are reviewed
-several times in independent sessions before any code is written.
+several times — each pass recorded in [`specs/reviews/`](specs/reviews/) — before any code is
+written.
 
 ## Purpose and differentiators
 

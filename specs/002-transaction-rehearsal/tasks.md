@@ -156,11 +156,11 @@ and reservations. Real-forge T019 is blocked on both actual assent adapters and 
 
 ## Parallel opportunities
 
-No [P] flags are used across incomplete test/implementation dependencies. After common
-prerequisites, independent fixture/guide authoring can run on distinct files: 001 naming
-versus forge setup after T009; 002 binding-fixture authoring versus authority-fixture
-authoring after interfaces stabilize; 003 state versus identity probes after T008 only
-with independent approved leases and no shared live writers.
+No [P] flags are used across incomplete test/implementation dependencies. Within this
+feature, binding-fixture authoring (T009–T012) versus authority-fixture authoring
+(T013–T016) can proceed on distinct files after the shared interfaces stabilize; real
+forge qualification (T018–T019) additionally waits on actual assent adapters for both
+forges.
 
 ## Completion
 

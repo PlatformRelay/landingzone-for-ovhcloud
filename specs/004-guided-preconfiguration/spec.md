@@ -1,5 +1,5 @@
 # Feature Specification: Friendly, resumable repository preconfiguration
-Created: 2026-10-01 · Status: draft · ADRs: 0001, 0003, 0005, 0007, 0008, 0013, 0019, 0023
+Created: 2026-10-01 · Status: draft · ADRs: 0001, 0002, 0003, 0005, 0007, 0008, 0011, 0013, 0019, 0021, 0023
 
 ## Why and scope
 Help an operator understand choices and prepare a reviewable repository configuration through
@@ -67,8 +67,8 @@ unsupported tuple, missing tool, long helper run, symlink destination, secret-li
 
 ## Implementation surface
 `tools/cmd/lz-configure/`, `tools/internal/configure/`, `schemas/configure-session.schema.json`,
-`harness/configure/{steps,checks}.yaml`, `tests/fixtures/configure/`, `Taskfile.yml`,
-`docs/how-to/preconfigure-repository.md`. One existing tools Go module; no second module.
+`harness/configure/{steps,checks,limits}.yaml`, `tests/fixtures/configure/`, `Taskfile.yml`,
+`docs/how-to/preconfigure-repository.md`. One tools Go module, created by phase 001 T001; no second module.
 
 ## Dependencies and stop conditions
 Phase 001 T001 pins tools; its T007 report/evidence contract supports local integration.

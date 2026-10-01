@@ -8,7 +8,7 @@ Versioned use-case rules propose explained defaults; derive progress from the cu
 validated steps, including changes after back/edit and resume.
 
 ## Technical Context
-Go under the existing `tools/` module; Huh library versus Gum subprocess prototype; exact pins
+Go under the `tools/` module (created by phase 001 T001); Huh library versus Gum subprocess prototype; exact pins
 chosen before captures. Linux amd64 first, any other terminal/OS explicitly qualified later.
 Local filesystem only, no secrets/telemetry/cloud cost. Helper timeouts and session size bounds
 are explicit reviewed configuration; no arbitrary commands from repository/session/answers.

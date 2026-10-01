@@ -127,22 +127,27 @@ Independent test: V008.
   - Verify: Procedure: run pinned `tofu providers schema -json`, record actual command/version/hash privately and sanitise schema fixture; observed limits/route subcontrols cite primary source and actual probe; wrong-pin/unknown limit refuses qualification and remains UNVERIFIED.
   - Evidence: `.local/evidence/003/t020-provider-and-limits.json`; initial status `not-run`.
 
-- [ ] T021 [US4] Write and implement qualification completeness oracle in tools/internal/probes/live/qualification/qualification_test.go and tools/internal/sandbox/qualification.go
+- [ ] T021 [US4] Write qualification completeness oracle tests in tools/internal/probes/live/qualification/qualification_test.go
   - Requirements: FR-009, SC-002; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T020; 002/T021 required for aggregate outcome.
-  - Verify: `task spike:qualification` offline fixture mode: complete independent packet accepted; omitted encryption/floor/tag/race/cost/cleanup/independent-review observation or unsupported tuple claim rejected; each absent clause tested red before/alongside implementation. Creates target; live aggregate uses same oracle.
+  - Verify: `go -C tools test ./internal/probes/live/qualification -run TestQualification -count=1`: compiling permissive oracle stub is behaviourally red when any encryption/floor/tag/race/cost/cleanup/independent-review observation is omitted from an otherwise complete packet or an unsupported tuple claims readiness; remove each guarded clause and confirm red. Authoring closes red-first; implementation follows in T022.
   - Evidence: `.local/evidence/003/t021-qualification-controls.json`; initial status `not-run`.
 
-- [ ] T022 [US4] Independently inspect spike packets and run aggregate decision through harness/live-checks.yaml
-  - Requirements: FR-008, FR-009, SC-001, SC-002; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T010, T014, T017, T019, T021; fresh independent reviewer and 002/T021 evidence.
-  - Verify: `task spike:qualification`: ranked spikes 1–7 have actual scoped results, costs/cleanup, matching source/pins and independent disposition; unsupported/refuted route blocks downstream claim; missing observation remains blocked, cannot close incomplete required experiment.
+- [ ] T022 [US4] Implement the qualification completeness oracle in tools/internal/sandbox/qualification.go
+  - Requirements: FR-009, SC-002; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T021.
+  - Verify: `task spike:qualification` offline fixture mode: all T021 controls green — complete independent packet accepted; omitted encryption/floor/tag/race/cost/cleanup/independent-review observation or unsupported tuple claim rejected. Creates target; live aggregate uses same oracle.
   - Evidence: `.local/evidence/003/t022-qualification.json`; initial status `not-run`.
+
+- [ ] T023 [US4] Independently inspect spike packets and run aggregate decision through harness/live-checks.yaml
+  - Requirements: FR-008, FR-009, SC-001, SC-002; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T010, T014, T017, T019, T022; fresh independent reviewer and 002/T021 evidence.
+  - Verify: `task spike:qualification`: ranked spikes 1–7 (plan.md "Ranked spike register") have actual scoped results, costs/cleanup, matching source/pins and independent disposition; unsupported/refuted route blocks downstream claim; missing observation remains blocked, cannot close incomplete required experiment.
+  - Evidence: `.local/evidence/003/t023-aggregate.json`; initial status `not-run`.
 
 ## Polish and exit
 
-- [ ] T023 Update Proposed ADRs and sanitized cost/gap notes in docs/adr/, docs/reference/{test-costs,provider-gaps}.md and specs/003-platform-feasibility/decisions.md
-  - Requirements: FR-009; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T022.
+- [ ] T024 Update Proposed ADRs and sanitized cost/gap notes in docs/adr/, docs/reference/{test-costs,provider-gaps}.md and specs/003-platform-feasibility/decisions.md
+  - Requirements: FR-009; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T023.
   - Verify: exempt — docs-only; content review records observations/refutations/owed evidence; operator alone ratifies ADRs; no product tuple marked supported from partial tests.
-  - Evidence: `.local/evidence/003/t023-docs-review.json`; initial status `not-run` (docs content review only).
+  - Evidence: `.local/evidence/003/t024-docs-review.json`; initial status `not-run` (docs content review only).
 
 ## Planned command creators
 
@@ -157,7 +162,7 @@ Independent test: V008.
 | `task spike:locking-promotion` | T013 |
 | `task spike:deny-floor` | T015 |
 | `task spike:credentials` | T018 |
-| `task spike:qualification` | T021 |
+| `task spike:qualification` | T022 |
 
 ## Dependencies & execution order
 
@@ -169,16 +174,14 @@ prerequisites exist; defining it does not close its acceptance check.
 MVP: admission/reaper offline. T001→T002→T003→T004→T005→T006→T007→T008
 is the safety gate for every later live branch. Recovery/isolation/locking and identity
 can branch after T008 with distinct fixtures and aggregate leases; T016 must precede
-floor binding, and old-writer fencing precedes replica activation. T022 requires both
+floor binding, and old-writer fencing precedes replica activation. T023 requires both
 branches and 002 evidence. Missing live authorization does not block offline preparation.
 
 ## Parallel opportunities
 
-No [P] flags are used across incomplete test/implementation dependencies. After common
-prerequisites, independent fixture/guide authoring can run on distinct files: 001 naming
-versus forge setup after T009; 002 binding-fixture authoring versus authority-fixture
-authoring after interfaces stabilize; 003 state versus identity probes after T008 only
-with independent approved leases and no shared live writers.
+No [P] flags are used across incomplete test/implementation dependencies. Within this
+feature, state probes (T009–T014) versus identity probes (T015–T019) can proceed after
+T008 only with independent approved leases and no shared live writers.
 
 ## Completion
 

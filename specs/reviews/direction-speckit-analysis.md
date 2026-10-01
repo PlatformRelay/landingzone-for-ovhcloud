@@ -43,10 +43,10 @@ applied dispositions. The naming interface choice remains an explicit implementa
 | 003/FR-005 | T011, T012, T013, T014 | V004, V005 |
 | 003/FR-006 | T015, T016, T017 | V006 |
 | 003/FR-007 | T018, T019 | V007 |
-| 003/FR-008 | T020, T022 | V008 |
-| 003/FR-009 | T021, T022, T023 | V008 |
-| 003/SC-001 | T008, T022 | V001, V002 |
-| 003/SC-002 | T021, T022 | V008 |
+| 003/FR-008 | T020, T023 | V008 |
+| 003/FR-009 | T021, T022, T023, T024 | V008 |
+| 003/SC-001 | T008, T023 | V001, V002 |
+| 003/SC-002 | T021, T022, T023 | V008 |
 | 004/FR-001 | T002, T003, T008, T009, T012, T013 | V001 |
 | 004/FR-002 | T002, T003, T004, T005, T008, T009, T012, T013 | V001 |
 | 004/FR-003 | T001, T004, T005, T013 | V002 |
@@ -63,8 +63,11 @@ applied dispositions. The naming interface choice remains an explicit implementa
 ## Metrics and checks performed
 
 - 47 requirements (36 FR, 11 SC), all mapped to tasks and acceptance checks.
-- 28 predefined acceptance checks; 79 tasks, including 74 behavioral verification/evidence
+- 28 predefined acceptance checks; 80 tasks, including 75 behavioral verification/evidence
   contracts and five explicit docs-only exemptions.
+- Amendment 2026-10-01 (external adversarial review): 003/T021 merged test-authoring and
+  implementation; it is now test-authoring T021 plus implementation T022, and the later 003
+  ids shifted (inspect T023, docs T024). Counts and the 003 mapping rows above reflect that.
 - 43 acceptance Task targets have named creators; unavailable targets remain planned.
 - Both fixture and real-integration dependency branches are acyclic; all named task edges resolve.
 - Generic 004 checkpoint/terminal work does not depend on the pending naming interface choice.

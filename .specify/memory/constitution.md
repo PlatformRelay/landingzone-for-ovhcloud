@@ -1,9 +1,10 @@
-<!-- Sync impact: constitution 1.1.0, 2026-10-01. Reference-baseline purpose,
+<!-- Sync impact: constitution 1.1.1, 2026-10-01. Governance reference repointed to the
+committed repository-root AGENTS.md; no gate changed. Reference-baseline purpose,
 substantive differentiators, usable operations and reasoned challenge added;
 project overrides and command guidance synchronized. Docs-only work remains exempt.
 Existing ADR statuses remain Proposed; naming interface proposals remain undecided. -->
 # OVHcloud Landing Zone Accelerator constitution
-Version: 1.1.0 · Ratified: 2026-10-01 · Last amended: 2026-10-01
+Version: 1.1.1 · Ratified: 2026-10-01 · Last amended: 2026-10-01
 
 ## Purpose
 Build an inspectable reference baseline for an OVHcloud landing zone through useful
@@ -110,6 +111,7 @@ a spike may activate only its bounded experiment. Done requires every check's ev
 Dependencies that need operator setup remain `blocked` and name the prerequisite.
 Independent adversarial review follows planning; a fresh technical review follows tasks;
 cross-artifact analysis follows task generation. Findings receive explicit disposition.
-Work follows workspace AGENTS.md: isolated worktree, lane claim, test-first engineering,
-atomic conventional commits and linear history. Amendments require a reason, version
-bump and synchronized templates; weakening a gate needs its own justification line.
+Work follows the committed repository-root `AGENTS.md`: isolated worktree, explicit lane
+claim, test-first engineering, atomic conventional commits and linear history. Amendments
+require a reason, version bump and synchronized templates; weakening a gate needs its
+own justification line.
