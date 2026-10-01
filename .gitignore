@@ -1,0 +1,38 @@
+# ovh-landing-zone-accelerator .gitignore
+# Infrastructure-as-code: state, plans and credentials are secret-bearing and must never be committed.
+
+# ─── Harness: local-only coordination ────────────────────────────────────────
+.claude/*
+!.claude/skills/
+.cursor/
+agent-context/
+AGENTS.local.md
+.worktrees/
+
+# ─── OpenTofu / Terraform ────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+*.tfplan.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terragrunt-cache/
+
+# ─── Credentials & secrets ───────────────────────────────────────────────────
+.envrc
+*.pem
+*.key
+clouds.yaml
+secure.yaml
+ovh.conf
+*.auto.tfvars
+secrets/
+
+# ─── Third-party corpora (licence: not redistributable here) ─────────────────
+# The OVHcloud docs knowledge base is CC BY-NC-SA 4.0; it is fetched locally, never committed.
+knowledge-base/
