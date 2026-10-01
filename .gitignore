@@ -8,6 +8,7 @@
 agent-context/
 AGENTS.local.md
 .worktrees/
+.local/
 
 # ─── OpenTofu / Terraform ────────────────────────────────────────────────────
 .terraform/
