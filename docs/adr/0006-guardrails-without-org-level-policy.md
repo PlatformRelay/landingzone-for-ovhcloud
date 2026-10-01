@@ -91,3 +91,12 @@ membership (ADR-0012), and for each plane whether it enforces the rule and how:
 
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
+
+### Additional floor-spike observations
+Capture published/account-observed policy, group and tag limits with source revision;
+unknown limits stay UNVERIFIED and block capacity claims. Record existing object counts
+without creating objects merely to reach a limit. On the approved canary, measure time
+from allow/deny update to repeated effective observations with positive and denial
+controls. Poll/retry only within spike 3's deadline; an unobserved stable window is
+blocked, not an assumed platform SLA. The qualification oracle rejects invented limits
+or unmeasured propagation guarantees. No ordinary-account policy change is authorized.
