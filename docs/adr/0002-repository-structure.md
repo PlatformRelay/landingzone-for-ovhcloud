@@ -1,5 +1,5 @@
 # ADR-0002: Repository structure (monorepo)
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-01
 - Related: ADR-0003, ADR-0004, ADR-0007, ADR-0010, ADR-0016
 
@@ -9,7 +9,7 @@ explicit distribution answer (ADR-0010). Prior art layers modules / components /
 or splits catalogue / pattern / accelerator (Azure). Here, golden paths are **data** over
 one composition graph (ADR-0016); runtime, identity, network and observability are **families with
 variants** (ADR-0017, ADR-0018); tenants self-serve through a separate repo gated by `assent`
-(ADR-0005). Spec Kit will be initialised here (`.specify/`, `specs/`).
+(ADR-0005). The reusable Spec Kit workflow is committed here (`.specify/`, `specs/`).
 
 ## Options considered
 1. **Monorepo, layered directories** (below).
@@ -62,6 +62,8 @@ ovh-landing-zone-accelerator/
 ```
 
 Rules:
+- Create each directory alongside its first real artifact; the tree above describes the intended
+  architecture, not an empty scaffolding task or evidence that its capabilities exist.
 - **Dependencies point down only**: `modules → modules/naming`; `components → modules`;
   `stages → components, schemas`; `profiles`, `catalog`, `templates`, `policies` are data. Within the
   monorepo's library layers nothing imports `stages/`; the only callers of a stage module are the
