@@ -14,7 +14,10 @@ All Task/Go check invocations below are isolated-child commands entered through 
 separately installed, independently approved `lz-offline` (creator T003). They are not
 host shortcuts. T002 tests the approved boundary stub/entry from an external test driver;
 its deliberately untrusted fixture checkout is data, never the host test driver or build source.
-Before T003 exists, only that separately reviewed bounded proof driver/stub may execute.
+Before T003 exists, only the separately reviewed T001 preparation control driver and T002
+boundary proof driver/stub may execute, within their approved closures below. Neither admits
+tool-output fixture capture. Version/provenance metadata is preparation evidence, not a
+tool-output test fixture. T004 capture waits for T003's evidenced capture/isolation gate.
 
 ## Authorized run boundary
 
@@ -29,23 +32,23 @@ not passed observations. T010–T022 are not activated by completing this subset
 
 ## Setup and foundation
 
-- [ ] T001 Select exact signed/checksummed tool and image pins in mise.toml and bootstrap tools/go.mod
+- [ ] T001 Select exact signed/checksummed tool and image pins in mise.toml, bootstrap tools/go.mod and qualify approved preparation with a bounded external control driver
   - Requirements: FR-001; ADRs: 0002, 0011. Depends on: operator structure, ratification and scaffold dispositions confirmed 2026-10-01; independent planning review before implementation.
-  - Verify: Procedure: independently approve the explicit preparation/build closure and recorded pins before any execution; install from that approved source outside the candidate (never load candidate mise/Task configuration on the host), run `go -C tools list -m`, `mise exec -- tofu version`, `mise exec -- terramate version`; compare exact identities to pins; missing/mismatched identity refuses fixture capture.
+  - Verify: Procedure: independently approve the explicit preparation/build closure and recorded pins before any execution; install from that approved source outside the candidate (never load candidate mise/Task configuration on the host), run `go -C tools list -m`, `mise exec -- tofu version`, `mise exec -- terramate version`; compare exact identities to pins. Missing/mismatched identity refuses preparation finalization and tool use. Create the bounded preparation control driver specified in contracts/checks.md, independently approve its exact source/input/build closure, then install it externally before running it. Against the unchanged approved preparation source, retain valid preparation plus missing/wrong tool or module identity, tampered manifest/signature/archive/image trust data, hostile ancestor/system/candidate config and false-source/wrong-candidate-path rejection controls; prove refusal timing, no hostile marker execution and failure cleanup. Challenge each guarded clause with a separately identified behavioural mutant and retain the valid control. A driver/runtime/input-delivery gap blocks T001; source inspection or an unavailable tool is not rejection evidence. No capture gate is claimed by T001 and no tool-output fixture may be captured here.
   - Evidence: `.local/evidence/001/t001-toolchain.json`; initial status `not-run`.
 
 - [ ] T002 Write pin/isolation tests and minimal compiling boundary stubs in tools/internal/checks/toolchain_test.go and tools/internal/probes/security/offline_test.go
   - Requirements: FR-001, FR-002; ADRs: 0008, 0011, 0021. Depends on: T001.
-  - Verify: `go -C tools test ./internal/checks ./internal/probes/security -run "TestToolchain|TestOfflineBoundary" -count=1`; valid pin/isolation control plus wrong version, absent tool, credential/socket mount, outbound subprocess and malicious host-launch cases must expose behavioural red. Invoke the advertised external entry from a candidate cwd with malicious Taskfile shell variables, includes, hooks, launcher replacement and local configuration: no host marker/token/network access may precede isolation. Use synthetic credentials only. Retain reachable outbound positive control, actual denial reason and isolation-off mutation; timeout/DNS failure is not denial proof.
+  - Verify: Create the bounded external boundary proof driver and compiling stubs described in contracts/checks.md; freeze and independently approve their exact source/input/build closure before building or executing outside the candidate. Through that driver run `go -C tools test ./internal/checks ./internal/probes/security -run "TestToolchain|TestOfflineBoundary" -count=1`; valid pin/isolation control plus wrong version, absent tool, mismatched artifact/image, unqualified capture/isolation gate, credential/socket mount, outbound subprocess and malicious host-launch cases must expose behavioural red. Author capture-admission tests that observe a capture-attempt marker only in private scratch: missing/wrong identities or absent gate proof must refuse before tool invocation/output publication, while a valid qualified control is admitted. These markers are synthetic test data, not captured tool-output fixtures. Invoke the boundary stub entry from a candidate cwd with malicious Taskfile shell variables, includes, hooks, launcher replacement and local configuration: no host marker/token/network access may precede isolation. Use synthetic credentials only. Retain reachable outbound positive control, actual denial reason and isolation-off mutation; timeout/DNS failure is not denial proof. This closes tests with valid/red evidence, never the production capture gate; T003 repeats them green through the actual entry.
   - Evidence: `.local/evidence/001/t002-boundary-red.json`; initial status `not-run`.
 
 - [ ] T003 Implement trusted preparation, external host entry and local isolation in tools/cmd/lz-offline/, tools/internal/checks/offline.go, harness/capabilities.yaml and Taskfile.yml
   - Requirements: FR-001, FR-002; ADRs: 0007, 0011, 0021. Depends on: T002.
-  - Verify: Planned `<approved-absolute-path>/lz-offline --candidate <checkout> -- task verify:toolchain` and the same entry with `task test:offline-boundary`: valid prepared image succeeds; wrong/missing pin, credential/socket/cache mount, outbound child or candidate-controlled launch rejects. Independently approve the launcher source/build/binary digest, install outside the candidate from the approved closure, then repeat T002 attacks through this actual host entry. Prepared provider mirror/lockfile and explicit mirror-only CLI config must support real `tofu init -backend=false -lockfile=readonly` with network=none; missing provider/hash or network fallback fails. Creates lz-offline and both child targets. T023 qualifies its own CI source admission; full forge wrapper stays T011.
+  - Verify: Planned `<approved-absolute-path>/lz-offline --candidate <checkout> -- task verify:toolchain` and the same entry with `task test:offline-boundary`: valid prepared image succeeds; wrong/missing pin, mismatched artifact/image, credential/socket/cache mount, outbound child or candidate-controlled launch rejects. Implement capture admission in this entry and its toolchain target: matching pinned tool/artifact identities and proven capture/isolation gate are prerequisites to every tool-output fixture capture. Independently approve the preparation/launcher source and build closure before building, then approve binary/image digests and install outside the candidate; repeat all T002 controls green through this actual entry, including pre-invocation/pre-publication capture refusal and gate-off sensitivity. Requalify the T001 preparation controls against any new preparation closure before it is used. Prepared provider mirror/lockfile and explicit mirror-only CLI config must support real `tofu init -backend=false -lockfile=readonly` with network=none; missing provider/hash or network fallback fails. Creates lz-offline, capture admission and both child targets. T023 qualifies its own CI source admission; full forge wrapper stays T011.
   - Evidence: `.local/evidence/001/t003-boundary-green.json`; initial status `not-run`.
 
 - [ ] T004 Capture pinned passing/failing/truncated tofu JSON streams and write report tests in tools/internal/report/report_test.go and tests/fixtures/tofu/
-  - Requirements: FR-003, SC-002; ADRs: 0008, 0011. Depends on: T003.
+  - Requirements: FR-003, SC-002; ADRs: 0008, 0011. Depends on: T003, including evidenced capture admission and isolation.
   - Verify: `go -C tools test ./internal/report -run TestReport -count=1`: record exact generating `tofu test -json` command/version; valid stream preserved, zero tests, required skip, crash, truncated/invalid stream and cleanup fault cause behavioural red before adapter.
   - Evidence: `.local/evidence/001/t004-report-red.json`; initial status `not-run`.
 
@@ -168,7 +171,10 @@ Independent test: V003, V008.
 
 | Task target | Creating task |
 | --- | --- |
+| bounded external preparation control driver (not a Task target) | T001, exact closure approval before build/execution |
+| bounded external boundary proof driver/stub (not a Task target) | T002, exact closure approval before build/execution |
 | `lz-offline` (approved external host entry) | T003 |
+| tool-output fixture capture admission | T003, T002 authors valid/red controls |
 | `task verify:toolchain` | T003 |
 | `task test:offline-boundary` | T003 |
 | `task test:reports` | T005 |
