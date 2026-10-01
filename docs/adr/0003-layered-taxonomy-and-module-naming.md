@@ -19,11 +19,12 @@ and tag key/value limits are UNVERIFIED.
 - **Prefix classes in a flat directory** (`res-cloud-project`, `ptn-network-baseline`).
 - **Layer directories** (`modules/`, `components/`, `stages/` + `profiles/`) — chosen in ADR-0002.
 - **Naming module** as a pure-function module vs. a locals-only convention documented in prose.
-- **Call interface remains open:** one logical resource with reusable context; a batch map keyed by
-  logical request ID; a catalogue preview by kind; or a naming provider/generator. The configuration
-  vector is a suggestion to compare, not an approved interface. See the
+- **Call interface selected:** one logical resource per pure call with reusable shared context.
+  Batch maps, catalogue previews and a naming provider/generator remain compared alternatives;
+  the configuration vector is not an instruction. See the
   [naming/labelling exploration](../explanation/naming-and-labelling-design.md) for primary examples,
-  tradeoffs and predefined checks. Final module split and field names need a joint decision.
+  tradeoffs and predefined checks. Final module split and field names need concrete-consumer
+  diagnosis before implementation.
 
 ## Decision
 **Layers**
@@ -59,8 +60,8 @@ and tag key/value limits are UNVERIFIED.
 **Naming module** (`modules/naming`) — a flexible convention, one implementation
 - Pure function, no providers or data sources: inputs are the hierarchy coordinates
   `(org, domain, tenant, environment, region, resource_kind, instance)` plus the organisation's
-  **naming template**. Output cardinality is pending: a scalar result identifies one logical resource;
-  a batch result must be keyed by stable logical request ID, not kind. Two resources of one kind
+  **naming template**. The selected scalar result identifies one logical resource; callers retain
+  stable logical IDs and own cross-call collision checks. Two resources of one kind
   require distinct resource-local identities in addition to their shared deployment instance.
   Names, full canonical metadata and applicable target projections are distinct results. No
   generated URN prefix: a display name is not an IAM identifier; URN matching uses provider-returned
@@ -80,12 +81,11 @@ and tag key/value limits are UNVERIFIED.
   resolved convention with examples.
 - **`names.yaml` (repo-wide) is the single source for limits and keys**: per resource kind the max
   length, charset, allowed separators and the OVH doc URL that states the limit; the label key
-  schema below. From it a generator emits (a) the table-driven `tofu test` runs for the module,
-  including `expect_failures` cases for invalid input and templates, (b) the CEL fixtures for the
-  assent policies (ADR-0005), (c) the Rego and tflint rule data, and (d) the docs page. CI fails if
-  any generated artefact is stale, so the self-service gate, the plan policy and the module can never
-  disagree about a conformant name or label. Independently authored golden vectors (not generated)
-  test collision, truncation, template changes and upgrades.
+  schema below. Handwritten module/evaluator/policy projections are compared against shared
+  cases with independently specified expected results; deliberate projection mutations must
+  fail those checks. Initial generation emits documentation only; no shared evaluator/test
+  generator is authorized. CI rejects stale generated documentation and inconsistent projections.
+  Independent golden vectors test collision, truncation, template changes and upgrades.
 - OVH per-resource name limits and tag constraints are _UNVERIFIED_ and are gathered in the spike;
   each row carries a source URL.
 - Strict input decoding precedes typed HCL object conversion; types alone do not reject unknown
@@ -137,8 +137,8 @@ AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marke
 ## Consequences
 - Naming is testable and centralised. **Naming-algorithm changes are migrations**: existing names
   stay stable by default, overrides support import, and independently authored golden vectors (not
-  generated from `names.yaml`) test collision, truncation and upgrade behaviour, because a wrong limit in
-  the data would pass every generated test.
+  generated from `names.yaml`) test collision, truncation and upgrade behaviour, because a shared
+  data error could otherwise correlate the implementation and oracle.
 - The layer rule gives a linter-enforceable dependency direction.
 
 ## Counterpoints
@@ -155,10 +155,13 @@ AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marke
   `resource.Tag()` conditions see tags set at creation and after mutation).
 - Spike: two organisations with different templates and label schemas produce valid names and labels
   for every kind in the catalogue; the plan policy rejects a resource missing `managed-by`.
-- Before choosing the interface, compare scalar and batch call sites with two same-kind resources,
+- Before implementing the selected scalar/shared-context interface, diagnose its concrete call sites
+  with two same-kind resources,
   two organisation conventions, import, invalid input, shortening and a metadata-only update.
   Phase 001 V004–V006 and T013–T016 carry the detailed positive/rejection/stability controls in the
-  exploration document. Interface-dependent implementation remains gated on the joint decision.
+  exploration document. Detailed fields/module splitting remain gated on concrete-consumer diagnosis;
+  001/T013–T016
+  remain outside the authorized foundation increment.
 
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
