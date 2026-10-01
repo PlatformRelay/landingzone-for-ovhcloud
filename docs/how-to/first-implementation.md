@@ -43,7 +43,8 @@ readiness without blocking that local evidence. FR-008/SC-003 remain incomplete 
 both actual forges qualify. A negative aggregate decision remains a failing/blocked
 qualification, even when its report is complete.
 
-Naming implementation waits for the joint call-interface decision. The
+Scalar naming with shared context and handwritten independent projections is selected;
+its later implementation still needs concrete-consumer diagnosis and is outside this run. The
 [004 proposal](../../specs/004-guided-preconfiguration/tasks.md) now permits a bounded
 renderer prototype and written journey; hardened persistence/export waits for real profile
 schemas. Its draft needs follow-up alignment and is outside this foundation run.

@@ -94,7 +94,7 @@ Independent test: V001–V003, V006–V007.
 Independent test: V004–V005.
 
 - [ ] T013 [US2] Author two independent organisation vectors and provider-free module tests in modules/naming/tests/unit.tftest.hcl, modules/naming/tests/contract.tftest.hcl and tests/fixtures/naming/
-  - Requirements: FR-005, SC-004; ADRs: 0003, 0008. Depends on: T007, T009; external joint decision on naming/label interface cardinality and module split.
+  - Requirements: FR-005, SC-004; ADRs: 0003, 0008. Depends on: T007, T009; concrete-consumer diagnosis of module splitting for the selected scalar/shared-context interface. Outside the foundation run.
   - Verify: `mise exec -- tofu -chdir=modules/naming test`: compiling pure module stub produces behavioural red for concrete expected names/labels; valid unusual template, collision/truncation/import/upgrade cases and expect_failures for validations; record actual CLI output.
   - Evidence: `.local/evidence/001/t013-naming-red.json`; initial status `not-run`.
 
@@ -108,9 +108,9 @@ Independent test: V004–V005.
   - Verify: `go -C tools test ./internal/namingdata -run TestProjections -count=1` plus pinned Conftest/assent tests: missing each required label, unknown key and tenant auth-key edits reject in applicable planes; wrong projection stub is behavioural red.
   - Evidence: `.local/evidence/001/t015-naming-policy-red.json`; initial status `not-run`.
 
-- [ ] T016 [US2] Implement strict catalogue/org schemas and shared projection data in schemas/{naming,labels}.schema.json, tools/internal/namingdata/ and policies/{plan,assent}/
+- [ ] T016 [US2] Implement strict catalogue/org schemas and handwritten independent projections in schemas/{naming,labels}.schema.json, tools/internal/namingdata/ and policies/{plan,assent}/
   - Requirements: FR-006; ADRs: 0003, 0011, 0021. Depends on: T015.
-  - Verify: `task test:naming-policy; task generate:check; task schema:check; task policy`: valid independent vectors and applicable projections agree; duplicate YAML, unknown key, missing required label and stale generated data fail. Creates test:naming-policy, generate:check, schema:check and the policy aggregate. `task schema:check` validates names.yaml and both org naming/label fixture sets against the actual strict schemas and rejects malformed/duplicate/unknown fields and zero discovery; no invented cloud fields or unaudited limits.
+  - Verify: `task test:naming-policy; task generate:check; task schema:check; task policy`: handwritten evaluators and applicable policy projections agree with shared cases whose expected results are independently specified; deliberately wrong projections, duplicate YAML, unknown key, missing required label and stale generated documentation fail. Generate documentation initially; no shared evaluator/test generator. Creates test:naming-policy, generate:check, schema:check and the policy aggregate. `task schema:check` validates names.yaml and both org naming/label fixture sets against the actual strict schemas and rejects malformed/duplicate/unknown fields and zero discovery; no invented cloud fields or unaudited limits.
   - Evidence: `.local/evidence/001/t016-naming-policy.json`; initial status `not-run`.
 
 T013–T016 also cover the detailed V004–V006 matrix in
@@ -118,7 +118,9 @@ T013–T016 also cover the detailed V004–V006 matrix in
 unknown-field rejection before HCL conversion, same-scope normalized/hash collisions, exact
 import overrides, pinned name recipe upgrades, metadata-only stability, separate target
 projections and stable selector subsets. Each applicable clause needs independent valid/red/green
-controls. Candidate call sites and fields remain illustrative until the joint decision.
+controls. Scalar cardinality/shared context is selected; detailed call sites/fields and
+module splitting remain illustrative pending concrete-consumer diagnosis. These tasks
+remain outside the foundation run.
 
 ## US3
 

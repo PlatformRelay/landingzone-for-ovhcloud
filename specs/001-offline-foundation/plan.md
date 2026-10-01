@@ -58,7 +58,7 @@ authority and operating prerequisites remain separate.
 | V Recovery | Missing observations fail closed; private evidence and separate cleanup/recovery paths required. Live readiness remains blocked on setup. |
 | VI Scope | Bounded first increment; no supported-tuple claim, broad scaffolding or runtime rollout. |
 | VII Useful outcomes | Preserve the reference baseline and differentiators; existing acceptance cases cover visible reports/status and failure paths; no new portal/CLI implied. |
-| VIII Decisions | Approved direction is distinct from pending interfaces; phase 001 naming T013 gates the joint choice; dependent work respects that gate. |
+| VIII Decisions | Scalar naming/shared context and handwritten independent projections are selected; later module splitting needs concrete-consumer diagnosis. This does not activate naming tasks in the foundation run. |
 
 
 Draft design conforms; this table is a review of the design, not evidence that future gates passed.
@@ -76,7 +76,8 @@ Feature artefacts: research.md, data-model.md, contracts/checks.md, quickstart.m
 3. US2: independently author naming vectors first; implement two organisation templates,
    labels and catalogue applicability. Synthetic limits may test algorithms; unknown actual
    limits are refused for cloud-ready kinds. Add projections and snapshots without overriding
-   the subject. Generate only projection data/vectors, not generic artefact scaffolds.
+   the subject. Handwrite evaluator/policy projections and independent expected vectors;
+   generate documentation initially, not evaluators or tests.
 4. US3: publish a short guide router and decision map; test stable actionable diagnostics
    and review-required status with the seeded diagnostic/evidence fixtures in T017. Add both offline forge adapters
    and run green/red controls on disposable repos before claiming portability. Mutate the
