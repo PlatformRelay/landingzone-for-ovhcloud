@@ -3,8 +3,8 @@ Planning baseline: 116405b · 2026-10-01. All specs are **draft**; no cloud work
 ADR-0002 is Accepted; other ADRs retain their recorded status. This planning set implements no landing-zone code.
 The [product direction](../docs/explanation/product-direction.md) preserves the reference-baseline
 ambition, useful differentiators and learning through bounded experiments.
-The [naming/labelling interface](../docs/explanation/naming-and-labelling-design.md) is pending a
-joint decision; phase 001 naming tasks carry that dependency.
+The operator selected scalar naming with shared context and handwritten independent projections;
+later naming consumers still need module-split diagnosis and implementation evidence.
 
 | Spec | Outcome | Gate and independent dependencies |
 | --- | --- | --- |

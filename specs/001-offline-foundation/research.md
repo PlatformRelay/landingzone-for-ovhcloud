@@ -22,18 +22,21 @@ synthetic constraints are allowed only for algorithm tests. Alternative broad sc
 Requirement → ADR → implementation → Verify → evidence is the portable contract.
 Each link must describe the actual task; unrelated spec-wide lists are refused.
 Pure prose needs content review rather than invented behavioral tests.
-## Open choice: naming and labelling interface
+## Decision: per-resource naming and independent projections
 The configuration-vector idea is not an instruction. Scalar shared-context calls, batches keyed by
 logical resource IDs and catalogue previews are compared in
-../../docs/explanation/naming-and-labelling-design.md. Current recommendation is a per-resource pure
-helper with reusable trusted context and ordinary caller for_each; final cardinality/module split
-needs a joint decision before T013/T014. Strict decoding, stable recipe revisions, per-target
-metadata projections and cross-caller collision checks are required whichever interface wins.
+../../docs/explanation/naming-and-labelling-design.md. The operator selected a per-resource pure
+helper with reusable trusted context and ordinary caller for_each on 2026-10-01. Callers/catalogue
+checks own cross-resource collision detection; a scalar call cannot inspect other calls. Diagnose
+module splitting against concrete consumers before the later naming work. Handwrite evaluators
+and policy projections against shared cases with independently specified expected results;
+initial generation is documentation only, never a shared evaluator/test generator. Strict
+decoding, stable recipe revisions and per-target metadata projections remain required.
 ## Primary references
 - https://github.com/github/spec-kit (workflow context; installed bundled commands govern this run)
 - https://opentofu.org/docs/cli/commands/test/ (framework; capture actual pinned output before parser work)
-- ADR-0002, 0003, 0008, 0019, 0021 (project choices; still Proposed).
+- ADR-0002 (Accepted), 0003, 0008, 0019, 0021 (other recorded statuses remain unchanged).
 No cloud name/tag constraint is promoted from prose to observed API behaviour here.
 
 ## Upstream input trace
-Naming reference inputs: the pinned scalar context example in ../../docs/reference/upstream-reference-map.md is a comparison input for T013–T016/V004–V006, not a selected call API. Use independent expected vectors, not copied generated outputs.
+Naming reference inputs: the pinned scalar context example in ../../docs/reference/upstream-reference-map.md is a comparison input for later T013–T016/V004–V006, not a released schema. Use independent expected vectors, not copied generated outputs. These tasks remain outside the foundation run.
