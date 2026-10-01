@@ -21,4 +21,5 @@ of the design and will be documented up front.
 
 ## Layout
 
-Monorepo. The structure is decided in the design documents, not here.
+Monorepo. The proposed structure and every other design decision are in
+[`docs/adr/`](docs/adr/README.md); all are still `Proposed` until independently reviewed.
