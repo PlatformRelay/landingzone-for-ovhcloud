@@ -1,0 +1,13 @@
+OVHcloud Landing Zone Accelerator
+Copyright 2026 Konrad Heimel (PlatformRelay)
+
+This is an independent community project. It is not an OVHcloud product and is not
+endorsed, sponsored or supported by OVHcloud. "OVHcloud" and related names are
+trademarks of their owner and are used only to identify the platform the code targets.
+
+Code, policies and schemas: Apache License 2.0 (LICENSE).
+Project documentation under docs/: CC BY 4.0 (docs/LICENSE).
+
+Short quotations from OVHcloud documentation (docs.ovhcloud.com, github.com/ovh/ovhcloud-docs,
+the archived github.com/ovh/docs under CC BY-NC-SA 4.0) are attributed at the place of use;
+no OVHcloud documentation is redistributed with this project.

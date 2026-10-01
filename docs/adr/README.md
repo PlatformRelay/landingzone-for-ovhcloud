@@ -22,11 +22,12 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0012](0012-compliance-profiles.md) | Compliance profiles | Proposed |
 | [0013](0013-documentation-strategy.md) | Documentation strategy | Proposed |
 | [0014](0014-ovh-docs-knowledge-base.md) | OVHcloud docs knowledge base | Proposed |
-| [0015](0015-licence-and-project-name.md) | Licence and project name | Proposed (needs operator) |
+| [0015](0015-licence-and-project-name.md) | Licence and project name | Proposed (licence decided) |
 | [0016](0016-golden-paths-as-profiles.md) | Golden paths as profiles over one composition graph | Proposed |
 | [0017](0017-runtime-families-and-output-contract.md) | Runtime families and the output-only contract (multiple base stacks) | Proposed |
 | [0018](0018-identity-planes-roles-and-providers.md) | Identity model: three planes, a role catalogue, pluggable providers | Proposed |
 | [0019](0019-agent-experience-sensors-and-guides.md) | Agent experience: sensors and guides for implementing agents | Proposed |
+| [0020](0020-generated-landing-zone-documentation.md) | Generated landing-zone documentation: system map, accounts and permissions with reasons | Proposed |
 
 Small patterns, guidelines, tools and techniques live in [`docs/reference/patterns-catalogue.md`](../reference/patterns-catalogue.md).
 
