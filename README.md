@@ -30,3 +30,7 @@ is part of the design and is documented up front.
 
 Monorepo. The proposed structure and every other design decision are in
 [`docs/adr/`](docs/adr/README.md); all are still `Proposed` until independently reviewed.
+
+The [initial Spec Kit phases](specs/README.md) cover the offline foundation, transaction
+rehearsals and protected platform feasibility. Their specs, plans and task lists are drafts;
+acceptance checks are predefined, and implementation evidence is still `not-run`.
