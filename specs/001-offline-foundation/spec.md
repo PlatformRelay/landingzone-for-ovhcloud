@@ -36,6 +36,7 @@ status, including review obligations. Independent test: V008 and V003.
 | P1 | OpenTofu 1.13 features and JSON stream match our proposed minimum | Capture version and passing/failing `tofu test -json` using pinned binary | UNVERIFIED; exact project pins must be prepared and captured |
 | P2 | Offline isolation blocks subprocess cloud calls, not merely top-level calls | Run an intentional outbound probe inside the same container as provider tests | UNVERIFIED; implementation acceptance V001 |
 | P3 | Resource naming/tag limits and metadata applicability are known per kind | Primary-source catalogue rows and sandbox probes where source is insufficient | UNVERIFIED; unknown kinds cannot be advertised as supported |
+| P4 | GitHub admits candidates with frozen approved workflow source and refuses every unreviewed workflow path before execution | T023 disposable proof: disabled setup, active no-bypass rules, valid history admission, edit/add/rename/delete and second-push denials | UNVERIFIED; Team availability does not qualify enforcement |
 
 ## Requirements
 - **FR-001**: MUST satisfy each clause below.
@@ -44,8 +45,8 @@ status, including review obligations. Independent test: V008 and V003.
 - **FR-002**: MUST satisfy each clause below.
   - **C002.1**: Run offline checks without cloud credentials or credential mounts.
   - **C002.2**: Deny outbound network, including provider subprocesses.
-  - **C002.3**: Enter isolation through a trusted immutable launcher before any candidate Taskfile, workflow, hook or provider executes.
-  - **C002.4**: Fetch pinned tools/providers only in separate credential-free preparation.
+  - **C002.3**: Enter isolation through a separately installed, digest-approved immutable launcher outside the candidate tree before any candidate Taskfile, workflow, hook or provider executes; candidate commands/configuration cannot select or replace it.
+  - **C002.4**: Fetch pinned tools/providers only in separate credential-free preparation; qualify mirror-only provider installation with lockfile and no network fallback.
 - **FR-003**: MUST satisfy each clause below.
   - **C003.1**: Wrap upstream reports without losing diagnostics.
   - **C003.2**: Reject crash or malformed/truncated output.
@@ -72,7 +73,7 @@ status, including review obligations. Independent test: V008 and V003.
   - **C007.2**: Run applicable HCL type/validation and lint checks.
   - **C007.3**: Run applicable data-schema checks.
   - **C007.4**: Reject invalid layer dependencies.
-  - **C007.5**: Select changed directories and transitive consumers.
+  - **C007.5**: Select changed directories and transitive consumers, including aliases, generated files, subdirectories, external sources and generated-instance fixtures required by ADR-0002.
   - **C007.6**: Fail or select the full suite on unknown changed paths or unresolved references; never silently select none.
 - **FR-008**: MUST satisfy each clause below.
   - **C008.1**: Use the same offline task contract with pinned setup on GitHub and GitLab.
@@ -90,7 +91,7 @@ status, including review obligations. Independent test: V008 and V003.
   - **C010.2**: Use exact Action pins, bounded execution and read-only repository fetch authority; no cloud/deployment credentials, secret-bearing environment, privileged runner or writable shared cache.
   - **C010.3**: Bind independently reviewed workflow/launcher source and image digests to the candidate head; execute candidate commands only inside the verified T003 boundary, with fetch tokens outside it.
   - **C010.4**: Reject missing checks, zero discovery, failures, cancelled/skipped runs, stale source/head or missing evidence instead of accepting a check name alone.
-  - **C010.5**: Limit bootstrap triggers to owned-branch pushes for reviewed foundation revisions; automatic execution of unreviewed/fork PR code is outside this bootstrap.
+  - **C010.5**: Enforce independently approved workflow/evaluator source before candidate publication or runner execution. Qualify source publication with Actions disabled, followed by a no-bypass freeze of all workflow paths, including new automatic YAML; a second unreviewed source push must be refused before execution. Owned-branch filters or review after execution alone cannot satisfy this clause.
   - **C010.6**: Retain T010–T012's protected publisher, fork and both-forge qualification as separate uncompleted duties.
 
 Each numbered clause inherits its parent requirement’s V-check and creating tasks.
@@ -98,7 +99,9 @@ For every guarded clause, implementation records a distinct expected outcome and
 valid/defect control; parent coverage alone cannot satisfy an untested child clause.
 
 ## Acceptance and predefined verification
-All commands are **planned**, with creating tasks in tasks.md. No implementation or live
+All commands are **planned**, with creating tasks in tasks.md. Task/Go check commands are
+in-child operations entered through T003's separately approved `lz-offline`; never invoke
+a candidate Taskfile on the host. Boundary tests exercise this actual advertised entry. No product acceptance or live cloud
 check has run. Evidence below is initially `not-run`; paths are under `.local/evidence/`.
 
 | Check | Requirements | Criterion: positive and negative outcomes | Verify (planned) | Evidence |
@@ -108,10 +111,10 @@ check has run. Evidence below is initially `not-run`; paths are under `.local/ev
 | V003 | FR-004, SC-003 | focused task mapping and justified aggregate accepted; unrelated blanket ADR lists, unmapped requirement/task and fake green evidence rejected; docs exemption accepted | `task test:traceability; task check:specs; task dod -- modules/naming` | `001/traceability.json` |
 | V004 | FR-005, SC-004 | two templates and independent collision/truncation/import/upgrade vectors pass; impossible or unknown kind rejects | `task test:naming; task snap:check -- modules/naming` | `001/naming.json` |
 | V005 | FR-006 | valid hierarchy labels pass; missing managed-by/managed-in/instance/release, unknown keys or tenant auth-key edits reject in applicable projections | `task test:naming-policy; task generate:check` | `001/naming-policy.json` |
-| V006 | FR-007 | valid module and data pass real L0 checks; unformatted/malformed HCL, pinned linter violation and malformed/empty schema discovery fail; leaf/consumer closure exact, reverse edge/cycle/unresolved path rejects, unknown diff selects full suite | `task test:dependencies; task test:static; task lint -- modules/naming; task schema:check` | `001/dependencies.json` |
+| V006 | FR-007 | valid module and data pass real L0 checks; unformatted/malformed HCL, pinned linter violation and malformed/empty schema discovery fail; leaf/consumer closure exact, alias/generated/subdirectory/external/generated-instance fixtures retain consumers or fail/widen on unresolved classification; reverse edge/cycle/unresolved path rejects, unknown diff selects full suite | `task test:dependencies; task test:static; task lint -- modules/naming; task schema:check` | `001/dependencies.json` |
 | V007 | FR-008 | valid offline job and broken behaviour have matching green/red reports on both real forges; parent-run fork has no privilege, including malicious Taskfile/workflow/include controls; fork-owned runner is not certified | `task verify:forge-offline` | `001/forge-offline.json` |
 | V008 | FR-009 | seeded defect yields stable id, location, observed/expected and fix; missing evidence is not-run and expert duty is review-required; decision map is fresh | `task test:agentex; task decision-map:check` | `001/agentex.json` |
-| V009 | FR-010, SC-005 | reviewed source and exact head run the implemented foundation checks green on GitHub; broken behavior is red; unpinned Action, widened permissions/trigger, credential/socket/cache exposure, host candidate execution, skipped check, zero discovery or stale head/source is rejected; absent CI stays blocked | `task test:foundation-ci; task ci:foundation`, then inspect actual PR checks/run metadata and matching task packet; creator T023 | `001/foundation-ci.json` |
+| V009 | FR-010, SC-005 | reviewed source and exact head run the implemented foundation checks green on GitHub; broken behavior is red; unreviewed workflow edit/addition/rename/deletion and second push cannot reach a runner; unpinned Action, widened permissions/trigger, credential/socket/cache exposure, host candidate execution, skipped check, zero discovery or stale head/source is rejected; absent CI stays blocked | `task test:foundation-ci; task ci:foundation`, then inspect actual PR checks/run metadata and matching task packet; creator T023 | `001/foundation-ci.json` |
 
 ## Success Criteria
 - **SC-001**: All required offline checks run in <=120 seconds for the naming change on an exclusive self-hosted runner with fixed CPU/memory and digest-pinned OS/image after tool preparation; unknown allocation or overlapping jobs blocks the measurement; a timeout fails (V001).
@@ -128,17 +131,19 @@ evidence; absent container runtime; stale generated output; malicious fork cache
 ## Implementation surface
 Go probe/test helpers live in `tools/internal/probes/`; root `tests/` holds their fixtures.
 `mise.toml`, `Taskfile.yml`, `tools/go.mod`, `tools/internal/{checks,report,namingdata}/`,
-`tools/cmd/lz-check/`, `tools/cmd/json2junit/`, `modules/naming/`, `names.yaml`,
+`tools/cmd/{lz-check,lz-offline}/`, `tools/cmd/json2junit/`, `modules/naming/`, `names.yaml`,
 `schemas/{naming,labels,check-report}.schema.json`, `harness/checks.yaml`,
 `harness/capabilities.yaml`, `tests/{check,fixtures,security}/`, `policies/{plan,assent}/`,
-`pipelines/{github,gitlab}/`, `AGENTS.md`, `harness/guides/`, `docs/reference/decision-map.md`.
+`pipelines/{github,gitlab}/` (including T023's foundation source manifest), `AGENTS.md`, `harness/guides/`, `docs/reference/decision-map.md`.
 
 ## Dependencies and stop conditions
 The structure, ratification and workflow-location decisions are confirmed; implementation
 authorization is limited to T001–T009 plus conditional T023. Tool preparation and actual P1/P2 observations
 remain due in those bounded proof tasks; failure blocks dependent work. Minimum local safety
 for dependent probes is T001–T009; naming, forge and latency do not gate that subset.
-The protected CI wrapper is later T011, not proof supplied by a local launcher.
+T003 qualifies local entry; T023 must independently qualify its minimal immutable CI
+source closure and pre-execution admission before any candidate push. No workflow/ruleset
+is qualified yet. T011 remains the later full forge wrapper, not this bootstrap's missing trust gate.
 An unevidenced naming kind is experimental and blocks
 cloud use of that kind; fixtures may use explicitly synthetic constraints. New sensors
 require independent protected review. All targets above are planned; tasks.md names the
