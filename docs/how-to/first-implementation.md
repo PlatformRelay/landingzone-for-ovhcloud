@@ -12,8 +12,19 @@ The minimum code prerequisite for protected platform experiments is
 [001 T001–T009](../../specs/001-offline-foundation/tasks.md): exact pins, isolated
 execution, real report fixtures, traceability and applicable dependency/static checks.
 It does not require the naming API, live both-forge qualification or latency benchmark.
-Start that subset only after the operator ratifies the structure or explicitly accepts
-its listed paths, and resolves workflow-scaffolding and constitution activation.
+The operator authorized that subset on 2026-10-01 with TDD, predefined evidence and
+independent review. ADR-0002 is Accepted, constitution 1.2.0 is ratified and the reusable
+workflow remains committed. Create directories with their first real artifact.
+Keep the complete feature draft: naming, full forge qualification, latency and full exit
+are outside this increment. After T001–T009 pass, conditional T023 supplies minimal
+GitHub CI for the implemented foundation. The operator granted merge permission;
+independent review, actual required checks, PR-head CI and mergeability remain gates.
+Missing CI is not a green gate. Material implementation choices are logged for validation.
+
+Prepare a bounded IAM/state feasibility slice after this minimum safety subset. That
+sequence does not grant cloud action, account, recovery or budget authority. Exact pins,
+prepared image/cache and actual isolation still need evidence in the foundation tasks;
+unavailability or a refuted mechanism blocks dependent work.
 
 [003 T001](../../specs/003-platform-feasibility/tasks.md) can draft the cost/sandbox
 operating ADR independently. Keep unresolved setup/custody/account choices explicit;
@@ -33,8 +44,9 @@ both actual forges qualify. A negative aggregate decision remains a failing/bloc
 qualification, even when its report is complete.
 
 Naming implementation waits for the joint call-interface decision. The
-[004 proposal](../../specs/004-guided-preconfiguration/tasks.md) waits for its scope
-and schedule decision; do not build a synthetic wizard merely because pins exist.
+[004 proposal](../../specs/004-guided-preconfiguration/tasks.md) now permits a bounded
+renderer prototype and written journey; hardened persistence/export waits for real profile
+schemas. Its draft needs follow-up alignment and is outside this foundation run.
 The [upstream trace](../reference/upstream-reference-map.md#translation-into-the-planning-set)
 identifies existing checks and future adaptation specs. Network/firewall topology,
 real profile exports and the installation-doc renderer are future consumer work.
