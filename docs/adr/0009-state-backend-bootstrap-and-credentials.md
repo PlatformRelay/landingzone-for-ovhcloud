@@ -40,7 +40,10 @@ writer; promotion is an explicit, logged step; Object Lock never applies to lock
   primary with the passphrase method configured only as the migration reader.
 - **Key-loss recovery is a separately decryptable backup**, not a fallback: a scheduled job (its own
   identity, read access to state, the escrowed passphrase from a sealed secret) pulls each state
-  snapshot and writes a copy encrypted under the escrow method to a second bucket in a second region.
+  snapshot and writes a copy encrypted under the escrow method to a backup destination.
+  A second region is a design option awaiting explicit scope approval; it is not part of
+  the one-project sandbox authorization. Backup failure-domain placement remains an open
+  design decision; independent decryption alone does not cover account unavailability.
   The escrow package records key identifiers, authenticators, backend configuration, toolchain
   versions and the recovery runbook; nothing needed to use it lives only inside encrypted state.
 - OKMS key rotation enabled; KMS or object-storage unavailability, key loss and state corruption
@@ -56,6 +59,10 @@ writes fenced; (b) rebuild in a new project and expect creation plus data restor
 is never the success criterion for a rebuild.
 
 ### Credential matrix ("lease, don't store", made explicit)
+Per-run/JIT credentials are a differentiator (ADR-0001), with an explicit scope: grant or mint
+bounded deployment authority when needed, record issuer authentication and measure its residual
+access window. An expiring elevation policy and an expiring access token are distinct controls;
+neither makes its long-lived issuer authenticator disappear. Only qualified routes get a JIT claim.
 Every automation identity is a row in `identities.yaml` with: issuer, principal type, **how the
 caller authenticates to the issuer**, scope, lifetime, renewal, revocation, state/backend/KMS access,
 emergency recovery.

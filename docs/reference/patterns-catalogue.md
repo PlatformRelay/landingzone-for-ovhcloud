@@ -7,6 +7,9 @@ Ids are provisional until the rule is implemented. Rules are not enforced mechan
 bans: each has an applicability (artefact kind), explicit exceptions with a justification line, and
 an evidence grade; behaviour and security rules outrank cosmetic ones, and a rule whose checker
 can be satisfied without the intended behaviour is a defect in the rule.
+Enforcement columns describe planned checks until their creating tasks land and evidence is
+recorded; this catalogue is not a passing run. ADRs and the constitution own the rules; this is
+their summary. Naming interface/cardinality remains a joint decision (ADR-0003).
 
 ## 1. HCL idioms and module interface
 | Id | Pattern | Why | Enforced by |
@@ -20,7 +23,7 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-HCL-007 | Outputs are a small documented API, never whole resource objects; family outputs match the contract schema | Contracts stay stable | contract test (L2) |
 | LZ-HCL-008 | Lifecycle protection where useful, **plus** an independent decommission gate (ADR-0005) that stays effective when the resource configuration is removed; `prevent_destroy` alone is not a deletion-authorisation boundary | Safe by default | policy rule + decommission gate |
 | LZ-HCL-009 | Provider-specific behaviour (e.g. `openstack` for strict security groups) is isolated in one module with a README reason | Gap register stays honest | dependency script |
-| LZ-HCL-010 | Every optional feature is a leaf; nothing mandatory depends on an optional | Profiles compose | dependency script |
+| LZ-HCL-010 | Every supported tuple has an acyclic dependency graph; optionality and prerequisites depend on the selected tuple (ADR-0016) | Profiles compose with explicit prerequisites | dependency script |
 | LZ-HCL-011 | `enabled` meta-argument (OpenTofu 1.11+) behind a variable; no `count = var.enabled ? 1 : 0` | Readability, fewer index addresses | tflint rule |
 | LZ-HCL-012 | Ephemeral resources and write-only attributes for secrets wherever the provider allows; plan JSON cannot prove absence of secret persistence, so state encryption remains the backstop | Less in state in cleartext | policy rule on plan JSON + review |
 | LZ-HCL-013 | No routine `-target` as a deployment decomposition strategy; a targeted recovery run is followed by a full-plan reconciliation | State boundaries are explicit (ADR-0004) | pipeline lint |
@@ -29,14 +32,18 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | Id | Pattern | Why | Enforced by |
 |---|---|---|---|
 | LZ-NAM-001 | All names come from `modules/naming`; no module builds its own | One convention | tflint rule |
-| LZ-NAM-002 | `names.yaml` is the single source for patterns, limits and docs; generated artefacts must be fresh | Gate and module never disagree | generator freshness check |
+| LZ-NAM-002 | `names.yaml` owns catalogue limits/keys/applicability; organisation naming/label data owns its convention; projections and generated artefacts must be fresh | One owner per rule, shared resolution | generator freshness check |
 | LZ-NAM-003 | Profiles and lifecycle metadata go in tags, never in names; names are immutable | Profile changes must not rename | naming tests |
-| LZ-NAM-004 | Name override input for imported resources; never auto-rename on algorithm change; version the algorithm | Brownfield safety | naming tests + review |
+| LZ-NAM-004 | Exact import override; preserve the pinned algorithm/template/abbreviation/catalogue recipe; name-affecting changes need an explicit migration diff | Brownfield safety | naming tests + review |
 | LZ-NAM-005 | Organisation-structure label keys come from the per-org `labels.yaml` schema (required/optional, allowed values, hierarchy level); unknown keys are rejected at merge, plan and scan | Adapts to org structures without code change | schema + Rego + scanner |
-| LZ-NAM-007 | Every labellable resource carries `managed-by=opentofu`, `managed-in=<forge>/<org>/<repo>//<path>`, `instance=<deployment instance id>`, `release=<train>`; Kubernetes objects carry them as labels, long values as annotations | Console triage, one writer per object, state-owner map | Rego on plan + scanner |
+| LZ-NAM-007 | Applicable resources carry managed-by, managed-in, instance and release metadata; target projections are explicit; K8s repository/path and invalid label values are annotations even when short | Console triage, legal target metadata, one writer | Rego on plan + scanner |
 | LZ-NAM-008 | Keys the IAM plane conditions on are marked `authorisation: true` and are set only by platform roots, never from a tenant file | A tenant must not be able to re-label itself into another envelope | schema + assent + Rego |
-| LZ-NAM-009 | The naming template is per-organisation data: segment order, separator, case, abbreviations, per-kind overrides, deterministic truncation; an impossible template fails at plan time | Flexible convention, one implementation | naming module validation |
+| LZ-NAM-009 | Organisation-controlled segment order, separator, case, abbreviations and kind rules; known impossible names reject at plan; unknown name/security inputs block apply preflight | Flexible convention, no deferred-validation loophole | naming validation + plan policy |
 | LZ-NAM-006 | Per-resource length and charset limits carry a source URL per row; unknown limits are marked, not guessed | No invented universal limit | schema |
+| LZ-NAM-010 | Stable logical resource IDs distinguish same-kind instances; batch keys and for_each addresses never use kind alone or a generated name | Repeat resources without identity churn | contract + scope collision check |
+| LZ-NAM-011 | Strict decode before typed HCL conversion; unknown keys and tenant changes to protected values reject | Typos and coercion cannot erase intent | schema + merge/plan policy |
+| LZ-NAM-012 | Explicit deterministic shortening and same-scope post-normalization collision checks; hashing does not reserve globally available names | Honest uniqueness scope | independent vectors + live qualification |
+| LZ-NAM-013 | Stable selector subset excludes mutable lifecycle metadata; labels, annotations and canonical metadata have distinct constraints | Metadata updates do not alter selectors or names | projection + upgrade controls |
 
 ## 3. `tofu test` patterns (ADR-0008)
 | Id | Pattern | Why | Enforced by |
@@ -90,7 +97,7 @@ can be satisfied without the intended behaviour is a defect in the rule.
 |---|---|---|---|
 | LZ-SEC-001 | Six automation identities by authority: bootstrap/order, account-governance, deployment per stage, observation, state, recovery | Least privilege | identity ledger test |
 | LZ-SEC-002 | A plan identity needs lock permissions; "plan is read-only" is not a permission spec | Locking | runbook + test |
-| LZ-SEC-003 | Short-lived tokens minted per run and revoked in `finally`; long-lived secrets only for the broker and the age key | Lease, don't store | pipeline review |
+| LZ-SEC-003 | Qualified per-run tokens expire and revoke within measured windows; long-lived issuer/governance/observation/S3/escrow and solo fallback credentials are explicit ADR-0009 matrix rows | Bound authority without hiding authenticators | pipeline review + revocation probes |
 | LZ-SEC-004 | Replica state never becomes a second active writer; promotion is explicit; WORM never applies to lock objects; the decrypting key is never recoverable only from the encrypted state | DR correctness | drill |
 | LZ-SEC-005 | Tenant schema forbids keys matching `*secret*`, `*password*`, `*token*` | No secrets in data | schema |
 | LZ-SEC-006 | Humans only in OVH IAM by default; any Keystone human has a ledger entry with expiry | Offboarding | scanner |
@@ -111,14 +118,14 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-SBX-001 | Every live fixture carries lease id, run id, TTL, estimated max exposure; reaper authority limited to known sandbox projects | Bounded spend | reaper |
 | LZ-SBX-002 | Budget guard fails closed: over cap or orphans found → no L7+ | Solo maintainer safety | budget guard |
 | LZ-SBX-003 | Bounded retries with jitter for transient failures; reconcile partial creates before retrying writes | API reality | test helpers |
-| LZ-SBX-004 | Smallest flavours, one cheap region, pre-ordered project pool; ordering tested separately with explicit authorisation | Cost | review |
+| LZ-SBX-004 | Smallest flavours and approved region within one dedicated project; additional projects/regions and ordering need explicit approval | Cost | review |
 
 ## 9. Documentation (ADR-0013)
 | Id | Pattern | Why | Enforced by |
 |---|---|---|---|
 | LZ-DOC-001 | Every page has `verified_against: {tofu, ovh}` front-matter; two minors behind fails | Freshness | docs lint |
-| LZ-DOC-002 | Code blocks come from tested examples via include markers; no pasted HCL | No rot | include tool |
-| LZ-DOC-003 | Every how-to ends in a `task` target; nightly runs it dry | Runbooks stay true | docs job |
+| LZ-DOC-002 | Executable examples use tested include markers; illustrative snippets are labelled; prose-only work is exempt | No rot | include tool |
+| LZ-DOC-003 | Executable how-tos end in a tested `task` target; nightly runs it dry; prose-only guidance has no invented behavior test | Runbooks stay true | docs job |
 | LZ-DOC-004 | "compliant"/"certified" banned; "aligned", "supports controls" allowed | Legal exposure | Vale rule |
 | LZ-DOC-005 | Terminology mapping pages carry caveats, never "equivalent" | Honesty | review |
 | LZ-DOC-006 | Every security page has "what this does not protect against" | Honesty | docs lint |
@@ -138,6 +145,8 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-AGX-009 | A regression fix records red-on-parent (or a targeted mutation) and green-on-change; a compile error or outage is not the red | Test sensitivity is evidence | evidence packet check |
 | LZ-AGX-010 | A skipped check, a crash, a parser failure or zero discovered tests can never produce green; missing observation is reported as `not-run` or `blocked` | Missing evidence is not success | report envelope |
 | LZ-AGX-011 | Changes that weaken a sensor, oracle, snapshot, rubric or capability grant need protected review and a justification line | The loop must not grade itself | protected paths + review |
+| LZ-AGX-012 | Every non-docs requirement/task has predefined verification, positive/rejection outcomes and evidence; docs-only work is exempt | Traceable engineering contract | Spec Kit analysis + review |
+| LZ-AGX-013 | Separate user suggestions from decisions; compare credible alternatives and push back only with defensible reasons | Collaboration without blind agreement or ritual opposition | design review |
 
 ## 11. Tools (pins live in `mise.toml`)
 OpenTofu ≥ 1.13 · Terramate 0.17.x (instance layer) · tflint + custom ruleset · trivy (config) · conftest/OPA · assent · terraform-docs ·

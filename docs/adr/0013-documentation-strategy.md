@@ -7,12 +7,21 @@
 Requirement: amazing documentation and readability. Prior art: AVM generated references, OCI and IBM
 manifests, Diataxis as a structure that separates learning, doing, looking up and understanding.
 Docs rot when examples and reference are written by hand.
+The published [OrbitalEdge example](../reference/upstream-reference-map.md) already supplies a
+use-case story, architecture, governance, day-1/day-2 and operations guides. Use that progression
+as prior art; a worked example alone is not this project's differentiator. Generated installation
+facts and tested recovery journeys are the additional work.
 
 ## Options considered
 Hand-written README per module; generated reference only; Diataxis site with generated reference and
 executed examples.
 
 ## Decision
+- **Useful polish:** documentation is an entry point to the differentiators in ADR-0001. Start with
+  a short adoption journey and resolved choices, then reveal contracts, authority and recovery
+  detail on demand. Installation diagrams, permission explanations and next actions should be
+  understandable without reconstructing the composition graph. Search, navigation and readable
+  examples support this; an extra application/portal is not required.
 - **Diataxis** under `docs/`: `tutorials/` (guided first landing zone on a sandbox), `how-to/` (bootstrap,
   add a project, rotate credentials, migrate between versions, add a policy), `reference/` (generated:
   module inputs/outputs via terraform-docs, schemas, policies, provider gaps, repo map), `explanation/`
@@ -26,7 +35,8 @@ executed examples.
 - **Writing rules**: first page states "unofficial" and "what OVHcloud can't do", then "Which golden
   path am I?" (a decision tree) and the **negative paths** page (ADR-0016); every page carries
   front-matter `verified_against: { tofu, ovh }` compared with `mise.toml` — pages more than two
-  minor versions behind fail CI; a glossary; no marketing tone; the writing-quality lint (Vale or
+  minor versions behind fail CI; a glossary; factual positioning of benefits with implementation
+  and verification status; the writing-quality lint (Vale or
   similar) runs in CI.
 - **Anti-rot gates** (all in CI): generated reference must be current (`terraform-docs --output-check`);
   every code block is pulled by include-marker from a tested example; external links re-resolved
@@ -38,6 +48,9 @@ executed examples.
   versioned docs, search, offline build, no server.
 - ADRs live in `docs/adr/`, linked from the explanation section.
 - Docs are published from `main`; versioned snapshots per release train tag.
+- **Docs-only exemption:** prose changes need content review, not invented automated behaviour
+  tests. Existing link/format checks can still run. Executable examples, renderers, generators and
+  publication/access-control workflows retain predefined tests and evidence under ADR-0008.
 
 ## Consequences
 - Docs build is part of CI; a broken link or stale generated file blocks a PR.

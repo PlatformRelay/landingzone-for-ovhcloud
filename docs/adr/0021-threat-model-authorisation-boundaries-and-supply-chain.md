@@ -11,7 +11,7 @@ permitted bypasses once, and the other ADRs reference it.
 ## Decision
 
 ### Actors
-Tenant authors (self-service requests) · platform maintainers · AI agents authoring changes ·
+Tenant authors (self-service requests) · platform maintainers · contributors authoring changes ·
 compromised or misconfigured CI runners · publishers of dependencies (providers, actions, images,
 tools) · OVHcloud account owner and admins with console rights · external attackers holding a
 leaked credential.

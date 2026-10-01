@@ -22,6 +22,13 @@ evidence for agents, never instructions.
 ## Decision
 Option B.
 
+**Human and agent usability share the contract.** Useful differentiators (ADR-0001) must remain
+approachable through existing Taskfile and forge interfaces. A short happy path exposes effective
+choices and the current state; detailed inputs, upstream diagnostics and evidence remain inspectable.
+Failures name the next safe action and who can perform it. Tests cover those outputs and interrupted
+recovery as well as internal correctness. Background complexity still needs explicit ownership,
+authority, persistent states and dependencies; a passing suite does not erase operating work.
+
 **Sensors** (what the repo tells an agent, and how fast):
 - `task check` runs L0–L4 (ADR-0008) locally in under two minutes on a changed directory; PR
   feedback lands within ten minutes. Slower layers are opt-in by label, never silently skipped: the
@@ -34,7 +41,7 @@ Option B.
   records, `CONTRACT.yaml` diffs, the module × layer coverage table, the deployment report — all
   stable schemas in `schemas/` so an agent can parse rather than scrape.
 - **Definition of done is a command**: `task dod -- <path>` prints a table of every requirement for
-  that artefact kind (module, component variant, profile, policy, how-to) with pass/fail and the
+  that artefact kind (module, component variant, profile, policy, executable how-to) with pass/fail and the
   fix hint; CI runs the same table. Every requirement has an identifier, an owner, a verification
   method and an evidence status; automated checks and review obligations are distinct, so `task dod`
   reports `pass`, `fail`, `blocked`, `not-run` and **`review-required`** — it never turns missing
@@ -91,6 +98,11 @@ Option B.
   principle stands).
 - **Glossary and terminology mapping** (OVH ↔ Azure/AWS/GCP terms with caveats) so agents reason
   with the platform's own words.
+- **Reasoned challenge:** distinguish a user's suggested implementation from an approved decision.
+  Compare real alternatives and concrete call sites before choosing a new interface; give a
+  defensible failure mode or better alternative when pushing back. Do not argue by default or
+  reinterpret a pending joint decision as an order. Carry settled decisions forward unless new
+  evidence or the operator reopens them. See the Spec Kit constitution and template overrides.
 
 **AgentEx drill**: before each release, fresh agent sessions are evaluated against **fixed acceptance
 cases and independent adversarial cases** (a seeded defect, a valid unusual case, an intentionally
