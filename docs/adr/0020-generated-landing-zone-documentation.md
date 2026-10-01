@@ -24,6 +24,11 @@ exactly this: accounts, rights, justification, review dates.
 Option B. `tools/lz-docs` renders a per-installation documentation set from data only; nothing in it
 is typed by hand after setup.
 
+Automatic documentation is a substantive differentiator (ADR-0001): an operator should be able
+to explain the installation without rebuilding its model mentally. Human explanations and
+machine-readable observations are views of the same sources, with progressive detail. The renderer
+is behavioural code and requires predefined tests even though its output is documentation.
+
 **Inputs** (all already exist or are introduced here):
 - desired state: tenant files, profile, identity ledger, IPAM ledger, waivers;
 - actual state: stage output contracts (`stage-outputs.json`) and the scanner's inventory
@@ -66,6 +71,10 @@ only identifiers.
 **Evidence rules**: every "actual" value cites its source (stage output or scanner run id); a value
 the scanner could not collect is shown as `UNVERIFIED`, never omitted or guessed (same rule as the
 deployment report).
+Generation time is separate from observation time and any human attestation; rendering again
+cannot refresh the evidence. A failed/stale scanner shows its last observation, age and failure
+status. Permission rationale describes desired intent, not proof of live effective authority or
+a completed access review. These states appear in the human view and its underlying data.
 
 ## Consequences
 - Compliance questionnaires are answered from a URL that is regenerated nightly; reviewers can be
@@ -86,6 +95,9 @@ deployment report).
   role data + scanner inventory → Markdown with reasons; a reviewer with no context can say who may
   do what and why.
 - Spike: GitHub Pages and GitLab Pages access control for a private site from the tenant-repo template.
+- Renderer controls: missing/stale inventory and a failed scanner remain visibly unverified;
+  re-rendering never changes the observation/attestation date; a valid fresh observation retains
+  its source. Private publication and reduced public scope have positive and rejection controls.
 
 ## Review log
 _(none yet)_

@@ -24,6 +24,13 @@ synthetic constraints are allowed only for algorithm tests. Alternative broad sc
 Requirement→ADR→implementation→Verify→evidence comes from the local Anvil specs/README.md.
 Anvil currently has no .specify constitution and explicitly uses its own spec workflow;
 no code or unrelated fleet machinery is copied. Docs-only tests are exempt by user request.
+## Open choice: naming and labelling interface
+The configuration-vector idea is not an instruction. Scalar shared-context calls, batches keyed by
+logical resource IDs and catalogue previews are compared in
+../../docs/explanation/naming-and-labelling-design.md. Current recommendation is a per-resource pure
+helper with reusable trusted context and ordinary caller for_each; final cardinality/module split
+needs a joint decision before T013/T014. Strict decoding, stable recipe revisions, per-target
+metadata projections and cross-caller collision checks are required whichever interface wins.
 ## Primary references
 - https://github.com/github/spec-kit (workflow context; installed bundled commands govern this run)
 - https://opentofu.org/docs/cli/commands/test/ (framework; capture actual pinned output before parser work)

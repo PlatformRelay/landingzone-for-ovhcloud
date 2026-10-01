@@ -9,7 +9,12 @@
 - OrganisationTemplate: ordered segments, separator/case, abbreviations, per-kind override,
   truncation strategy and algorithm version. LabelSchema: namespace, required keys,
   hierarchy derivation, allowed values and authorisation-owned keys.
-- NamingResult: names map, name_short, labels; no provider ids or invented URNs. Import
-  override is explicit and wins; profile/release label changes do not rename resources.
+- NamingResult: scalar vs batch cardinality and final field names are pending joint decision.
+  A result represents one logical resource; batches key by immutable logical request ID, never kind
+  or generated name. Names, canonical metadata and target labels/annotations/tags are separate;
+  no provider ids or invented URNs. Import override stays exact; metadata updates never rename.
+  Name-affecting algorithm/template/abbreviation/catalogue revisions are frozen together.
 Validation: strict YAML, duplicate/unknown fields rejected; no silent truncation/collision;
 managed-by, managed-in, instance and release are mandatory for applicable resources.
+Typed HCL conversion is not strict decoding. Unknown name/security inputs block authoritative
+apply preflight; projection/selector constraints are independent of canonical metadata.

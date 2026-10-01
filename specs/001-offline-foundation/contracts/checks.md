@@ -25,6 +25,10 @@ All commands are planned and must be created by tasks.md; no acceptance check ru
   blocked/not-run/review-required/exempt. A non-pass required item exits nonzero.
 - `task test:naming`, `test:naming-policy`, `snap:check -- modules/naming`, `generate:check`:
   independently checked algorithm, shared data projections and freshness, no cloud calls.
+  The detailed V004–V006 matrix in ../../docs/explanation/naming-and-labelling-design.md
+  includes same-kind logical IDs, strict decoding, stable complete recipes, scoped collisions,
+  exact imports, target metadata/annotation projections and stable selectors. Call-interface
+  cardinality/module split is pending joint decision before implementation.
 - `task verify:forge-offline`: both real forge sample repos; repository tokens only in
   protected qualification runner; no secret reaches the contributor workflow under test.
 - `task decision-map:check`: regenerate from ADRs, registry and paths and reject diff.

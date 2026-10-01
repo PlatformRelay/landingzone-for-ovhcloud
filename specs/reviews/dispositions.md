@@ -28,3 +28,20 @@ planning lane. The final read-only Spec Kit analysis maps all 35 requirements to
 23 acceptance checks and 66 tasks, with four docs-only exemptions and no unresolved
 cross-artifact finding or dependency cycle. Its output is recorded in speckit-analysis.md.
 This approval and analysis do not activate drafts or close future implementation checks.
+
+## Direction and guided-setup follow-up
+The independent direction/004 plan review is CLEAN. Its optional notes are applied: persisted
+explicit/default answer origins, cheap-helper refresh against actual content/tool bindings, and
+narrow owned checkpoint/staging/evidence writes. 004 T004/T006/T010 exercise the corresponding
+equal-value resume, dirty-content and outside-root/interrupted-export controls.
+
+| Technical finding | Disposition | Plan verification |
+| --- | --- | --- |
+| TR-D1: two decisions reserved ADR-0023 | Applied; existing guided setup keeps 0023, phase 003 cost/sandbox creator and index reserve 0024 | Unique authored IDs and reserved future path checked |
+| TR-D2: generic resume waited on naming-interface choice | Applied; 004 T005 creates its own strict local schema/decoder; 001/T016 and later real-data gates apply to real T011 exports | Full and fixture DAGs checked; T005/T009 have no 001/T013 ancestor; real T011 retains 001/T016 |
+| TR-D3: early human-rubric source implicit | Applied; T009 points to existing plan/ADR/SC-001 criteria; T012 expands later | Reference and dependency read; no invented future human-review evidence |
+
+Focused technical re-review is APPROVE. Updated read-only analysis covers 47 requirements,
+28 checks, 79 tasks, 74 non-doc verification contracts and five docs exemptions, plus 43 mapped
+acceptance target creators. This extends the historical three-phase analysis, without claiming
+implemented modules, wizard, terminal qualification, cloud support or completed acceptance checks.

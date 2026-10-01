@@ -27,6 +27,24 @@ sandbox pays only for what mocks cannot prove.
 ## Decision
 The layered taxonomy. Every layer has a Taskfile target (ADR-0007), a stated cost, and a cadence.
 
+**Verification is predefined.** Before implementation, every non-documentation requirement and
+success criterion maps to an acceptance check; every task names its requirement/ADR, dependencies,
+verification command or bounded procedure, positive and negative outcomes, and evidence destination.
+The trace is requirement → ADR → implementation → check → evidence. Planned commands name their
+creating task and start `not-run`. Tests precede behavioural implementation; red means a concrete
+behavioural defect, never a missing tool, syntax error or outage. Implementation closes on the
+same controls green. Evidence binds revision, input, tool versions, discovery count and environment;
+missing, stale or unrelated evidence cannot satisfy a requirement. The Spec Kit constitution and
+project template overrides carry this contract into future work.
+
+**Test the visible journey.** Each differentiator (ADR-0001) has a valid path, a failure or interrupted
+path, and the observable explanation/next safe action. Assert those outputs as well as internal
+invariants. An experiment may begin with unknown platform behaviour when proving or refuting it
+is its bounded purpose; a successful simulation cannot qualify an unobserved live mechanism.
+Market/adoption research is not an engineering prerequisite. Pure prose is exempt from invented
+automated tests; executable examples, generators, schemas, policies, renderers and workflow
+configuration are behavioural work, including when their output is documentation.
+
 | # | Layer | Mechanism | Catches | Cost | Cadence |
 |---|---|---|---|---|---|
 | L0 | Static | `tofu fmt -check`, `tofu validate`, tflint (+ custom naming/tag rules), trivy config, terraform-docs `--output-check`, JSON-Schema validation of profiles/tenants/matrix, `assent lint`, dependency-direction script, markdown/link lint | syntax, types, undocumented inputs, layering violations, schema drift | 0 | pre-commit, PR |
@@ -72,8 +90,8 @@ Cost accounting counts preparation, recording, idle reference infrastructure and
 the final command (L9 is not "API only" once an upgrade test deploys N).
 
 **Coverage rule.** Every module: L0, L1, L2, L3. Every family variant: L2 contract. Every profile: L3,
-L8, inclusion test. Every policy: L4 with fixtures and mutants. Every how-to: its ending `task`
-target runs in dry-run nightly (ADR-0013).
+L8, inclusion test. Every policy: L4 with fixtures and mutants. Every executable how-to: its ending
+`task` target runs in dry-run nightly (ADR-0013); prose-only work has no invented behavior test.
 
 **Mocking limits.** `mock_provider` masks provider-side validation; L5/L6/L7 exist for that reason;
 mock defaults are copied from recorded real values (`tests/fixtures/`), refreshed by a task.

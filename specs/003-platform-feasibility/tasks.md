@@ -11,7 +11,7 @@ module; no second Go module or package outside tools/ is assumed.
 
 ## Setup and foundation
 
-- [ ] T001 Write cost/sandbox operations ADR at docs/adr/0023-cost-and-sandbox-operations.md
+- [ ] T001 Write cost/sandbox operations ADR at docs/adr/0024-cost-and-sandbox-operations.md
   - Requirements: FR-001; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: 001/T022; operator decisions for numeric limits and setup.
   - Verify: exempt — docs-only; content review and operator disposition cover budget units, external inventory, prices/freshness, runtime, concurrency, cleanup authority and health bootstrap before live implementation.
   - Evidence: `.local/evidence/003/t001-cost-adr-review.json`; initial status `not-run` (docs content review only).

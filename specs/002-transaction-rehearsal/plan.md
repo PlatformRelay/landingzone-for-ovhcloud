@@ -30,7 +30,12 @@ Terramate generates HCL. This phase is an experiment, not an unattended deployme
 | IV Authority | One state owner, trusted evaluator and protected execution boundaries explicit; no authoring cloud authority. |
 | V Recovery | Missing observations fail closed; private evidence and separate cleanup/recovery paths required. Live readiness remains blocked on setup. |
 | VI Scope | Bounded first increment; no supported-tuple claim, broad scaffolding or runtime rollout. |
+| VII Useful outcomes | Preserve the reference baseline and differentiators; existing acceptance cases cover visible reports/status and failure paths; no new portal/CLI implied. |
+| VIII Decisions | Approved direction is distinct from pending interfaces; phase 001 naming T013 gates the joint choice; dependent work respects that gate. |
+
+
 Draft design conforms; this table is a review of the design, not evidence that future gates passed.
+
 
 ## Project Structure
 Implementation paths: see spec.md's Implementation surface; no generic src/ tree.

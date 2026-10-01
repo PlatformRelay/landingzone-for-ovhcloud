@@ -37,3 +37,5 @@ secrets/
 # ─── Third-party corpora (licence: not redistributable here) ─────────────────
 # The OVHcloud docs knowledge base is CC BY-NC-SA 4.0; it is fetched locally, never committed.
 knowledge-base/
+# Local upstream/reference clones retain their own history and licences.
+references/

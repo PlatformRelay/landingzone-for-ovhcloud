@@ -82,7 +82,7 @@ Independent test: V001–V003, V006–V007.
 Independent test: V004–V005.
 
 - [ ] T013 [US2] Author two independent organisation vectors and provider-free module tests in modules/naming/tests/unit.tftest.hcl, modules/naming/tests/contract.tftest.hcl and tests/fixtures/naming/
-  - Requirements: FR-005, SC-004; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T007, T009.
+  - Requirements: FR-005, SC-004; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T007, T009; external joint decision on naming/label interface cardinality and module split.
   - Verify: `mise exec -- tofu -chdir=modules/naming test`: compiling pure module stub produces behavioural red for concrete expected names/labels; valid unusual template, collision/truncation/import/upgrade cases and expect_failures for validations; record actual CLI output.
   - Evidence: `.local/evidence/001/t013-naming-red.json`; initial status `not-run`.
 
@@ -100,6 +100,13 @@ Independent test: V004–V005.
   - Requirements: FR-006; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T015.
   - Verify: `task test:naming-policy; task generate:check; task schema:check; task policy`: valid independent vectors and applicable projections agree; duplicate YAML, unknown key, missing required label and stale generated data fail. Creates test:naming-policy, generate:check, schema:check and the policy aggregate. `task schema:check` validates names.yaml and both org naming/label fixture sets against the actual strict schemas and rejects malformed/duplicate/unknown fields and zero discovery; no invented cloud fields or unaudited limits.
   - Evidence: `.local/evidence/001/t016-naming-policy.json`; initial status `not-run`.
+
+T013–T016 also cover the detailed V004–V006 matrix in
+../../docs/explanation/naming-and-labelling-design.md: repeated same-kind resources, strict
+unknown-field rejection before HCL conversion, same-scope normalized/hash collisions, exact
+import overrides, pinned name recipe upgrades, metadata-only stability, separate target
+projections and stable selector subsets. Each applicable clause needs independent valid/red/green
+controls. Candidate call sites and fields remain illustrative until the joint decision.
 
 ## US3
 

@@ -15,7 +15,7 @@ with the first public release.
 |---|---|---|
 | [0001](0001-scope-positioning-and-unofficial-status.md) | Scope, positioning and unofficial status | Proposed |
 | [0002](0002-repository-structure.md) | Repository structure (monorepo) | Proposed |
-| [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy and module naming | Proposed |
+| [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy, naming and labelling | Proposed (call interface pending) |
 | [0004](0004-staged-roots-and-output-contracts.md) | Staged roots, separate state, typed output contracts | Proposed |
 | [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Proposed |
 | [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Proposed |
@@ -35,6 +35,9 @@ with the first public release.
 | [0020](0020-generated-landing-zone-documentation.md) | Generated landing-zone documentation: system map, accounts and permissions with reasons | Proposed |
 | [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
 | [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
+| [0023](0023-guided-repository-preconfiguration.md) | Friendly, resumable repository preconfiguration | Proposed |
+
+ADR-0024 is reserved for cost/sandbox operations by phase 003 T001; it has not been authored yet.
 
 Still to be written: network and resilience architecture, cost and sandbox operations, observability
 and incident response, documentation accessibility.
