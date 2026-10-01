@@ -1,5 +1,12 @@
 # Offline command and report contracts
 All commands are planned and must be created by tasks.md; no acceptance check runs yet.
+- `task test:foundation-ci`, `task ci:foundation` (T023): only after T001–T009 have evidenced
+  completion, test/bootstrap the implemented foundation on GitHub. Exact Action pins,
+  reviewed workflow/launcher and image digests, owned-branch push trigger, ephemeral hosted
+  runner, read-only outer fetch, network-isolated candidate execution and 10-minute timeout.
+  No cloud/deployment/secret-bearing environment. Require actual matching PR-head run/check
+  evidence and behavioral red/green controls; missing/stale/skipped/zero-discovery results
+  block merge. This does not close full both-forge/fork/publisher qualification.
 - `task verify:toolchain`: versions/pins and required cache/image identity, fail on mismatch.
 - `task check`: credential-free prepared image, no network, required L0–L4 applicable to
   the selected artefact. Unknown changed scope selects full suite or fails explicitly.

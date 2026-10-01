@@ -1,6 +1,6 @@
 # Initial project phases
 Planning baseline: 116405b · 2026-10-01. All specs are **draft**; no cloud work has run.
-The design remains in Proposed ADRs. This planning set implements no landing-zone code.
+ADR-0002 is Accepted; other ADRs retain their recorded status. This planning set implements no landing-zone code.
 The [product direction](../docs/explanation/product-direction.md) preserves the reference-baseline
 ambition, useful differentiators and learning through bounded experiments.
 The [naming/labelling interface](../docs/explanation/naming-and-labelling-design.md) is pending a
@@ -8,24 +8,29 @@ joint decision; phase 001 naming tasks carry that dependency.
 
 | Spec | Outcome | Gate and independent dependencies |
 | --- | --- | --- |
-| [001-offline-foundation](001-offline-foundation/spec.md) | Pinned offline checks, reporting, naming/labels and traceability | D4 ratification or explicit 001 path-subset acceptance before T001. Minimum local safety is T001–T009; full exit still needs V001–V008 green and docs review. Naming, forge qualification and latency are outside 003's minimum prerequisite. |
+| [001-offline-foundation](001-offline-foundation/spec.md) | Pinned offline checks, reporting, naming/labels and traceability | T001–T009 plus conditional GitHub CI bootstrap T023 authorized with TDD and independent review; merge permission granted subject to actual checks, PR-head CI and mergeability. Structure, constitution and scaffold dispositions are confirmed. Full exit still needs V001–V009 green and docs review; naming, full forge qualification and latency remain outside this subset. |
 | [002-transaction-rehearsal](002-transaction-rehearsal/spec.md) | Local two-tenant graph, publication, binding and reservation rehearsals; separate forge qualification | Local exit: V001–V006 green plus V007 pass or explicit blocked record per unavailable forge. Blocked V007 cannot qualify that forge or satisfy SC-003. |
 | [003-platform-feasibility](003-platform-feasibility/spec.md) | Protected recovery, isolation, floor, credential, sandbox and locking probes | Docs-only T001 can start independently. Code/probes require 001/T009 plus their admission/reaper and operator gates. Aggregate needs local 002/T008, T012, T016, not live forge adapters. Every refutation blocks its named downstream claim; incomplete observations remain blocked. |
-| [004-guided-preconfiguration](004-guided-preconfiguration/spec.md) | Draft friendly terminal journey, defaults, progress and save/resume proposal | Scope/schedule and persistence depth await operator decision. No parallel implementation commitment. Real exports also need actual schema/catalogue creators; synthetic qualification is not real readiness. |
+| [004-guided-preconfiguration](004-guided-preconfiguration/spec.md) | Draft friendly terminal journey, defaults, progress and save/resume proposal | Bounded renderer prototype and written journey approved; hardened persistence/export deferred until real profile schemas exist. Its draft needs follow-up alignment; no 004 implementation is part of the 001 foundation run. Synthetic qualification is not real export readiness. |
 
-Feature numbers identify documents, not a ratified schedule. The proposed phase reorder and
-first vertical slice are open decisions. Repairing prerequisite edges does not select either.
+Feature numbers identify documents, not a complete delivery schedule. The approved next
+increment is 001/T001–T009 plus CI bootstrap T023, followed by preparation of a bounded
+IAM/state feasibility slice. That sequence does not authorize live actions or every task
+in the later drafts. The recorded downstream choices still need their own alignment,
+implementation and qualification.
 Local models do not prove cloud isolation or forge enforcement. Platform probes qualify only
 named fixtures. A future adoption slice needs its own spec and the decisions for its areas;
 no runtime, network or regulated support is implied.
 
 ## Activation gates
-Before creating 001 implementation paths: D4 ratified or explicit path-subset acceptance.
-Before using this workflow as an active contract: operator disposition of committed versus
-local-only scaffolding and constitution ratification. These draft files preserve the proposal;
-their presence is not a decision. Live work additionally needs approved scope, budget, cleanup
+The operator accepted ADR-0002, ratified constitution 1.2.0 and selected committed reusable
+workflow scaffolding on 2026-10-01. Create directories with their first real artifact.
+Only 001/T001–T009 plus conditional T023 have implementation authorization here; observed premises, task evidence
+and independent reviews remain required. No whole-feature acceptance is implied. Live work
+additionally needs approved scope, budget, cleanup
 health, recovery setup and numerical RunConfig. A newly created project alone supplies no
-account-scoped IAM/federation authority. Naming and 004 scope have their own pending decisions.
+account-scoped IAM/federation authority. Later naming consumers and real profile exports
+retain their own implementation and qualification prerequisites.
 
 ## Workflow
 The vendored workflow provides generic command documents under `.specify/commands/`.

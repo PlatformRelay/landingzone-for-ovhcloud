@@ -6,6 +6,17 @@ Give contributors a free, deterministic feedback loop before any cloud resource 
 Deliver the first pure naming module and the verification harness it exercises.
 Exclude provisioning, auto-merge execution, runtime families, cloud scans and release claims.
 
+## Authorized increment
+The operator authorized T001–T009 on 2026-10-01 with tests first, predefined evidence and
+independent reviews, then granted merge permission subject to actual gates/CI/review and
+mergeability. Conditional T023 adds only minimal GitHub CI after the foundation passes.
+ADR-0002 is Accepted,
+constitution 1.2.0 is ratified and reusable `.specify/` scaffolding stays committed.
+Create each implementation directory with its first real artifact. T010–T022 remain
+planned outside this increment; no whole-feature V/FR/SC pass or supported tuple is
+claimed from the foundation subset. Prepare the next bounded IAM/state feasibility
+slice only after this minimum safety, with separate live authority and prerequisites.
+
 ## User Scenarios & Testing
 ### User Story 1 — Trust local feedback (Priority: P1)
 A contributor checks a change with no cloud authority. Given a valid module, the check
@@ -74,6 +85,13 @@ status, including review obligations. Independent test: V008 and V003.
   - **C009.2**: Bind DoD to actual evidence.
   - **C009.3**: Generate the ADR decision map.
   - **C009.4**: Publish progressive guides only for implemented artifact kinds.
+- **FR-010**: MUST provide the bounded foundation's GitHub CI bootstrap.
+  - **C010.1**: Run only implemented foundation checks after T001–T009 have evidenced completion.
+  - **C010.2**: Use exact Action pins, bounded execution and read-only repository fetch authority; no cloud/deployment credentials, secret-bearing environment, privileged runner or writable shared cache.
+  - **C010.3**: Bind independently reviewed workflow/launcher source and image digests to the candidate head; execute candidate commands only inside the verified T003 boundary, with fetch tokens outside it.
+  - **C010.4**: Reject missing checks, zero discovery, failures, cancelled/skipped runs, stale source/head or missing evidence instead of accepting a check name alone.
+  - **C010.5**: Limit bootstrap triggers to owned-branch pushes for reviewed foundation revisions; automatic execution of unreviewed/fork PR code is outside this bootstrap.
+  - **C010.6**: Retain T010–T012's protected publisher, fork and both-forge qualification as separate uncompleted duties.
 
 Each numbered clause inherits its parent requirement’s V-check and creating tasks.
 For every guarded clause, implementation records a distinct expected outcome and
@@ -93,12 +111,14 @@ check has run. Evidence below is initially `not-run`; paths are under `.local/ev
 | V006 | FR-007 | valid module and data pass real L0 checks; unformatted/malformed HCL, pinned linter violation and malformed/empty schema discovery fail; leaf/consumer closure exact, reverse edge/cycle/unresolved path rejects, unknown diff selects full suite | `task test:dependencies; task test:static; task lint -- modules/naming; task schema:check` | `001/dependencies.json` |
 | V007 | FR-008 | valid offline job and broken behaviour have matching green/red reports on both real forges; parent-run fork has no privilege, including malicious Taskfile/workflow/include controls; fork-owned runner is not certified | `task verify:forge-offline` | `001/forge-offline.json` |
 | V008 | FR-009 | seeded defect yields stable id, location, observed/expected and fix; missing evidence is not-run and expert duty is review-required; decision map is fresh | `task test:agentex; task decision-map:check` | `001/agentex.json` |
+| V009 | FR-010, SC-005 | reviewed source and exact head run the implemented foundation checks green on GitHub; broken behavior is red; unpinned Action, widened permissions/trigger, credential/socket/cache exposure, host candidate execution, skipped check, zero discovery or stale head/source is rejected; absent CI stays blocked | `task test:foundation-ci; task ci:foundation`, then inspect actual PR checks/run metadata and matching task packet; creator T023 | `001/foundation-ci.json` |
 
 ## Success Criteria
 - **SC-001**: All required offline checks run in <=120 seconds for the naming change on an exclusive self-hosted runner with fixed CPU/memory and digest-pinned OS/image after tool preparation; unknown allocation or overlapping jobs blocks the measurement; a timeout fails (V001).
 - **SC-002**: Every report fault case and each guarded clause has a behavioural red control and valid unusual input (V002).
 - **SC-003**: All non-docs requirements and tasks have predefined checks; no missing evidence is displayed as pass (V003).
 - **SC-004**: Two differing organisation templates preserve names across label/profile changes and algorithm upgrades (V004).
+- **SC-005**: The foundation PR has an actual successful GitHub run for its independently reviewed exact head/source and a recorded failing behavioral control; local/synthetic reports, skipped or stale runs cannot satisfy this criterion (V009).
 
 ## Edge cases
 Empty repo/diff; changed shared tool; conflicting catalogue limits; duplicate YAML keys;
@@ -114,9 +134,12 @@ Go probe/test helpers live in `tools/internal/probes/`; root `tests/` holds thei
 `pipelines/{github,gitlab}/`, `AGENTS.md`, `harness/guides/`, `docs/reference/decision-map.md`.
 
 ## Dependencies and stop conditions
-Implementation starts only after external D4 ratification or explicit acceptance of the
-001 implementation-path subset. Tool preparation follows that gate. Minimum local safety
-for dependent probes is T001–T009; naming, forge and latency do not gate that subset. An unevidenced naming kind is experimental and blocks
+The structure, ratification and workflow-location decisions are confirmed; implementation
+authorization is limited to T001–T009 plus conditional T023. Tool preparation and actual P1/P2 observations
+remain due in those bounded proof tasks; failure blocks dependent work. Minimum local safety
+for dependent probes is T001–T009; naming, forge and latency do not gate that subset.
+The protected CI wrapper is later T011, not proof supplied by a local launcher.
+An unevidenced naming kind is experimental and blocks
 cloud use of that kind; fixtures may use explicitly synthetic constraints. New sensors
 require independent protected review. All targets above are planned; tasks.md names the
 creator. Evidence starts not-run and goes under private `.local/evidence/`; sanitised

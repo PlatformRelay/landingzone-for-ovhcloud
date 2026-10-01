@@ -5,6 +5,16 @@ Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft
 Build a narrow Go-based check/report harness around the first provider-free naming module.
 Use Task as the local/CI interface. Do not add an agent framework or provision cloud resources.
 
+The authorized increment is T001–T009: toolchain, local isolation, reports, trace/DoD
+and dependency/static checks, plus conditional GitHub CI bootstrap T023 after those pass.
+The full feature remains draft. TDD, independent review, actual gates/PR-head CI and
+mergeability are required; the operator granted merge permission. Structure, constitution
+ratification and committed workflow decisions are confirmed. Add directories with their
+first real artifact; do not create an empty architecture tree. Naming, forge adapters,
+latency and full feature exit remain planned outside this increment. Minimum safety
+precedes preparation of the next bounded IAM/state feasibility slice, whose live
+authority and operating prerequisites remain separate.
+
 ## Technical Context
 - Language: OpenTofu HCL, Go (one tools/go.mod), JSON Schema, YAML, thin Task/Bash glue.
 - First implementation pins: OpenTofu 1.13.0, Terramate 0.17.3, ovh/ovh 2.21.0 when
@@ -13,7 +23,7 @@ Use Task as the local/CI interface. Do not add an agent framework or provision c
 - Target: Linux amd64 CI with a digest-pinned OCI image; no cloud credentials or mounts.
   Separate credential-free preparation downloads providers into a checksum-verified cache.
   Local `task check` uses the prepared image with network=none; absence of runtime/cache fails.
-  CI uses a protected verification workflow at an explicitly approved base revision, triggered
+  Full forge qualification later uses a protected verification workflow at an explicitly approved base revision, triggered
   by maintainer dispatch with a candidate SHA. Its trusted launcher obtains a candidate archive
   as data, validates rooted paths, then invokes candidate commands only inside network=none,
   with no runtime socket, host credentials, privileged mounts or protected cache writes.
@@ -23,6 +33,13 @@ Use Task as the local/CI interface. Do not add an agent framework or provision c
   digests and expected publisher; required-check origin enforcement must be qualified.
   Ordinary candidate CI is advisory until that trusted result exists; no pull_request_target
   checkout of fork code. This certifies parent-run fork checks, not fork-owned infrastructure.
+  The narrower T023 bootstrap supplies actual CI for the reviewed owned foundation branch:
+  owned-branch push triggers, ephemeral GitHub-hosted execution, contents-read fetch only,
+  full-SHA Actions and an independently reviewed launcher revision/image digest. Tokens
+  stay outside candidate execution in the T003 boundary. Check acceptance binds the actual
+  PR head and reviewed workflow/launcher digest, not merely a green name. No unreviewed/fork
+  PR trigger, deployment identity or protected-environment secret is used. It does not
+  qualify the broader protected-publisher/fork contract; T010–T012 remain planned.
 - Storage: tracked schemas, independent vectors and sanitised tool fixtures; raw results in
   gitignored `.local/evidence/`. No hosted service, cloud state or telemetry.
 - Tests: Go unit/contract tests, pure `tofu test` plan tests, Conftest and assent fixtures,
@@ -91,6 +108,12 @@ for L1/L2 and saved-plan output snapshots for L3, not fake provider output.
 
 ## Dependencies and live change ordering
 Tool preparation → isolation → report/registry → module + projections → forge checks.
+The current T001–T009 run stops at the report/registry and dependency/static foundation.
+T023 may then bootstrap only those implemented checks; missing foundation evidence
+blocks it. A valid actual GitHub PR-head run and a failing behavior control are required.
+Its real-tool controls use fixture modules; absent modules/naming checks stay not-run.
+Schema validation joins at T016. Partial V001/V006 observations cannot close their
+later latency/schema/forge duties or claim a full requirement pass.
 Guide authoring can parallel the module after the interface is fixed. No live objects change.
 OpenTofu/tool version and runtime gates stop implementation testing, not spec editing.
 Full ADR-0019 scaffolding follows two real examples per kind in the first vertical slice;

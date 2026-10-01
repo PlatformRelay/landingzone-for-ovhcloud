@@ -11,10 +11,21 @@ All Go test code lives under the single tools Go module, including tools/interna
 Root tests/ holds HCL fixtures, captured outputs and qualification data consumed by that
 module; no second Go module or package outside tools/ is assumed.
 
+## Authorized run boundary
+
+Only T001–T009 plus conditional T023 are authorized for this run, with TDD, predefined
+evidence and independent reviews. The operator granted merge permission subject to actual
+gates, PR-head CI, review and mergeability; missing CI is not a green gate.
+On 2026-10-01 the operator accepted ADR-0002, ratified constitution
+1.2.0 and chose committed reusable workflow scaffolding. Those earlier external gates
+are resolved. Add directories with their first real artifact. Exact tool/image pins,
+prepared local runtime/cache and P1/P2 qualification remain implementation premises,
+not passed observations. T010–T022 are not activated by completing this subset.
+
 ## Setup and foundation
 
 - [ ] T001 Select exact signed/checksummed tool and image pins in mise.toml and bootstrap tools/go.mod
-  - Requirements: FR-001; ADRs: 0002, 0011. Depends on: external D4 ratification or explicit 001 path-subset acceptance.
+  - Requirements: FR-001; ADRs: 0002, 0011. Depends on: operator structure, ratification and scaffold dispositions confirmed 2026-10-01; independent planning review before implementation.
   - Verify: Procedure: install recorded pins, run `go -C tools list -m`, `mise exec -- tofu version`, `mise exec -- terramate version`; compare exact identities to pins; missing/mismatched identity refuses fixture capture.
   - Evidence: `.local/evidence/001/t001-toolchain.json`; initial status `not-run`.
 
@@ -56,6 +67,7 @@ module; no second Go module or package outside tools/ is assumed.
 - [ ] T009 Implement dependency scanning, applicable L0 runners and full-suite fallback in tools/internal/checks/{dependencies,static}.go, .tflint.hcl and Taskfile.yml
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T008.
   - Verify: `task test:dependencies; task test:static`: V006 valid/dependency/static fixture controls pass; deleting consumer selection or accepting reversed layer edge fails its control. Creates test:dependencies, test:static and lint targets plus changed-path selection for task check. `task lint -- modules/naming` runs real pinned `tofu fmt -check -recursive modules/naming`, prepared-cache `tofu -chdir=modules/naming init -backend=false`, `tofu -chdir=modules/naming validate -json`, and `tflint --chdir=modules/naming --format=json`; actual counted observations only. Schema result joins after T016; resource scanning is not-applicable, docs-only tests exempt.
+  - Subset outcome: verify the real-tool runner on T008's fixture modules. Before T014 creates modules/naming, its lint/DoD result is not-run with nonzero required-check status; never fabricate a module pass or close V006's later schema duties.
   - Evidence: `.local/evidence/001/t009-dependencies.json`; initial status `not-run`.
 
 ## US1
@@ -169,6 +181,15 @@ Independent test: V003, V008.
 | `task decision-map:check` | T018 |
 | `task verify:latency` | T021 |
 | `task check` | T009 (selection); T021 (complete naming aggregate) |
+| `task test:foundation-ci` | T023 |
+| `task ci:foundation` | T023 |
+
+## Conditional CI bootstrap
+
+- [ ] T023 Test first, then implement minimal GitHub foundation CI in .github/workflows/foundation.yml, tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
+  - Requirements: FR-010, SC-005; ADRs: 0007, 0008, 0011, 0021. Depends on: T009; evidenced T001–T009 completion and independent approval of exact workflow/launcher source before push; actual GitHub execution available.
+  - Verify: Planned `task test:foundation-ci; task ci:foundation`. First write valid reviewed owned-branch fixtures plus defect controls and retain behavioral red before implementation. Reject unpinned Actions, write/token/secret or privileged-cache authority, unreviewed/fork triggers, candidate execution on the connected host, skipped/omitted checks, zero discovery and stale source/head. Then implement only the T003/T005/T007/T009 foundation aggregate inside T003 isolation, using exact Action/image/source pins, owned-branch push triggers, an ephemeral GitHub-hosted runner, contents-read fetch authority outside the child and a 10-minute job timeout. Record tests green, a real failing behavioral CI control and a valid actual run on the foundation PR head; inspect run/check metadata, reviewed workflow/launcher/image digests, all required check counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge; no cloud credentials, deployment or protected-environment secrets. Creates both targets and V009 packet. T010–T012 remain open; this bootstrap does not certify arbitrary fork execution or both-forge publisher enforcement.
+  - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain the pre-implementation red, green controls, actual run/check IDs and exact head/source bindings, plus the V009 packet reference.
 
 ## Dependencies & execution order
 
@@ -177,9 +198,13 @@ Test tasks precede their implementation; all external gates remain blocked until
 observed. A command may be defined with an explicit blocked result before its live
 prerequisites exist; defining it does not close its acceptance check.
 
-MVP: T001–T009 supplies offline/report/traceability without cloud resources; US2
-can start then, independent of forge setup, followed by US3. Foundation exit T022 still
-requires real forge evidence and whole-suite latency.
+Authorized minimum: T001–T009 supplies offline/report/traceability and fixture-based
+dependency/static checks without cloud resources. Review the foundation, then run T023
+only if those tasks have evidenced completion. Review the bounded branch and actual CI.
+Naming, full forge qualification, AgentEx and whole-feature exit tasks remain outside its
+authorization; T022 still requires real forge evidence and whole-suite latency.
+Prepare a bounded IAM/state feasibility slice after minimum safety, retaining its
+separate live action/account/recovery/budget authority and task prerequisites.
 
 ## Parallel opportunities
 

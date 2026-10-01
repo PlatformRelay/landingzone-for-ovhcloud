@@ -13,8 +13,14 @@ Do not run acceptance commands until their implementation and prerequisites have
 6. Keep absent tools, unavailable forge/credentials and unobserved mechanisms blocked.
 7. Complete independent review and record every non-docs check before changing to done.
 
-Full 001 exit needs actual forge evidence, the recorded naming decision and the
-exclusive-runner benchmark. The minimum T001–T009 subset is independent of those
-exits; D4 path activation and workflow/constitution decisions gate its start.
+Full 001 exit needs actual forge evidence, naming implementation and the
+exclusive-runner benchmark. The operator authorized only T001–T009 for the current
+run, followed by conditional T023 after evidenced completion. TDD, predefined evidence,
+independent review, actual required checks/PR-head CI and mergeability gate the granted
+merge permission. Structure, constitution and committed scaffold decisions are confirmed.
+Create directories with their first real artifact. Exact pins, image/cache and actual
+tool/isolation premises remain unobserved until their proof tasks run. The subset uses
+real fixture modules for static checks; absent modules/naming stays not-run. Later
+schema/forge/latency duties cannot be closed by the subset's partial V observations.
 A planning document grants no purchase, deletion or IAM authority. Docs-only tasks
 need content review rather than invented acceptance tests.
