@@ -19,6 +19,11 @@ and tag key/value limits are UNVERIFIED.
 - **Prefix classes in a flat directory** (`res-cloud-project`, `ptn-network-baseline`).
 - **Layer directories** (`modules/`, `components/`, `stages/` + `profiles/`) — chosen in ADR-0002.
 - **Naming module** as a pure-function module vs. a locals-only convention documented in prose.
+- **Call interface remains open:** one logical resource with reusable context; a batch map keyed by
+  logical request ID; a catalogue preview by kind; or a naming provider/generator. The configuration
+  vector is a suggestion to compare, not an approved interface. See the
+  [naming/labelling exploration](../explanation/naming-and-labelling-design.md) for primary examples,
+  tradeoffs and predefined checks. Final module split and field names need a joint decision.
 
 ## Decision
 **Layers**
@@ -54,19 +59,24 @@ and tag key/value limits are UNVERIFIED.
 **Naming module** (`modules/naming`) — a flexible convention, one implementation
 - Pure function, no providers or data sources: inputs are the hierarchy coordinates
   `(org, domain, tenant, environment, region, resource_kind, instance)` plus the organisation's
-  **naming template**; outputs `names` (map by kind), `name_short` and `labels` (below). No
+  **naming template**. Output cardinality is pending: a scalar result identifies one logical resource;
+  a batch result must be keyed by stable logical request ID, not kind. Two resources of one kind
+  require distinct resource-local identities in addition to their shared deployment instance.
+  Names, full canonical metadata and applicable target projections are distinct results. No
   generated URN prefix: a display name is not an IAM identifier; URN matching uses provider-returned
   ids per resource kind. Profiles are folded into labels, never names (names are immutable; profiles
   can change).
 - **The template is per organisation, in data** (`naming.yaml` in the tenant repo, platform-controlled):
   `pattern` as an ordered list of segments (`[kind, org, tenant, env, region, instance]` or
-  `[org, tenant, env, kind, instance]` — the resource short name may come first or last), the
+  `[org, tenant, env, kind, instance]` — both kind short name and human resource name/role can be
+  ordered independently), the
   separator, the case rule, the **abbreviation table** (segment values → short forms, resource kinds →
   short names such as `pn`, `gw`, `k8s`), per-kind overrides (an S3 bucket cannot carry a separator
   the pattern uses), and a deterministic truncation strategy (keep the identifying segments, drop or
   hash the rest, never silently cut) when the resolved name exceeds the kind's limit. The module
-  validates every resolved pattern against the per-kind limits at plan time; an impossible template
-  fails before any resource is created. The generated docs page (ADR-0020) shows the organisation's
+  validates fully known resolved patterns against per-kind limits at plan time. Unknown name or
+  security inputs block authoritative apply preflight; deferred HCL validation alone is not a
+  plan-time refusal guarantee. The generated docs page (ADR-0020) shows the organisation's
   resolved convention with examples.
 - **`names.yaml` (repo-wide) is the single source for limits and keys**: per resource kind the max
   length, charset, allowed separators and the OVH doc URL that states the limit; the label key
@@ -78,6 +88,11 @@ and tag key/value limits are UNVERIFIED.
   test collision, truncation, template changes and upgrades.
 - OVH per-resource name limits and tag constraints are _UNVERIFIED_ and are gathered in the spike;
   each row carries a source URL.
+- Strict input decoding precedes typed HCL object conversion; types alone do not reject unknown
+  keys. Mutable label/profile changes never alter names. Freeze name-affecting algorithm, template,
+  abbreviation and catalogue revisions together; upgrades require an explained migration diff.
+  Shortening is explicit and deterministic, with insufficient budgets and observed same-scope
+  collisions rejected. A hash does not reserve a name or guarantee global availability.
 
 **Labelling convention** (tags on OVHcloud resources, labels and annotations on Kubernetes objects,
 metadata on OpenStack resources, inventory records where an API carries none)
@@ -102,13 +117,19 @@ metadata on OpenStack resources, inventory records where an API carries none)
   from the organisation schema (merge gate); the Rego plan policy requires the mandatory and
   required keys on every resource kind the applicability table marks as labellable (apply gate);
   the scanner reports resources with missing, unknown or foreign keys and console-made resources
-  without `managed-by` (detective). Kubernetes objects created by the runtime carry the same keys as
-  labels, with long values (`managed-in`, `release`) as annotations.
+  without `managed-by` (detective). Kubernetes gets separate labels and annotations: `managed-in`
+  repository/path is an annotation even when short; any invalid label value, including some release
+  strings, remains intact in its declared annotation. Selector labels are a stable explicit subset
+  excluding mutable lifecycle metadata. Standard application labels use real application fields and
+  management-tool provenance, not inferred infrastructure kinds.
 - **Applicability table** in `names.yaml`: per resource kind whether the API carries tags, labels,
   metadata or nothing; where it carries nothing, the metadata is recorded in the inventory the
   scanner and the docs renderer maintain, and the docs say so. No invented provider fields.
-- Keys and values obey the OVH tag constraints once the spike establishes them; until then the
-  module enforces a conservative pattern (lowercase, `[a-z0-9:_./-]`, bounded length).
+- Canonical keys/values and target-specific projections have separate constraints. OVH tag limits
+  stay unverified until sourced and probed; synthetic constraints exercise the algorithm without
+  qualifying a cloud kind. Unknown applicability blocks its cloud claim; no generic pattern or
+  invented provider field substitutes for actual API support. Metadata writer/merge behavior must
+  be qualified before claiming coexistence with externally managed non-system tags.
 
 **Spec**: a written module spec with numbered requirements (functional `LZFR`, non-functional `LZNFR`,
 AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marked manual.
@@ -134,6 +155,10 @@ AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marke
   `resource.Tag()` conditions see tags set at creation and after mutation).
 - Spike: two organisations with different templates and label schemas produce valid names and labels
   for every kind in the catalogue; the plan policy rejects a resource missing `managed-by`.
+- Before choosing the interface, compare scalar and batch call sites with two same-kind resources,
+  two organisation conventions, import, invalid input, shortening and a metadata-only update.
+  Phase 001 V004–V006 and T013–T016 carry the detailed positive/rejection/stability controls in the
+  exploration document. Interface-dependent implementation remains gated on the joint decision.
 
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
