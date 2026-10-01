@@ -21,10 +21,18 @@ executed examples.
   map, CLI help.
 - **Examples are tests**: every snippet in docs is extracted from a tested `examples/` directory
   (ADR-0008 layer 5); no hand-pasted HCL.
-- **Diagrams as text** (Mermaid or D2, checked in); a C4 context + container view per blueprint.
-- **Writing rules**: first page states "unofficial" and "what OVHcloud can't do"; every page has an
-  owner-less "last verified against provider vX.Y" stamp, enforced by a check; a glossary; no marketing
-  tone; the writing-quality lint (Vale or similar) runs in CI.
+- **Diagrams as text** (Mermaid or D2, checked in); a C4 context + container view per golden path.
+- **Writing rules**: first page states "unofficial" and "what OVHcloud can't do", then "Which golden
+  path am I?" (a decision tree) and the **negative paths** page (ADR-0016); every page carries
+  front-matter `verified_against: { tofu, ovh }` compared with `mise.toml` — pages more than two
+  minor versions behind fail CI; a glossary; no marketing tone; the writing-quality lint (Vale or
+  similar) runs in CI.
+- **Anti-rot gates** (all in CI): generated reference must be current (`terraform-docs --output-check`);
+  every code block is pulled by include-marker from a tested example; external links re-resolved
+  weekly (OVH moved its docs site in 2026, so this is not theoretical); every how-to ends in a `task`
+  target that the nightly runs in dry-run or mock mode; an ADR referenced from code that is
+  `Superseded` fails lint; the **honesty page** and the enforcement matrix are generated from
+  `policies/guardrails.yaml` (ADR-0006).
 - **Site tool:** MkDocs Material or Starlight — a time-boxed comparison spike picks one; requirements:
   versioned docs, search, offline build, no server.
 - ADRs live in `docs/adr/`, linked from the explanation section.
@@ -43,4 +51,5 @@ executed examples.
 - Spike: MkDocs Material vs Starlight on a 20-page sample with versioning and search.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: decision tree and negative paths, freshness front-matter, anti-rot gates.
+  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

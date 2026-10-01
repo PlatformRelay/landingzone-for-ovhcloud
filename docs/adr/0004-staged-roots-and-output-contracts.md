@@ -15,12 +15,17 @@ let permissions be scoped per layer and failures be recovered without a full tea
 - **Per-project roots** (one root per OVH project) — high fan-out, strong blast-radius isolation.
 
 ## Decision (proposed)
-Staged roots, with per-project roots *inside* the project-factory stage via `for_each` over factory files
-(ADR-0005) and a documented upgrade path to per-project roots if state size demands it.
+Staged roots forming **one composition graph** (`stages/`, ADR-0016), driven by a profile; tenants are
+`for_each` instances over tenant files (ADR-0005) with **per-tenant state keys** (ADR-0009).
 
-Default stage set for the reference blueprint (names fixed in the blueprint manifest):
-`00-bootstrap` (manual, once) → `10-identity` → `20-network` → `30-projects` → `40-observability` →
-`90-workloads` (examples only).
+Stage set (fixed names; a profile may leave a stage empty, never reorder it):
+`00-bootstrap` (manual, once; recoverable via `import`) → `10-account` (deny-floor, groups, roles,
+federation hand-off, break-glass, audit sink) → `20-network` (island by default; hub-vrack variant)
+→ `30-tenants` (projects, quotas, budget alerts, Keystone machine identities, resource groups)
+→ `40-runtimes` (one runtime variant per tenant environment, ADR-0017) → `50-observability`
+(streams, alerting per project) → `90-workloads` (examples only).
+Separate stages for tenants and runtimes keep a broken cluster from blocking project vending, and
+let the two-pipeline rule (ADR-0009) scope credentials per stage.
 
 **Output contract**
 - Each stage writes a `stage-outputs.json` (and publishes the same data as tofu outputs) validated against
@@ -41,11 +46,12 @@ identity-bearing resources; plan-diff review gate shows destroys prominently (AW
 ## Counterpoints
 - Remote-state coupling is a known Terraform smell; the typed file contract mitigates but adds a
   generation step.
-- Six stages may be too coarse for small installations: the starter ships a `minimal` scenario with
-  three stages.
+- Seven stages are heavy for `solo`; a profile leaves stages empty (`20-network` island needs no
+  hub, `50-observability` may be `none`), so the stage count is constant but the work is not.
 
 ## Verification
 - Spike: two stages exchanging a contract file in CI on GitHub Actions and GitLab CI without remote state.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: stage names aligned with the profile model; tenants and runtimes split.
+  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

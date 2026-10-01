@@ -12,7 +12,7 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0002](0002-repository-structure.md) | Repository structure (monorepo) | Proposed |
 | [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy and module naming | Proposed |
 | [0004](0004-staged-roots-and-output-contracts.md) | Staged roots, separate state, typed output contracts | Proposed |
-| [0005](0005-yaml-project-factory.md) | YAML project factory as the primary interface | Proposed |
+| [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Proposed |
 | [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Proposed |
 | [0007](0007-pipeline-portability.md) | Pipeline portability: task contract, generated TACO config | Proposed |
 | [0008](0008-testing-strategy.md) | Testing strategy | Proposed |
@@ -23,6 +23,13 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0013](0013-documentation-strategy.md) | Documentation strategy | Proposed |
 | [0014](0014-ovh-docs-knowledge-base.md) | OVHcloud docs knowledge base | Proposed |
 | [0015](0015-licence-and-project-name.md) | Licence and project name | Proposed (needs operator) |
+| [0016](0016-golden-paths-as-profiles.md) | Golden paths as profiles over one composition graph | Proposed |
+| [0017](0017-runtime-families-and-output-contract.md) | Runtime families and the output-only contract (multiple base stacks) | Proposed |
+| [0018](0018-identity-planes-roles-and-providers.md) | Identity model: three planes, a role catalogue, pluggable providers | Proposed |
+
+Revision note: ADRs 0001–0004, 0006–0009 and 0011–0014 were revised on 2026-10-01 after an
+independent second brainstorm round (three blind designs merged with round 1); each carries the
+revision in its review log. The merge record is kept outside the repo in the maintainers' harness.
 
 ## Review protocol
 

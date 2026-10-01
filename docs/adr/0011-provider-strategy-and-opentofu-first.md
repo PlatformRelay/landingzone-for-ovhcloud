@@ -26,11 +26,24 @@ have no Terraform equivalent at that version (research, to verify against the Op
 - **Providers:** `ovh/ovh` is primary; `terraform-provider-openstack` only where a resource has no OVH
   provider equivalent, isolated in `modules/` with a documented reason in each module README.
 - **No custom provider** (Azure's `alz` provider showed the cost: bespoke behaviour, no `depends_on`).
-- **Pinning:** `.terraform.lock.hcl` committed for blueprint stages and examples, not for library modules;
+- **Pinning:** `.terraform.lock.hcl` committed for stages and examples, not for library modules;
   constraints `~>` minor; a scheduled job tests the newest provider release and opens an issue on break.
 - **Gap register:** `docs/reference/provider-gaps.md` lists things a landing zone wants that the provider
   does not offer, each with: workaround (API script, manual runbook, or none), upstream issue link, and
-  the module that is affected. This is a deliverable, kept current.
+  the module that is affected. This is a deliverable, kept current. Seeded on 2026-10-01 from the
+  provider docs listing: **SAML identity provider** (`/me/identity/provider` has no resource; singleton
+  per account) → `pending_actions` + scanner check (ADR-0018); OAuth2 client **secret rotation with
+  overlap** (two live secrets? UNVERIFIED) → client-swap rotation; **audit/login event stream**
+  (UNVERIFIED) → spike; **cost estimate** → public catalogue API script (ADR-0006). Confirmed present
+  and used: `ovh_iam_policy` (deny, conditions, `expired_at`), `ovh_cloud_quota`,
+  `ovh_cloud_project_alerting`, `ovh_cloud_project_kube_oidc`, `ovh_me_identity_user_token`,
+  `ovh_me_api_oauth2_client`, the `ovh_vrack_*` family.
+- **Minimum OpenTofu 1.13** (wildcard overrides in tests, ADR-0008); `mock_provider` `source` (1.14)
+  adopted when released to separate `ovh/ovh` from `openstack` mocks.
+- **Custom endpoint:** go-ovh accepts an arbitrary endpoint URL; the provider's `endpoint` is used by
+  the record/replay proxy (ADR-0008). Whether the provider passes a full URL through unchanged is a spike.
+- **Provider schema snapshot** (`tofu providers schema -json`) committed and diffed on every bump;
+  Renovate bumps run the canary lane (ADR-0008 L10).
 
 ## Consequences
 - Contributors need OpenTofu; Terraform users may hit unsupported features and are told which.
@@ -46,4 +59,5 @@ have no Terraform equivalent at that version (research, to verify against the Op
   against provider docs for 2.21.x; verify with `tofu validate` on a skeleton.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: gap register seeded from verified provider docs; OpenTofu 1.13 minimum;
+  endpoint note; schema snapshot. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

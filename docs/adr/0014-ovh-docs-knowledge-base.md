@@ -1,49 +1,53 @@
 # ADR-0014: OVHcloud docs knowledge base
-- Status: Proposed
+- Status: Proposed (revised 2026-10-01 after brainstorm round 2)
 - Date: 2026-10-01
 - Related: ADR-0013, ADR-0015
 
 ## Context
-The operator wants OVHcloud's docs as a knowledge base. `github.com/ovh/docs` is the primary source:
-maintained (HEAD 2026-09-01 at time of research), **CC BY-NC-SA 4.0** (attribution, non-commercial,
-share-alike), 2.2 GB working tree of which ~1.3 GB images; ~19,383 Markdown files (~192 MB) in 15
-locales, en-gb ≈ 1,563 files; layout `pages/<domain>/<product>/<guide>/guide.<locale>.md` plus
-`meta.yaml`. It already contains OVH's landing-zone guides under
-`pages/public_cloud/public_cloud_cross_functional/` (what is a landing zone, migration, securing and
-structuring projects, delegating projects, 3-AZ reference architecture). help.ovhcloud.com mirrors the
-same content; scraping it adds terms-of-service questions and no new content.
+The operator wants OVHcloud's docs as a knowledge base. Verified 2026-10-01: `github.com/ovh/docs`
+declares itself **archived** in its README ("moved to ovh/ovhcloud-docs; the website has moved from
+help.ovhcloud.com/csm to docs.ovhcloud.com; every legacy URL redirects"); its content stays under
+**CC BY-NC-SA 4.0**. The successor **`github.com/ovh/ovhcloud-docs`** (default branch `develop`,
+pushed 2026-10-01) is an MDX/Rspress site with 7 locales under `docs/<lang>/` and **no LICENSE file**
+— until a licence is stated, its content must be treated as all-rights-reserved. It carries the
+landing-zone guides (five pillars) and the API/product guides this project cites.
 
 ## Options considered
-Scrape help.ovhcloud.com; clone `ovh/docs` and commit it; clone locally, gitignored, and cite;
-vendor excerpts into our docs.
+Scrape docs.ovhcloud.com; clone a docs repo and commit it; clone locally, gitignored, and cite;
+vendor excerpts; an index only.
 
 ## Decision (proposed)
-- **Local, gitignored, pinned:** `task kb:fetch` sparse/shallow-clones `ovh/docs` into `knowledge-base/`
-  (en-gb only, `meta.yaml` included), records the commit SHA in `knowledge-base/SOURCE.md`, strips
-  navigation/iframe blocks, and builds a local search index. Not committed, not shipped, not in releases.
-- **Cite, don't copy:** project docs link to the canonical OVHcloud URL and name the guide; any quoted
-  text is short, attributed, and licence-compliant. The licence is non-commercial/share-alike, so
-  redistributing derived text inside this project's published artifacts is **not** assumed to be allowed;
-  that needs a legal decision (ADR-0015).
-- **Use:** research and review agents consult the index; design claims about OVH behaviour must cite a
-  guide path + commit SHA or the live API schema (`api.ovh.com/console`), or be marked UNVERIFIED.
-- **Refresh:** a scheduled task diffs the pinned SHA against upstream and lists changed guides relevant
-  to our pillars.
-- **Optional:** expose the index to agents via a local MCP server (not a project deliverable in v1).
-- API schema and provider docs are separate sources, fetched the same way.
+- **Committed index, local mirror.** `kb/manifest.yaml` (committed) lists every OVH page the project
+  cites: URL, title, `sha256` of the fetched content, `last_verified`, and which ADR/doc cites it.
+  `task kb:sync` shallow-clones `ovh/ovhcloud-docs` (English only) into `kb/mirror/` (gitignored),
+  records the commit SHA in `kb/mirror/SOURCE.md`, strips navigation, and builds a local search index.
+  Not committed, not shipped, not in releases.
+- **Cite, don't copy.** Project docs link the canonical docs.ovhcloud.com URL and paraphrase; quoted
+  text is short and attributed; no images. Redistributing derived text is **not** assumed permitted
+  under either repo's terms; that needs a legal decision (ADR-0015).
+- **Use.** Agents consult the mirror; every design claim about OVH behaviour cites a guide path plus
+  commit SHA, the live API schema (`eu.api.ovh.com/1.0/<section>.json`), or the provider docs
+  (`ovh/terraform-provider-ovh` `docs/`), or is marked UNVERIFIED. The provider docs and API schema
+  are fetched the same way and listed in the manifest.
+- **Refresh.** A weekly task re-resolves every manifest URL (redirect or 404 → issue), diffs the
+  pinned SHA against upstream, and lists changed guides relevant to the five pillars; `last_verified`
+  older than 180 days is a docs-freshness finding (ADR-0013).
+- **Optional:** expose the index to agents via a local MCP server (not a v1 deliverable).
 
 ## Consequences
-- Contributors need ~200 MB (en-gb Markdown only) to use the knowledge base; the task is optional for
-  normal development.
-- Evidence trail for every OVH claim.
+- Contributors need a few hundred MB locally only if they want the mirror; normal development does
+  not require it.
+- Evidence trail for every OVH claim, with freshness.
 
-## Counterpoints
-- Non-commercial licence may conflict with commercial adopters of the accelerator only if we embed text;
-  citing avoids it. If legal review later allows embedding, revisit.
-- A clone ages; the pinned SHA and refresh task make staleness visible.
+## Counterpoints (kept even if overruled)
+- The successor repo's missing licence is stricter in effect than CC BY-NC-SA; the index-only approach
+  is the safe side. If a permissive licence appears, revisit embedding.
+- A mirror ages; the SHA pin and the weekly diff make staleness visible.
 
 ## Verification
-- Confirm the licence file and any per-directory exceptions; measure an en-gb-only sparse clone.
+- Confirm the licence situation of `ovh/ovhcloud-docs` (file, README, site footer); measure an
+  English-only sparse clone; verify the legacy-URL redirects used by existing citations.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: source repo moved to `ovh/ovhcloud-docs`; committed manifest; weekly link job.
+  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

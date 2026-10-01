@@ -19,9 +19,12 @@ commits, rebase-merge, no squash.
 
 ## Decision (proposed)
 - **Start with option 1**, designed so that 2 can be added without changing tags: tags are
-  `<layer>/<name>/v<semver>` (e.g. `modules/private-network/v1.2.0`, `blueprints/core/v0.3.0`).
+  `<layer>/<name>/v<semver>` (e.g. `modules/private-network/v1.2.0`,
+  `components/runtime/kube-managed/v0.3.0`, `profiles/team-kube/v0.3.0`). The tenant and profile
+  **schemas** are versioned by `apiVersion` (`v1alpha1` → `v1beta1` → `v1`), additive-only within a
+  version, with a migration note for every bump.
   Consumers pin the tag; docs show the `ref=` form.
-- **Semver per module, component and blueprint**, plus a repo-wide *release train* tag
+- **Semver per module, component and profile**, plus a repo-wide *release train* tag
   (`release/YYYY.MM`) that records a compatible set. Pre-1.0 modules may break on minor versions and say so.
 - **Interface = contract:** `CONTRACT.yaml` lists inputs (name, type, required), outputs, and variable
   validations. `tools/` diffs it on every PR and fails on a breaking change without a major bump.
@@ -48,4 +51,5 @@ commits, rebase-merge, no squash.
   consume via `//modules/x?ref=` in OpenTofu; attempt registry publication from a monorepo tag.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: tag examples use components and profiles; schema `apiVersion` rule.
+  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

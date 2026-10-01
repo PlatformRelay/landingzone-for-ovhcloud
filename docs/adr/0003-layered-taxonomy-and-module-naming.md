@@ -11,16 +11,21 @@ Azure's `naming`, generating resource names and tags), or both. This ADR does bo
 
 ## Options considered
 - **Prefix classes in a flat directory** (`res-cloud-project`, `ptn-network-baseline`).
-- **Layer directories** (`modules/`, `components/`, `blueprints/`) — chosen in ADR-0002.
+- **Layer directories** (`modules/`, `components/`, `stages/` + `profiles/`) — chosen in ADR-0002.
 - **Naming module** as a pure-function module vs. a locals-only convention documented in prose.
 
 ## Decision (proposed)
 **Layers**
-- `modules/` — provider-thin, one OVH product concern (`cloud-project`, `iam-policy`, `private-network`,
-  `kube-cluster`, `object-storage`, `logs-stream`, `naming`). May call providers; may not call other layers.
-- `components/` — landing-zone features composed of modules (`project-baseline`, `network-hub`,
-  `identity-baseline`, `observability-baseline`, `project-factory`).
-- `blueprints/` — composed, deployable landing zones made of ordered stages (ADR-0004).
+- `modules/` — provider-thin, one OVH product concern (`cloud-project`, `cloud-quota`, `iam-policy`,
+  `private-network`, `kube-cluster`, `object-storage`, `logs-stream`, `naming`). May call providers;
+  may call only `modules/naming` among modules.
+- `components/<family>/<variant>/` — landing-zone features composed of modules. Families with
+  variants behind one output contract: `runtime/{kube-managed,vm-openstack,managed-only,hybrid-vrack}`
+  (ADR-0017), `identity/{ovh-native,ovh-saml,keystone-machine,k8s-oidc}` (ADR-0018),
+  `network/{island,hub-vrack}`, `observability/{ldp,byo,none}`. Singletons: `account-baseline`,
+  `project-factory`, `guardrails`, `state-backend`.
+- `stages/` — the one composition graph: ordered roots with their own state (ADR-0004), driven by a
+  profile (ADR-0016). "Blueprint" is no longer a layer.
 
 **Names**
 - Directory name = module name = lowercase kebab-case, product-noun-first, no provider prefix inside the
@@ -38,11 +43,19 @@ Azure's `naming`, generating resource names and tags), or both. This ADR does bo
 - No telemetry variable (unlike AVM): this project collects none, by principle.
 
 **Naming module** (`modules/naming`)
-- Pure function: inputs `(org, workload, environment, region, instance, resource_kind)`, outputs
-  `names`, `project_name`, `tags`.
-- One convention, encoded once; every other module takes names from it or from the caller, never builds
-  its own. Length and charset limits per OVH resource kind are data in the module, tested by unit tests.
-- OVH project display names have limits — _UNVERIFIED, to be confirmed in a spike_.
+- Pure function, no providers or data sources: inputs are the hierarchy coordinates
+  `(org, domain, tenant, environment, region, resource_kind, instance)`, outputs `names` (map by
+  kind), `name_short`, `tags` (including `lz:domain`, `lz:tenant`, `lz:env`, `lz:owner`), and
+  `urn_prefix` for IAM resource matching. Profiles are folded into tags, never names (names are
+  immutable; profiles can change).
+- **`names.yaml` is the single source**: per resource kind the pattern, max length, charset,
+  separator and the OVH doc URL that states the limit. From it a generator emits (a) the table-driven
+  `tofu test` runs for the module, including `expect_failures` cases for invalid input, (b) the CEL
+  regex fixtures for the assent policies (ADR-0005), (c) the tflint rule data, and (d) the docs page.
+  CI fails if any generated artefact is stale, so the self-service gate and the module can never
+  disagree about a conformant name.
+- OVH per-resource name limits are _UNVERIFIED_ and are gathered in the spike; each row carries a
+  source URL.
 
 **Spec**: a written module spec with numbered requirements (functional `LZFR`, non-functional `LZNFR`,
 AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marked manual.
@@ -60,4 +73,5 @@ AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marke
   cluster names, tag key/value constraints).
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: component families with variants; `stages/` replaces `blueprints/`;
+  `names.yaml` dual source. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

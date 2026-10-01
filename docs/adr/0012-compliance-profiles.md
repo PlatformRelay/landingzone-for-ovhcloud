@@ -14,16 +14,23 @@ SNC date in 2026; unverified). Over-claiming compliance is a legal and reputatio
 No profiles; a single hardened default; **switchable profiles** with per-control mapping.
 
 ## Decision (proposed)
-- Profiles are named sets of policy ids (ADR-0006) plus module default overrides:
-  `baseline` (default), `hardened`, later `hds-aligned` and a CIS-style set. Profile files live in
-  `policies/profiles/` and are data, tested.
+- A compliance profile is a value of the golden-path profile's `compliance` field (ADR-0016):
+  `none` (default) or `hds-aligned` in v1; a CIS-style `hardened` set later. Each is a data file in
+  `policies/compliance/` containing (a) the set of guardrail ids it turns on (ADR-0006) and (b) a
+  **region and product allowlist**. The allowlist is enforced **at schema-validation time** (a tenant
+  requesting a non-listed product or region fails before plan), by `precondition`s in the stages, and
+  by the scanner. A nightly test diffs the allowlist against the live capabilities API so the data
+  cannot rot silently.
 - Wording rule enforced by a docs linter: the words **"compliant"** and **"certified"** are banned in
   product docs; permitted: "aligned with", "supports controls X, Y". Each profile page has three
   columns per control: *implemented in code*, *detective only*, *not covered / customer responsibility*.
-- Claims are tied to product and region, using a data file the blueprint manifest references; the
+- Claims are tied to product and region, using the allowlist the profile references; the
   scanner (ADR-0006) flags resources outside the claimed product/region set.
 - No profile ships before its control mapping is reviewed by someone with the relevant expertise; v1
-  ships `baseline` and `hardened` only.
+  ships `none` and `hds-aligned` only. SecNumCloud is a documented non-goal for v1 (Hosted Private
+  Cloud / SNC platform is a different control plane whose qualification scope moves faster than an
+  open-source repo can track; one secondary source claims an SNC Cloud Platform qualification dated
+  2026-09-01, UNVERIFIED).
 
 ## Consequences
 - Differentiator without legal exposure; a visible "what we don't cover" list.
@@ -38,4 +45,5 @@ No profiles; a single hardened default; **switchable profiles** with per-control
   dates and URLs.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: compliance as a profile field with region/product allowlists validated at
+  schema time; SecNumCloud non-goal stated. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.

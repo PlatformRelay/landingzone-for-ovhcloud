@@ -27,8 +27,19 @@ biased; claims need checking against official docs.
    Digger/OpenTaco, Spacelift, Scalr, env0, Terrateam. *Unsupported*: HCP Terraform (documented why).
 4. No orchestrator is required. The directory layout stays orchestrator-friendly; a Terramate or
    Terragrunt recipe lives in `docs/how-to/`. Revisit if stage count grows.
-5. Credentials never in pipeline definitions: OIDC/federation if OVH supports it for CI, otherwise
-   short-lived service-account tokens injected by the platform's secret store (ADR-0009).
+5. Credentials never in pipeline definitions: short-lived tokens minted per run ("lease, don't
+   store", ADR-0009); OIDC/federation only if a spike finds OVH supports it.
+6. **Thin adapter, fat task**: forge files stay under ~40 lines each; a conformance test runs the
+   smoke task under `act` (GitHub) and `gitlab-ci-local` (GitLab) on a schedule (tools: spike).
+7. **Two pipelines by construction** (ADR-0009): the identity stage has its own workflow, service
+   account and review rule; tenant pipelines cannot change IAM.
+8. The **tenant repo** (ADR-0005) gets its own thin pipeline from `templates/tenant-repo/`: schema
+   validation → `assent run` (GitLab; GitHub: CODEOWNERS until the adapter) → plan → policy → apply
+   from the protected branch, with the plan hash pinned between plan and apply.
+9. TACO support is **consumer-side**: TACOs run plan/apply of a golden path with a pre-plan hook
+   calling `task policy:check`; the monorepo's own tests never run inside a TACO. Each supported
+   TACO has a row in `docs/reference/tacos.md` (OpenTofu binary? hooks? plan JSON export? OPA
+   bundle?) with a `verified_on` date; rows older than six months are flagged by the freshness gate.
 
 ## Consequences
 - Contributors can run everything locally with `task`.
@@ -44,4 +55,6 @@ biased; claims need checking against official docs.
 - Spike: Atlantis + OpenTofu + S3 backend on OVH Object Storage works end to end.
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: thin-adapter rule, two-pipeline rule, tenant-repo pipeline with assent,
+  consumer-side TACO support with a conformance checklist. Source:
+  agent-context/research/BRAINSTORM-2026-10-01-round2.md.

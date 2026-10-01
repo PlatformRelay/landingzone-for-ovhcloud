@@ -20,17 +20,29 @@ OVHcloud's own docs define five pillars: IAM, networking, security, billing, obs
 - **C. Module library only** — AVM-style, no blueprints.
 
 ## Decision (proposed)
-**B, delivered in the order of C**: modules first, then components, then blueprints (ADR-0003), each
+**B, delivered in the order of C**: modules first, then components, then stages and profiles (ADR-0003), each
 independently releasable, so the library hedge is never lost.
 
-- "Landing zone" is defined by OVHcloud's five pillars; every blueprint documents how it covers each.
-- **v1 scope:** Public Cloud (projects, IAM, vRack/private networking, Managed Kubernetes baseline,
-  Object Storage, logging, alerting). **Out of v1:** Hosted Private Cloud, Bare Metal, AI products.
-- **Non-goals:** replacing the OVHcloud Manager; claiming certification (ADR-0012); parity with other clouds.
-- **Unofficial status** appears in: README first block, docs landing page, every blueprint README, the
-  starter template, release notes. Wording: independent community project, not endorsed or supported by
-  OVHcloud, trademarks belong to their owners.
-- The docs open with a "What OVHcloud can't do (and what we do instead)" page, before any tutorial.
+- "Landing zone" is defined by OVHcloud's five pillars; every golden path documents how it covers each.
+- **Principle (round 2): opinionated at the seams, free in the middle.** The project fixes identity,
+  state, pipeline, naming, guardrails and audit; it does not dictate what runs in a project. Several
+  **golden paths** (ADR-0016) are supported from one codebase; several base stacks (ADR-0017) and
+  IAM providers (ADR-0018) are first-class.
+- **v1 scope:** Public Cloud (projects, quotas, budgets, IAM across the OVH, Keystone and Kubernetes
+  planes, vRack/private networking, Managed Kubernetes and OpenStack VM runtimes, managed services,
+  Object Storage, logging, alerting). **Reserved interface, partially automated in v1:** hybrid
+  attachment of Bare Metal / Hosted Private Cloud over vRack (`hybrid-vrack`). **Out of v1:** anything
+  inside vSphere, AI products, SecNumCloud paths.
+- **v1.x goal:** brownfield adoption — a discovery tool that emits the tenant model plus `import`
+  blocks for an existing account, and a tenant "exit kit" (export as `import` blocks) as the
+  anti-lock-in guardrail. Early spike, because greenfield OVH accounts are rare.
+- **Non-goals:** replacing the OVHcloud Manager; claiming certification (ADR-0012); parity with other
+  clouds; a CLI product or portal in v1.
+- **Unofficial status** appears in: README first block, docs landing page, every profile page, the
+  tenant-repo template, release notes. Wording: independent community project, not endorsed or
+  supported by OVHcloud, trademarks belong to their owners.
+- The docs open with a "What OVHcloud can't do (and what we do instead)" page, before any tutorial,
+  followed by "Which golden path am I?".
 
 ## Consequences
 - Honest positioning costs some marketing appeal; avoids support burden from false expectations.
@@ -48,4 +60,5 @@ independently releasable, so the library hedge is never lost.
   tag conditions across two projects).
 
 ## Review log
-_(empty)_
+- 2026-10-01 revision: golden-path principle, multi-stack and multi-IAM scope, hybrid reserved
+  interface, brownfield goal. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
