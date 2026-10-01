@@ -32,7 +32,7 @@ ovh-landing-zone-accelerator/
 │                                   #   identity/{ovh-native,ovh-saml,keystone-machine,k8s-oidc}
 │                                   #   network/{island,hub-vrack}  observability/{ldp,byo,none}
 │                                   #   singletons: account-baseline/ project-factory/ guardrails/ state-backend/
-├── stages/<root-template>/         # layer 3: reusable root templates; one instance = one state owner (ADR-0004)
+├── stages/<stage>/                 # layer 3: stage modules composing components; called only by deployment instances (ADR-0004)
 ├── profiles/<golden-path>.yaml     # golden paths = presets over the supported catalogue (ADR-0016)
 ├── catalog/                        # data: supported-combinations.yaml, resource-ownership.yaml, controls.yaml
 ├── schemas/                        # JSON Schema only: tenant, profile, deployments, outputs artefacts,
@@ -63,10 +63,14 @@ ovh-landing-zone-accelerator/
 
 Rules:
 - **Dependencies point down only**: `modules → modules/naming`; `components → modules`;
-  `stages → components, schemas`; `profiles`, `catalog`, `templates`, `policies` are data; nothing
-  imports `stages/`. A dependency checker parses HCL with a maintained parser, resolves local paths and
-  package boundaries, rejects unclassified dependencies and computes **transitive** test selection;
-  its own fixtures cover aliases, generated files, subdirectories and external sources.
+  `stages → components, schemas`; `profiles`, `catalog`, `templates`, `policies` are data. Within the
+  monorepo's library layers nothing imports `stages/`; the only callers of a stage module are the
+  **deployment instances** generated in a tenant repo (ADR-0004), which are the outermost roots and
+  hold backend and provider configuration. A dependency checker parses HCL with a maintained parser,
+  resolves local paths and package boundaries, classifies every directory into one of the layers
+  (library, stage, generated instance, example, test), rejects unclassified dependencies and computes
+  **transitive** test selection; its fixtures cover aliases, generated files, subdirectories,
+  external sources and a generated-instance fixture.
 - Generators for an artefact kind are added only after two real examples establish the shape;
   tools are added when the first vertical slice needs them, not before.
 - Unit tests, examples, `CONTRACT.yaml` and generated docs live **next to the code**; `tests/` holds only
