@@ -24,8 +24,14 @@ commits, rebase-merge, no squash.
   **schemas** are versioned by `apiVersion` (`v1alpha1` → `v1beta1` → `v1`), additive-only within a
   version, with a migration note for every bump.
   Consumers pin the tag; docs show the `ref=` form.
-- **Semver per module, component and profile**, plus a repo-wide *release train* tag
-  (`release/YYYY.MM`) that records a compatible set. Pre-1.0 modules may break on minor versions and say so.
+- **The release train is authoritative** (ADR-0022): each immutable train has a unique, patchable
+  version (`2026.10.0`, `2026.10.1`) and a manifest recording the full source commit, the component
+  dependency closure, schemas, policies, toolchain, lockfiles and tested combinations. With relative
+  module sources the entire closure comes from that commit; **module and component tags are metadata
+  for library consumers and never imply independently resolved dependencies**. Pre-1.0: minor
+  versions may break with a migration note; the contract checker demands a major bump after 1.0.
+  Compatibility review also covers permissions, defaults, state addresses and migration behaviour,
+  which `CONTRACT.yaml` alone cannot infer.
 - **Interface = contract:** `CONTRACT.yaml` lists inputs (name, type, required), outputs, and variable
   validations. `tools/` diffs it on every PR and fails on a breaking change without a major bump.
   Breaking = removed/renamed input or output, type narrowing, new required input, changed default
@@ -35,7 +41,8 @@ commits, rebase-merge, no squash.
   changelogs. Release notes written for humans via the workspace changelog skill, not auto-dumped.
 - **Mirror/registry (option 2/3):** decided after the spike, if demand exists. Until then docs state
   "consumed from git".
-- Provider constraints use compatible ranges (`~> 2.21`), tested at the lower and upper edge in CI.
+- Provider constraints use compatible ranges (`~> 2.21` admits later 2.x); CI tests the lowest
+  admitted and the newest released version; there is no testable future upper edge.
 
 ## Consequences
 - Tag names are long but unambiguous and parseable.
@@ -53,3 +60,5 @@ commits, rebase-merge, no squash.
 ## Review log
 - 2026-10-01 revision: tag examples use components and profiles; schema `apiVersion` rule.
   Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review: accepted — release train with dependency closure is
+  authoritative, unique patchable train ids, tags as metadata, pre-1.0 semantics, no "upper edge".

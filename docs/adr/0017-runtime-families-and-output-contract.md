@@ -22,25 +22,35 @@ Option B.
 
 - `components/runtime/<kind>/` with kinds `kube-managed`, `vm-openstack`, `managed-only`,
   `hybrid-vrack` (v1: the first three tested; `hybrid-vrack` documented, partially automated).
-- **Output contract** `schemas/runtime-outputs.schema.json`, identical for every kind:
-  `network { private_network_id, subnet_ids, gateway_id }`, `endpoints { kind, uri, credentials_ref }`,
-  `workload_identity { plane, principal }`, `log_sink`, `pending_actions[]` (manual steps the kind
-  cannot automate, e.g. vSphere-side work for `hybrid-vrack`).
+- **Output contract = a small versioned envelope plus typed capability outputs**
+  (`schemas/runtime-envelope.schema.json`, `schemas/capabilities/*.schema.json`). The envelope
+  identifies runtime kind, deployment scope (instance, project, region), readiness and
+  `pending_actions[]`. Capabilities (`network`, `ingress`, `kubernetes-api`, `workload-identity`,
+  `log-stream`, …) are published only when they exist; **no placeholder values** — a managed-only
+  runtime publishes no `network` capability rather than an empty gateway id. Every resource reference
+  carries its API authority, project, region and identifier. **Consumers declare the capabilities they
+  require**; an absent capability fails validation early with a precise diagnostic, never late at
+  apply. Exact fields are designed against real consumers in the first vertical slice.
+- A tenant environment may compose **several capabilities** (a VM runtime plus a managed database);
+  "one runtime per environment" is a preset, not a rule.
 - **Inputs are kind-specific**, validated by `oneOf` in the tenant schema (ADR-0005) under
   `runtime.<kind>:`; a runtime may expose rich native inputs (node pools, flavours, images).
 - A runtime **consumes** identities from ADR-0018 and never creates IAM policies; it binds principals
   in its own plane (K8s RBAC from OIDC groups, Keystone application credentials for VM deployers).
-- Stages select the runtime at one point (ADR-0016 rule 2); `stages/40-runtimes` instantiates one
-  runtime per tenant environment with `for_each`.
-- **Contract tests**: a shared `*-contract.tftest.hcl` is run against every kind with `override_*`
-  blocks replacing providers; every output field is asserted with `can()`/`regex`. An orphan runtime
-  (not referenced by any profile in the capability matrix) fails CI.
+- The `runtime` root template is instantiated once per deployment instance (ADR-0004), selecting the
+  variant from the profile at one point (ADR-0016 rule 2).
+- **Contract tests**: the **actual** runtime implementation runs under `mock_provider` and its real
+  outputs are asserted against the envelope and capability schemas; `override_*` is used only for
+  dependencies outside the implementation under test. Consumer tests prove each intended consumer
+  works against the capabilities it needs and that an unsupported consumer fails early. An orphan
+  runtime (not in any supported tuple) fails CI.
 - **Network family specifics:** an **IPAM ledger** (`ipam.yaml` in the tenant repo: CIDRs, VLAN ids,
   routing ownership, reservations) is validated before any network change; ranges are never derived
   from a tenant's position in a list; IPv6 is covered or explicitly disabled. OpenStack's default
-  allow-all egress is unmanaged by `ovh_cloud_security_group`, so "controlled egress" uses explicit
-  rule sets (or the `openstack` resource with `delete_default_rules`) and is proven by a traffic
-  probe (ADR-0008 L7), never by a plan read.
+  allow-all egress is unmanaged by `ovh_cloud_security_group`, and explicit allow rules **do not
+  remove it**; "controlled egress" therefore requires the default rule to be removed or separately
+  neutralised (the `openstack` security-group resource with `delete_default_rules`, one writer per
+  group) and is proven by IPv4 and IPv6 traffic probes (ADR-0008 L7), never by a plan read.
 - Observability sinks and networks are families with the same rule (`components/network/{island,hub-vrack}`,
   `components/observability/{ldp,byo,none}`); this ADR's contract pattern applies to all families.
 
@@ -55,10 +65,15 @@ Option B.
   from forking (ADR-0016).
 
 ## Verification
-- Spike: write the schema, implement `managed-only` and `kube-managed`; pass if `team-vm` compiles
-  against both unchanged and the contract test passes for all three.
+- Spike (ranked 11 by the review): implement `managed-only` and `kube-managed` for real under mocks;
+  pass if each intended consumer works against the capabilities it needs, an unsupported consumer
+  fails early with a precise diagnostic, no placeholder gateway or principal exists, and a VM plus
+  managed-database composition is expressible.
 - Spike: `ovh_cloud_project_kube_oidc` against a Keycloak realm (ADR-0018).
 
 ## Review log
 - 2026-10-01: IPAM ledger, IPv6 rule and the default-egress finding adopted from the external blind
   design review.
+- 2026-10-01 round-2 adversarial review: **rejected** the universal output schema; accepted —
+  envelope plus typed capability outputs, consumer-declared requirements, no placeholders, several
+  capabilities per environment, actual implementation under mocks, default egress must be removed.

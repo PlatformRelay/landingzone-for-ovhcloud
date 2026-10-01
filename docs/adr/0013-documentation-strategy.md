@@ -19,8 +19,9 @@ executed examples.
   (why no org hierarchy, guardrail classes, state strategy, prior-art comparison).
 - **Generated where possible, with CI drift gates**: module READMEs, policy pages, schema docs, repository
   map, CLI help.
-- **Examples are tests**: every snippet in docs is extracted from a tested `examples/` directory
-  (ADR-0008 layer 5); no hand-pasted HCL.
+- **Examples are tests**: runnable examples are included from tested `examples/` directories;
+  illustrative snippets and expected-output fragments are labelled as such and checked according to
+  their kind; no unlabelled hand-pasted HCL.
 - **Diagrams as text** (Mermaid or D2, checked in); a C4 context + container view per golden path.
 - **Writing rules**: first page states "unofficial" and "what OVHcloud can't do", then "Which golden
   path am I?" (a decision tree) and the **negative paths** page (ADR-0016); every page carries
@@ -44,8 +45,11 @@ executed examples.
 
 ## Counterpoints
 - Strict generated docs can read mechanically; the tutorial and explanation sections carry the prose.
-- A "last verified" stamp creates upkeep; made cheap by a scheduled check that bumps it when examples
-  still pass.
+- A freshness stamp creates upkeep. Two stamps, never one: `example_tested_at` is updated by
+  automation when the example's tests pass; `claim_verified_at` (IAM, regions, compliance, security
+  prose) is updated only by a human review with the evidence and scope recorded, and has an owner and
+  a deadline. Automation updates test evidence; it never certifies prose. External link outages create
+  bounded, deduplicated findings and do not block unrelated fixes.
 
 ## Verification
 - Spike: MkDocs Material vs Starlight on a 20-page sample with versioning and search.
@@ -53,3 +57,5 @@ executed examples.
 ## Review log
 - 2026-10-01 revision: decision tree and negative paths, freshness front-matter, anti-rot gates.
   Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review: accepted — `example_tested_at` vs `claim_verified_at`,
+  labelled snippet kinds, bounded link findings.

@@ -33,9 +33,10 @@ independently releasable, so the library hedge is never lost.
   Object Storage, logging, alerting). **Reserved interface, partially automated in v1:** hybrid
   attachment of Bare Metal / Hosted Private Cloud over vRack (`hybrid-vrack`). **Out of v1:** anything
   inside vSphere, AI products, SecNumCloud paths.
-- **v1.x goal:** brownfield adoption — a discovery tool that emits the tenant model plus `import`
-  blocks for an existing account, and a tenant "exit kit" (export as `import` blocks) as the
-  anti-lock-in guardrail. Early spike, because greenfield OVH accounts are rare.
+- **Adoption is v1:** adopting one existing project with an explained no-replacement plan is the
+  default first experience and a v1 acceptance gate (ADR-0005). **v1.x:** account-wide discovery that
+  emits the tenant model plus `import` blocks, and a tenant "exit kit" (ADR-0022). The prevalence of
+  brownfield accounts is an assumption, not a measured fact.
 - **Non-goals:** replacing the OVHcloud Manager; claiming certification (ADR-0012); parity with other
   clouds; a CLI product or portal in v1.
 - **Unofficial status** appears in: README first block, docs landing page, every profile page, the
@@ -46,7 +47,9 @@ independently releasable, so the library hedge is never lost.
 
 ## Consequences
 - Honest positioning costs some marketing appeal; avoids support burden from false expectations.
-- Guardrails are weaker than on hyperscalers (preventive only in the pipeline) — see ADR-0006.
+- Guardrail coverage varies by operation and authority: IAM prevents documented actions, topology
+  constrains connectivity, pipeline policy gates managed changes, and scans detect the rest. The
+  release catalogue (ADR-0022) lists the combinations for which these claims have evidence.
 - If OVHcloud ships org-level policy, ADR-0006 and ADR-0012 get superseded, not the project.
 
 ## Counterpoints
@@ -62,3 +65,5 @@ independently releasable, so the library hedge is never lost.
 ## Review log
 - 2026-10-01 revision: golden-path principle, multi-stack and multi-IAM scope, hybrid reserved
   interface, brownfield goal. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review: accepted — guardrail-coverage wording, release catalogue
+  of qualified combinations, adoption as a v1 gate; "greenfield accounts are rare" marked as assumption.

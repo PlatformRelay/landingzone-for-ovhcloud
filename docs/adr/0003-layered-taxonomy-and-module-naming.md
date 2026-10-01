@@ -35,19 +35,23 @@ Azure's `naming`, generating resource names and tags), or both. This ADR does bo
   never `main`, never repeat the type.
 
 **Interfaces** (every module, enforced by a linter script)
-- Required: `name` (or `name_prefix`), `tags` (map).
-- Standard optional inputs where meaningful: `enabled` (OpenTofu 1.11 `enabled` meta-argument, behind a
-  variable for Terraform compatibility), `iam_policies`, `lock`-style protection (`prevent_destroy` wired
-  to a variable where the OpenTofu version allows).
+- Require explicit, typed identifiers and ownership metadata appropriate to the resource; expose
+  `name` and `tags` only where the API carries them (an identity user has a login and one group, not a
+  name and tags) and document where metadata is recorded when it cannot. Primitive modules accept
+  existing names (import override); governing components apply the naming convention.
+- Standard optional inputs where meaningful: `enabled` (OpenTofu 1.11 meta-argument; a module using it
+  is OpenTofu-only and labelled so — a variable does not make the syntax Terraform-compatible),
+  `iam_policies`, deletion protection (`prevent_destroy` plus the decommission gate of ADR-0005).
 - Outputs: stable, documented, never whole resource objects.
 - No telemetry variable (unlike AVM): this project collects none, by principle.
 
 **Naming module** (`modules/naming`)
 - Pure function, no providers or data sources: inputs are the hierarchy coordinates
   `(org, domain, tenant, environment, region, resource_kind, instance)`, outputs `names` (map by
-  kind), `name_short`, `tags` (including `lz:domain`, `lz:tenant`, `lz:env`, `lz:owner`), and
-  `urn_prefix` for IAM resource matching. Profiles are folded into tags, never names (names are
-  immutable; profiles can change).
+  kind), `name_short` and `tags` (including `lz:domain`, `lz:tenant`, `lz:env`, `lz:owner`). No
+  generated URN prefix: a display name is not an IAM identifier; URN matching uses provider-returned
+  ids per resource kind. Profiles are folded into tags, never names (names are immutable; profiles
+  can change).
 - **`names.yaml` is the single source**: per resource kind the pattern, max length, charset,
   separator and the OVH doc URL that states the limit. From it a generator emits (a) the table-driven
   `tofu test` runs for the module, including `expect_failures` cases for invalid input, (b) the CEL
@@ -61,7 +65,10 @@ Azure's `naming`, generating resource names and tags), or both. This ADR does bo
 AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marked manual.
 
 ## Consequences
-- Naming is testable and centralised; rename = one-module change plus a release.
+- Naming is testable and centralised. **Naming-algorithm changes are migrations**: existing names
+  stay stable by default, overrides support import, and independently authored golden vectors (not
+  generated from `names.yaml`) test collision, truncation and upgrade behaviour, because a wrong limit in
+  the data would pass every generated test.
 - The layer rule gives a linter-enforceable dependency direction.
 
 ## Counterpoints
@@ -75,3 +82,5 @@ AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marke
 ## Review log
 - 2026-10-01 revision: component families with variants; `stages/` replaces `blueprints/`;
   `names.yaml` dual source. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review: accepted — no universal `name`/`tags` interface, `enabled`
+  is OpenTofu-only, no generated URN prefix, naming changes are migrations with independent golden vectors.

@@ -6,14 +6,15 @@
 ## Context
 The `ovh/ovh` provider (v2.21.0 on 2026-09-24, MPL-2.0, 177 resource doc pages = 99 SDK + 78
 framework registrations; an earlier "~233" counted source files) covers IAM
-(`ovh_iam_policy`, `ovh_iam_resource_group`, `ovh_iam_permission_group`, `ovh_iam_resource_tags`),
+(`ovh_iam_policy`, `ovh_iam_resource_group`, `ovh_iam_permissions_group`, `ovh_iam_resource_tags`),
 identities (`ovh_me_identity_user/group`, `ovh_me_api_oauth2_client`), projects (`ovh_cloud_project`),
 vRack and private networks, gateways, load balancers, Managed Kubernetes, Object Storage and S3 policies,
-databases, alerting, Logs Data Platform and OKMS. Gaps we could not confirm: budget/cost resources,
-SSO/SAML federation resources, quota requests, organisation-level objects. Public Cloud compute and
-network are also reachable through the OpenStack API/provider with a per-project OpenStack user.
-OpenTofu 1.11 added ephemeral resources, write-only attributes and the `enabled` meta-argument; these
-have no Terraform equivalent at that version (research, to verify against the OpenTofu docs).
+databases, alerting, Logs Data Platform, OKMS, quotas (`ovh_cloud_quota`) and budget alerts
+(`ovh_cloud_project_alerting`). Confirmed gaps: SAML identity provider, organisation-level objects.
+Public Cloud compute and network are also reachable through the OpenStack API/provider, with a
+per-project OpenStack user or the IAM service-account bridge (ADR-0018). OpenTofu 1.11 added
+ephemeral resources, write-only attributes and the `enabled` meta-argument; Terraform has ephemeral
+resources since 1.10 and write-only arguments since 1.11, but not `enabled` or state encryption.
 
 ## Options considered
 - Terraform-compatible lowest common denominator.
@@ -21,11 +22,14 @@ have no Terraform equivalent at that version (research, to verify against the Op
 - Both fully supported, tested in CI.
 
 ## Decision (proposed)
-- **OpenTofu is the reference runtime**; minimum version set to the lowest release providing the features
-  ADR-0009 needs (ephemeral resources, state encryption). Terraform compatibility is a CI *informational*
-  job, not a gate, and docs say which modules are Terraform-safe.
-- **Providers:** `ovh/ovh` is primary; `terraform-provider-openstack` only where a resource has no OVH
-  provider equivalent, isolated in `modules/` with a documented reason in each module README.
+- **OpenTofu is the supported engine** (minimum 1.13). Terraform compatibility is a separately
+  labelled, **version-specific qualification for selected modules**, generated from a passing
+  qualification job; a failing qualification removes the label before release. There is no
+  "informational" job that can stay red behind a badge (ADR-0022).
+- **Providers:** prefer `ovh/ovh` where its resource lifecycle and controls satisfy the contract; use
+  `terraform-provider-openstack/openstack` where the required **semantics** are absent or inadequate
+  (strict security groups with `delete_default_rules` is the first case), with one writer per cloud
+  object and a documented ownership boundary (`catalog/resource-ownership.yaml`).
 - **No custom provider** (Azure's `alz` provider showed the cost: bespoke behaviour, no `depends_on`).
 - **Pinning:** `.terraform.lock.hcl` committed for stages and examples, not for library modules;
   constraints `~>` minor; a scheduled job tests the newest provider release and opens an issue on break.
@@ -62,3 +66,6 @@ have no Terraform equivalent at that version (research, to verify against the Op
 ## Review log
 - 2026-10-01 revision: gap register seeded from verified provider docs; OpenTofu 1.13 minimum;
   endpoint note; schema snapshot. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review: accepted — resource name `ovh_iam_permissions_group`,
+  Terraform ephemeral/write-only correction, provider choice by lifecycle semantics, labelled
+  Terraform qualification instead of an informational job, gap paragraph reconciled.

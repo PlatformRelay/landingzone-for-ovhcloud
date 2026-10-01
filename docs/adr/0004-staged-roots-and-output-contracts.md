@@ -1,57 +1,80 @@
-# ADR-0004: Staged roots, separate state, typed output contracts
-- Status: Proposed
+# ADR-0004: Root templates, deployment instances and state ownership
+- Status: Proposed (rewritten 2026-10-01 after the round-2 adversarial review)
 - Date: 2026-10-01
-- Related: ADR-0003, ADR-0005, ADR-0009
+- Related: ADR-0003, ADR-0005, ADR-0009, ADR-0016, ADR-0021
 
 ## Context
-Azure's `caf-enterprise-scale` was retired for a monolithic state, hard permission scoping, many
-provider aliases and a huge variable surface. Google FAST and example-foundation use staged roots with
-output contracts; AWS LZA failures can force tearing down stacks in reverse order. Smaller state units
-let permissions be scoped per layer and failures be recovered without a full teardown.
+Google FAST and example-foundation use staged roots with output contracts; monolithic single-state
+landing zones are hard to scope and recover (Azure's `caf-enterprise-scale` was retired; the exact
+reasons are not evidenced here). The round-2 review found a hard error in the previous version of this
+ADR: a root invocation's `for_each` over tenant files shares **that root's single state**; module
+instances cannot select their own backend key, so "per-tenant state" inside one tenants stage was
+impossible, and a failed run would have locked every tenant. It also found that
+`terraform_remote_state` exposes the whole state snapshot, that `moved` blocks do not transfer
+objects between independent states, and that the fixed stage order put networking before the
+projects that project-local networks need.
 
 ## Options considered
-- **One root, many modules** — simplest, monolith risks above.
-- **Staged roots, each its own state**, data passed through a contract.
-- **Per-project roots** (one root per OVH project) — high fan-out, strong blast-radius isolation.
+- **One root, many modules** — simplest; monolithic state, one blast radius.
+- **Stages as root templates, one root invocation per deployment instance**, each with exactly one
+  state owner and backend key, exchanging versioned output artefacts.
+- **Per-leaf-module states** — mechanical splitting; too many states, no ownership meaning.
 
 ## Decision (proposed)
-Staged roots forming **one composition graph** (`stages/`, ADR-0016), driven by a profile; tenants are
-`for_each` instances over tenant files (ADR-0005) with **per-tenant state keys** (ADR-0009).
+Root templates instantiated per deployment instance.
 
-Stage set (fixed names; a profile may leave a stage empty, never reorder it):
-`00-bootstrap` (manual, once; recoverable via `import`) → `10-account` (deny-floor, groups, roles,
-federation hand-off, break-glass, audit sink) → `20-network` (island by default; hub-vrack variant)
-→ `30-tenants` (projects, quotas, budget alerts, Keystone machine identities, resource groups)
-→ `40-runtimes` (one runtime variant per tenant environment, ADR-0017) → `50-observability`
-(streams, alerting per project) → `90-workloads` (examples only).
-Separate stages for tenants and runtimes keep a broken cluster from blocking project vending, and
-let the two-pipeline rule (ADR-0009) scope credentials per stage.
+**Root templates** live in `stages/` (name kept; semantics changed): `bootstrap`,
+`account-governance`, `account-fabric` (shared vRack and audit facilities), `project` (adoption or
+vending, quotas, budget alert, machine identities, resource group), `project-network`,
+`runtime`, `observability`. They are reusable code, not deployment instances.
 
-**Output contract**
-- Each stage writes a `stage-outputs.json` (and publishes the same data as tofu outputs) validated against
-  a JSON Schema in `schemas/`. Downstream stages read **only** the contract, via the pipeline-provided
-  file or `terraform_remote_state` fed from it — never by reaching into another stage's resources.
-- Contract changes follow the same semver rules as module interfaces (ADR-0010).
-- A stage declares in its manifest: inputs it consumes, outputs it publishes, OVH API permissions it
-  needs, and which service account applies it (least privilege per stage).
+**Deployment instances.** A platform-controlled manifest in the tenant repo, `deployments.yaml`,
+enumerates every instance: `instance_id` (immutable) → root template and version → tenant,
+environment, region → project id → backend bucket and key → runner authority (which credential class
+may plan and apply) → the output artefacts it consumes. **Each instance has exactly one state owner
+and one backend key.** Tenant and runtime roots are invoked once per tenant × environment (and per
+region where ownership requires it); account roots exactly once. Tenant `for_each` inside a shared
+root is never used as state isolation. Tenant authors cannot edit `deployments.yaml` through the
+routine self-service lane (ADR-0005, ADR-0021).
 
-**Safe by default**: no stage deletes resources it does not own; `prevent_destroy` on state-bearing and
-identity-bearing resources; plan-diff review gate shows destroys prominently (AWS LZA v1.16 lesson).
+**Dependency order by real references, not a fixed number line:**
+bootstrap → account-governance → account-fabric → project → project-network → runtime →
+observability (workload streams). Audit sinks that the account needs before any project exist in
+`account-fabric`, not in observability; a runtime never waits on the observability instance and vice
+versa. Every edge names a versioned output artefact.
+
+**Output artefacts, not state reads.** Each instance publishes `outputs.json` validated against a
+schema in `schemas/`, written by the pipeline to an access-controlled location (the state bucket's
+`artifacts/` prefix with its own permission, or the forge's artefact store). Consumers read **only**
+the artefact; no instance reads another's state. Artefact changes follow the contract semver rules
+(ADR-0010). A manifest entry declares inputs consumed, outputs published, the OVH API permissions the
+instance needs and the identity that applies it.
+
+**Cross-instance transfers** (moving an object between roots) are a tested procedure, not a `moved`
+block: freeze both writers, preserve both snapshots, remove from one state and import into the
+other, validate both plans, record the transfer in the instance manifest.
+
+**Safe by default**: no instance deletes resources it does not own; deletion protection on state-,
+identity- and network-bearing resources plus a decommission gate that stays effective when the
+resource configuration is removed (ADR-0005); the plan-diff review shows destroys prominently.
 
 ## Consequences
-- Stage ordering is explicit; failure at stage N leaves stages < N intact.
-- More pipelines and more state buckets/keys; the Taskfile contract (ADR-0007) hides it.
-- Cross-stage refactors need `moved` blocks and a documented migration note.
+- More backend keys; all generated from `deployments.yaml` and `stacks.yaml` (ADR-0007), never hand-edited.
+- Failure at one instance leaves every other instance untouched and unlocked.
+- A diagram of state owners and writers is a required artefact of the generated documentation (ADR-0020).
 
-## Counterpoints
-- Remote-state coupling is a known Terraform smell; the typed file contract mitigates but adds a
-  generation step.
-- Seven stages are heavy for `solo`; a profile leaves stages empty (`20-network` island needs no
-  hub, `50-observability` may be `none`), so the stage count is constant but the work is not.
+## Counterpoints (kept even if overruled)
+- Many small instances multiply pipelines and artefacts; the generator and the manifest keep them
+  mechanical, and the two-pipeline rule needs them anyway.
+- Fixed stage numbers were easier to explain; rejected because they encoded a false dependency.
 
 ## Verification
-- Spike: two stages exchanging a contract file in CI on GitHub Actions and GitLab CI without remote state.
+- Spike (ranked 2 by the review): two tenants, two instances, two scoped backend authorities;
+  tenant A cannot read or write B's state; project precedes project-network; artefact exchange works
+  on GitHub and GitLab without remote-state access.
 
 ## Review log
 - 2026-10-01 revision: stage names aligned with the profile model; tenants and runtimes split.
-  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review (external, Codex): **rejected** the `for_each`-as-isolation
+  design, the `terraform_remote_state` contract, cross-state `moved` and the fixed order; all
+  accepted and rewritten above. Source: agent-context/inbox/round2-review-codex-gpt-6-2026-10-01.md.

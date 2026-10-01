@@ -24,7 +24,7 @@ ovh-landing-zone-accelerator/
 ├── README.md  LICENSE  NOTICE  CONTRIBUTING.md  SECURITY.md  AGENTS.md
 ├── mise.toml  Taskfile.yml  stacks.yaml  .tflint.hcl  .editorconfig
 ├── modules/<name>/                 # layer 1: provider-thin primitives (ADR-0003)
-│   ├── main.tf variables.tf outputs.tf versions.tf README.md(generated) CONTRACT.yaml
+│   ├── main.tf variables.tf outputs.tf versions.tf README.md (authored guidance + generated interface section) CONTRACT.yaml
 │   ├── examples/<case>/            # runnable; each is a test target (ADR-0008)
 │   └── tests/*.tftest.hcl          # unit + contract, mock_provider / override_*
 ├── modules/naming/                 # pure function; names.yaml is the single source (ADR-0003)
@@ -32,18 +32,24 @@ ovh-landing-zone-accelerator/
 │                                   #   identity/{ovh-native,ovh-saml,keystone-machine,k8s-oidc}
 │                                   #   network/{island,hub-vrack}  observability/{ldp,byo,none}
 │                                   #   singletons: account-baseline/ project-factory/ guardrails/ state-backend/
-├── stages/NN-<name>/               # layer 3: the ONE composition graph; roots with own state (ADR-0004)
-├── profiles/<golden-path>.yaml     # golden paths = data (ADR-0016); capability matrix in schemas/
-├── schemas/                        # JSON Schema: tenant, profile, capability-matrix, stage-outputs,
-│                                   #   runtime-outputs, identity-outputs, CONTRACT.yaml, names, guardrails
+├── stages/<root-template>/         # layer 3: reusable root templates; one instance = one state owner (ADR-0004)
+├── profiles/<golden-path>.yaml     # golden paths = presets over the supported catalogue (ADR-0016)
+├── catalog/                        # data: supported-combinations.yaml, resource-ownership.yaml, controls.yaml
+├── schemas/                        # JSON Schema only: tenant, profile, deployments, outputs artefacts,
+│                                   #   identity/runtime capability outputs, CONTRACT.yaml, names, guardrails
+├── releases/<version>/manifest.yaml # immutable release-train closure and evidence (ADR-0022)
+├── harness/                        # agent harness: artifact-kinds.yaml, checks.yaml, capabilities.yaml,
+│                                   #   guides/, schemas/ (diagnostic, evidence, verdict), evals/ (ADR-0019)
 ├── policies/
 │   ├── guardrails.yaml             # rule → enforcement-plane matrix (ADR-0006)
 │   ├── plan/                       # Rego on plan JSON + tests
 │   ├── assent/                     # .assent policies + fixtures for the tenant repo (ADR-0005)
 │   └── mutants/                    # mutation harness for plan and assent policies (ADR-0008)
-├── templates/tenant-repo/          # self-service repo skeleton: tenants/, identities.yaml, .assent/, CI include
+├── templates/tenant-repo/          # self-service repo skeleton: tenants/, owners.yaml, deployments.yaml,
+│                                   #   identities.yaml, ipam.yaml, .assent/, CI include (ADR-0005)
 ├── examples/<profile>/             # one runnable example per golden path; tutorials include from here
-├── tests/{contract,snapshots,live,drills,fixtures}/   # cross-cutting only; unit tests live with the code
+├── tests/{contracts,security,live,migrations,recovery,snapshots,harness,fixtures}/
+│                                   # cross-cutting only; live/ is a protected discovery root; unit tests live with the code
 ├── tools/                          # one Go module: lz-audit scanner, contract diff, stacks generator,
 │                                   #   json→junit, reaper, budget guard, kb sync
 ├── pipelines/{github,gitlab}/      # thin adapters calling `task …` (ADR-0007)
@@ -56,8 +62,12 @@ ovh-landing-zone-accelerator/
 
 Rules:
 - **Dependencies point down only**: `modules → modules/naming`; `components → modules`;
-  `stages → components, schemas`; `profiles`, `templates`, `policies` are data; nothing imports
-  `stages/`. A CI script parses `source =` and fails on violations.
+  `stages → components, schemas`; `profiles`, `catalog`, `templates`, `policies` are data; nothing
+  imports `stages/`. A dependency checker parses HCL with a maintained parser, resolves local paths and
+  package boundaries, rejects unclassified dependencies and computes **transitive** test selection;
+  its own fixtures cover aliases, generated files, subdirectories and external sources.
+- Generators for an artefact kind are added only after two real examples establish the shape;
+  tools are added when the first vertical slice needs them, not before.
 - Unit tests, examples, `CONTRACT.yaml` and generated docs live **next to the code**; `tests/` holds only
   what spans directories.
 - `kb/mirror/` and any `knowledge-base/` directory are gitignored; never committed.
@@ -86,3 +96,7 @@ Rules:
 - 2026-10-01 revision: `blueprints/` → `profiles/` + `stages/`; component families with variants;
   `templates/tenant-repo/`; `policies/{guardrails.yaml,plan,assent,mutants}`; `kb/manifest.yaml`.
   Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 round-2 adversarial review: accepted — stages as root templates, `catalog/`, `releases/`,
+  `harness/`, security/migrations/recovery test dirs, a real HCL dependency checker with transitive
+  selection, authored READMEs, generators only after two examples. Rejected: renaming `stages/` to
+  `roots/` (same semantics, name kept).
