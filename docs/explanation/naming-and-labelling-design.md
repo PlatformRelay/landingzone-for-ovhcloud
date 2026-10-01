@@ -1,7 +1,8 @@
 # Naming and labelling: interface exploration and behavioral contract
 
-Status: interface **pending joint decision** owned by the operator. Record the answer
-before 001/T013 onward; unresolved choice blocks dependent work, never silent ratification. Flexible conventions and verified behavior are
+Status: **per-resource pure helper with shared context selected** on 2026-10-01.
+Detailed fields/module splitting need concrete-consumer diagnosis before 001/T013 onward;
+those tasks remain outside the authorized foundation increment. Flexible conventions and verified behavior are
 approved direction; a configuration vector is a hypothesis, not an instruction. This document
 elaborates [ADR-0003](../adr/0003-layered-taxonomy-and-module-naming.md). No module exists yet.
 
@@ -14,12 +15,12 @@ strings and maps; it neither reserves a name nor proves the caller's authority.
 
 | Interface | Strength | Cost or failure mode | Position |
 | --- | --- | --- | --- |
-| One logical resource per pure module call; shared context and local request | Explicit identity/override, ordinary caller `for_each`, small contract | Repeated calls; cross-call collisions need a scope-level check | Current recommendation; not decided |
+| One logical resource per pure module call; shared context and local request | Explicit identity/override, ordinary caller `for_each`, small contract | Repeated calls; cross-call collisions need a scope-level check | Selected; callers own cross-call collision checks |
 | Batch map keyed by stable logical request IDs | One call, central within-batch duplicate detection | Mixed kind constraints, precedence rules, partial invalid inputs and larger error surface | Viable alternative; compare real call sites |
 | Catalogue of candidate names by kind | Convenient discovery and constraint metadata | Candidate by kind does not identify two instances or establish availability | Useful auxiliary view; insufficient as the sole resource API |
 | Naming provider or external generator | Rich language/data tooling and central execution | Extra executable dependency and lifecycle; policy and HCL can diverge | Defer unless a concrete pure-module limitation warrants it |
 
-The proposed scalar result is a name plus canonical metadata and explicit applicable projections.
+The selected scalar result is a name plus canonical metadata and explicit applicable projections.
 A batch result would be keyed by logical request ID, never just kind or generated name. Resource
 kind, human resource name/role and immutable logical ID are distinct. Final field names, module
 split and any batch wrapper remain open; no pseudocode here is a released input schema.
@@ -110,7 +111,7 @@ counts/lengths and projection collisions against their own constraints.
 These checks extend phase 001's existing acceptance contract; every command remains planned.
 Creators T013/T014 cover naming, T015/T016 projections/schema/policy. Private evidence remains under
 `.local/evidence/001/`; strict input checks also use T016/V006. Interface-dependent work waits for
-the joint decision. Pure prose explaining it needs content review, not an invented test.
+concrete-consumer diagnosis. Pure prose explaining it needs content review, not an invented test.
 
 | Behavior | Positive control | Rejection/stability control | Check |
 | --- | --- | --- | --- |
@@ -123,13 +124,15 @@ the joint decision. Pure prose explaining it needs content review, not an invent
 | Target projection | Real target schema preserves complete metadata in its proper location | Short illegal K8s label, long value, projection collision, missing required unsupported field | V005/V006 |
 | Selectors and status | Stable selectors; experimental constraints visibly unverified | Release/owner update changes no selector/name; unknown input cannot authorize apply | V004/V005 |
 
-Run against the pinned tool and record positive, behavioral-red and green results. Generated
-vectors supplement independent golden cases; each guarded clause needs a sensitivity control.
+Run against the pinned tool and record positive, behavioral-red and green results. Handwritten
+projections use shared cases with independently specified expected results;
+initial generation is documentation only. Each guarded clause needs a sensitivity control.
 Live OVH constraints and tag/authorisation visibility remain phase 003 probes.
 
-## Cheapest decision experiment
+## Concrete-consumer diagnosis before implementation
 
 Compare concrete scalar and batch call sites for two organisation conventions and two same-kind
 resources. Include import, one invalid field, a long name and a metadata-only update. Use the same
-golden expectations and synthetic constraints, then inspect diffs and failure locality. Decide the
-interface together; avoid expanding a whole resource-inventory DSL before this comparison.
+golden expectations and synthetic constraints, then inspect diffs and failure locality. Retain
+the selected scalar/shared-context interface unless new evidence warrants reopening it;
+avoid expanding a whole resource-inventory DSL before this comparison.
