@@ -12,8 +12,7 @@ in separate sessions; implementation must produce its own verification evidence.
 
 Create an inspectable reference baseline for an OVHcloud landing zone: useful code, documented
 tradeoffs and reproducible verification that future implementations can be compared against.
-The maintainer brings an OVHcloud employee's perspective to this independent project. Learning and
-visible technical contributions are worthwhile outcomes; adoption is the desired upside.
+Learning and visible technical contributions are worthwhile outcomes; adoption is the desired upside.
 
 The ambition is a solid, approachable baseline with substantive reasons to choose it:
 
@@ -58,8 +57,8 @@ is part of the design and is documented up front.
 
 ## Layout
 
-Monorepo. The proposed structure and every other design decision are in
-[`docs/adr/`](docs/adr/README.md); all retain `Proposed` status until explicit operator ratification.
+Monorepo. The structure and other design decisions are in
+[`docs/adr/`](docs/adr/README.md). ADR-0002 is Accepted; other records retain their indexed status.
 
 The [initial Spec Kit phases](specs/README.md) cover the offline foundation, transaction
 rehearsals and protected platform feasibility. Their specs, plans and task lists are drafts;
