@@ -4,7 +4,8 @@
 - Related: ADR-0003, ADR-0009
 
 ## Context
-The `ovh/ovh` provider (v2.21.0 on 2026-09-24, MPL-2.0, ~233 resource files) covers IAM
+The `ovh/ovh` provider (v2.21.0 on 2026-09-24, MPL-2.0, 177 resource doc pages = 99 SDK + 78
+framework registrations; an earlier "~233" counted source files) covers IAM
 (`ovh_iam_policy`, `ovh_iam_resource_group`, `ovh_iam_permission_group`, `ovh_iam_resource_tags`),
 identities (`ovh_me_identity_user/group`, `ovh_me_api_oauth2_client`), projects (`ovh_cloud_project`),
 vRack and private networks, gateways, load balancers, Managed Kubernetes, Object Storage and S3 policies,

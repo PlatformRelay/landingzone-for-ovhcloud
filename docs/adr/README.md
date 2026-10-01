@@ -26,6 +26,9 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0016](0016-golden-paths-as-profiles.md) | Golden paths as profiles over one composition graph | Proposed |
 | [0017](0017-runtime-families-and-output-contract.md) | Runtime families and the output-only contract (multiple base stacks) | Proposed |
 | [0018](0018-identity-planes-roles-and-providers.md) | Identity model: three planes, a role catalogue, pluggable providers | Proposed |
+| [0019](0019-agent-experience-sensors-and-guides.md) | Agent experience: sensors and guides for implementing agents | Proposed |
+
+Small patterns, guidelines, tools and techniques live in [`docs/reference/patterns-catalogue.md`](../reference/patterns-catalogue.md).
 
 Revision note: ADRs 0001–0004, 0006–0009 and 0011–0014 were revised on 2026-10-01 after an
 independent second brainstorm round (three blind designs merged with round 1); each carries the
@@ -38,7 +41,10 @@ revision in its review log. The merge record is kept outside the repo in the mai
    reading only the files — never another reviewer's output in round one.
 3. Findings are recorded in the ADR's *Review log* section with the reviewer, date, and disposition
    (accepted / rejected + reason).
-4. Status moves to `Accepted` only on the operator's say-so.
+4. A third round is an **operator walkthrough**: a fresh session and the operator walk through first
+   setup, a failed apply, a compromised credential, lost state, an upgrade and a retirement using
+   only the documented design; gaps become edits.
+5. Status moves to `Accepted` only on the operator's say-so.
 
 ## Template
 

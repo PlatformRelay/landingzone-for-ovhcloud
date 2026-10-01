@@ -29,8 +29,11 @@ No profiles; a single hardened default; **switchable profiles** with per-control
 - No profile ships before its control mapping is reviewed by someone with the relevant expertise; v1
   ships `none` and `hds-aligned` only. SecNumCloud is a documented non-goal for v1 (Hosted Private
   Cloud / SNC platform is a different control plane whose qualification scope moves faster than an
-  open-source repo can track; one secondary source claims an SNC Cloud Platform qualification dated
-  2026-09-01, UNVERIFIED).
+  open-source repo can track). Verified 2026-10-01 from OVHcloud's newsroom: SecNumCloud
+  qualification for the **SNC Cloud Platform** (France) was announced on 2026-09-01, the third after
+  Bare Metal Pod and VMware on OVHcloud; it does not cover ordinary Public Cloud projects.
+- `hds-aligned` states the customer-side prerequisites OVH documents for HDS (contractual activation
+  and the support-tier requirement) as `pending_actions`; a Terraform apply never implies HDS scope.
 
 ## Consequences
 - Differentiator without legal exposure; a visible "what we don't cover" list.
@@ -47,3 +50,5 @@ No profiles; a single hardened default; **switchable profiles** with per-control
 ## Review log
 - 2026-10-01 revision: compliance as a profile field with region/product allowlists validated at
   schema time; SecNumCloud non-goal stated. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 (later): SNC Cloud Platform qualification verified (OVH newsroom, 2026-09-01); HDS
+  customer-side prerequisites added, from the external blind design review.

@@ -30,7 +30,12 @@ Credentials: long-lived client secret in forge secrets; TACO-held secret; "lease
 - **Disaster recovery of state:** scheduled copy of state buckets to a second region (native
   replication: spike); a **quarterly restore drill** (ADR-0008 L10) restores from the replica into a
   scratch project and asserts an empty plan; the state bucket is covered by the deny-floor
-  (ADR-0006).
+  (ADR-0006). Fencing rules: the replica is never a second active writer; promotion is an explicit,
+  logged step; Object Lock/WORM is never applied to lock objects (release requires deletion); the
+  decrypting key and the credentials to recover it are never stored only inside the encrypted state.
+- **Automation identities by authority** (ADR-0018): bootstrap/order, account-governance, deployment
+  per stage, observation, state, recovery — each with its own policy; a plan identity needs lock
+  permissions.
 - **Recoverable bootstrap (stage 00):** one manual, human-run stage creates the state bucket, the
   OKMS key, the automation project (if the order model allows), the identity pipeline's service
   account and the deny-floor, then migrates its own state into the bucket. Resource names come from
@@ -74,3 +79,5 @@ Credentials: long-lived client secret in forge secrets; TACO-held secret; "lease
 ## Review log
 - 2026-10-01 revision: locking confirmed; per-tenant buckets; DR replica and restore drill; import-based
   re-bootstrap; two-pipeline rule; lease-don't-store. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 (later): DR fencing rules and the identity-authority catalogue adopted from the external
+  blind design review.

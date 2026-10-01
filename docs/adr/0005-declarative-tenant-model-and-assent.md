@@ -50,8 +50,21 @@ escape hatch `extensions/<tenant>.tf` in the tenant repo, which receives the sta
 - removal of a tenant or environment → **block** unless `lifecycle: decommission` was merged earlier
   (two-step destroy); the stage never destroys on file removal without it;
 - new `waiver` → **require review**; expired waivers are scanner findings (ADR-0006).
-- GitLab is the first fully worked path (assent Core); on GitHub, CODEOWNERS plus the plan-policy
-  job stand in until the adapter lands, and the PR comment says so.
+- **Policy-driven auto-merge is a core feature of this landing zone on every supported forge**
+  (operator decision 2026-10-01): routine tenant changes merge and deploy without a human in the
+  loop, with the decision record as the audit trail. `assent` is PlatformRelay's own engine for it;
+  its current limits (GitHub adapter designed, not yet built) are tracked and delivered in the
+  assent repository and do **not** shape this design. The tenant-repo template is forge-neutral: the
+  same policies, fixtures and decision schema apply on GitHub and GitLab.
+
+**Adopt first, order second.** The default first experience **adopts an existing project**
+(`import` blocks, expected no-change plan; naming overrides preserve existing names). Ordering a
+project is an opt-in workflow (`lifecycle: order`) run with the bootstrap/order identity only:
+preflight (payment prerequisites, project-count eligibility, region/product availability, quota,
+estimated cost) → human-reviewed preview → execute → **reconcile before any retry** → record.
+**Retirement** is staged and tested: freeze, inspect dependencies, preserve data, verify backups,
+revoke access, remove billable resources, verify inventory and billing, then close; US-partition
+deletion differs and is documented separately.
 
 **Order-based steps** (quota profile upgrades that need a ticket, payment prerequisites) are intents:
 the stage emits `pending_actions` and the pipeline reports them; nothing is silently skipped.
@@ -70,7 +83,9 @@ the stage emits `pending_actions` and the pipeline reports them; nothing is sile
 - One policy language would be simpler; assent is CEL-only and operates on repo diffs, not plans, so
   a second engine for plan JSON is unavoidable unless plan checks move into `check` blocks (recorded
   as an option for ADR-0006).
-- assent is alpha; its schema may change. The template pins an assent version (`mise.toml`).
+- assent is alpha and its GitHub adapter is unbuilt; until it lands, GitHub users have no
+  auto-merge. Recorded, not designed around: the adapter is a dependency owned by the same
+  maintainer, and the template pins an assent version (`mise.toml`).
 
 ## Verification
 - Spike: schema + three assent policies (quota within band → approve; new tenant → request-changes;
@@ -82,3 +97,7 @@ the stage emits `pending_actions` and the pipeline reports them; nothing is sile
 ## Review log
 - 2026-10-01 revision: project factory → declarative tenant model in a separate repo; assent gate;
   waivers; virtual hierarchy. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
+- 2026-10-01 (later): adopt-first default, order workflow with reconcile-before-retry, staged
+  retirement adopted from the external blind design review.
+- 2026-10-01 (operator): auto-merge is a core feature on every forge; assent's limitations do not
+  shape the design; "GitLab-first" and the CODEOWNERS fallback removed.

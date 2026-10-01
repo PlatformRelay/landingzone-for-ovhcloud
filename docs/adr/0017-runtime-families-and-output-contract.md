@@ -35,6 +35,12 @@ Option B.
 - **Contract tests**: a shared `*-contract.tftest.hcl` is run against every kind with `override_*`
   blocks replacing providers; every output field is asserted with `can()`/`regex`. An orphan runtime
   (not referenced by any profile in the capability matrix) fails CI.
+- **Network family specifics:** an **IPAM ledger** (`ipam.yaml` in the tenant repo: CIDRs, VLAN ids,
+  routing ownership, reservations) is validated before any network change; ranges are never derived
+  from a tenant's position in a list; IPv6 is covered or explicitly disabled. OpenStack's default
+  allow-all egress is unmanaged by `ovh_cloud_security_group`, so "controlled egress" uses explicit
+  rule sets (or the `openstack` resource with `delete_default_rules`) and is proven by a traffic
+  probe (ADR-0008 L7), never by a plan read.
 - Observability sinks and networks are families with the same rule (`components/network/{island,hub-vrack}`,
   `components/observability/{ldp,byo,none}`); this ADR's contract pattern applies to all families.
 
@@ -54,4 +60,5 @@ Option B.
 - Spike: `ovh_cloud_project_kube_oidc` against a Keycloak realm (ADR-0018).
 
 ## Review log
-_(empty)_
+- 2026-10-01: IPAM ledger, IPv6 rule and the default-egress finding adopted from the external blind
+  design review.

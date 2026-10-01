@@ -34,8 +34,13 @@ and emitting the contract `{ principals, groups, bindings, pending_actions }`:
   adapter emits `pending_actions` (upload metadata, set group attribute) and the detective scanner
   (ADR-0006) checks the live `/me/identity/provider` matches. Entra, Okta, Keycloak, Google and AD FS
   are **how-to pages and example IdP configurations**, not code.
-- `keystone-machine`: per-project OpenStack application credentials with `expires_at` and access
-  rules for `ci-deployer` and runtimes (ADR-0017).
+- `keystone-machine`: machine access to the OpenStack plane. **Default (after a spike): the OVH
+  service-account bridge** — OVH documents that an IAM service account authenticates to OpenStack
+  with `OS_AUTH_TYPE=v3oidcclientcredentials` and receives OpenStack rights through IAM policies
+  (e.g. `publicCloudProject:openstack:infrastructureSupervisor`, "11 levels of rights"), so one
+  identity spans both planes and offboarding is one action. **Fallback:** per-project Keystone
+  application credentials with `expires_at` and access rules. The spike must prove the bridge works
+  with the `openstack` Terraform provider, token refresh and revocation.
 - `k8s-oidc`: cluster OIDC to the same IdP; K8s groups named identically to OVH groups so one
   offboarding action in the IdP removes all three planes.
 
@@ -43,7 +48,12 @@ and emitting the contract `{ principals, groups, bindings, pending_actions }`:
 which planes it exists in. Default: **humans exist only in OVH IAM**; a human Keystone user is allowed
 only by an explicit ledger entry with an `expires` date (the VM-classic path may need Horizon/CLI
 access). The scanner reconciles the ledger against the live account: an unknown principal is a
-finding.
+finding. The scanner also enumerates **contact-based delegations to other NIC handles**, a
+separate access route that IAM group removal does not revoke (OVH delegation guide).
+
+**Automation identities by authority** (ADR-0009): bootstrap/order, account-governance,
+deployment per stage, observation, state, recovery. A pipeline may hold several; none holds
+account-wide authority for convenience; a plan identity also needs lock permissions.
 
 **Break-glass.** One sealed native user outside the deny-floor group (ADR-0006), plus time-boxed IAM
 policies using `expired_at` for planned elevated work; both alert via the audit sink when used
@@ -73,4 +83,6 @@ the SAML and OIDC paths are tested without an enterprise tenant.
 - Spike: find the audit source for IAM logins and API activity consumable by Logs Data Platform.
 
 ## Review log
-_(empty)_
+- 2026-10-01: service-account → OpenStack bridge (OVH guide, verified), delegation scan and the
+  identity-authority catalogue adopted from the external blind design
+  (agent-context/inbox/REVIEW-codex-gpt-6-blind-2026-10-01.md).

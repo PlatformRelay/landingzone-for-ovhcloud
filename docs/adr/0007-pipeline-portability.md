@@ -34,9 +34,13 @@ biased; claims need checking against official docs.
 7. **Two pipelines by construction** (ADR-0009): the identity stage has its own workflow, service
    account and review rule; tenant pipelines cannot change IAM.
 8. The **tenant repo** (ADR-0005) gets its own thin pipeline from `templates/tenant-repo/`: schema
-   validation → `assent run` (GitLab; GitHub: CODEOWNERS until the adapter) → plan → policy → apply
-   from the protected branch, with the plan hash pinned between plan and apply.
-9. TACO support is **consumer-side**: TACOs run plan/apply of a golden path with a pre-plan hook
+   validation → `assent run` (policy-driven auto-merge, same on both forges) → plan → policy →
+   apply from the protected branch, with the plan hash pinned between plan and apply.
+9. **Forks get no credentials, ever.** A plan executes provider code and external data sources,
+    so read-only credentials do not make fork PR execution safe; no `pull_request_target` checkout
+    of fork code; fork jobs cannot poison caches used by privileged runs. Live layers (ADR-0008 L5+)
+    run only on maintainer branches.
+10. TACO support is **consumer-side**: TACOs run plan/apply of a golden path with a pre-plan hook
    calling `task policy:check`; the monorepo's own tests never run inside a TACO. Each supported
    TACO has a row in `docs/reference/tacos.md` (OpenTofu binary? hooks? plan JSON export? OPA
    bundle?) with a `verified_on` date; rows older than six months are flagged by the freshness gate.
