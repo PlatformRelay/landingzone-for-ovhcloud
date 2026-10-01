@@ -1,6 +1,5 @@
 # ADR-0015: Licence and project name
 - Status: Proposed
-  goes through external review like the others)
 - Date: 2026-10-01
 - Related: ADR-0001, ADR-0014
 
