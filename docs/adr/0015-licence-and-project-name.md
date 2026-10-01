@@ -25,7 +25,10 @@ neutral brand (e.g. `<brand>-lz` with "for OVHcloud" in the tagline) · keep gen
 - Name: **keep `ovh-landing-zone-accelerator` for now**, with the unofficial notice, because the repo is
   private and cheap to rename before first publication; revisit before the first public release after a
   trademark-risk read of OVHcloud's brand policy. A neutral brand is the safer long-term option.
-- NOTICE file attributing OVHcloud docs where quoted (ADR-0014).
+- Provenance and the applicable licence are recorded for any retained third-party material;
+  attribution never overrides its licence. Original executable examples carry the code licence even
+  when included in documentation; REUSE-compatible file-level metadata resolves mixed and generated
+  content. A published trademark-use decision precedes the first public release.
 
 ## Consequences
 - Choosing Apache-2.0 closes off copyleft protection against closed forks.
@@ -42,3 +45,5 @@ neutral brand (e.g. `<brand>-lz` with "for OVHcloud" in the tagline) · keep gen
 - 2026-10-01 (operator): licence **Apache-2.0** for code, policies and schemas, **CC BY 4.0** for
   the project's own documentation; `LICENSE`, `NOTICE` and `docs/LICENSE` added. Name kept while the
   repository is private; re-decided before the first public tag. Counterpoints above stand.
+- 2026-10-01 round-2 adversarial review: accepted — provenance rules for mixed content, REUSE
+  metadata, examples under the code licence. No licence or name change inferred from the review.

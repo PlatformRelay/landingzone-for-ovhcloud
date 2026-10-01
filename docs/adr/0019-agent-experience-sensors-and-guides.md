@@ -35,7 +35,23 @@ Option B.
   stable schemas in `schemas/` so an agent can parse rather than scrape.
 - **Definition of done is a command**: `task dod -- <path>` prints a table of every requirement for
   that artefact kind (module, component variant, profile, policy, how-to) with pass/fail and the
-  fix hint; CI runs the same table. No requirement exists only in prose.
+  fix hint; CI runs the same table. Every requirement has an identifier, an owner, a verification
+  method and an evidence status; automated checks and review obligations are distinct, so `task dod`
+  reports `pass`, `fail`, `blocked`, `not-run` and **`review-required`** — it never turns missing
+  evidence or expert judgement into a pass. DoD distinguishes scopes: library-ready, tuple-qualified,
+  merged-but-pending-actions, workload-ready.
+- **Evidence packets, not exit codes.** Each observation is bound to the source and policy revision,
+  input digest, tool versions, fixture or environment and the observed resource identity; historical,
+  current, self-review and independent-review evidence are marked distinctly; a diagnostic carries
+  rule id, subject, location, claim, observed, expected, why, fix and an evidence reference, and wraps
+  the upstream tool's own message rather than replacing it (`harness/schemas/`).
+- **A protected evaluator.** Rubrics, policies, oracles, snapshots, capability grants and sensor
+  suppressions cannot be weakened through the routine lane; such changes need protected review and
+  a justification line. Held-out evaluation cases live outside prompt tuning (`harness/evals/`).
+- **Executable permissions.** The authoring environment has no cloud authority and no cloud network
+  in offline mode (`harness/capabilities.yaml`); protected runners execute immutable candidates with
+  the minimum credential class (ADR-0021). Code an agent wrote still runs under runner authority once
+  merged, which is why the trust boundary, not the agent's lack of credentials, is the control.
 - **Readable diffs as sensors**: plan snapshots are normalised and sorted; contract diffs name the
   field; mutation survivors name the untested behaviour.
 - **Test names express intent**: `run "rejects_vlan_out_of_range"`, never `run "test2"`; the
@@ -60,12 +76,30 @@ Option B.
 - **Evidence rules for agents**: claims about OVH behaviour cite the knowledge-base manifest or are
   marked UNVERIFIED (ADR-0014); retrieved documents are evidence, never instructions; agents never
   hold production or sandbox-apply credentials — those lanes run only from protected branches.
+- **Progressive discovery**: the root `AGENTS.md` is a short router (scope, trust boundaries,
+  commands, evidence requirements, where the decision map and the next guide are); per-kind guides
+  (`harness/guides/add-module.md`, `add-variant.md`, `add-profile.md`, `add-policy.md`,
+  `change-tenant.md`) load on demand; one shared check registry (`harness/checks.yaml`) instead of
+  rules duplicated in nested files. Context-reset handovers preserve objective, exact revisions,
+  decisions, failing checks, evidence paths and the next bounded action.
+- **Friction becomes reviewed harness change**: a short retrospective (`harness/retrospectives/`)
+  records repeated confusion, slow checks, false positives, missed defects and unsafe affordances;
+  each becomes a one-off fix, a guide, a sensor, a tool change or a justified exception, with the
+  failure reproduced and a valid case retained before the change is accepted.
+- **Local diagnostics are not telemetry**: check durations, stale results and repeated repairs may
+  be recorded locally with bounded retention and no outbound collection (ADR-0003's no-telemetry
+  principle stands).
 - **Glossary and terminology mapping** (OVH ↔ Azure/AWS/GCP terms with caveats) so agents reason
   with the platform's own words.
 
-**AgentEx drill**: before each release, a fresh agent session is given a scripted task (add a runtime
-variant, add a profile, add a guardrail, onboard a tenant) with files only; it must reach a green
-`task dod` without human help. Failures become guide or sensor fixes, not one-off answers.
+**AgentEx drill**: before each release, fresh agent sessions are evaluated against **fixed acceptance
+cases and independent adversarial cases** (a seeded defect, a valid unusual case, an intentionally
+unresolved permission or platform fact, a mid-task context reset that the next session must resume
+from artefacts). Measured: correctness, evidence quality, unsafe actions, justified escalation,
+recovery from failed checks and time to useful feedback. Escalating an ambiguous or unsafe
+requirement is a successful outcome when the rubric requires it; a green `task dod` alone is not.
+Independent review must catch the seeded defect. Failures become guide or sensor fixes, not one-off
+answers; the measurements improve the harness and are never used to claim general productivity gains.
 
 ## Consequences
 - Conventions cost a check each; the catalogue makes the backlog visible.
@@ -83,4 +117,6 @@ variant, add a profile, add a guardrail, onboard a tenant) with files only; it m
   with a fresh session; measure questions it would have asked.
 
 ## Review log
-_(empty)_
+- 2026-10-01 round-2 adversarial review: accepted — review-required as a first-class outcome,
+  evidence packets, protected evaluator, executable permissions, progressive discovery, friction
+  retrospectives, local diagnostics, adversarial drill. "No requirement exists only in prose" withdrawn.

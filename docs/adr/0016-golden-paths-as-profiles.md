@@ -5,8 +5,9 @@
 
 ## Context
 The operator wants several supported setups, not one opinionated landing zone: "most landing zones
-are too opinionated; I'd like golden paths". Prior art ships one shape (AWS LZA, Azure ALZ, OCI) or a
-fork-and-customise starting point (Google example-foundation). Forks rot; one shape excludes.
+are too opinionated; I'd like golden paths". Prior art ships a few fixed scenarios (Azure's
+accelerator lists several; AWS LZA and OCI one shape each) or a fork-and-customise starting point
+(Google example-foundation). Forks rot; fixed shapes exclude.
 Three independent blind designs in the round-2 brainstorm (agent-context, 2026-10-01) all arrived at
 the same mechanism: a golden path is **data selecting variants over one shared composition graph**.
 
@@ -35,7 +36,7 @@ Option 2.
 
 | Profile | For | Pins | Deliberately leaves out |
 |---|---|---|---|
-| `solo` | one team, one account, a few projects | scale solo, native IAM, island network, runtime chosen at init | federation, hub, self-service |
+| `solo` | one team, one account, one project per environment (`dev`, `prod`) | scale solo, native IAM, island network, runtime chosen at init | federation, hub, self-service |
 | `team-kube` | product teams on Managed Kubernetes | runtime kube-managed, K8s OIDC to the IdP, LDP | VM bastion path, hub |
 | `team-vm` | lift-and-shift, licensing-bound workloads | runtime vm-openstack, bastion, security-group intents | autoscaling, image pipeline |
 | `org-federated` | an organisation with an IdP and self-serving tenants | scale org, SAML, tenant repo gated by assent, two-pipeline rule, break-glass | hub (optional), compliance |
@@ -50,17 +51,22 @@ network emulation, Windows domain join, …).
 1. Profiles contain no HCL. Code lives in `modules/` and `components/`; the graph lives in `stages/`.
 2. Every component family exposes variants behind one output contract (ADR-0017, ADR-0018); a stage
    selects the variant at exactly one point, from the profile.
-3. Everything optional is a leaf: nothing mandatory depends on an optional component.
-4. **Capability matrix**: `schemas/capability-matrix.yaml` lists the variant combinations that are
-   tested; a profile outside the matrix fails validation. Untested combinations are refused, not
-   "probably fine".
-5. **Inclusion tests**: for each pair of profiles where one is documented as a superset of another
-   (`team-kube` ⊇ `solo`), a `tofu test` with `override_module` wildcards (OpenTofu 1.13) asserts the
-   superset's plan contains exactly the subset's module set plus the pack. A path that re-declares a
-   resource a component already owns fails.
-6. **Upgrade path between profiles** is tested: switching `solo → org-federated` must plan without
-   destroying state-bearing or identity-bearing resources.
-7. A tenant file (ADR-0005) references exactly one profile and may override only `overridable` fields.
+3. Every supported tuple resolves to an **acyclic dependency graph**; optionality is conditional on
+   the tuple (backup, identity or observability can be prerequisites in one profile and absent in
+   another), not a universal "leaf" property.
+4. **Supported catalogue**: `catalog/supported-combinations.yaml` (ADR-0022) lists the tuples that are
+   tested with their status; a profile outside the catalogue fails validation. The profile dimensions
+   alone admit hundreds of raw tuples; five named paths are presets over the catalogue and do not
+   widen it. Untested combinations are refused, not "probably fine".
+5. **Invariant tests per supported tuple**: shared security and ownership invariants (one state owner
+   per instance, tenant isolation, deny-floor coverage, no placeholder outputs) are tested across each
+   supported tuple. Runtime-specific resource sets are **not** required to include one another; a
+   "superset" relation between profiles is not meaningful when `solo` may select a VM runtime.
+6. **Profile transitions are named migration workflows** (`solo → org-federated`, `team-vm` adding
+   federation) with state-address mapping, adoption and data-preservation tests; changing a profile
+   field never by itself authorises a migration or changes state ownership.
+7. A tenant file (ADR-0005) references exactly one profile and may override only `overridable` fields;
+   the tenancy cardinality (one project per tenant × environment) is defined once, in ADR-0005.
 
 ## Consequences
 - Adding a golden path is a data file, an entry in the capability matrix, an example, and an
@@ -78,9 +84,14 @@ network emulation, Windows domain join, …).
   real surface; the named paths are presets, and the matrix says which other combinations are tested.
 
 ## Verification
-- Spike: implement `solo` and `team-kube` on the shared graph; pass if the diff between them is zero
-  HCL lines outside `components/runtime/*` and the profile files.
-- Spike: inclusion test with `override_module` wildcards on OpenTofu 1.13.0.
+- Spike (ranked 12 by the review): implement two profiles on **both** designs — the shared graph and
+  thin per-path roots sharing components — on identical fixtures; compare measured readability, plan
+  time, state isolation, permission scope and migration results. Zero changed HCL lines is not the
+  criterion. Reject any design that needs hidden backward dependencies.
+- Spike: `override_module` wildcards (1.13) in wiring tests only.
 
 ## Review log
-_(empty)_
+- 2026-10-01 round-2 adversarial review (needs spike): **rejected** the inclusion theorem and the
+  zero-diff spike; accepted — invariant tests per supported tuple, transitions as migrations,
+  conditional optionality, supported catalogue, comparative spike against thin roots, Azure prior-art
+  correction, `solo` cardinality. The profile-over-one-graph bet itself is kept pending the spike.

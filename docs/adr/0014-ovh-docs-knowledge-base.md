@@ -9,7 +9,9 @@ declares itself **archived** in its README ("moved to ovh/ovhcloud-docs; the web
 help.ovhcloud.com/csm to docs.ovhcloud.com; every legacy URL redirects"); its content stays under
 **CC BY-NC-SA 4.0**. The successor **`github.com/ovh/ovhcloud-docs`** (default branch `develop`,
 pushed 2026-10-01) is an MDX/Rspress site with 7 locales under `docs/<lang>/` and **no LICENSE file**
-— until a licence is stated, its content must be treated as all-rights-reserved. It carries the
+— until a licence is stated, its content is treated as all-rights-reserved by default. Material that
+derives from the archived CC BY-NC-SA pages may still carry that (irrevocable) licence; provenance is
+assessed per file and revision, never assumed either way. It carries the
 landing-zone guides (five pillars) and the API/product guides this project cites.
 
 ## Options considered
@@ -17,9 +19,12 @@ Scrape docs.ovhcloud.com; clone a docs repo and commit it; clone locally, gitign
 vendor excerpts; an index only.
 
 ## Decision (proposed)
-- **Committed index, local mirror.** `kb/manifest.yaml` (committed) lists every OVH page the project
-  cites: URL, title, `sha256` of the fetched content, `last_verified`, and which ADR/doc cites it.
-  `task kb:sync` shallow-clones `ovh/ovhcloud-docs` (English only) into `kb/mirror/` (gitignored),
+- **Committed index, local mirror.** `kb/manifest.yaml` (committed) records per cited page: canonical
+  URL, upstream repository and immutable revision and path where available, fetch time, raw hash,
+  normaliser version and normalised hash, licence evidence, and the claims that reference it, so a new
+  contributor can reproduce the evidence from the committed manifest alone. A refresh produces a
+  reviewed diff; fetching new content never advances a claim to verified.
+  `task kb:sync` shallow- **and sparse-** clones `ovh/ovhcloud-docs` (English only) into `kb/mirror/` (gitignored),
   records the commit SHA in `kb/mirror/SOURCE.md`, strips navigation, and builds a local search index.
   Not committed, not shipped, not in releases.
 - **Cite, don't copy.** Project docs link the canonical docs.ovhcloud.com URL and paraphrase; quoted
@@ -57,3 +62,5 @@ vendor excerpts; an index only.
 - 2026-10-01 revision: source repo moved to `ovh/ovhcloud-docs`; committed manifest; weekly link job.
   Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
 - 2026-10-01 (later): claim ledger with status enum adopted from the external blind design review.
+- 2026-10-01 round-2 adversarial review: accepted — full manifest provenance fields, reviewed refresh
+  diffs, sparse checkout, per-file licence provenance.

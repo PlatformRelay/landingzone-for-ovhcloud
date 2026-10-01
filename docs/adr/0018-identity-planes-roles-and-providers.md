@@ -38,11 +38,18 @@ and emitting the contract `{ principals, groups, bindings, pending_actions }`:
   service-account bridge** — OVH documents that an IAM service account authenticates to OpenStack
   with `OS_AUTH_TYPE=v3oidcclientcredentials` and receives OpenStack rights through IAM policies
   (e.g. `publicCloudProject:openstack:infrastructureSupervisor`, "11 levels of rights"), so one
-  identity spans both planes and offboarding is one action. **Fallback:** per-project Keystone
+  identity can span both planes (end-to-end revocation through the OpenStack provider: spike).
+  **Fallback:** per-project Keystone
   application credentials with `expires_at` and access rules. The spike must prove the bridge works
   with the `openstack` Terraform provider, token refresh and revocation.
-- `k8s-oidc`: cluster OIDC to the same IdP; K8s groups named identically to OVH groups so one
-  offboarding action in the IdP removes all three planes.
+- `k8s-oidc`: cluster OIDC to the same IdP; K8s groups named identically to OVH groups. A common
+  role catalogue coordinates access, but **offboarding is an issuer-specific workflow**: Kubernetes
+  validates OIDC tokens locally and does not revoke issued tokens, so IdP group removal alone is not
+  evidence of immediate cluster or machine-credential revocation. A **revocation matrix** records,
+  per credential type (IdP session, OVH IAM user, service account, identity-user token, Keystone
+  credential, S3 key, Kubernetes token, client certificate, NIC delegation), the issuer, subject
+  binding, expiry, revocation mechanism and the **maximum residual access window**; offboarding tests
+  use already-issued credentials, not fresh logins.
 
 **Identity ledger.** `identities.yaml` in the tenant repo lists every human group and workload and
 which planes it exists in. Default: **humans exist only in OVH IAM**; a human Keystone user is allowed
@@ -63,7 +70,10 @@ policies using `expired_at` for planned elevated work; both alert via the audit 
 the SAML and OIDC paths are tested without an enterprise tenant.
 
 ## Consequences
-- Swapping the IdP changes one profile value and the IdP-side how-to; no HCL change.
+- Replacing the IdP is an **account-wide migration** of a singleton: validate subjects, group claims,
+  issuer and audience settings, certificate rollover, native recovery access and existing sessions
+  before switching; document rollback; validate every affected plane. Required federation actions
+  (`pending_actions`) **block readiness**; emitting them is not enough.
 - The role catalogue is a compatibility promise; adding a role touches every adapter and is a minor
   version of the identity family.
 - The singleton federation and the missing resource are registered as provider gaps (ADR-0011).
@@ -86,3 +96,6 @@ the SAML and OIDC paths are tested without an enterprise tenant.
 - 2026-10-01: service-account → OpenStack bridge (OVH guide, verified), delegation scan and the
   identity-authority catalogue adopted from the external blind design
   (agent-context/inbox/REVIEW-codex-gpt-6-blind-2026-10-01.md).
+- 2026-10-01 round-2 adversarial review: accepted — "one offboarding action" withdrawn (Kubernetes
+  tokens are not revocable), revocation matrix with residual windows, IdP replacement as a migration,
+  pending federation actions block readiness. Offboarding claims are release blockers until qualified.

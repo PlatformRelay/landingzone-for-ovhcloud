@@ -1,83 +1,108 @@
-# ADR-0009: State backend, bootstrap and credentials
-- Status: Proposed (revised 2026-10-01 after brainstorm round 2)
+# ADR-0009: State backend, bootstrap, recovery and credentials
+- Status: Proposed (rewritten 2026-10-01 after the round-2 adversarial review)
 - Date: 2026-10-01
-- Related: ADR-0004, ADR-0007, ADR-0011, ADR-0018
+- Related: ADR-0004, ADR-0007, ADR-0011, ADR-0018, ADR-0021
 
 ## Context
-Verified 2026-10-01: OVH Object Storage supports S3 conditional writes (`If-Match`, `If-None-Match` on
-`PutObject` and `CompleteMultipartUpload`; "unencrypted objects and objects encrypted with SSE-S3"),
-and OVH's blog (2026-06-15) confirms native Terraform/OpenTofu S3 lockfile locking works on it.
-OpenTofu state encryption lists an OVHcloud KMS key provider (external, maintained by OVHcloud) and a
-PBKDF2 passphrase provider; plan files can be encrypted too. OVH docs warn the S3 backend is not
-encrypted at rest by default. Credentials: OAuth2 clients (`ovh_me_api_oauth2_client`, long-lived
-secrets), identity-user tokens with `expires_in` (`ovh_me_identity_user_token`), access-token auth in
-go-ovh (`OVH_ACCESS_TOKEN`); Keystone application credentials with expiry and access rules for the
-OpenStack plane. No OIDC federation from CI providers to the OVH API was found (absence unproven).
+Verified 2026-10-01: OVH Object Storage supports S3 conditional writes (`If-Match`, `If-None-Match`;
+unencrypted or SSE-S3 objects), and OVH's blog confirms native lockfile locking works; OpenTofu
+state encryption offers an OVHcloud KMS key provider (external) and a PBKDF2 passphrase provider.
+Credential mechanisms: OAuth2 clients (`ovh_me_api_oauth2_client`, long-lived secret, **not
+importable** with its secret), identity-user tokens with expiry (`ovh_me_identity_user_token`,
+requires a user login), the documented IAM service-account bridge to OpenStack (ADR-0018), Keystone
+application credentials (OVH support for access rules UNVERIFIED), no OIDC federation from CI found.
+The round-2 review found two errors in the previous version: (1) **a PBKDF2 "fallback" cannot
+decrypt state written under the OKMS method** — OpenTofu's fallback is a reader for data encrypted by
+its own method during rollover, not a second wrapping key; losing the OKMS key would have lost all
+state. (2) Encrypting stage 00 with a key that stage 00 itself creates is a circular bootstrap
+dependency. "Lease, don't store" also left unspecified who authenticates to the issuer.
 
 ## Options considered
-State: OVH Object Storage S3 backend; an external S3; TACO-managed state; local state for bootstrap only.
-Locking: native lockfile (now confirmed viable); TACO-level locking; none.
-Credentials: long-lived client secret in forge secrets; TACO-held secret; "lease, don't store".
+State: OVH Object Storage; another S3; TACO- or GitLab-managed state. Locking: native lockfile;
+TACO-level; none. Recovery: none; replica under the same key (false safety); **independently
+decryptable backup**. Credentials: long-lived secrets in the forge; TACO-held; issuer with leases.
 
 ## Decision (proposed)
-- **Backend:** OVH Object Storage S3, bucket versioning on, **`use_lockfile = true`**. Granularity:
-  one bucket per platform stage set, one key per stage; **one bucket per tenant** for tenant and
-  runtime state (blast radius of a leaked tenant credential is one tenant's state).
-- **Encryption mandatory** from stage 00: OpenTofu client-side `encryption {}` with the OVHcloud KMS
-  key provider as primary and a PBKDF2 fallback whose passphrase is sealed offline; `plan {}`
-  encrypted; key rotation enabled. Client-side encryption yields opaque objects, so the SSE-C caveat
-  on conditional writes does not apply.
-- **Disaster recovery of state:** scheduled copy of state buckets to a second region (native
-  replication: spike); a **quarterly restore drill** (ADR-0008 L10) restores from the replica into a
-  scratch project and asserts an empty plan; the state bucket is covered by the deny-floor
-  (ADR-0006). Fencing rules: the replica is never a second active writer; promotion is an explicit,
-  logged step; Object Lock/WORM is never applied to lock objects (release requires deletion); the
-  decrypting key and the credentials to recover it are never stored only inside the encrypted state.
-- **Automation identities by authority** (ADR-0018): bootstrap/order, account-governance, deployment
-  per stage, observation, state, recovery — each with its own policy; a plan identity needs lock
-  permissions.
-- **Recoverable bootstrap (stage 00):** one manual, human-run stage creates the state bucket, the
-  OKMS key, the automation project (if the order model allows), the identity pipeline's service
-  account and the deny-floor, then migrates its own state into the bucket. Resource names come from
-  the naming module, so the stage can be **re-run from empty state with `import` blocks** if state is
-  lost.
-- **Two-pipeline rule:** the pipeline that changes identity (stage 10) uses its own service account,
-  protected branch and review rule; tenant and runtime pipelines cannot change IAM.
-- **Credentials — "lease, don't store":**
-  1. the only long-lived secrets are the identity pipeline's OAuth2 client and the age key for SOPS,
-     held in the forge or TACO secret store;
-  2. every other run mints short-lived credentials: an identity-user token with `expires_in` for the
-     OVH plane (service-account user per stage, least privilege), and a Keystone application
-     credential with `expires_at` and access rules for the OpenStack plane; revoked in a `finally` step;
-  3. P0 fallback for `solo`: per-stage OAuth2 clients with a documented rotation task;
-  4. OIDC federation from CI is used if a spike ever finds it; a token-broker component is optional,
-     never required.
-- **Repo-side secrets:** SOPS + age for bootstrap values and IdP metadata; the tenant schema forbids
-  keys named `*secret*`/`*password*`.
-- **Nothing in state in cleartext:** ephemeral resources and write-only attributes (OpenTofu 1.11+)
-  wherever the provider supports them; otherwise state encryption is the backstop.
+
+### Backend and locking
+OVH Object Storage S3, bucket versioning on, `use_lockfile = true`; one bucket per account-level
+root set, one bucket per tenant for its instances; backend and decrypt permissions scoped to the
+instance's credential class (ADR-0004), otherwise per-tenant buckets isolate nothing. Stale-lock and
+interrupted-writer procedures are documented and drilled; a replica is **never** a second active
+writer; promotion is an explicit, logged step; Object Lock never applies to lock objects.
+
+### Encryption and key recovery (replaces the false fallback claim)
+- Client-side `encryption {}` is mandatory for every instance; plan files encrypted too.
+- **Bootstrap starts with an independently escrowed method**: the bootstrap root encrypts with a
+  PBKDF2 passphrase held in offline escrow (two holders, ADR-0022) before any KMS exists; it creates
+  the OKMS key and the later stages' access credentials; later instances use the OKMS key provider as
+  primary with the passphrase method configured only as the migration reader.
+- **Key-loss recovery is a separately decryptable backup**, not a fallback: a scheduled job (its own
+  identity, read access to state, the escrowed passphrase from a sealed secret) pulls each state
+  snapshot and writes a copy encrypted under the escrow method to a second bucket in a second region.
+  The escrow package records key identifiers, authenticators, backend configuration, toolchain
+  versions and the recovery runbook; nothing needed to use it lives only inside encrypted state.
+- OKMS key rotation enabled; KMS or object-storage unavailability, key loss and state corruption
+  are three separate drill cases.
+
+### Recoverable bootstrap
+Stage `bootstrap` is run by a human once, from a clean environment, and can be **re-run from empty
+state**: an independently retained **resource-id and import manifest** (written by the stage, stored
+with the escrow package) supplies provider-assigned ids that names cannot reconstruct; secrets that
+cannot be read back (OAuth2 client secrets) are re-issued, never "imported". Drills: (a) restore a
+snapshot into an isolated backend and validate against the same disposable fixture with production
+writes fenced; (b) rebuild in a new project and expect creation plus data restoration; an empty plan
+is never the success criterion for a rebuild.
+
+### Credential matrix ("lease, don't store", made explicit)
+Every automation identity is a row in `identities.yaml` with: issuer, principal type, **how the
+caller authenticates to the issuer**, scope, lifetime, renewal, revocation, state/backend/KMS access,
+emergency recovery.
+
+| Authority | Mechanism (preferred → fallback) | Lifetime |
+|---|---|---|
+| bootstrap / order | human-held OAuth2 client, offline escrow, used only in the bootstrap runbook | long-lived, rotated after each use |
+| account governance (identity pipeline) | dedicated OAuth2 client in the forge/TACO protected store; two-pipeline rule | long-lived; client-swap rotation (two live secrets per client UNVERIFIED) |
+| deployment per instance | per-instance service account; OVH plane: identity-user token with `expires_in` minted at run start from a service-account user whose login the pipeline holds; OpenStack plane: the IAM service-account bridge (ADR-0018) → fallback Keystone application credential with expiry | per run; revoked in `finally` |
+| observation (scanner, docs renderer) | read-only service account | long-lived, rotated quarterly |
+| state / backup | per-bucket S3 credentials scoped to the instance; backup job has read-state + write-backup only | rotated quarterly |
+| recovery (break-glass) | sealed native user outside the deny-floor; alerting on use | permanent, drilled |
+
+`solo` may use the fallback of per-instance long-lived clients with a documented rotation task.
+OIDC federation from CI is adopted only if a spike finds an authoritative source. A token broker is
+optional and, if used, is itself a row in the matrix with its own authenticator; it must not run
+only inside the platform it recovers.
+
+### Secrets elsewhere
+SOPS + age for repo-side bootstrap values and IdP metadata (age recipients: the two escrow holders
+and the identity pipeline); the tenant schema forbids keys matching `*secret*|*password*|*token*`;
+ephemeral resources and write-only attributes wherever the provider supports them; otherwise state
+encryption is the backstop, not a proof of absence.
 
 ## Consequences
-- The conditional-write spike from round 1 is closed; locking is a configuration, not a risk.
-- Bootstrap is the single place a human holds powerful credentials; its runbook ends in a tested
-  task and has a recovery section.
-- Minimum OpenTofu is 1.13 (ADR-0008); Terraform cannot read encrypted state.
+- Key loss no longer means state loss; the cost is one backup job and an escrow procedure with two
+  holders.
+- Bootstrap has an offline prerequisite (the escrow package) and a tested re-run path.
+- The matrix makes "who can mint what" reviewable; forge secrets hold exactly the rows marked long-lived.
 
 ## Counterpoints (kept even if overruled)
-- Encryption keyed by OKMS makes every plan depend on an OVH service; the PBKDF2 fallback is the
-  mitigation and is drilled.
-- Per-tenant buckets multiply backend configs; generated from `stacks.yaml` (ADR-0007).
-- "Lease, don't store" adds a broker step per run; `solo` keeps the simple fallback.
+- Two encryption methods in play (OKMS primary, escrow for bootstrap and backups) is more to drill;
+  rejected alternative — OKMS everywhere — leaves no path when the key is gone.
+- Per-run token minting needs a stored authenticator anyway; the gain is scope and lifetime, not
+  "no secrets".
 
-## Verification
-- Spike: two concurrent `tofu apply` with `use_lockfile` on an OVH bucket; second is refused.
-- Spike: OKMS key provider round trip; rotate; delete the key; restore with the PBKDF2 fallback.
-- Spike: mint an identity-user token with `expires_in = 3600` and a Keystone app credential with
-  access rules; allowed path works, disallowed path 403, unusable after expiry.
-- Spike: bucket replication or scheduled copy across OVH regions; restore drill script.
+## Verification (ranked by the review)
+- Spike 1: a fresh operator environment recovers the disposable fixture **without** the original
+  key service, using the escrow backup; demonstrate that the old "PBKDF2 fallback" idea fails.
+- Spike 5: who authenticates to each issuer; expiry mid-run, renewal, failed cleanup, eventual
+  revocation; bridge qualified with the OpenStack provider; application-credential access rules on OVH.
+- Spike 7: two concurrent writers; interrupted writer; stale-lock procedure; promotion cannot create
+  two active writers; bounded replica lag; restoration into an isolated backend.
 
 ## Review log
-- 2026-10-01 revision: locking confirmed; per-tenant buckets; DR replica and restore drill; import-based
-  re-bootstrap; two-pipeline rule; lease-don't-store. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 (later): DR fencing rules and the identity-authority catalogue adopted from the external
-  blind design review.
+- 2026-10-01 revisions: locking confirmed; per-tenant buckets; replica and restore drill; import-based
+  re-bootstrap; two-pipeline rule; lease-don't-store; DR fencing; identity-authority catalogue.
+- 2026-10-01 round-2 adversarial review: **rejected** — PBKDF2 fallback as recovery (factual error),
+  circular bootstrap encryption, unspecified issuer authentication, "import" of OAuth2 secrets, empty
+  plan as rebuild criterion. All accepted and rewritten above. Source:
+  agent-context/inbox/round2-review-codex-gpt-6-2026-10-01.md.

@@ -28,6 +28,14 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0018](0018-identity-planes-roles-and-providers.md) | Identity model: three planes, a role catalogue, pluggable providers | Proposed |
 | [0019](0019-agent-experience-sensors-and-guides.md) | Agent experience: sensors and guides for implementing agents | Proposed |
 | [0020](0020-generated-landing-zone-documentation.md) | Generated landing-zone documentation: system map, accounts and permissions with reasons | Proposed |
+| [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
+| [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
+
+Round-2 adversarial review (external, 2026-10-01): ADR-0004, 0005, 0009 were rejected and rewritten;
+0016 and 0017 lost their inclusion theorem and universal schema; every other ADR carries the accepted
+corrections in its review log. Still to be written (review items 8, 9, 10, 13): network and resilience
+architecture, cost and sandbox operations, observability and incident response, documentation
+accessibility.
 
 Small patterns, guidelines, tools and techniques live in [`docs/reference/patterns-catalogue.md`](../reference/patterns-catalogue.md).
 
