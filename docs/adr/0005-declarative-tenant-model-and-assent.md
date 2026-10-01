@@ -64,6 +64,9 @@ re-derives the tree from live tags and diffs it against the model.
   never destroys running infrastructure.
 
 ### Transaction lifecycle (merge is not deployment)
+The useful auto-merge experience combines an attributable policy decision with visible execution
+status and the next safe action. Acceptance, deployment and workload readiness remain separate
+user-visible outcomes; polishing the request view never turns a blocked run into success.
 States per instance: `queued → planning → policy → ready → applying → applied | blocked | failed`,
 with `pending-actions` when manual steps remain (federation, orders, HDS prerequisites). Idempotent
 re-runs; partial completion recorded; rebase invalidation; a merged tenant may be `applied` yet

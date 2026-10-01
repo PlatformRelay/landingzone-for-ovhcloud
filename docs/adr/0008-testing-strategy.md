@@ -7,7 +7,7 @@
 Requirement: "very extensive testing of everything" and "very heavy use of all the tofu testing
 features we can use and features beyond that". The platform bills by usage (per-second with minimum
 periods for some compute; per product UNVERIFIED) with no hard cap, project
-creation is a slow billed order, and one human plus agents maintain the repo, so extent must be bought
+creation is a slow billed order, and one maintainer operates the repo, so extent must be bought
 with cheap layers and the gates themselves must be tested.
 Verified against opentofu.org and the OpenTofu changelog on 2026-10-01: OpenTofu 1.13.0 (2026-09-30)
 offers `run` blocks with `command = plan | apply`, `assert`, file- and run-level `variables`, the
@@ -26,6 +26,28 @@ sandbox pays only for what mocks cannot prove.
 
 ## Decision
 The layered taxonomy. Every layer has a Taskfile target (ADR-0007), a stated cost, and a cadence.
+Current one-off trial funding permits selective approved experiments, overriding any
+nightly/quarterly live cadence below; recurring recording/reference infrastructure and
+release-wide live runs require verified headroom and explicit run approval. Offline
+checks retain their full applicable coverage.
+
+**Verification is predefined.** Before implementation, every non-documentation requirement and
+success criterion maps to an acceptance check; every task names its requirement/ADR, dependencies,
+verification command or bounded procedure, positive and negative outcomes, and evidence destination.
+The trace is requirement → ADR → implementation → check → evidence. Planned commands name their
+creating task and start `not-run`. Tests precede behavioural implementation; red means a concrete
+behavioural defect, never a missing tool, syntax error or outage. Implementation closes on the
+same controls green. Evidence binds revision, input, tool versions, discovery count and environment;
+missing, stale or unrelated evidence cannot satisfy a requirement. The Spec Kit constitution and
+project template overrides carry this contract into future work.
+
+**Test the visible journey.** Each differentiator (ADR-0001) has a valid path, a failure or interrupted
+path, and the observable explanation/next safe action. Assert those outputs as well as internal
+invariants. An experiment may begin with unknown platform behaviour when proving or refuting it
+is its bounded purpose; a successful simulation cannot qualify an unobserved live mechanism.
+Market/adoption research is not an engineering prerequisite. Pure prose is exempt from invented
+automated tests; executable examples, generators, schemas, policies, renderers and workflow
+configuration are behavioural work, including when their output is documentation.
 
 | # | Layer | Mechanism | Catches | Cost | Cadence |
 |---|---|---|---|---|---|
@@ -36,8 +58,8 @@ The layered taxonomy. Every layer has a Taskfile target (ADR-0007), a stated cos
 | L4 | Policy | Conftest tests for every Rego rule; `assent test` fixtures for every assent policy; **mutation harness** (flip comparators, drop a rule, widen a regex) with a kill-rate threshold; guardrail-id reference test (ADR-0006) | dead policies, gates that pass everything, rules with no enforcing plane | 0 | PR; mutation nightly |
 | L5 | Live plan | `tofu test` `command = plan` with the real `ovh` provider and a **read-only** service account, in **separate test files under a protected `tests/live/` discovery root** (`-filter` selects files, not runs, so live and mock runs never share a file), across a region matrix | auth/API breakage, data-source regressions, product-per-region availability | API calls only | maintainer lane: label `live-plan`, weekly, release |
 | L6 | Replay | the same runs against a **record/replay proxy** (cassettes of real API traffic; the provider's endpoint pointed at the proxy); cassettes refreshed from the sandbox nightly | provider behaviour at zero cost, deterministic | 0 after recording | PR, if the spike passes |
-| L7 | Apply | `tofu test` `command = apply` chains (`run.project` → `run.network` uses `run.project.id`; cleanup in reverse order) on module examples in the sandbox; Go/terratest only for behaviour HCL cannot assert (HTTP/TCP probes, OIDC login, S3 PUT) | real resource behaviour, eventual consistency, provider bugs | billed, minutes | nightly **rotation** (a quarter of modules per night), all on release |
-| L8 | Golden-path e2e | apply one profile from zero via the tenant-repo template, probe, destroy; timing recorded as a metric | composition errors, bootstrap ordering | billed, ~1 h | nightly rotation of profiles; all before release |
+| L7 | Apply | `tofu test` `command = apply` chains (`run.project` → `run.network` uses `run.project.id`; cleanup in reverse order) on module examples in the sandbox; Go/terratest only for behaviour HCL cannot assert (HTTP/TCP probes, OIDC login, S3 PUT) | real resource behaviour, eventual consistency, provider bugs | billed, minutes | selective approved experiments while on trial credit; full live suite only with release funding/approval |
+| L8 | Golden-path e2e | apply one profile from zero via the tenant-repo template, probe, destroy; timing recorded as a metric | composition errors, bootstrap ordering | billed, ~1 h | selective approved profile experiments while on trial credit; release scope needs funding/approval |
 | L9 | Drift and conformance | `tofu plan -detailed-exitcode` on a long-lived reference environment; `lz-audit` scan; **upgrade test** (apply release N, plan N+1: zero destroys of protected resources) | manual changes, provider default changes, breaking upgrades | API only | nightly; upgrade test on release candidates |
 | L10 | Drills and canaries | DR restore of state from a replica; chaos (delete a gateway by hand, expect a finding and an additive repair plan); break-glass login alert; credential rotation; **provider canary**: Renovate bumps of `ovh/ovh` run L3 + L5 + an L7 subset before merge, with a `tofu providers schema -json` snapshot diff | recovery procedures that rot, alerting that never fired, provider breaking changes | billed, scheduled | quarterly; canary on every bump |
 
@@ -56,14 +78,16 @@ data-preserving upgrades (`tests/security/`, `tests/recovery/`, `tests/migration
 network access to cloud endpoints**, and a deliberate attempted call proves the boundary. L5 and all
 recording and apply lanes are separate, protected targets; forks cannot reach them.
 
-**Sandbox safety (mandatory, not optional).** Dedicated projects `lz-sandbox` (apply tests) and
-`lz-sandbox-ref` (drift). Live runs are admitted only when an **external run-lease inventory**,
+**Sandbox safety (mandatory, not optional).** One dedicated sandbox project under D8;
+apply and drift fixtures rotate within it with independently recorded ownership.
+This is not cross-project or account isolation proof. Live runs are admitted only when an **external run-lease inventory**,
 bounded concurrent reservations, a maximum runtime and cleanup authority fit the approved exposure
 ceiling; unknown billing, inventory or reaper health **blocks new admission while cleanup stays
 enabled**. Created resource ids are persisted independently of tags; test cancellation, process death
-and reaper failure are themselves tested. Smallest flavours, one cheap region, a pre-ordered project
-pool; spend published weekly to `docs/reference/test-costs.md`. Cap: 200 €/month (D8), recalibrated
-after a one-week rotation.
+and reaper failure are themselves tested. Smallest flavours and an approved region. Additional projects, a pool and a second
+region require a separate operator decision; spend published weekly to `docs/reference/test-costs.md`. Current total exposure ceiling: 200 € one-off trial credit (repository working contract;
+no monthly reset). The earlier D8 monthly wording does not grant recurring funding. Recalibrate
+after bounded selective experiments; no funded recurring rotation is assumed.
 
 **Reporting.** A common report envelope wraps each tool's own output (`-json-into` where a tool has
 it); `tools/json2junit` renders it for both forges; a skipped check, a crash, a cleanup error or zero
@@ -72,8 +96,8 @@ Cost accounting counts preparation, recording, idle reference infrastructure and
 the final command (L9 is not "API only" once an upgrade test deploys N).
 
 **Coverage rule.** Every module: L0, L1, L2, L3. Every family variant: L2 contract. Every profile: L3,
-L8, inclusion test. Every policy: L4 with fixtures and mutants. Every how-to: its ending `task`
-target runs in dry-run nightly (ADR-0013).
+L8, inclusion test. Every policy: L4 with fixtures and mutants. Every executable how-to: its ending
+`task` target runs in dry-run nightly (ADR-0013); prose-only work has no invented behavior test.
 
 **Mocking limits.** `mock_provider` masks provider-side validation; L5/L6/L7 exist for that reason;
 mock defaults are copied from recorded real values (`tests/fixtures/`), refreshed by a task.
@@ -82,7 +106,7 @@ mock defaults are copied from recorded real values (`tests/fixtures/`), refreshe
 - Contributors get fast, free feedback; the sandbox bill is bounded and visible.
 - Snapshots, mutation reports and freshness gates produce noise; the pre-mortem says this is where a
   solo maintainer disables gates. Mitigation: thresholds are tuned by data in the first month, and a
-  gate may be loosened only with a written justification (workspace rule).
+  gate may be loosened only with a written justification (with the reason recorded on its own line).
 - OpenTofu 1.13 becomes the minimum (wildcard overrides).
 
 ## Counterpoints (kept even if overruled)
@@ -95,7 +119,8 @@ mock defaults are copied from recorded real values (`tests/fixtures/`), refreshe
 - Spike: replay proxy — provider with `endpoint` set to a local recorder; record one apply, replay the
   plan offline; pass if the plan is byte-identical after normalisation.
 - Spike: `override_module` wildcards (1.13.0) in an inclusion test.
-- Spike: one week of the nightly rotation; record cost against the cap; reaper leaves nothing.
+- Spike: a bounded selective sample under the remaining trial-credit exposure ceiling;
+  record full cost and cleanup. Recurring rotation needs a new funding/approval decision.
 - Spike: `tofu test -json` → JUnit rendered in GitHub and GitLab.
 
 ## Review log

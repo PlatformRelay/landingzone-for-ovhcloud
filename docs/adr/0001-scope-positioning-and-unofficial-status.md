@@ -32,6 +32,20 @@ OVHcloud's own docs define five pillars: IAM, networking, security, billing, obs
 **B, delivered in the order of C**: modules first, then components, then stages and profiles (ADR-0003), each
 independently releasable, so the library hedge is never lost.
 
+**Purpose:** establish a credible, inspectable OVHcloud landing-zone reference baseline through
+building and learning. The maintainer's employee perspective informs the independent project;
+it does not change its ownership, endorsement or support status. Adoption and wider discussion
+are desired outcomes; lack of customer/adoption evidence does not block a bounded experiment.
+Useful modules, explained decisions and reproducible checks retain value without full adoption.
+
+**Substantive differentiators:** generated installation documentation (ADR-0020), per-run/JIT
+credentials with explicit issuer and revocation boundaries (ADR-0009/0018), policy-driven auto-merge
+(ADR-0005/0007), and adaptable naming/labelling (ADR-0003). These features are intended to make the
+baseline worth discussing and adopting; their effect on traction is a hypothesis. Deliver each as
+a visible, tested user journey, keeping planned, implemented and verified scope distinct.
+See [product direction](../explanation/product-direction.md). The Taskfile-backed guided setup helper
+(ADR-0023) makes preconfiguration approachable without a portal or general management CLI.
+
 - "Landing zone" is defined by OVHcloud's five pillars; every golden path documents how it covers each.
 - **Principle: opinionated at the seams, free in the middle.** The project fixes identity,
   state, pipeline, naming, guardrails and audit; it does not dictate what runs in a project. Several

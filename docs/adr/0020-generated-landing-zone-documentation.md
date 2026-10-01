@@ -24,10 +24,17 @@ exactly this: accounts, rights, justification, review dates.
 Option B. `tools/lz-docs` renders a per-installation documentation set from data only; nothing in it
 is typed by hand after setup.
 
+Automatic documentation is a substantive differentiator (ADR-0001): an operator should be able
+to explain the installation without rebuilding its model mentally. Human explanations and
+machine-readable observations are views of the same sources, with progressive detail. The renderer
+is behavioural code and requires predefined tests even though its output is documentation.
+
 **Inputs** (all already exist or are introduced here):
 - desired state: tenant files, profile, identity ledger, IPAM ledger, waivers;
-- actual state: stage output contracts (`stage-outputs.json`) and the scanner's inventory
-  (read-only API enumeration), never raw state files;
+- actual state: published stage output contracts (`outputs.json`) from validated `current` publication
+  records (ADR-0004); verify generation/digest and producer status before reading. Pending,
+  failed or unpublished generations never become current actual values; scanner inventory
+  comes from read-only API enumeration. Never read raw state files;
 - **permission rationale as data**: every role's action list in `components/identity/roles/<role>.yaml`
   carries, per action family, a `reason` (why the role needs it), a `scope` (what it may touch) and
   `review_every` (an interval); every automation identity in the ledger carries `purpose`, `owner`,
@@ -66,6 +73,18 @@ only identifiers.
 **Evidence rules**: every "actual" value cites its source (stage output or scanner run id); a value
 the scanner could not collect is shown as `UNVERIFIED`, never omitted or guessed (same rule as the
 deployment report).
+Generation time is separate from observation time and any human attestation; rendering again
+cannot refresh the evidence. A failed/stale scanner shows its last observation, age and failure
+status. Permission rationale describes desired intent, not proof of live effective authority or
+a completed access review. Each access-review record names last human attestation,
+reviewer, next due date and current owner; missing attestation/owner and overdue review
+remain visibly unresolved. Scanner health/last success/age remain separate, including an
+explicit overdue/failed status; rendering cannot manufacture an attestation. These states
+appear in the human view and its underlying data. Scanner failure or observations beyond
+the configured freshness bound emit an alert to the explicitly configured accountable
+recipient; absence of a recipient is an unresolved operating prerequisite, not healthy
+monitoring. Qualify the API observer's account-inventory visibility separately from site
+reader/forge membership; a site member is not proof the observer can enumerate IAM.
 
 ## Consequences
 - Compliance questionnaires are answered from a URL that is regenerated nightly; reviewers can be
@@ -86,6 +105,15 @@ deployment report).
   role data + scanner inventory → Markdown with reasons; a reviewer with no context can say who may
   do what and why.
 - Spike: GitHub Pages and GitLab Pages access control for a private site from the tenant-repo template.
+- Renderer controls: missing/stale inventory and a failed scanner remain visibly unverified;
+  re-rendering never changes the observation/attestation date; a valid fresh observation retains
+  its source. Private publication and reduced public scope have positive and rejection controls.
+- Renderer controls: valid published current/digest/status accepted; unpublished, pending,
+  failed, mismatched-digest or late stale generation rejected. Missing owner/attestation,
+  overdue access review and stale/failed scanner stay visibly unresolved; generation time
+  cannot refresh any observation or human review. A failed/stale scanner produces the
+required alert and stale status; missing alert recipient stays unresolved. Independent
+API observer and site-reader controls must each prove their own scope.
 
 ## Review log
 _(none yet)_
