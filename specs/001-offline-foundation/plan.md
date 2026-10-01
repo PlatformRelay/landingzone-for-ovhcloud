@@ -96,8 +96,15 @@ Implementation paths: see spec.md's Implementation surface; no generic src/ tree
 Feature artefacts: research.md, data-model.md, contracts/checks.md, quickstart.md, tasks.md.
 
 ## Delivery phases
-1. Setup: test the pin verifier and isolated execution boundary, then build Task targets
-   and offline image preparation. Capture real 1.13 passing and failing JSON streams.
+1. Setup: T001 selects pins, prepares only independently approved external source and
+   records version/provenance metadata. It creates a separately approved bounded control
+   driver and proves preparation identity/trust/config rejection and cleanup before closure.
+   T002 creates the approved external proof driver/tests/compiling stubs with valid and
+   behavioural red capture/isolation controls. T003 implements the actual preparation/entry,
+   toolchain target and capture admission; approve source/build closure before build, then
+   binary/image before installation, and repeat controls green. Only then may T004 capture
+   real 1.13 passing/failing JSON streams. See contracts/checks.md for exact control owners
+   and private driver boundaries; no candidate configuration executes on the host.
 2. US1: test the report adapter and traceability/DoD oracle; implement only fields consumed
    by CI and naming. Empty discovery and absent evidence must be behavioural failures.
 3. US2: independently author naming vectors first; implement two organisation templates,
@@ -135,7 +142,10 @@ it cannot meet its budget by dropping a layer. A provider-free module uses real 
 for L1/L2 and saved-plan output snapshots for L3, not fake provider output.
 
 ## Dependencies and live change ordering
-Tool preparation → isolation → report/registry → module + projections → forge checks.
+Approved T001 preparation and control proof → approved T002 valid/red boundary driver →
+approved T003 actual entry and green capture/isolation gate → T004 tool-output capture →
+report/registry → module + projections → forge checks. No later-created gate is a T001
+prerequisite; T001 instead owns preparation refusal/cleanup before its outputs are consumed.
 The current T001–T009 run stops at the report/registry and dependency/static foundation.
 T023 may then bootstrap only those implemented checks; missing foundation evidence
 blocks it. Unqualified pre-execution source admission blocks candidate publication/CI. A valid actual GitHub PR-head run and a failing behavior
