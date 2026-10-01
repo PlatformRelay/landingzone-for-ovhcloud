@@ -8,7 +8,7 @@ The operator wants several supported setups, not one opinionated landing zone: "
 are too opinionated; I'd like golden paths". Prior art ships a few fixed scenarios (Azure's
 accelerator lists several; AWS LZA and OCI one shape each) or a fork-and-customise starting point
 (Google example-foundation). Forks rot; fixed shapes exclude.
-Three independent blind designs in the round-2 brainstorm (agent-context, 2026-10-01) all arrived at
+Several independent designs for this project arrived at
 the same mechanism: a golden path is **data selecting variants over one shared composition graph**.
 
 ## Options considered
@@ -18,7 +18,7 @@ the same mechanism: a golden path is **data selecting variants over one shared c
 3. **Terragrunt/Terramate include hierarchy** — DRY, but a second tool for every adopter.
 4. **A generic orchestrator expanding YAML into module calls** — hidden DSL, hard to test.
 
-## Decision (proposed)
+## Decision
 Option 2.
 
 **Profile = golden path.** `profiles/<name>.yaml` (schema `schemas/profile.schema.json`) pins:
@@ -74,7 +74,7 @@ network emulation, Windows domain join, …).
 - The composition graph carries conditionals; readability is protected by rule 2 (one selection
   point per family) and by plan snapshots per profile (ADR-0008).
 - The capability matrix is small on purpose: five tested paths is the sustainable maximum for one
-  operator plus agents (opinion from all three blind designs).
+  operator plus agents (opinion).
 
 ## Counterpoints (kept even if overruled)
 - Large conditional graphs plan slowly and read badly; one root per path (option 1) is easier to
@@ -91,7 +91,4 @@ network emulation, Windows domain join, …).
 - Spike: `override_module` wildcards (1.13) in wiring tests only.
 
 ## Review log
-- 2026-10-01 round-2 adversarial review (needs spike): **rejected** the inclusion theorem and the
-  zero-diff spike; accepted — invariant tests per supported tuple, transitions as migrations,
-  conditional optionality, supported catalogue, comparative spike against thin roots, Azure prior-art
-  correction, `solo` cardinality. The profile-over-one-graph bet itself is kept pending the spike.
+- 2026-10-01: round-2 external adversarial review applied.

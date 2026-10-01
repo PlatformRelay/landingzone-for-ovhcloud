@@ -1,5 +1,5 @@
 # ADR-0003: Layered taxonomy, naming and labelling
-- Status: Proposed (revised 2026-10-01 after operator decision D2)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0002, ADR-0005, ADR-0006, ADR-0010, ADR-0020
 
@@ -20,7 +20,7 @@ and tag key/value limits are UNVERIFIED.
 - **Layer directories** (`modules/`, `components/`, `stages/` + `profiles/`) — chosen in ADR-0002.
 - **Naming module** as a pure-function module vs. a locals-only convention documented in prose.
 
-## Decision (proposed)
+## Decision
 **Layers**
 - `modules/` — provider-thin, one OVH product concern (`cloud-project`, `cloud-quota`, `iam-policy`,
   `private-network`, `kube-cluster`, `object-storage`, `logs-stream`, `naming`). May call providers;
@@ -136,10 +136,4 @@ AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marke
   for every kind in the catalogue; the plan policy rejects a resource missing `managed-by`.
 
 ## Review log
-- 2026-10-01 revision: component families with variants; `stages/` replaces `blueprints/`;
-  `names.yaml` dual source. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — no universal `name`/`tags` interface, `enabled`
-  is OpenTofu-only, no generated URN prefix, naming changes are migrations with independent golden vectors.
-- 2026-10-01 operator decision D2 (refined): per-organisation naming template with configurable
-  segment order; labelling convention with mandatory `managed-by`, `managed-in`, `instance`,
-  `release` keys and a per-organisation structure schema, policy-checked at merge, plan and scan.
+- 2026-10-01: round-2 external adversarial review applied.

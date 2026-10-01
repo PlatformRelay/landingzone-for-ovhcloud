@@ -19,12 +19,12 @@ OVHcloud's own docs define five pillars: IAM, networking, security, billing, obs
   IAM/naming conventions, networking baseline, observability, pipeline-side guardrails.
 - **C. Module library only** — AVM-style, no blueprints.
 
-## Decision (proposed)
+## Decision
 **B, delivered in the order of C**: modules first, then components, then stages and profiles (ADR-0003), each
 independently releasable, so the library hedge is never lost.
 
 - "Landing zone" is defined by OVHcloud's five pillars; every golden path documents how it covers each.
-- **Principle (round 2): opinionated at the seams, free in the middle.** The project fixes identity,
+- **Principle: opinionated at the seams, free in the middle.** The project fixes identity,
   state, pipeline, naming, guardrails and audit; it does not dictate what runs in a project. Several
   **golden paths** (ADR-0016) are supported from one codebase; several base stacks (ADR-0017) and
   IAM providers (ADR-0018) are first-class.
@@ -63,7 +63,4 @@ independently releasable, so the library hedge is never lost.
   tag conditions across two projects).
 
 ## Review log
-- 2026-10-01 revision: golden-path principle, multi-stack and multi-IAM scope, hybrid reserved
-  interface, brownfield goal. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — guardrail-coverage wording, release catalogue
-  of qualified combinations, adoption as a v1 gate; "greenfield accounts are rare" marked as assumption.
+- 2026-10-01: round-2 external adversarial review applied.

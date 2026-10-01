@@ -1,5 +1,5 @@
 # ADR-0006: Guardrails without organisation-level policy
-- Status: Proposed (revised 2026-10-01 after brainstorm round 2)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0001, ADR-0005, ADR-0008, ADR-0012, ADR-0018
 
@@ -22,7 +22,7 @@ Cost controls (verified): `ovh_cloud_quota` with `prevent_automatic_quota_upgrad
    declaring which planes enforce it, generated into docs, tested by mutation.
 4. Wait for the platform.
 
-## Decision (proposed)
+## Decision
 Option 3.
 
 **Guardrail spec** `policies/guardrails.yaml`: one entry per rule — id, intent, severity, profile
@@ -90,10 +90,4 @@ membership (ADR-0012), and for each plane whether it enforces the rule and how:
 - Spike: cost preview from the public catalogue API for three flavours and one managed cluster.
 
 ## Review log
-- 2026-10-01 revision: deny-floor and tag conditions (verified facts), enforcement matrix as data,
-  mutation tests, cost/quota guardrails. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 (later): architecture plane, five-outcome deployment report, delegation and default-egress
-  findings, commercial-safety rules adopted from the external blind design review.
-- 2026-10-01 round-2 adversarial review (needs spike): accepted — per-principal-class deny bindings
-  (universal group UNVERIFIED), route-specific tests, allow-cannot-override-deny for break-glass,
-  saved-plan apply instead of re-plan, `check` is not preventive, scoped wording, lockout recovery.
+- 2026-10-01: round-2 external adversarial review applied.

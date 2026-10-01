@@ -1,5 +1,5 @@
 # ADR-0008: Testing strategy — every `tofu test` feature, and beyond
-- Status: Proposed (rewritten 2026-10-01 after brainstorm round 2)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0005, ADR-0006, ADR-0007, ADR-0010, ADR-0016, ADR-0017
 
@@ -24,7 +24,7 @@ The go-ovh client accepts an arbitrary endpoint URL, which makes a record/replay
 Native `tofu test` only; Terratest only; a layered taxonomy where ~80 % of tests cost nothing and the
 sandbox pays only for what mocks cannot prove.
 
-## Decision (proposed)
+## Decision
 The layered taxonomy. Every layer has a Taskfile target (ADR-0007), a stated cost, and a cadence.
 
 | # | Layer | Mechanism | Catches | Cost | Cadence |
@@ -99,9 +99,4 @@ mock defaults are copied from recorded real values (`tests/fixtures/`), refreshe
 - Spike: `tofu test -json` → JUnit rendered in GitHub and GitLab.
 
 ## Review log
-- 2026-10-01 rewrite: L0–L10, every `tofu test` feature mapped, mutation, canary, replay spike,
-  fail-closed budget guard. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — `-filter` is file-level (separate live files),
-  never override the subject under test, offline mode = L0–L4 without network, reservation-based
-  admission with cleanup always enabled, defect-specific mutants, report envelope, mapped defect
-  classes, honest cost accounting, bounded record/replay spike. Rejected: nothing material.
+- 2026-10-01: round-2 external adversarial review applied.

@@ -9,7 +9,7 @@ Kubernetes (`ovh_cloud_project_kube*`, OIDC via `ovh_cloud_project_kube_oidc` �
 provider docs), plain OpenStack compute in a Public Cloud project (`openstack` provider), managed
 services only (databases, Object Storage, Logs Data Platform, OKMS), and hybrid attachments to bare
 metal or Hosted Private Cloud over vRack (`ovh_vrack_dedicated_server*`, `ovh_vrack_dedicated_cloud*`
-exist). The trap named by every blind design is the lowest common denominator: a "compute" interface
+exist). The trap to avoid is the lowest common denominator: a "compute" interface
 that fits none of them.
 
 ## Options considered
@@ -17,7 +17,7 @@ that fits none of them.
 - **B. Common outputs, kind-specific inputs** — one output schema; inputs stay native to the kind.
 - **C. Common inputs and outputs** — the LCD trap.
 
-## Decision (proposed)
+## Decision
 Option B.
 
 - `components/runtime/<kind>/` with kinds `kube-managed`, `vm-openstack`, `managed-only`,
@@ -72,8 +72,4 @@ Option B.
 - Spike: `ovh_cloud_project_kube_oidc` against a Keycloak realm (ADR-0018).
 
 ## Review log
-- 2026-10-01: IPAM ledger, IPv6 rule and the default-egress finding adopted from the external blind
-  design review.
-- 2026-10-01 round-2 adversarial review: **rejected** the universal output schema; accepted —
-  envelope plus typed capability outputs, consumer-declared requirements, no placeholders, several
-  capabilities per environment, actual implementation under mocks, default egress must be removed.
+- 2026-10-01: round-2 external adversarial review applied.

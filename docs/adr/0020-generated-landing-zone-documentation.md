@@ -20,7 +20,7 @@ exactly this: accounts, rights, justification, review dates.
   the reasons stored as data next to the permissions.
 - **C. A live dashboard service** — a second product with its own identity and hosting.
 
-## Decision (proposed)
+## Decision
 Option B. `tools/lz-docs` renders a per-installation documentation set from data only; nothing in it
 is typed by hand after setup.
 
@@ -80,4 +80,4 @@ deployment report).
 - Spike: GitHub Pages and GitLab Pages access control for a private site from the tenant-repo template.
 
 ## Review log
-_(empty)_
+_(none yet)_

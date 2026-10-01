@@ -17,7 +17,7 @@ commits, rebase-merge, no squash.
 3. OCI artifacts per module.
 4. One version for the whole repo.
 
-## Decision (proposed)
+## Decision
 - **Start with option 1**, designed so that 2 can be added without changing tags: tags are
   `<layer>/<name>/v<semver>` (e.g. `modules/private-network/v1.2.0`,
   `components/runtime/kube-managed/v0.3.0`, `profiles/team-kube/v0.3.0`). The tenant and profile
@@ -58,7 +58,4 @@ commits, rebase-merge, no squash.
   consume via `//modules/x?ref=` in OpenTofu; attempt registry publication from a monorepo tag.
 
 ## Review log
-- 2026-10-01 revision: tag examples use components and profiles; schema `apiVersion` rule.
-  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — release train with dependency closure is
-  authoritative, unique patchable train ids, tags as metadata, pre-1.0 semantics, no "upper edge".
+- 2026-10-01: round-2 external adversarial review applied.

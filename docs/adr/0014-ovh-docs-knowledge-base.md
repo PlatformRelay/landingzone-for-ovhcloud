@@ -1,5 +1,5 @@
 # ADR-0014: OVHcloud docs knowledge base
-- Status: Proposed (revised 2026-10-01 after brainstorm round 2)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0013, ADR-0015
 
@@ -18,7 +18,7 @@ landing-zone guides (five pillars) and the API/product guides this project cites
 Scrape docs.ovhcloud.com; clone a docs repo and commit it; clone locally, gitignored, and cite;
 vendor excerpts; an index only.
 
-## Decision (proposed)
+## Decision
 - **Committed index, local mirror.** `kb/manifest.yaml` (committed) records per cited page: canonical
   URL, upstream repository and immutable revision and path where available, fetch time, raw hash,
   normaliser version and normalised hash, licence evidence, and the claims that reference it, so a new
@@ -59,8 +59,4 @@ vendor excerpts; an index only.
   English-only sparse clone; verify the legacy-URL redirects used by existing citations.
 
 ## Review log
-- 2026-10-01 revision: source repo moved to `ovh/ovhcloud-docs`; committed manifest; weekly link job.
-  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 (later): claim ledger with status enum adopted from the external blind design review.
-- 2026-10-01 round-2 adversarial review: accepted — full manifest provenance fields, reviewed refresh
-  diffs, sparse checkout, per-file licence provenance.
+- 2026-10-01: round-2 external adversarial review applied.

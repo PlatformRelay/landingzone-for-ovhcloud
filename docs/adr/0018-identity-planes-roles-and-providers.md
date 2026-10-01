@@ -19,7 +19,7 @@ users, and the choice must be swappable without touching anything else.
 - **B. Adapters per plane × source behind one contract; IdP-side setup documented, not coded.**
 - **C. Keycloak mandatory as the single broker** — simplest to test, excludes shops with Entra/Okta.
 
-## Decision (proposed)
+## Decision
 Option B, with C as the reference IdP for CI.
 
 **Role catalogue (public API, fixed in v1):** `platform-admin`, `tenant-owner`, `tenant-developer`,
@@ -81,7 +81,7 @@ the SAML and OIDC paths are tested without an enterprise tenant.
 ## Counterpoints (kept even if overruled)
 - Five roles will not fit every organisation; custom roles are a documented extension (a sixth role
   = a new action list + bindings), not a v1 feature.
-- Banning humans from Keystone outright (one blind design's position) is cleaner for offboarding;
+- Banning humans from Keystone outright is cleaner for offboarding;
   rejected as too opinionated for `team-vm`. The ledger entry with expiry keeps it visible.
 
 ## Verification
@@ -93,9 +93,4 @@ the SAML and OIDC paths are tested without an enterprise tenant.
 - Spike: find the audit source for IAM logins and API activity consumable by Logs Data Platform.
 
 ## Review log
-- 2026-10-01: service-account → OpenStack bridge (OVH guide, verified), delegation scan and the
-  identity-authority catalogue adopted from the external blind design
-  (agent-context/inbox/REVIEW-codex-gpt-6-blind-2026-10-01.md).
-- 2026-10-01 round-2 adversarial review: accepted — "one offboarding action" withdrawn (Kubernetes
-  tokens are not revocable), revocation matrix with residual windows, IdP replacement as a migration,
-  pending federation actions block readiness. Offboarding claims are release blockers until qualified.
+- 2026-10-01: round-2 external adversarial review applied.

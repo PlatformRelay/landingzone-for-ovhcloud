@@ -21,7 +21,7 @@ resources since 1.10 and write-only arguments since 1.11, but not `enabled` or s
 - **OpenTofu-first**, Terraform compatibility best effort and tested where cheap.
 - Both fully supported, tested in CI.
 
-## Decision (proposed)
+## Decision
 - **OpenTofu is the supported engine** (minimum 1.13). Terraform compatibility is a separately
   labelled, **version-specific qualification for selected modules**, generated from a passing
   qualification job; a failing qualification removes the label before release. There is no
@@ -43,7 +43,8 @@ resources since 1.10 and write-only arguments since 1.11, but not `enabled` or s
   and used: `ovh_iam_policy` (deny, conditions, `expired_at`), `ovh_cloud_quota`,
   `ovh_cloud_project_alerting`, `ovh_cloud_project_kube_oidc`, `ovh_me_identity_user_token`,
   `ovh_me_api_oauth2_client`, the `ovh_vrack_*` family.
-- **Minimum OpenTofu 1.13** (wildcard overrides in tests, ADR-0008); `mock_provider` `source` (1.14)
+- **Minimum OpenTofu 1.13** (wildcard overrides in tests, ADR-0008); Terramate CLI (MPL-2.0, 0.17.x)
+  pinned for the instance layer (ADR-0007); `mock_provider` `source` (1.14)
   adopted when released to separate `ovh/ovh` from `openstack` mocks.
 - **Custom endpoint:** go-ovh accepts an arbitrary endpoint URL; the provider's `endpoint` is used by
   the record/replay proxy (ADR-0008). Whether the provider passes a full URL through unchanged is a spike.
@@ -64,8 +65,4 @@ resources since 1.10 and write-only arguments since 1.11, but not `enabled` or s
   against provider docs for 2.21.x; verify with `tofu validate` on a skeleton.
 
 ## Review log
-- 2026-10-01 revision: gap register seeded from verified provider docs; OpenTofu 1.13 minimum;
-  endpoint note; schema snapshot. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — resource name `ovh_iam_permissions_group`,
-  Terraform ephemeral/write-only correction, provider choice by lifecycle semantics, labelled
-  Terraform qualification instead of an informational job, gap paragraph reconciled.
+- 2026-10-01: round-2 external adversarial review applied.

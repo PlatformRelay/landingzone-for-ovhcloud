@@ -1,5 +1,5 @@
 # ADR-0005: Declarative tenant model, policy-driven auto-merge and the self-service transaction
-- Status: Proposed (rewritten 2026-10-01 after the round-2 adversarial review)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0003, ADR-0004, ADR-0006, ADR-0016, ADR-0017, ADR-0018, ADR-0021
 
@@ -14,16 +14,16 @@ forge** (operator decision D7). PlatformRelay's `assent` is the engine: determin
 (approve / comment / request-changes / block) from lintable, testable YAML policies with CEL
 predicates. Its current limits (GitHub adapter unbuilt) are tracked in the assent repository and do
 not shape this design.
-The round-2 review rejected the first trust contract: a request could edit the data that authorised
-it (owners, effective defaults, waivers), tenant HCL extensions would have executed under platform
-credentials, and a stale decommission flag could have authorised a later deletion.
+Auto-merge makes repository content part of an authorisation protocol, so three things must hold: a
+request can never edit the data that authorises it (owners, effective defaults, waivers); tenant HCL
+never executes under platform credentials; and a stale flag in a file never authorises a deletion.
 
 ## Options considered
 - HCL/tfvars per project; a portal; one YAML file per project rendered by the platform.
 - **A declarative tenant model in a separate self-service repo, with an auto-merge gate whose
   authority comes from trusted data, and a defined transaction lifecycle** (chosen).
 
-## Decision (proposed)
+## Decision
 
 ### Model
 Kinds under `apiVersion: lz.platformrelay.dev/v1alpha1`, strict-decode schemas in `schemas/`
@@ -114,11 +114,4 @@ deletion differs and is documented separately.
   billing checks.
 
 ## Review log
-- 2026-10-01 revision: project factory → declarative tenant model; assent gate; waivers; virtual hierarchy.
-- 2026-10-01 (later): adopt-first, order workflow, staged retirement from the external blind design.
-- 2026-10-01 (operator): auto-merge is a core feature on every forge; assent limits do not shape the design.
-- 2026-10-01 round-2 adversarial review: **rejected** the trust contract; accepted: authority from
-  trusted base data and allowlisted deltas, decision binding, aggregate reservations, extension roots
-  with scoped credentials, retirement record, transaction lifecycle, canonical effective document,
-  strict YAML. Rejected from the review: nothing material. Source:
-  agent-context/inbox/round2-review-codex-gpt-6-2026-10-01.md.
+- 2026-10-01: round-2 external adversarial review applied.

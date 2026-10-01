@@ -4,12 +4,11 @@
 - Related: ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0009, ADR-0018, ADR-0019
 
 ## Context
-The round-2 review ranked a missing threat model as the most consequential gap: without it, the
-auto-merge lane, the agent workflow, the extension mechanism and the sandbox each drew their own
-implicit trust line, and they disagreed. This ADR names the actors, the boundaries and the permitted
-bypasses once, and the other ADRs reference it.
+The auto-merge lane, the agent workflow, the extension mechanism and the sandbox each need a trust
+line, and when each draws its own they disagree. This ADR names the actors, the boundaries and the
+permitted bypasses once, and the other ADRs reference it.
 
-## Decision (proposed)
+## Decision
 
 ### Actors
 Tenant authors (self-service requests) · platform maintainers · AI agents authoring changes ·
@@ -62,4 +61,4 @@ identity code and before every release.
 - The spike list of ADR-0005 and ADR-0009 doubles as the first security-suite content.
 
 ## Review log
-- 2026-10-01: created from the round-2 adversarial review's "what is missing" items 1, 5 and 12.
+- 2026-10-01: created from the round-2 external adversarial review.
