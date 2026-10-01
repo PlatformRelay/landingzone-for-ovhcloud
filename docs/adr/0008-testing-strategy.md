@@ -62,7 +62,7 @@ bounded concurrent reservations, a maximum runtime and cleanup authority fit the
 ceiling; unknown billing, inventory or reaper health **blocks new admission while cleanup stays
 enabled**. Created resource ids are persisted independently of tags; test cancellation, process death
 and reaper failure are themselves tested. Smallest flavours, one cheap region, a pre-ordered project
-pool; spend published weekly to `docs/reference/test-costs.md`. Cap: 100 €/month (D8), recalibrated
+pool; spend published weekly to `docs/reference/test-costs.md`. Cap: 200 €/month (D8), recalibrated
 after a one-week rotation.
 
 **Reporting.** A common report envelope wraps each tool's own output (`-json-into` where a tool has

@@ -32,7 +32,10 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-NAM-002 | `names.yaml` is the single source for patterns, limits and docs; generated artefacts must be fresh | Gate and module never disagree | generator freshness check |
 | LZ-NAM-003 | Profiles and lifecycle metadata go in tags, never in names; names are immutable | Profile changes must not rename | naming tests |
 | LZ-NAM-004 | Name override input for imported resources; never auto-rename on algorithm change; version the algorithm | Brownfield safety | naming tests + review |
-| LZ-NAM-005 | Mandatory tags: `lz:domain`, `lz:tenant`, `lz:env`, `lz:owner`, `lz:profile`; tag keys are data in `names.yaml` | IAM conditions and billing depend on them | policy rule |
+| LZ-NAM-005 | Organisation-structure label keys come from the per-org `labels.yaml` schema (required/optional, allowed values, hierarchy level); unknown keys are rejected at merge, plan and scan | Adapts to org structures without code change | schema + Rego + scanner |
+| LZ-NAM-007 | Every labellable resource carries `managed-by=opentofu`, `managed-in=<forge>/<org>/<repo>//<path>`, `instance=<deployment instance id>`, `release=<train>`; Kubernetes objects carry them as labels, long values as annotations | Console triage, one writer per object, state-owner map | Rego on plan + scanner |
+| LZ-NAM-008 | Keys the IAM plane conditions on are marked `authorisation: true` and are set only by platform roots, never from a tenant file | A tenant must not be able to re-label itself into another envelope | schema + assent + Rego |
+| LZ-NAM-009 | The naming template is per-organisation data: segment order, separator, case, abbreviations, per-kind overrides, deterministic truncation; an impossible template fails at plan time | Flexible convention, one implementation | naming module validation |
 | LZ-NAM-006 | Per-resource length and charset limits carry a source URL per row; unknown limits are marked, not guessed | No invented universal limit | schema |
 
 ## 3. `tofu test` patterns (ADR-0008)
