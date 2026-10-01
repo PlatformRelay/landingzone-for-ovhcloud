@@ -35,6 +35,7 @@ with the first public release.
 | [0020](0020-generated-landing-zone-documentation.md) | Generated landing-zone documentation: system map, accounts and permissions with reasons | Proposed |
 | [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
 | [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
+| [0023](0023-guided-repository-preconfiguration.md) | Friendly, resumable repository preconfiguration | Proposed |
 
 ADR-0024 is reserved for cost/sandbox operations by phase 003 T001; it has not been authored yet.
 
