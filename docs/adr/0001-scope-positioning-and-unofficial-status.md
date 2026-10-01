@@ -9,8 +9,13 @@ Zones) ship landing zones whose value rests on **organisation-level** primitives
 service-control policies, org policy. OVHcloud, per our research, has none of these: the account is the
 top level, a Public Cloud project is the unit of isolation, billing and quota, and IAM policies are
 allow/deny on actions with tags as conditions, but nothing every project inherits automatically.
-No EU provider we found ships an open, tested landing-zone codebase (Scaleway: guidance PDF; STACKIT:
-partner-led blueprints; OVHcloud: documentation of a landing-zone approach, no accelerator).
+OVHcloud already publishes deployable network landing-zone examples in
+[`ovh/public-cloud-examples`](../reference/upstream-reference-map.md): hub/spoke with multi-vRack
+IPsec, mono-vRack LAN transit, and HA firewall adoption in an existing project. At the inspected
+revision the repository labels its code demonstration-only; no landing-zone test suite or CI
+workflow was found. This is a scoped source observation, not proof of absence across OVHcloud.
+The opportunity is a qualified cross-pillar baseline and its operating workflows, building on
+existing examples rather than claiming the first OVHcloud landing-zone codebase.
 OVHcloud's own docs define five pillars: IAM, networking, security, billing, observability.
 
 ## Options considered
@@ -18,6 +23,10 @@ OVHcloud's own docs define five pillars: IAM, networking, security, billing, obs
 - **B. Opinionated landing zone on OVH's real primitives, honest about the gaps** — project factory,
   IAM/naming conventions, networking baseline, observability, pipeline-side guardrails.
 - **C. Module library only** — AVM-style, no blueprints.
+- **D. Extend the published network examples only** — lowest duplication; suitable for generally
+  useful resource fixes, tests and guides. Their network scope and demo operating model do not yet
+  supply the proposed tenant/authority/evidence workflows. Reassess a separate accelerator as those
+  workflows are exercised; upstream contributions remain a valid outcome.
 
 ## Decision
 **B, delivered in the order of C**: modules first, then components, then stages and profiles (ADR-0003), each
@@ -38,12 +47,17 @@ independently releasable, so the library hedge is never lost.
   emits the tenant model plus `import` blocks, and a tenant "exit kit" (ADR-0022). The prevalence of
   brownfield accounts is an assumption, not a measured fact.
 - **Non-goals:** replacing the OVHcloud Manager; claiming certification (ADR-0012); parity with other
-  clouds; a CLI product or portal in v1.
+  clouds; a general cloud management CLI or portal in v1. The guided repository-preconfiguration
+  helper (ADR-0023), requested explicitly by the operator, is in scope.
 - **Unofficial status** appears in: README first block, docs landing page, every profile page, the
   tenant-repo template, release notes. Wording: independent community project, not endorsed or
   supported by OVHcloud, trademarks belong to their owners.
 - The docs open with a "What OVHcloud can't do (and what we do instead)" page, before any tutorial,
   followed by "Which golden path am I?".
+- Inspect published examples before writing equivalent resource code. The
+  [pinned reference map](../reference/upstream-reference-map.md) identifies reuse candidates,
+  qualification checks and provenance obligations. No entire network topology becomes a default
+  solely because it is available; the existing-project path is the smallest adoption reference.
 
 ## Consequences
 - Honest positioning costs some marketing appeal; avoids support burden from false expectations.
@@ -53,10 +67,13 @@ independently releasable, so the library hedge is never lost.
 - If OVHcloud ships org-level policy, ADR-0006 and ADR-0012 get superseded, not the project.
 
 ## Counterpoints
-- OVHcloud may publish its own accelerator, making this redundant. Mitigation: unofficial status is
-  explicit; interface decisions (ADR-0005) are portable.
+- Published examples already overlap the network foundation. Rebuilding those recipes alone adds
+  little value. Demonstrate safer adoption, reproducible checks and useful workflows; reuse or
+  contribute general fixes upstream instead of maintaining duplicates without a reason.
 - "Landing zone" may over-promise for a platform without a hierarchy. Alternative name: "platform
   baseline". Kept as an open question for ADR-0015.
+- Differentiators add state, authority and recovery work. Extensive testing is essential; stable
+  interfaces, progressive detail and visible operational states also bound that complexity.
 
 ## Verification
 - Spike: confirm no preventive org-wide deny exists (read IAM policy docs end to end, test `deny` +
