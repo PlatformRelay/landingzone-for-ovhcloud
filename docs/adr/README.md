@@ -15,7 +15,7 @@ with the first public release.
 |---|---|---|
 | [0001](0001-scope-positioning-and-unofficial-status.md) | Scope, positioning and unofficial status | Proposed |
 | [0002](0002-repository-structure.md) | Repository structure (monorepo) | Proposed |
-| [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy and module naming | Proposed |
+| [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy, naming and labelling | Proposed (call interface pending) |
 | [0004](0004-staged-roots-and-output-contracts.md) | Staged roots, separate state, typed output contracts | Proposed |
 | [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Proposed |
 | [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Proposed |
@@ -36,6 +36,8 @@ with the first public release.
 | [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
 | [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
 
+ADR-0024 is reserved for cost/sandbox operations by phase 003 T001; it has not been authored yet.
+
 Still to be written: network and resilience architecture, cost and sandbox operations, observability
 and incident response, documentation accessibility.
 
@@ -46,9 +48,10 @@ Small patterns, guidelines, tools and techniques live in [`docs/reference/patter
 
 1. Author drafts in this directory with status `Proposed`.
 2. At least two independent review rounds, each in a fresh session or a different model family, each
-   reading only the files — never another reviewer's output in round one.
-3. Findings are recorded in the ADR's *Review log* section with the reviewer, date, and disposition
-   (accepted / rejected + reason).
+   reading the files plus the current decision log and open operator decisions — never
+   another reviewer's output in round one. State the commissioning and scope.
+3. Detailed findings/dispositions stay in local-only review records. The ADR *Review log*
+   keeps a date and concise disposition without authoring attribution.
 4. A third round is an **operator walkthrough**: a fresh session and the operator walk through first
    setup, a failed apply, a compromised credential, lost state, an upgrade and a retirement using
    only the documented design; gaps become edits.
