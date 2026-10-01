@@ -109,7 +109,8 @@ gate their dependent implementation, while independent work proceeds.
 ## Governance and lifecycle
 Specs use `draft`, `active`, `done`, `dropped`; draft plans are not deployment approval.
 Active also requires operator disposition of constitution ratification and workflow
-scaffolding location; the recorded Ratified date is awaiting confirmation.
+scaffolding location; the operator confirmed constitution 1.2.0 ratification and committed
+workflow scaffolding on 2026-10-01.
 Active requires observed premises (or an explicit justified waiver) and mapped checks;
 a spike may activate only its bounded experiment. Done requires every check's evidence.
 Dependencies that need operator setup remain `blocked` and name the prerequisite.
