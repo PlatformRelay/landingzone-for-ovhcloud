@@ -5,6 +5,7 @@ description: Perform a non-destructive cross-artifact consistency and quality an
 ## Project verification contract
 
 Project override: include check coverage, task Verify/Evidence metadata, future-command creators, docs-only exemptions, premise evidence and task DAG in the analysis. Preserve the read-only analysis boundary.
+Check that undecided proposals have not become implicit decisions, that user-visible and recovery outcomes have verification, and that market/adoption assumptions do not block bounded engineering experiments. Apply constitution I–VIII.
 
 ## User Input
 

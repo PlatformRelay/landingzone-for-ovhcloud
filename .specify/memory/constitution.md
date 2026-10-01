@@ -1,10 +1,19 @@
-<!-- Sync impact: new constitution 1.0.0, 2026-10-01. Project overrides added for
-spec, plan and tasks templates; command guidance aligned. Docs-only work is exempt
-from automated-test requirements. Existing ADR statuses remain Proposed. -->
+<!-- Sync impact: constitution 1.1.0, 2026-10-01. Reference-baseline purpose,
+substantive differentiators, usable operations and reasoned challenge added;
+project overrides and command guidance synchronized. Docs-only work remains exempt.
+Existing ADR statuses remain Proposed; naming interface proposals remain undecided. -->
 # OVHcloud Landing Zone Accelerator constitution
-Version: 1.0.0 · Ratified: 2026-10-01 · Last amended: 2026-10-01
+Version: 1.1.0 · Ratified: 2026-10-01 · Last amended: 2026-10-01
 
-## I. Evidence before implementation
+## Purpose
+Build an inspectable reference baseline for an OVHcloud landing zone through useful
+experiments. Learning, visible technical contributions and a credible comparison point
+are outcomes in their own right; adoption is a desired outcome, not a prerequisite for
+starting. The maintainer's OVHcloud experience informs the design; official ownership
+and support are governed separately by ADR-0001. Do not require customer research or
+adoption evidence before building a bounded increment.
+
+## I. Evidence for claims; experiments for unknowns
 A spec MUST name its load-bearing host, tool and API premises, a probe and evidence
 status before implementation. An unobserved mechanism is `UNVERIFIED`, never a fact.
 A feasibility spike may start with an unobserved premise only when proving or refuting
@@ -27,7 +36,7 @@ Test-authoring tasks close with valid-case plus behavioural red evidence; implem
 tasks close with the same checks green. A missing binary or syntax error is not the red.
 
 ## III. Tests first; test the sensors
-Write behaviour tests before or alongside implementation. Unit, contract, snapshot
+Write failing behaviour tests before implementation. Unit, contract, snapshot
 and policy layers run without cloud credentials or cloud network access. Real-provider
 and apply tests have separate discovery roots and protected targets. A gate MUST
 reject a concrete defect for every guarded clause, retain a valid unusual case, and
@@ -68,6 +77,31 @@ kind. Full ADR-0019 AgentEx scope is due with the first vertical slice, not sile
 OpenTofu >=1.13 is supported; Terraform claims require a passing version-specific job.
 Tool and provider pins are exact, reviewed and recorded with evidence. Local installed
 versions are observations, not permission to lower the minimum. No telemetry.
+
+## VII. Useful differentiators and approachable operations
+Automatic installation documentation, per-run/JIT credentials, policy-driven auto-merge
+and adaptable naming/labelling are intentional product differentiators. Each needs a
+visible user outcome, a named failure/recovery case and predefined verification;
+their existence does not establish adoption or security effectiveness. Preserve the
+approved ambition while delivering runnable increments. Product output distinguishes
+planned, implemented and verified capabilities and their scope.
+Simple entry points, progressive detail, explained changes, stable diagnostics and
+the next safe action make background complexity operable. A Taskfile-backed guided
+preconfiguration helper offers explained use-case defaults, accurate customization progress
+and safe save/resume (ADR-0023); it prepares reviewed drafts without deployment authority.
+Tests cover user-visible
+behaviour and failure paths as well as internals. Tests do not remove responsibility
+for inspecting authority, persistent state, dependencies and recovery. No extra portal,
+general cloud management CLI or hosted control plane is implied by this principle.
+
+## VIII. Reasoned challenge and explicit decisions
+A proposed interface or technology is a hypothesis until explicitly decided. Compare
+credible alternatives against the intended outcome; push back with a concrete failure
+mode, source, experiment or better alternative. Do not manufacture objections merely
+to sound critical. Distinguish approved direction from an undecided implementation
+idea, and record material tradeoffs and the operator's decision. Once chosen, execute
+the decision; reopen it only for new evidence or an explicit request. Pending choices
+gate their dependent implementation, while independent work proceeds.
 
 ## Governance and lifecycle
 Specs use `draft`, `active`, `done`, `dropped`; draft plans are not deployment approval.

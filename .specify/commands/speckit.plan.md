@@ -13,6 +13,7 @@ handoffs:
 ## Project verification contract
 
 Project override: resolve unknowns into evidence-backed choices or bounded feasibility experiments with explicit downstream stop gates. Every non-docs requirement gets a predefined verification. Independent adversarial review follows the plan before task generation.
+Compare credible alternatives and concrete usage before choosing an interface. Reasoned challenge is required when warranted; contrarianism is not. Respect pending joint decisions and carry approved decisions forward. Include user-visible behaviour and operational complexity in the plan.
 
 ## User Input
 

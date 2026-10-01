@@ -1,10 +1,15 @@
 # Feature Specification: [FEATURE]
 Created: [DATE] · Status: draft · ADRs: [IDS]
 ## Why and scope
-[Observable outcome; explicit exclusions]
+[Reference-baseline contribution, learning objective and visible user outcome;
+explicit exclusions. Adoption research is not a prerequisite.]
+## Decisions and proposals
+[Approved direction; undecided interface hypotheses; credible alternatives and
+their concrete tradeoffs. Preserve pending joint decisions.]
 ## User Scenarios & Testing
 ### User Story 1 — [journey] (Priority: P1)
-[Given/when/then, independent observable check]
+[Given/when/then, independent observable check; explained result, progressive
+detail and next safe action. Include a failure/interruption/recovery scenario.]
 ## Premises
 | ID | Mechanism premise | Probe | Evidence status |
 | --- | --- | --- | --- |

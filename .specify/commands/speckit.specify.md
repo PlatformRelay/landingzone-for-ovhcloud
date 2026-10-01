@@ -13,6 +13,7 @@ handoffs:
 ## Project verification contract
 
 Project override: use the constitution and project spec-template override. Every non-docs requirement and success criterion needs a predefined observable check and evidence destination; list tool/API premises and their observation status.
+Record approved direction separately from undecided suggestions. Specify the visible baseline contribution, useful differentiator and failure/recovery journey; adoption evidence is not a development prerequisite.
 
 ## User Input
 

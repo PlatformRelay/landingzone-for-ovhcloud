@@ -14,6 +14,7 @@ handoffs:
 ## Project verification contract
 
 Project override: tests and predefined verification are mandatory for every non-docs task under constitution II–III. Include requirement/ADR IDs, exact paths, dependencies, Verify with expected positive and negative outcomes, and Evidence. Docs-only tasks use an explicit exemption. This supersedes the generic optional-tests guidance below.
+Map user-visible outcomes and failure/recovery behaviour to test tasks. Do not silently turn an undecided interface proposal into implementation authority; dependent tasks remain gated on the recorded decision.
 
 ## User Input
 

@@ -1,11 +1,14 @@
 # Implementation Plan: [FEATURE]
 Date: [DATE] · Spec: [spec.md](spec.md) · Status: draft
 ## Summary
-[Cheapest useful increment]
+[Runnable increment; baseline contribution and useful differentiator demonstrated]
 ## Technical Context
 [Language/version, dependencies, storage, platform, testing, cost, runtime bounds]
 ## Constitution Check
-[Principles I–VI before research and after design; explicit blocked gates]
+[Principles I–VIII before research and after design; explicit blocked gates]
+## Alternatives and decisions
+[Compare credible interfaces with concrete call sites and failure modes. Identify
+approved decisions, pending joint choices and the cheapest discriminating experiment.]
 ## Project Structure
 [Concrete paths; contracts, data-model.md, research.md, quickstart.md]
 ## Delivery phases
@@ -16,4 +19,5 @@ positive/negative controls, clause mutation, evidence, doc exemption]
 ## Dependencies and live change ordering
 [Graph independently reconstructed; authorization, cleanup and stop gates]
 ## Complexity tracking
-[Why each new tool is needed; deferred work and trade-offs]
+[Why each new tool is needed; authority, state, dependencies and recovery burden;
+simple entry point and progressive detail; deferred work and tradeoffs]
