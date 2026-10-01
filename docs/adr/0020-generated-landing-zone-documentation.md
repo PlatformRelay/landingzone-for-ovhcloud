@@ -50,11 +50,18 @@ is typed by hand after setup.
    customer-side prerequisites still pending (`pending_actions`), and the control-to-evidence table.
 7. **Change log**: the dated merge history of the tenant repo with the auto-merge decision records.
 
-**Publishing**: the tenant-repo template (ADR-0005) includes a docs job: render → build (the site
-tool chosen in ADR-0013) → publish to GitHub Pages or GitLab Pages, on every merge and nightly after
-the conformance run, so the "actual" columns are at most a day old. Each page carries a generated-at
-stamp and the commit it was rendered from. The site is private by default (Pages access control
-where the forge supports it); the docs never contain secrets, only identifiers.
+**Publishing, fail-closed**: the tenant-repo template (ADR-0005) includes a docs job: render → build
+(the site tool chosen in ADR-0013) → publish, on every merge and nightly after the conformance run,
+so the "actual" columns are at most a day old. Each page carries a generated-at stamp and the commit
+it was rendered from. The rendered inventory names break-glass holders, permission scopes and network
+structure, so **the default target is a private artefact** (the forge's protected artefact store or a
+protected branch readable only by repository members) or a local directory. Publishing to a hosted
+site requires **verified access control** before any upload: the job proves that an unauthenticated
+request is denied and an intended reader is admitted, and refuses to publish otherwise. GitHub Pages
+can restrict visibility only for organisations on Enterprise Cloud; GitLab Pages access control is
+available more broadly but is still verified, not assumed. Public publishing is a separate, explicit
+choice with a reviewed data scope (no accounts, no network map). The docs never contain secrets,
+only identifiers.
 
 **Evidence rules**: every "actual" value cites its source (stage output or scanner run id); a value
 the scanner could not collect is shown as `UNVERIFIED`, never omitted or guessed (same rule as the
@@ -71,7 +78,8 @@ deployment report).
 - Generated prose reads mechanically; the pages are reference material and say so; explanations
   stay hand-written in the project docs.
 - Publishing the account inventory, even privately, is a disclosure risk; mitigations: identifiers
-  only, access-controlled Pages, and a profile switch to render to a local directory instead.
+  only, private artefact by default, verified access control before any hosted publication, and a
+  reviewed reduced scope for anything public.
 
 ## Verification
 - Spike: render the accounts-and-permissions page for the `solo` profile from a sandbox: ledger +

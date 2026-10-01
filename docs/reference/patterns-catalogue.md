@@ -80,6 +80,9 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-CI-005 | Never print full plan JSON into a public PR; post a sanitised summary (adds/changes/destroys, rule hits, cost estimate) | Plans can leak secrets | plan-summary tool |
 | LZ-CI-006 | Monorepo jobs run changed directories **and their dependants** from the dependency checker's graph; tenant-repo runs select instances with `terramate list --changed` | Shared defaults matter | dependency checker + Terramate |
 | LZ-CI-008 | Terramate-generated files (backend, providers, module calls) are committed and a freshness check fails CI when `terramate generate` would change them | Instances are always runnable vanilla OpenTofu | freshness check |
+| LZ-CI-009 | Ordering and selection are separate: `after`/`before` order, `wants` (generated from the artefact graph) selects consumers, and the driver widens selection with instances whose consumed artefacts changed outside git | Dependants are never skipped | reconciler + qualification fixture |
+| LZ-CI-010 | Output artefacts are immutable and generation-stamped with a publication record; plans bind consumed digests; apply fences against the producer's current generation; waves apply and publish before consumers plan | No stale upstream inputs | transaction driver + tests |
+| LZ-CI-011 | Manifest rows and stack directories correspond exactly; instance ids are immutable; a row removed without a retirement record is a tombstone, not a deletion | Lifecycle without surprises | reconciler check |
 | LZ-CI-007 | Gate loosening needs its own justification line in the PR (workspace rule) | No silent erosion | review |
 
 ## 6. State, identity and secrets (ADR-0009, ADR-0018)
@@ -119,6 +122,7 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-DOC-004 | "compliant"/"certified" banned; "aligned", "supports controls" allowed | Legal exposure | Vale rule |
 | LZ-DOC-005 | Terminology mapping pages carry caveats, never "equivalent" | Honesty | review |
 | LZ-DOC-006 | Every security page has "what this does not protect against" | Honesty | docs lint |
+| LZ-DOC-007 | Generated installation docs go to a private artefact by default; a hosted site is used only after an unauthenticated-denial and intended-reader test passes; public publication is a separate reviewed scope | Fail-closed disclosure | docs job gate |
 
 ## 10. AgentEx (ADR-0019)
 | Id | Pattern | Why | Enforced by |
