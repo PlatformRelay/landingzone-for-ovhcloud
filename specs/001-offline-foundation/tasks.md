@@ -10,6 +10,11 @@ acceptance-table evidence path and references the task packets that support it.
 All Go test code lives under the single tools Go module, including tools/internal/probes/.
 Root tests/ holds HCL fixtures, captured outputs and qualification data consumed by that
 module; no second Go module or package outside tools/ is assumed.
+All Task/Go check invocations below are isolated-child commands entered through the
+separately installed, independently approved `lz-offline` (creator T003). They are not
+host shortcuts. T002 tests the approved boundary stub/entry from an external test driver;
+its deliberately untrusted fixture checkout is data, never the host test driver or build source.
+Before T003 exists, only that separately reviewed bounded proof driver/stub may execute.
 
 ## Authorized run boundary
 
@@ -19,24 +24,24 @@ gates, PR-head CI, review and mergeability; missing CI is not a green gate.
 On 2026-10-01 the operator accepted ADR-0002, ratified constitution
 1.2.0 and chose committed reusable workflow scaffolding. Those earlier external gates
 are resolved. Add directories with their first real artifact. Exact tool/image pins,
-prepared local runtime/cache and P1/P2 qualification remain implementation premises,
+prepared local runtime/mirror and P1/P2 qualification remain implementation premises,
 not passed observations. T010–T022 are not activated by completing this subset.
 
 ## Setup and foundation
 
 - [ ] T001 Select exact signed/checksummed tool and image pins in mise.toml and bootstrap tools/go.mod
   - Requirements: FR-001; ADRs: 0002, 0011. Depends on: operator structure, ratification and scaffold dispositions confirmed 2026-10-01; independent planning review before implementation.
-  - Verify: Procedure: install recorded pins, run `go -C tools list -m`, `mise exec -- tofu version`, `mise exec -- terramate version`; compare exact identities to pins; missing/mismatched identity refuses fixture capture.
+  - Verify: Procedure: independently approve the explicit preparation/build closure and recorded pins before any execution; install from that approved source outside the candidate (never load candidate mise/Task configuration on the host), run `go -C tools list -m`, `mise exec -- tofu version`, `mise exec -- terramate version`; compare exact identities to pins; missing/mismatched identity refuses fixture capture.
   - Evidence: `.local/evidence/001/t001-toolchain.json`; initial status `not-run`.
 
 - [ ] T002 Write pin/isolation tests and minimal compiling boundary stubs in tools/internal/checks/toolchain_test.go and tools/internal/probes/security/offline_test.go
   - Requirements: FR-001, FR-002; ADRs: 0008, 0011, 0021. Depends on: T001.
-  - Verify: `go -C tools test ./internal/checks ./internal/probes/security -run "TestToolchain|TestOfflineBoundary" -count=1`; valid pin/isolation control plus wrong version, absent tool, credential/socket mount, outbound subprocess and malicious host-launch cases must expose behavioural red.
+  - Verify: `go -C tools test ./internal/checks ./internal/probes/security -run "TestToolchain|TestOfflineBoundary" -count=1`; valid pin/isolation control plus wrong version, absent tool, credential/socket mount, outbound subprocess and malicious host-launch cases must expose behavioural red. Invoke the advertised external entry from a candidate cwd with malicious Taskfile shell variables, includes, hooks, launcher replacement and local configuration: no host marker/token/network access may precede isolation. Use synthetic credentials only. Retain reachable outbound positive control, actual denial reason and isolation-off mutation; timeout/DNS failure is not denial proof.
   - Evidence: `.local/evidence/001/t002-boundary-red.json`; initial status `not-run`.
 
-- [ ] T003 Implement trusted preparation, launcher and local isolation in tools/internal/checks/offline.go, harness/capabilities.yaml and Taskfile.yml
+- [ ] T003 Implement trusted preparation, external host entry and local isolation in tools/cmd/lz-offline/, tools/internal/checks/offline.go, harness/capabilities.yaml and Taskfile.yml
   - Requirements: FR-001, FR-002; ADRs: 0007, 0011, 0021. Depends on: T002.
-  - Verify: `task verify:toolchain; task test:offline-boundary`: valid prepared image succeeds; wrong/missing pin, credential/socket/cache mount, outbound child or candidate-controlled launch rejects. Creates both targets; trusted CI wrapper is integrated in T011.
+  - Verify: Planned `<approved-absolute-path>/lz-offline --candidate <checkout> -- task verify:toolchain` and the same entry with `task test:offline-boundary`: valid prepared image succeeds; wrong/missing pin, credential/socket/cache mount, outbound child or candidate-controlled launch rejects. Independently approve the launcher source/build/binary digest, install outside the candidate from the approved closure, then repeat T002 attacks through this actual host entry. Prepared provider mirror/lockfile and explicit mirror-only CLI config must support real `tofu init -backend=false -lockfile=readonly` with network=none; missing provider/hash or network fallback fails. Creates lz-offline and both child targets. T023 qualifies its own CI source admission; full forge wrapper stays T011.
   - Evidence: `.local/evidence/001/t003-boundary-green.json`; initial status `not-run`.
 
 - [ ] T004 Capture pinned passing/failing/truncated tofu JSON streams and write report tests in tools/internal/report/report_test.go and tests/fixtures/tofu/
@@ -61,12 +66,12 @@ not passed observations. T010–T022 are not activated by completing this subset
 
 - [ ] T008 Write layer/changed-closure and real-tool static tests in tools/internal/checks/{dependencies,static}_test.go and tests/check/fixtures/{dependencies,static}/
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T007.
-  - Verify: `go -C tools test ./internal/checks -run "TestDependencies|TestStatic" -count=1`: leaf+consumer and shared-tool changes select exact closure; reverse edge/cycle/unresolved reference fail; unknown path selects full suite; omitted selection clause yields behavioural red. Also run pinned `tofu fmt -check`, `tofu validate -json` and configured tflint on valid/unformatted/malformed/linter-offence fixture modules; bypass each clause and require behavioural red, not missing-tool failure.
+  - Verify: `go -C tools test ./internal/checks -run "TestDependencies|TestStatic" -count=1`: leaf+consumer and shared-tool changes select exact closure; reverse edge/cycle/unresolved reference fail; unknown path selects full suite. Include separate aliases, generated files, nested subdirectories, external sources and generated-instance fixtures from ADR-0002; classify every directory/edge and retain transitive consumers. An unresolved external/package boundary fails or widens, never silently disappears. Drop a consumer or classification for each fixture class and require behavioural red; no generator is implemented. Also run pinned `tofu fmt -check`, `tofu validate -json` and configured tflint on valid/unformatted/malformed/linter-offence fixture modules; bypass each clause and require behavioural red, not missing-tool failure.
   - Evidence: `.local/evidence/001/t008-dependencies-red.json`; initial status `not-run`.
 
 - [ ] T009 Implement dependency scanning, applicable L0 runners and full-suite fallback in tools/internal/checks/{dependencies,static}.go, .tflint.hcl and Taskfile.yml
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T008.
-  - Verify: `task test:dependencies; task test:static`: V006 valid/dependency/static fixture controls pass; deleting consumer selection or accepting reversed layer edge fails its control. Creates test:dependencies, test:static and lint targets plus changed-path selection for task check. `task lint -- modules/naming` runs real pinned `tofu fmt -check -recursive modules/naming`, prepared-cache `tofu -chdir=modules/naming init -backend=false`, `tofu -chdir=modules/naming validate -json`, and `tflint --chdir=modules/naming --format=json`; actual counted observations only. Schema result joins after T016; resource scanning is not-applicable, docs-only tests exempt.
+  - Verify: `task test:dependencies; task test:static`: V006 valid/dependency/static controls include every T008/ADR-0002 fixture class; deleting consumer selection, dropping an alias/generated/nested/external/generated-instance edge or accepting reversed layer edge fails its own control. Creates test:dependencies, test:static and lint targets plus changed-path selection for task check. `task lint -- modules/naming` runs real pinned `tofu fmt -check -recursive modules/naming`, mirror-only `tofu -chdir=modules/naming init -backend=false -lockfile=readonly`, `tofu -chdir=modules/naming validate -json`, and `tflint --chdir=modules/naming --format=json`; actual counted observations only. Schema result joins after T016; resource scanning is not-applicable, docs-only tests exempt.
   - Subset outcome: verify the real-tool runner on T008's fixture modules. Before T014 creates modules/naming, its lint/DoD result is not-run with nonzero required-check status; never fabricate a module pass or close V006's later schema duties.
   - Evidence: `.local/evidence/001/t009-dependencies.json`; initial status `not-run`.
 
@@ -154,8 +159,8 @@ Independent test: V003, V008.
   - Evidence: `.local/evidence/001/t021-latency.json`; initial status `not-run`.
 
 - [ ] T022 Run foundation exit checks and independent evidence inspection through harness/checks.yaml
-  - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, SC-001, SC-002, SC-003, SC-004; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T019, T021.
-  - Verify: Run every V001–V008 command from spec.md and `task check -- modules/naming`; valid cases pass, every guarded clause has a killed behavioural mutant/valid unusual case; absent tool, forge proof or expert review prevents phase exit.
+  - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, SC-001, SC-002, SC-003, SC-004, SC-005; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T019, T021, T023.
+  - Verify: Run every V001–V009 command from spec.md and `task check -- modules/naming`; valid cases pass, every guarded clause has a killed behavioural mutant/valid unusual case; absent tool, forge proof or expert review prevents phase exit.
   - Aggregate ADR rationale: 0002 paths/layers; 0003 names/labels; 0007 forge execution; 0008 checks/evidence; 0011 pins; 0019 diagnostics/DoD; 0021 protected boundary.
   - Evidence: `.local/evidence/001/t022-exit.json`; initial status `not-run`.
 
@@ -163,6 +168,7 @@ Independent test: V003, V008.
 
 | Task target | Creating task |
 | --- | --- |
+| `lz-offline` (approved external host entry) | T003 |
 | `task verify:toolchain` | T003 |
 | `task test:offline-boundary` | T003 |
 | `task test:reports` | T005 |
@@ -188,10 +194,14 @@ Independent test: V003, V008.
 
 ## Conditional CI bootstrap
 
-- [ ] T023 Test first, then implement minimal GitHub foundation CI in .github/workflows/foundation.yml, tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
-  - Requirements: FR-010, SC-005; ADRs: 0007, 0008, 0011, 0021. Depends on: T009; evidenced T001–T009 completion and independent approval of exact workflow/launcher source before push; actual GitHub execution available.
-  - Verify: Planned `task test:foundation-ci; task ci:foundation`. First write valid reviewed owned-branch fixtures plus defect controls and retain behavioral red before implementation. Reject unpinned Actions, write/token/secret or privileged-cache authority, unreviewed/fork triggers, candidate execution on the connected host, skipped/omitted checks, zero discovery and stale source/head. Then implement only the T003/T005/T007/T009 foundation aggregate inside T003 isolation, using exact Action/image/source pins, owned-branch push triggers, an ephemeral GitHub-hosted runner, contents-read fetch authority outside the child and a 10-minute job timeout. Record tests green, a real failing behavioral CI control and a valid actual run on the foundation PR head; inspect run/check metadata, reviewed workflow/launcher/image digests, all required check counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge; no cloud credentials, deployment or protected-environment secrets. Creates both targets and V009 packet. T010–T012 remain open; this bootstrap does not certify arbitrary fork execution or both-forge publisher enforcement.
-  - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain the pre-implementation red, green controls, actual run/check IDs and exact head/source bindings, plus the V009 packet reference.
+- [ ] T023 Test first, then qualify source admission and implement minimal GitHub foundation CI in .github/workflows/foundation.yml, pipelines/github/foundation-source.json, tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
+  - Requirements: FR-010, SC-005; ADRs: 0007, 0008, 0011, 0021. Depends on: T009; evidenced T001–T009 completion and independent approval of exact workflow/launcher closure before controlled source publication; repository/disposable-probe setup access and actual GitHub execution available. T023 creates and qualifies its own source-admission prerequisite; no pre-existing trusted workflow/ruleset is assumed. Its unqualified state blocks candidate push/CI/merge, not the bounded setup proof.
+  - Verify: Planned child `task test:foundation-ci; task ci:foundation`. Write approved-source/candidate fixtures first; retain behavioral red for each C010 clause before implementation. Reject unpinned Actions, widened authority, candidate host execution, omitted/zero/skipped checks and stale source/head.
+  - Source-admission proof (created here): setup runs only through a separately reviewed external driver; fetch/settings credentials never enter candidate tasks. First trial the exact setup in a disposable repository. Suspend candidate publication; disable Actions and read back disabled execution. Independently approve the complete workflow/Action/launcher/image closure, then publish it on a ref that cannot trigger candidate execution. Activate a no-bypass push ruleset covering every `.github/workflows/**` path; read back active rules, empty bypass list and matching approved closure before enabling Actions, with no queued/started candidate run. A candidate-owned source manifest cannot approve itself.
+  - Admission controls: prove the exact intended initial source-publication history, unchanged approved-source candidate push and final rebase-merge under the repo-wide freeze; source bytes must remain independently approved throughout. Ordinary file-push success alone is insufficient. Workflow edit, deletion, rename, newly added automatic YAML and a second unreviewed source push are refused before any runner executes; exercise available Git push/API paths and record actual denials. Unavailable enforcement, rejected initial publication/valid history/rebase-merge or any host execution blocks T023/merge; no candidate-CI fallback. Independently review the tested setup before target settings writes.
+  - Cleanup/recovery: bound the disposable probe's deadline and finally cancel runs, disable Actions and remove only recorded temporary refs/resources; cleanup error blocks qualification. Target setup failure/source update leaves Actions disabled and candidate publication suspended. Retain the setup/source snapshot; repeat independent source approval and qualification before re-enabling. Never remove enforcement while execution is enabled.
+  - CI proof: only after source admission passes, execute the T003/T005/T007/T009 aggregate in T003 isolation. Frozen YAML uses full-SHA Actions and digest-pinned approved host launcher/image, owned-branch push triggers, ephemeral hosted runner, contents-read outer fetch and 10-minute timeout; candidate archive is data, never host checkout/build/source/execution. Tokens stay outside the child. Retain tests green, an actual failing behavioral run and valid GitHub run/check on the foundation PR head. Verify executed workflow/launcher/image/publisher identities, exact candidate SHA, counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge; no cloud/deployment/protected-environment authority. Creates both child targets, source manifest and V009 packet; full T010–T012 qualification remains open.
+  - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain the pre-implementation red, green controls, source review/freeze identity, valid admission and denied-push observations, actual run/check IDs and exact head/source bindings, plus the V009 packet reference.
 
 ## Dependencies & execution order
 
@@ -202,7 +212,8 @@ prerequisites exist; defining it does not close its acceptance check.
 
 Authorized minimum: T001–T009 supplies offline/report/traceability and fixture-based
 dependency/static checks without cloud resources. Review the foundation, then run T023
-only if those tasks have evidenced completion. Review the bounded branch and actual CI.
+only if those tasks have evidenced completion; T023 creates and qualifies CI source
+admission before candidate publication. Review the bounded branch and actual CI.
 Naming, full forge qualification, AgentEx and whole-feature exit tasks remain outside its
 authorization; T022 still requires real forge evidence and whole-suite latency.
 Prepare a bounded IAM/state feasibility slice after minimum safety, retaining its

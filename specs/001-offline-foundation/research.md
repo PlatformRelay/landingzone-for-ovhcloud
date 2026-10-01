@@ -5,8 +5,13 @@ revision and licence in .specify/UPSTREAM.md. Project overrides require predefin
 verification for behavioral work; workstation versions are private observations.
 ## Decision: a prepared offline boundary
 Rationale: removing OVH_* variables cannot block a provider or external subprocess from
-making calls. Prepare checksum-verified tools/provider cache separately; run the suite in
-a pinned no-network image without host credential mounts. Alternative env-only mode rejected.
+making calls. Prepare checksum-verified tools/provider filesystem mirror and lockfile separately; run the suite in
+a pinned no-network image without host credential mounts and explicit mirror-only provider
+installation (no direct/network fallback). A plugin cache alone is not offline installation.
+The host entry is an approved absolute-path `lz-offline` installed outside the candidate
+from independently reviewed source/binary digest; candidate Task/Go commands are child
+operations only. Tests must enter this real host entry with malicious checkout data.
+T002's initial boundary stub/test driver is explicitly reviewed before its bounded proof. Alternative env-only mode rejected.
 ## Decision: candidate-independent CI launcher
 Use a protected base-revision verification workflow, maintainer-dispatched against a candidate
 SHA. Fetch its archive as data and validate extraction paths; execute all candidate commands
@@ -14,6 +19,23 @@ in the prepared isolated image. Fetch/publish tokens stay in the outer trusted j
 workflow or Taskfile controls mounts, image or launch arguments. Required checks bind expected
 publisher and candidate digest; qualify actual enforcement on both forges. Alternative trusting
 a candidate `task check` to enter its own isolation rejected. Parent-run checks only are certified.
+## Bounded GitHub source-admission hypothesis
+Owned-branch push filters do not select trusted workflow source: GitHub resolves YAML from
+the event SHA/ref. Manual dispatch also resolves its ref and requires a default-branch
+workflow; changing the event alone cannot close this gate. Post-run digest review is too late.
+T023 proposes one independently approved source publication on a ref that cannot execute
+candidates with Actions disabled and candidate publication suspended, followed by an active no-bypass push
+ruleset restricting every workflow path before candidate admission. Frozen YAML invokes only
+full-SHA/digest-pinned approved host code. Qualification must accept the exact intended
+initial source publication, candidate history and final rebase-merge under the repo-wide freeze and reject a second unreviewed push, added YAML and edit/rename/deletion
+through available push/API paths before any runner executes. Read back Actions disabled before publication, then active rules/no bypass and source
+closure before re-enabling. T023 creates/probes this setup on a disposable repository first,
+with bounded finally cleanup; failed setup/source updates retain disabled execution until
+requalified. Source updates repeat the gate.
+GitHub documents private push rulesets for Team; plan availability is not enforcement proof.
+No source/rule is already qualified. If this mechanism fails, T023 and merge remain blocked;
+a protected external/base-source evaluator plus scoped publisher is an alternative requiring
+separate setup/authority disposition, not a claimed existing fallback.
 ## Decision: one pure module first
 Rationale: names/labels are required by D2 and exercise reporting, schemas, contracts,
 snapshots and policy without cloud charges. Cloud applicability is gated on evidenced rows;
@@ -37,6 +59,14 @@ decoding, stable recipe revisions and per-target metadata projections remain req
 - https://opentofu.org/docs/cli/commands/test/ (framework; capture actual pinned output before parser work)
 - ADR-0002 (Accepted), 0003, 0008, 0019, 0021 (other recorded statuses remain unchanged).
 No cloud name/tag constraint is promoted from prose to observed API behaviour here.
+
+## Source-selection references
+- [GitHub workflow resolution](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows)
+- [GitHub dispatch ref/default-branch requirements](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
+- [Push ruleset availability](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)
+- [Workflow path restrictions](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#restrict-file-paths)
+- [OpenTofu mirror installation](https://opentofu.org/docs/cli/config/config-file/#explicit-installation-method-configuration)
+These describe mechanisms; T003/T023 owe pinned-runtime and actual denial/admission evidence.
 
 ## Upstream input trace
 Naming reference inputs: the pinned scalar context example in ../../docs/reference/upstream-reference-map.md is a comparison input for later T013–T016/V004–V006, not a released schema. Use independent expected vectors, not copied generated outputs. These tasks remain outside the foundation run.

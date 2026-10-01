@@ -3,7 +3,8 @@ Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft
 
 ## Summary
 Build a narrow Go-based check/report harness around the first provider-free naming module.
-Use Task as the local/CI interface. Do not add an agent framework or provision cloud resources.
+Use Task as the in-child check interface; use a separately approved launcher as the host entry.
+Do not add an agent framework or provision cloud resources.
 
 The authorized increment is T001–T009: toolchain, local isolation, reports, trace/DoD
 and dependency/static checks, plus conditional GitHub CI bootstrap T023 after those pass.
@@ -21,8 +22,15 @@ authority and operating prerequisites remain separate.
   a provider fixture is introduced. Other tools and the offline image get exact versions
   and verified digests in the initial toolchain task, before fixtures are captured.
 - Target: Linux amd64 CI with a digest-pinned OCI image; no cloud credentials or mounts.
-  Separate credential-free preparation downloads providers into a checksum-verified cache.
-  Local `task check` uses the prepared image with network=none; absence of runtime/cache fails.
+  Separate credential-free preparation downloads providers into a checksum-verified filesystem
+  mirror and lockfile. Explicit provider installation has no direct/network fallback.
+  T003 creates `lz-offline`, installed at an approved absolute path outside the candidate tree
+  with independently reviewed source/binary digest. It treats the checkout as data, ignores
+  candidate Taskfiles/includes/hooks/configuration on the host, and enters the prepared image
+  with network=none before invoking `task check`. Runtime/image/mirror absence fails.
+  Candidate code cannot build, replace or select this host launcher; preparation/build/install
+  of the approved closure is separate from candidate execution. All Task shortcuts below
+  denote child commands, never a host command that loads a candidate Taskfile.
   Full forge qualification later uses a protected verification workflow at an explicitly approved base revision, triggered
   by maintainer dispatch with a candidate SHA. Its trusted launcher obtains a candidate archive
   as data, validates rooted paths, then invokes candidate commands only inside network=none,
@@ -33,13 +41,32 @@ authority and operating prerequisites remain separate.
   digests and expected publisher; required-check origin enforcement must be qualified.
   Ordinary candidate CI is advisory until that trusted result exists; no pull_request_target
   checkout of fork code. This certifies parent-run fork checks, not fork-owned infrastructure.
-  The narrower T023 bootstrap supplies actual CI for the reviewed owned foundation branch:
-  owned-branch push triggers, ephemeral GitHub-hosted execution, contents-read fetch only,
-  full-SHA Actions and an independently reviewed launcher revision/image digest. Tokens
-  stay outside candidate execution in the T003 boundary. Check acceptance binds the actual
-  PR head and reviewed workflow/launcher digest, not merely a green name. No unreviewed/fork
-  PR trigger, deployment identity or protected-environment secret is used. It does not
-  qualify the broader protected-publisher/fork contract; T010–T012 remain planned.
+  T023 first qualifies CI source admission, then supplies actual CI for the owned foundation
+  branch. Its proposed mechanism is one controlled publication of independently reviewed
+  workflow source with Actions disabled and candidate publication suspended, followed by an
+  active push ruleset with no bypass restricting every `.github/workflows/**` path.
+  Read back Actions disabled before source publication; the source publication
+  ref must not trigger candidate execution. T023 creates this prerequisite as a bounded
+  disposable-repository proof after T001–T009, not an unexplained pre-existing wrapper.
+  Independently review tested setup before target writes; read back active rules, no bypass
+  and frozen source before enabling Actions, with no pending candidate run. The probe
+  finally cancels runs, disables Actions and cleans only recorded temporary refs/resources;
+  cleanup error blocks. Failure/source updates leave execution disabled and publication
+  suspended; never remove enforcement while execution is enabled. Before the first candidate push, prove that an
+  unchanged approved workflow admits the intended initial source history, candidate push and
+  final rebase-merge while edits, deletion, rename and an
+  added automatic workflow are refused before runner execution. Test a second unreviewed
+  push and all available candidate push/API paths. If initial history admission or enforcement
+  fails, T023 and merge stay blocked; do not relax the rule or allow a review-after-run bypass.
+  The frozen YAML executes only full-SHA Actions and an approved digest-pinned launcher/image
+  closure outside the candidate; no host checkout/build/source of candidate scripts. It uses
+  an ephemeral GitHub-hosted runner, contents-read fetch only, isolated candidate commands
+  and a 10-minute timeout. Tokens remain outside the child. Workflow/launcher updates suspend
+  candidate publication and repeat independent approval plus source-admission qualification.
+  Actual source/head/image/publisher metadata binds the result; this supplements pre-execution
+  enforcement. No source workflow or ruleset is qualified yet. Team-plan availability is a
+  prerequisite observation, not denial proof. No deployment/protected-environment authority
+  is added; T010–T012 full fork/both-forge/publisher qualification remains planned.
 - Storage: tracked schemas, independent vectors and sanitised tool fixtures; raw results in
   gitignored `.local/evidence/`. No hosted service, cloud state or telemetry.
 - Tests: Go unit/contract tests, pure `tofu test` plan tests, Conftest and assent fixtures,
@@ -86,7 +113,7 @@ Feature artefacts: research.md, data-model.md, contracts/checks.md, quickstart.m
 
 ## Verification strategy
 Applicable L0 is explicit: `tofu fmt -check -recursive modules/naming`,
-`tofu -chdir=modules/naming init -backend=false` from prepared cache,
+`tofu -chdir=modules/naming init -backend=false -lockfile=readonly` with the prepared mirror-only CLI configuration,
 `tofu -chdir=modules/naming validate -json`, `tflint --chdir=modules/naming --format=json`
 with committed exact built-in rule config, and strict names/org-label-schema validation.
 T008 writes valid and malformed/unformatted/linter fixtures plus empty-discovery and
@@ -100,7 +127,7 @@ One check registry in harness/checks.yaml records id, requirement, artefact kind
 creator task, discovery scope, fixture provenance and evidence status. `task check:specs`
 validates mappings; `task dod -- <path>` evaluates implemented checks and displays missing
 checks as not-run. Docs-only tasks remain explicitly exempt, not falsely passed.
-See spec V001–V008 and contracts/checks.md. Every clause of every new sensor gets a
+See spec V001–V009 and contracts/checks.md. Every clause of every new sensor gets a
 mutation/control; an unchanged green result after removing the guarded behaviour blocks it.
 Fixture capture is from pinned tool output, never copied from upstream prose.
 The speed check runs the complete applicable naming suite and records discovery counts;
@@ -111,7 +138,8 @@ for L1/L2 and saved-plan output snapshots for L3, not fake provider output.
 Tool preparation → isolation → report/registry → module + projections → forge checks.
 The current T001–T009 run stops at the report/registry and dependency/static foundation.
 T023 may then bootstrap only those implemented checks; missing foundation evidence
-blocks it. A valid actual GitHub PR-head run and a failing behavior control are required.
+blocks it. Unqualified pre-execution source admission blocks candidate publication/CI. A valid actual GitHub PR-head run and a failing behavior
+control are required.
 Its real-tool controls use fixture modules; absent modules/naming checks stay not-run.
 Schema validation joins at T016. Partial V001/V006 observations cannot close their
 later latency/schema/forge duties or claim a full requirement pass.
