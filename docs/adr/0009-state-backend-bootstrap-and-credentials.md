@@ -1,5 +1,5 @@
 # ADR-0009: State backend, bootstrap, recovery and credentials
-- Status: Proposed (rewritten 2026-10-01 after the round-2 adversarial review)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0004, ADR-0007, ADR-0011, ADR-0018, ADR-0021
 
@@ -11,18 +11,19 @@ Credential mechanisms: OAuth2 clients (`ovh_me_api_oauth2_client`, long-lived se
 importable** with its secret), identity-user tokens with expiry (`ovh_me_identity_user_token`,
 requires a user login), the documented IAM service-account bridge to OpenStack (ADR-0018), Keystone
 application credentials (OVH support for access rules UNVERIFIED), no OIDC federation from CI found.
-The round-2 review found two errors in the previous version: (1) **a PBKDF2 "fallback" cannot
-decrypt state written under the OKMS method** — OpenTofu's fallback is a reader for data encrypted by
-its own method during rollover, not a second wrapping key; losing the OKMS key would have lost all
-state. (2) Encrypting stage 00 with a key that stage 00 itself creates is a circular bootstrap
-dependency. "Lease, don't store" also left unspecified who authenticates to the issuer.
+Two facts constrain recovery: OpenTofu's encryption `fallback` is a reader for data encrypted by its
+own method during rollover, **not a second wrapping key**, so a passphrase fallback cannot decrypt
+state written under the OKMS method and losing that key means losing the state unless a separately
+decryptable copy exists; and a root cannot be encrypted with a key that the same root creates, so
+bootstrap needs a method that exists before any KMS does. Any lease-based credential scheme must also
+say who authenticates to the issuer.
 
 ## Options considered
 State: OVH Object Storage; another S3; TACO- or GitLab-managed state. Locking: native lockfile;
 TACO-level; none. Recovery: none; replica under the same key (false safety); **independently
 decryptable backup**. Credentials: long-lived secrets in the forge; TACO-held; issuer with leases.
 
-## Decision (proposed)
+## Decision
 
 ### Backend and locking
 OVH Object Storage S3, bucket versioning on, `use_lockfile = true`; one bucket per account-level
@@ -100,9 +101,4 @@ encryption is the backstop, not a proof of absence.
   two active writers; bounded replica lag; restoration into an isolated backend.
 
 ## Review log
-- 2026-10-01 revisions: locking confirmed; per-tenant buckets; replica and restore drill; import-based
-  re-bootstrap; two-pipeline rule; lease-don't-store; DR fencing; identity-authority catalogue.
-- 2026-10-01 round-2 adversarial review: **rejected** — PBKDF2 fallback as recovery (factual error),
-  circular bootstrap encryption, unspecified issuer authentication, "import" of OAuth2 secrets, empty
-  plan as rebuild criterion. All accepted and rewritten above. Source:
-  agent-context/inbox/round2-review-codex-gpt-6-2026-10-01.md.
+- 2026-10-01: round-2 external adversarial review applied.

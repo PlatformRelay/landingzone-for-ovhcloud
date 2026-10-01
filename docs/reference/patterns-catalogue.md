@@ -1,7 +1,7 @@
 # Patterns catalogue — small patterns, guidelines, tools and techniques
 
-Status: draft, 2026-10-01. Harvested from the two brainstorm rounds, three blind designs, one
-external blind design and the ADRs. Each entry names the check that enforces it (ADR-0019); an
+Status: draft, 2026-10-01. Harvested from the design rounds, independent designs, one
+external design and the ADRs. Each entry names the check that enforces it (ADR-0019); an
 entry marked **review** has no check yet — review is a legitimate enforcement method, not a gap.
 Ids are provisional until the rule is implemented. Rules are not enforced mechanically as universal
 bans: each has an applicability (artefact kind), explicit exceptions with a justification line, and
@@ -78,7 +78,8 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-CI-003 | Unattended apply executes the exact approved saved-plan or run artefact; approval is bound to commit, policy bundle, toolchain and target; a re-plan invalidates it | Stale-plan safety | pipeline + test |
 | LZ-CI-004 | Pin actions, includes and images by digest; `.terraform.lock.hcl` committed for stages and examples with linux and darwin hashes | Supply chain | Renovate + lint |
 | LZ-CI-005 | Never print full plan JSON into a public PR; post a sanitised summary (adds/changes/destroys, rule hits, cost estimate) | Plans can leak secrets | plan-summary tool |
-| LZ-CI-006 | Path-filtered jobs run changed directories **and their dependants** from the dependency graph | Shared defaults matter | graph script |
+| LZ-CI-006 | Monorepo jobs run changed directories **and their dependants** from the dependency checker's graph; tenant-repo runs select instances with `terramate list --changed` | Shared defaults matter | dependency checker + Terramate |
+| LZ-CI-008 | Terramate-generated files (backend, providers, module calls) are committed and a freshness check fails CI when `terramate generate` would change them | Instances are always runnable vanilla OpenTofu | freshness check |
 | LZ-CI-007 | Gate loosening needs its own justification line in the PR (workspace rule) | No silent erosion | review |
 
 ## 6. State, identity and secrets (ADR-0009, ADR-0018)
@@ -135,6 +136,6 @@ can be satisfied without the intended behaviour is a defect in the rule.
 | LZ-AGX-011 | Changes that weaken a sensor, oracle, snapshot, rubric or capability grant need protected review and a justification line | The loop must not grade itself | protected paths + review |
 
 ## 11. Tools (pins live in `mise.toml`)
-OpenTofu ≥ 1.13 · tflint + custom ruleset · trivy (config) · conftest/OPA · assent · terraform-docs ·
+OpenTofu ≥ 1.13 · Terramate 0.17.x (instance layer) · tflint + custom ruleset · trivy (config) · conftest/OPA · assent · terraform-docs ·
 task · Vale · lychee (links) · release tooling (release-please manifest or in-repo tool, spike) ·
 Renovate · gitleaks · Go (tools/) · Keycloak container (identity tests) · `act`, `gitlab-ci-local` (spike).

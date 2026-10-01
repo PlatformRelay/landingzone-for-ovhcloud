@@ -14,7 +14,7 @@ is a legal and reputational risk.
 ## Options considered
 No profiles; a single hardened default; **switchable profiles** with per-control mapping.
 
-## Decision (proposed)
+## Decision
 - A compliance profile is a value of the golden-path profile's `compliance` field (ADR-0016):
   `none` (default) or `hds-aligned` in v1; a CIS-style `hardened` set later. Each is a data file in
   `policies/compliance/` containing (a) the set of guardrail ids it turns on (ADR-0006) and (b) a
@@ -54,10 +54,4 @@ No profiles; a single hardened default; **switchable profiles** with per-control
   dates and URLs.
 
 ## Review log
-- 2026-10-01 revision: compliance as a profile field with region/product allowlists validated at
-  schema time; SecNumCloud non-goal stated. Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 (later): SNC Cloud Platform qualification verified (OVH newsroom, 2026-09-01); HDS
-  customer-side prerequisites added, from the external blind design review.
-- 2026-10-01 round-2 adversarial review (needs spike + qualified review): accepted — availability
-  is not certification scope, reviewer gate before `hds-aligned` ships, hardening bundle, contradictions
-  in the context and counterpoints fixed, "without legal exposure" removed.
+- 2026-10-01: round-2 external adversarial review applied.

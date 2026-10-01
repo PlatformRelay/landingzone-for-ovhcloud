@@ -1,12 +1,12 @@
 # ADR-0002: Repository structure (monorepo)
-- Status: Proposed (revised 2026-10-01 after brainstorm round 2)
+- Status: Proposed
 - Date: 2026-10-01
 - Related: ADR-0003, ADR-0004, ADR-0007, ADR-0010, ADR-0016
 
 ## Context
 The operator prefers a monorepo. Registries expect one repository per module, so a monorepo needs an
 explicit distribution answer (ADR-0010). Prior art layers modules / components / tests (OCI, Alibaba)
-or splits catalogue / pattern / accelerator (Azure). Round 2 added: golden paths are **data** over
+or splits catalogue / pattern / accelerator (Azure). Here, golden paths are **data** over
 one composition graph (ADR-0016); runtime, identity, network and observability are **families with
 variants** (ADR-0017, ADR-0018); tenants self-serve through a separate repo gated by `assent`
 (ADR-0005). Spec Kit will be initialised here (`.specify/`, `specs/`).
@@ -16,13 +16,13 @@ variants** (ADR-0017, ADR-0018); tenants self-serve through a separate repo gate
 2. **Multi-repo** — registry-native; one maintainer plus agents cannot keep N repos green.
 3. **Monorepo plus a split-mirror job** — kept as an ADR-0010 option, not a layout concern.
 
-## Decision (proposed)
+## Decision
 Option 1.
 
 ```
 ovh-landing-zone-accelerator/
 ├── README.md  LICENSE  NOTICE  CONTRIBUTING.md  SECURITY.md  AGENTS.md
-├── mise.toml  Taskfile.yml  stacks.yaml  .tflint.hcl  .editorconfig
+├── mise.toml  Taskfile.yml  .tflint.hcl  .editorconfig
 ├── modules/<name>/                 # layer 1: provider-thin primitives (ADR-0003)
 │   ├── main.tf variables.tf outputs.tf versions.tf README.md (authored guidance + generated interface section) CONTRACT.yaml
 │   ├── examples/<case>/            # runnable; each is a test target (ADR-0008)
@@ -46,11 +46,12 @@ ovh-landing-zone-accelerator/
 │   ├── assent/                     # .assent policies + fixtures for the tenant repo (ADR-0005)
 │   └── mutants/                    # mutation harness for plan and assent policies (ADR-0008)
 ├── templates/tenant-repo/          # self-service repo skeleton: tenants/, owners.yaml, deployments.yaml,
-│                                   #   identities.yaml, ipam.yaml, .assent/, CI include (ADR-0005)
+│                                   #   identities.yaml, ipam.yaml, .assent/, CI include, Terramate config
+│                                   #   generating one stack per deployment instance (ADR-0005, ADR-0007)
 ├── examples/<profile>/             # one runnable example per golden path; tutorials include from here
 ├── tests/{contracts,security,live,migrations,recovery,snapshots,harness,fixtures}/
 │                                   # cross-cutting only; live/ is a protected discovery root; unit tests live with the code
-├── tools/                          # one Go module: lz-audit scanner, contract diff, stacks generator,
+├── tools/                          # one Go module: lz-audit scanner, contract diff, dependency checker,
 │                                   #   json→junit, reaper, budget guard, kb sync
 ├── pipelines/{github,gitlab}/      # thin adapters calling `task …` (ADR-0007)
 ├── pipelines/tacos/<name>/         # generated consumer configs + conformance checklist
@@ -71,7 +72,7 @@ Rules:
 - Unit tests, examples, `CONTRACT.yaml` and generated docs live **next to the code**; `tests/` holds only
   what spans directories.
 - `kb/mirror/` and any `knowledge-base/` directory are gitignored; never committed.
-- Tool pins in `mise.toml` (OpenTofu ≥ 1.13, tflint, trivy, conftest, task, terraform-docs, assent).
+- Tool pins in `mise.toml` (OpenTofu ≥ 1.13, Terramate, tflint, trivy, conftest, task, terraform-docs, assent).
 - `tools/` is one Go module (static binaries on both forges). Go chosen; Python rejected for runtime
   install cost in CI.
 - Spec Kit files live only in `.specify/` and `specs/`.
@@ -93,10 +94,4 @@ Rules:
   CI path filter that runs only changed directories and their dependants.
 
 ## Review log
-- 2026-10-01 revision: `blueprints/` → `profiles/` + `stages/`; component families with variants;
-  `templates/tenant-repo/`; `policies/{guardrails.yaml,plan,assent,mutants}`; `kb/manifest.yaml`.
-  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — stages as root templates, `catalog/`, `releases/`,
-  `harness/`, security/migrations/recovery test dirs, a real HCL dependency checker with transitive
-  selection, authored READMEs, generators only after two examples. Rejected: renaming `stages/` to
-  `roots/` (same semantics, name kept).
+- 2026-10-01: round-2 external adversarial review applied.

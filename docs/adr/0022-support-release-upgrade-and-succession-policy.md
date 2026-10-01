@@ -5,17 +5,17 @@
 
 ## Context
 One human maintainer plus agents cannot support every combination the schemas can express (the
-round-2 review counted 384 raw tuples over the profile dimensions before features and regions). The
-review also found that per-module tags cannot describe a deployable dependency closure and that an
-"informational" Terraform job can look like a support promise. A project with a single maintainer
+profile dimensions alone admit 384 raw tuples before features and regions). Per-module tags cannot
+describe a deployable dependency closure, and an "informational" Terraform job can look like a
+support promise. A project with a single maintainer
 needs a stated support envelope, an immutable release unit, an upgrade promise and a succession plan,
 or every one of them is decided in an incident.
 
-## Decision (proposed)
+## Decision
 
 ### Supported combinations are a catalogue, not a schema
 `catalog/supported-combinations.yaml` lists every supported tuple (profile, runtime, identity,
-network, resilience, compliance, region class, engine and provider versions) with a status:
+network, resilience, compliance, region class, engine, Terramate and provider versions) with a status:
 `supported` (evidence from the live layers), `experimental` (qualified in part, named gaps),
 `documented-only`. A profile outside the catalogue fails validation. Five named golden paths are
 presets over this catalogue; they do not widen it.
@@ -66,4 +66,4 @@ exit-kit docs) if the project is abandoned. Agents never hold release authority.
   separately.
 
 ## Review log
-- 2026-10-01: created from the round-2 adversarial review's "what is missing" items 6, 7 and 11.
+- 2026-10-01: created from the round-2 external adversarial review.

@@ -19,7 +19,7 @@ evidence for agents, never instructions.
   message; every "how to add X" is a template plus a checklist that CI verifies.
 - **C. A bespoke agent framework** in the repo — a second product.
 
-## Decision (proposed)
+## Decision
 Option B.
 
 **Sensors** (what the repo tells an agent, and how fast):
@@ -117,6 +117,4 @@ answers; the measurements improve the harness and are never used to claim genera
   with a fresh session; measure questions it would have asked.
 
 ## Review log
-- 2026-10-01 round-2 adversarial review: accepted — review-required as a first-class outcome,
-  evidence packets, protected evaluator, executable permissions, progressive discovery, friction
-  retrospectives, local diagnostics, adversarial drill. "No requirement exists only in prose" withdrawn.
+- 2026-10-01: round-2 external adversarial review applied.

@@ -12,7 +12,7 @@ Docs rot when examples and reference are written by hand.
 Hand-written README per module; generated reference only; Diataxis site with generated reference and
 executed examples.
 
-## Decision (proposed)
+## Decision
 - **Diataxis** under `docs/`: `tutorials/` (guided first landing zone on a sandbox), `how-to/` (bootstrap,
   add a project, rotate credentials, migrate between versions, add a policy), `reference/` (generated:
   module inputs/outputs via terraform-docs, schemas, policies, provider gaps, repo map), `explanation/`
@@ -55,7 +55,4 @@ executed examples.
 - Spike: MkDocs Material vs Starlight on a 20-page sample with versioning and search.
 
 ## Review log
-- 2026-10-01 revision: decision tree and negative paths, freshness front-matter, anti-rot gates.
-  Source: agent-context/research/BRAINSTORM-2026-10-01-round2.md.
-- 2026-10-01 round-2 adversarial review: accepted — `example_tested_at` vs `claim_verified_at`,
-  labelled snippet kinds, bounded link findings.
+- 2026-10-01: round-2 external adversarial review applied.

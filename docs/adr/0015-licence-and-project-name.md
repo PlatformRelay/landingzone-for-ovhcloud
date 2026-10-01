@@ -1,5 +1,5 @@
 # ADR-0015: Licence and project name
-- Status: Proposed (licence and interim name decided by the operator on 2026-10-01; the ADR text still
+- Status: Proposed
   goes through external review like the others)
 - Date: 2026-10-01
 - Related: ADR-0001, ADR-0014
@@ -42,8 +42,4 @@ neutral brand (e.g. `<brand>-lz` with "for OVHcloud" in the tagline) · keep gen
 - Read OVHcloud's trademark/brand usage policy; check what other community OVH projects do.
 
 ## Review log
-- 2026-10-01 (operator): licence **Apache-2.0** for code, policies and schemas, **CC BY 4.0** for
-  the project's own documentation; `LICENSE`, `NOTICE` and `docs/LICENSE` added. Name kept while the
-  repository is private; re-decided before the first public tag. Counterpoints above stand.
-- 2026-10-01 round-2 adversarial review: accepted — provenance rules for mixed content, REUSE
-  metadata, examples under the code licence. No licence or name change inferred from the review.
+- 2026-10-01: round-2 external adversarial review applied.

@@ -4,6 +4,11 @@ Every non-trivial decision is recorded here before code depends on it. Format: M
 An ADR is **Proposed** until it has survived independent review (see below), then **Accepted**.
 A decision that is overruled keeps its counterpoints in the record — the reasoning outlives the vote.
 
+**Until the repository is public, readability beats history**: ADRs are amended or deleted in place,
+review findings are applied rather than logged in detail, and the merge records of each review round
+live in the maintainers' harness. Historisation (superseded-by links, dated revision notes) starts
+with the first public release.
+
 ## Index
 
 | ADR | Title | Status |
@@ -14,7 +19,7 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0004](0004-staged-roots-and-output-contracts.md) | Staged roots, separate state, typed output contracts | Proposed |
 | [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Proposed |
 | [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Proposed |
-| [0007](0007-pipeline-portability.md) | Pipeline portability: task contract, generated TACO config | Proposed |
+| [0007](0007-pipeline-portability.md) | Pipeline portability and instance orchestration with Terramate | Proposed |
 | [0008](0008-testing-strategy.md) | Testing strategy | Proposed |
 | [0009](0009-state-backend-bootstrap-and-credentials.md) | State backend, bootstrap and credentials | Proposed |
 | [0010](0010-versioning-release-and-distribution.md) | Versioning, release and distribution | Proposed |
@@ -31,17 +36,11 @@ A decision that is overruled keeps its counterpoints in the record — the reaso
 | [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
 | [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
 
-Round-2 adversarial review (external, 2026-10-01): ADR-0004, 0005, 0009 were rejected and rewritten;
-0016 and 0017 lost their inclusion theorem and universal schema; every other ADR carries the accepted
-corrections in its review log. Still to be written (review items 8, 9, 10, 13): network and resilience
-architecture, cost and sandbox operations, observability and incident response, documentation
-accessibility.
+Still to be written: network and resilience architecture, cost and sandbox operations, observability
+and incident response, documentation accessibility.
 
 Small patterns, guidelines, tools and techniques live in [`docs/reference/patterns-catalogue.md`](../reference/patterns-catalogue.md).
 
-Revision note: ADRs 0001–0004, 0006–0009 and 0011–0014 were revised on 2026-10-01 after an
-independent second brainstorm round (three blind designs merged with round 1); each carries the
-revision in its review log. The merge record is kept outside the repo in the maintainers' harness.
 
 ## Review protocol
 
