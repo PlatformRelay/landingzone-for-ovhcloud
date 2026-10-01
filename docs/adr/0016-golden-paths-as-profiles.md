@@ -15,7 +15,7 @@ the same mechanism: a golden path is **data selecting variants over one shared c
 1. **One root module per golden path** — simple to read; paths drift into forks within months.
 2. **Profiles (data) over one composition graph** — every path instantiates the same stages; the
    profile pins which component variant each family uses and which optional leaves are on.
-3. **Terragrunt/Terramate include hierarchy** — DRY, but a second tool for every adopter.
+3. **Terragrunt include hierarchy** — DRY, but a second tool for every adopter.
 4. **A generic orchestrator expanding YAML into module calls** — hidden DSL, hard to test.
 
 ## Decision
