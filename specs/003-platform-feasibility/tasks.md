@@ -11,10 +11,10 @@ module; no second Go module or package outside tools/ is assumed.
 
 ## Setup and foundation
 
-- [ ] T001 Write cost/sandbox operations ADR at docs/adr/0024-cost-and-sandbox-operations.md
+- [x] T001 Write cost/sandbox operations ADR at docs/adr/0024-cost-and-sandbox-operations.md — authoring closed 2026-10-02; evidence: [T001](evidence/T001.md). ADR remains Proposed; owner/numerical/setup/live prerequisites remain separate.
   - Requirements: FR-001; ADRs: 0008. Depends on: none. Drafting records unresolved numeric/setup decisions; operator approval gates implementation, not this docs-only task.
   - Verify: exempt — docs-only; content review and operator disposition cover budget units, external inventory, prices/freshness, runtime, concurrency, per-spike timeboxes/spend caps/refutation stops, cleanup authority and health bootstrap before live implementation.
-  - Evidence: `.local/evidence/003/t001-cost-adr-review.json`; initial status `not-run` (docs content review only).
+  - Evidence: `.local/evidence/003/t001-cost-adr-review.json`; independent documentation review APPROVE, 2026-10-02; no runtime/live qualification.
 
 - [ ] T002 Pin remaining helper/provider versions and write RunConfig/admission tests in tools/internal/sandbox/admission_test.go and tests/fixtures/sandbox/
   - Requirements: FR-001, FR-002; ADRs: 0008, 0011. Depends on: T001, 001/T009; approved cost/sandbox ADR.

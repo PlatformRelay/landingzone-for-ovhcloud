@@ -1,7 +1,8 @@
 # Architecture decision records
 
 Every non-trivial decision is recorded here before code depends on it. Format: MADR-lite.
-An ADR is **Proposed** until it has survived independent review (see below), then **Accepted**.
+An ADR remains **Proposed** through independent review; only the operator's explicit
+acceptance makes it **Accepted** (see the review protocol below).
 A decision that is overruled keeps its counterpoints in the record — the reasoning outlives the vote.
 
 **Until the repository is public, readability beats history**: ADRs are amended or deleted in place,
@@ -36,10 +37,12 @@ with the first public release.
 | [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
 | [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
 | [0023](0023-guided-repository-preconfiguration.md) | Friendly, resumable repository preconfiguration | Proposed |
+| [0024](0024-cost-and-sandbox-operations.md) | Cost and sandbox operations | Proposed |
 
-ADR-0024 is reserved for cost/sandbox operations by phase 003 T001; it has not been authored yet.
+ADR-0024 records the proposed operating contract; documentation-task closure does not
+approve its open numerical/setup choices or authorize live implementation.
 
-Still to be written: network and resilience architecture, cost and sandbox operations, observability
+Still to be written: network and resilience architecture, observability
 and incident response, documentation accessibility.
 
 Small patterns, guidelines, tools and techniques live in [`docs/reference/patterns-catalogue.md`](../reference/patterns-catalogue.md).
