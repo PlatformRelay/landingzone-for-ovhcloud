@@ -10,8 +10,18 @@ Unknown setup is an explicit external gate; planning does not spend the budget.
 ## Decision: prove independent decryption first after cleanup is qualified
 https://opentofu.org/docs/language/state/encryption/ describes method/fallback readers.
 The recovery design cannot use PBKDF2 as a second wrapping key for OKMS-written state;
-003 must observe a separately encrypted backup and clean restore against the pinned tool.
+003 must observe a separately encrypted backup and clean restore without the original
+account/KMS against the pinned tool.
 Account-specific OKMS helper, backend conditional-write and IAM behaviours remain UNVERIFIED.
+## Decision: initial-development custody amendment
+On 2026-10-01 the operator approved D49: one maintainer plus a separately encrypted sealed
+offline copy for initial development, exercising C001.3's amendment provision. The
+[spec amendment](spec.md#development-custody-amendment-d49) records its scope and evidence
+requirements. A second human custodian is not a pending development prerequisite; actual
+package availability, independent access and clean-environment recovery without the
+original account/KMS remain unverified until their respective checks pass. Key-loss,
+wrong-escrow, same-key-replica and plaintext-refusal controls remain mandatory. The copy
+does not qualify recovery while the maintainer is unavailable or production two-person custody.
 ## Decision: supported principal routes require their own evidence
 ADR-0006 and 0018 already distinguish OVH IAM, Keystone and S3, singleton SAML and cached
 Kubernetes tokens. We do not promote a denial on one API to global prevention or assume
@@ -20,7 +30,8 @@ immediate revocation after group removal. Use per-issuer approved measured resid
 Provider resource pages and source (https://github.com/ovh/terraform-provider-ovh),
 https://opentofu.org/docs/language/settings/backends/s3/ and the account's read-only
 inventory inform experiments. Account probes were not run during planning. Credentials,
-scoped projects, holders, cleanup health and forge runners all remain setup gates.
+scoped projects, D49 maintainer custody/sealed offline package, cleanup health and forge
+runners all remain actual setup gates; the approved custody shape alone passes none of them.
 Failed mechanisms revise Proposed ADRs in place; no unsupported branch gets a green label.
 
 The per-spike ceilings and refutation stops are in spec.md. Approval must bind these

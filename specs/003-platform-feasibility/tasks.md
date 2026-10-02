@@ -18,7 +18,7 @@ module; no second Go module or package outside tools/ is assumed.
 
 - [ ] T002 Pin remaining helper/provider versions and write RunConfig/admission tests in tools/internal/sandbox/admission_test.go and tests/fixtures/sandbox/
   - Requirements: FR-001, FR-002; ADRs: 0008, 0011. Depends on: T001, 001/T009; approved cost/sandbox ADR.
-  - Verify: `go -C tools test ./internal/sandbox -run TestAdmission -count=1`: exact approved valid config accepted; missing/wrong project, numeric limit, holder, cleanup permission, unknown cost, stale billing, exhausted aggregate or unhealthy reaper rejected; missing/over-ceiling per-spike deadline/spend or absent refutation rule rejected; permissive stub yields behavioural red.
+  - Verify: `go -C tools test ./internal/sandbox -run TestAdmission -count=1`: exact approved valid config accepted; missing/wrong project, numeric limit, D49 maintainer custody or independently usable sealed offline copy, cleanup permission, unknown cost, stale billing, exhausted aggregate or unhealthy reaper rejected; missing/over-ceiling per-spike deadline/spend or absent refutation rule rejected; permissive stub yields behavioural red. The development valid control uses one maintainer plus a separately encrypted sealed offline copy, not a fabricated second human.
   - Evidence: `.local/evidence/003/t002-admission-red.json`; initial status `not-run`.
 
 - [ ] T003 Implement approved config schema, external lease/exposure ledger and admission in tools/internal/sandbox/ and harness/live-checks.yaml
@@ -37,8 +37,8 @@ module; no second Go module or package outside tools/ is assumed.
   - Evidence: `.local/evidence/003/t005-reaper.json`; initial status `not-run`.
 
 - [ ] T006 Validate operator-provided sandbox, runner, cleanup, escrow and approved run-config inventory through tools/internal/probes/live/sandbox/preflight.go
-  - Requirements: FR-001; ADRs: 0008, 0009, 0022. Depends on: T005; operator setup of one pre-existing sandbox project, protected runner, scoped read/apply/cleanup identities, backup destination, two holders and numerical RunConfig.
-  - Verify: `task live:preflight`: protected read-only real inventory matches approved ids/permissions/health; missing holder, scope, price or heartbeat refuses; no orders/carts/writes. Creates live:preflight; unknown real setup stays blocked.
+  - Requirements: FR-001; ADRs: 0008, 0009, 0022. Depends on: T005; operator setup of one pre-existing sandbox project, protected runner, scoped read/apply/cleanup identities, backup destination, D49's one maintainer plus a separately encrypted sealed offline copy for initial development, and numerical RunConfig.
+  - Verify: `task live:preflight`: protected read-only real inventory matches approved ids/permissions/health and actual D49 custody/package availability with independently usable access; missing maintainer custody, missing/unusable sealed offline copy, scope, price or heartbeat refuses; no orders/carts/writes. Creates live:preflight; unknown real setup stays blocked. Package presence is not clean recovery proof: T009–T010/V003 must qualify restore without the original account/KMS. No second human custodian or maintainer-loss/production two-person claim.
   - Evidence: `.local/evidence/003/t006-preflight.json`; initial status `not-run`.
 
 ## US1
@@ -66,7 +66,7 @@ Independent test: V003–V005.
 
 - [ ] T010 [US2] Execute clean-runner recovery and empty-bootstrap reconciliation in tests/live/recovery/
   - Requirements: FR-004; ADRs: 0009, 0022. Depends on: T009; explicit isolated recovery/backend fixture authority and independently usable escrow package.
-  - Verify: `task spike:recovery`: correct key consumes actual saved plan/state; wrong/missing keys/plaintext input denied and private canary absent; independent backup restores known data with original KMS unavailable; same-key replica negative fails; empty-state import reconciles ids and reissues unreadable OAuth secret.
+  - Verify: `task spike:recovery`: correct key consumes actual saved plan/state; wrong/missing keys/plaintext input denied and private canary absent; D49's separately encrypted sealed offline backup restores known data in a clean environment with the original account and KMS unavailable; wrong escrow and same-key replica negatives fail; empty-state import reconciles ids and reissues unreadable OAuth secret. This qualifies only the approved development route, not recovery when the sole maintainer is unavailable or production two-person custody.
   - Evidence: `.local/evidence/003/t010-recovery.json`; initial status `not-run`.
 
 - [ ] T011 [US2] Write cross-tenant state/artifact/decrypt route helpers in tools/internal/probes/live/state/isolation_test.go
