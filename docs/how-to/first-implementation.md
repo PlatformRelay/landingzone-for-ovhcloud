@@ -21,6 +21,15 @@ GitHub CI for the implemented foundation. The operator granted merge permission;
 independent review, actual required checks, PR-head CI and mergeability remain gates.
 Missing CI is not a green gate. Material implementation choices are logged for validation.
 
+The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
+as **DEFERRED**, nonblocking technical debt [KI-001](../known-issues/KI-001-ci-source-admission-unqualified.md) for current private
+maintainer development, publication, review PR creation and merge. Frozen workflows,
+a no-bypass ruleset and the disposable source-admission experiment are later obligations,
+not immediate T023 prerequisites. Review PR creation does not establish merge readiness:
+tests/evidence, exact pins, read-only authority, T003 isolation, exact-head CI and
+independent review remain required. Whole-feature hardened guarantees remain unqualified;
+the constitution and ADRs are unchanged.
+
 Prepare a bounded IAM/state feasibility slice after this minimum safety subset. That
 sequence does not grant cloud action, account, recovery or budget authority. Exact pins,
 prepared image/cache and actual isolation still need evidence in the foundation tasks;
@@ -81,7 +90,8 @@ A review of planning documents does not qualify the future commands they describ
 ## Stop and retain a useful result
 
 Stop at an unanswered decision, unmet dependency, unverified premise outside the
-selected experiment, or failing required check. Record the precise prerequisite and
+selected experiment, or failing required check, subject to the scoped C2 deferral above.
+Record the precise prerequisite and
 continue only independent authorized work. Do not silently change scope, version floor,
 account boundary, auto-merge activation, naming projections or the wizard threat model.
 

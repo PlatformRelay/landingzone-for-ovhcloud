@@ -22,6 +22,15 @@ Local models do not prove cloud isolation or forge enforcement. Platform probes 
 named fixtures. A future adoption slice needs its own spec and the decisions for its areas;
 no runtime, network or regulated support is implied.
 
+The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
+as **DEFERRED**, nonblocking technical debt [KI-001](../docs/known-issues/KI-001-ci-source-admission-unqualified.md) for current private
+maintainer development, publication, review PR creation and merge. Frozen workflows,
+a no-bypass ruleset and the disposable source-admission experiment are later obligations,
+not immediate T023 prerequisites. Review PR creation does not establish merge readiness:
+tests/evidence, exact pins, read-only authority, T003 isolation, exact-head CI and
+independent review remain required. Whole-feature hardened guarantees remain unqualified;
+the constitution and ADRs are unchanged.
+
 ## Activation gates
 The operator accepted ADR-0002, ratified constitution 1.2.0 and selected committed reusable
 workflow scaffolding on 2026-10-01. Create directories with their first real artifact.
