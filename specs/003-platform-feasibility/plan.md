@@ -12,8 +12,13 @@ fixtures. A failed premise stops its dependent implementation and revises the Pr
   primary-source review. Test suites separate tests/live from offline discovery.
 - Execution: protected trusted runner, explicit approved sandbox ids and credential class;
   no production authority. One existing sandbox project with two separately scoped state/artifact fixtures. This
-  does not prove cross-project/account isolation. Approved region/backup location and two
-  independent escrow holders are external gates; pool/second region/account shape is pending.
+  does not prove cross-project/account isolation. Approved region/backup location and actual
+  D49 custody/package availability are external gates: one maintainer plus a separately
+  encrypted sealed offline copy for initial development, as recorded in the spec's
+  [custody amendment](spec.md#development-custody-amendment-d49). Independent usability
+  without the original account/KMS and recovery in a clean environment require evidence.
+  No second human custodian or maintainer-loss/production two-person recovery is claimed;
+  pool/second region/account shape retains its separate approval requirements.
 - Storage: external durable lease/resource-id inventory not hosted solely inside the
   fixtures it cleans; private encrypted snapshots/plans/logs; sanitised evidence envelope.
 - Cost: one-off EUR 200 trial funding per the current repository working contract.
@@ -53,11 +58,13 @@ Feature artefacts: research.md, data-model.md, contracts/checks.md, quickstart.m
    durable request identity and bounded inventory scan before any retry. Reaper is restricted
    by independent sandbox project allowlist plus known ids, not tenant-supplied labels.
    External setup gate: existing sandbox, scoped read/apply/cleanup identities, protected
-   runner, alert, holders and budget config. Canary cleanup then fault drill; failed health
+   runner, alert, D49 maintainer custody/sealed offline package and budget config.
+   Read-only preflight checks actual package availability and independently usable access;
+   it does not replace T009–T010's recovery proof. Canary cleanup then fault drill; failed health
    forbids subsequent admission while the cleanup lane remains executable.
 3. US2: create disposable state/plan fixture, snapshot and sealed id/import manifest;
    demonstrate clean bootstrap without KMS and independent escrow backup. Fresh runner
-   has no original key/helper service; restore known data into isolated backend and fence
+   has no original account access or original key/helper service; restore known data into isolated backend and fence
    production writes. Empty-state reconciliation imports stable ids; unreadable OAuth secret
    is reissued, never claimed recoverable. Use actual pinned OpenTofu state and saved-plan
    files: correct key decrypts/consumes, wrong/missing key and plaintext inputs reject;

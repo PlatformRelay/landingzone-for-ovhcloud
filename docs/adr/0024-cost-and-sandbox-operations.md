@@ -48,8 +48,10 @@ maintainer plus a separately encrypted sealed offline copy for initial developme
 That copy must be independently usable without the original account/KMS, with recovery
 qualified in a clean environment. It is not a second human custodian, and maintainer-loss
 or production two-person custody remains unqualified. This is the operator amendment
-allowed by FR-001 C001.3. Older two-holder language in the 003 plan and T006 must be
-aligned with this limited disposition before implementation; do not invent a second holder.
+allowed by FR-001 C001.3 and recorded in the spec's
+[development custody amendment](../../specs/003-platform-feasibility/spec.md#development-custody-amendment-d49).
+The plan and T006 use that limited custody shape; actual package availability and recovery
+evidence remain prerequisites for their respective checks, not consequences of this amendment.
 
 D53 chooses OVHcloud S3 as the first state implementation and qualification target;
 later backend adapters retain explicit selection and need their own evidence. Deployment
