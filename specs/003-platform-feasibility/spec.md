@@ -13,7 +13,8 @@ Given known inventory, prices, cleanup health and an approved lease, a protected
 may execute in one dedicated sandbox project. Unknown inputs deny admission; cancellation
 and process death still leave an independently discoverable cleanup path. Test: V001–V002.
 ### User Story 2 — Recover and isolate state (Priority: P1)
-A fresh operator restores the disposable fixture without its original KMS; two tenant
+The maintainer in a clean environment restores the disposable fixture without its original
+account or KMS under the development custody amendment below; two tenant
 credentials cannot reach each other's state, and promotion never leaves two writers.
 Independent test: V003–V005.
 ### User Story 3 — Bound identity authority (Priority: P2)
@@ -27,16 +28,35 @@ with no promotion of an unprobed tuple. Independent test: V008.
 ## Premises
 | ID | Mechanism premise | Probe | Evidence status |
 | --- | --- | --- | --- |
-| P1 | Dedicated sandbox and backup location, holders and scoped cleanup identities exist | Protected read-only account/project/region/role inventory; sealed recovery-package check | UNVERIFIED; external setup gate |
+| P1 | Dedicated sandbox and backup location, D49 maintainer custody and sealed offline copy, and scoped cleanup identities exist | Protected read-only account/project/region/role inventory; sealed recovery-package check | UNVERIFIED; external setup gate |
 | P2 | Cloud lockfile, permissions and replica fencing meet our contract | Pinned OpenTofu/S3 conditional write and concurrent-writer probes on disposable fixtures | UNVERIFIED; authoritative docs do not prove this account |
 | P3 | OKMS/PBKDF2 backup and clean bootstrap can recover without original dependency | Independent fresh-runner key-loss and empty-state recovery drills | UNVERIFIED; no live drill has run |
 | P4 | Deny-floor bindings and OVH-to-OpenStack credential bridge behave as claimed | Canary route matrix and already-issued-token revocation probes | UNVERIFIED; alternate paths must be observed individually |
+
+## Development custody amendment (D49)
+
+**Operator-approved scope, 2026-10-01:** for initial development, one maintainer plus a
+separately encrypted sealed offline copy replaces C001.3's two-holder requirement under
+its explicit operator-amendment provision. This settles the custody shape; a second human
+custodian is not an unanswered prerequisite for this development scope.
+
+The offline package must be independently usable without the original account or KMS;
+qualify recovery of known data in a clean environment. Actual custody, package availability
+and independently usable access remain T006 preflight evidence; T009–T010/V003 retain
+the actual key-loss and recovery controls, including wrong/missing keys, wrong escrow,
+same-key replica failure, plaintext refusal and separate state/plan enforcement mutations.
+No successful restore is inferred from package presence or the approved amendment.
+
+The copy is not a second human custodian. Recovery while the sole maintainer is unavailable,
+production human-loss recovery and production two-person custody remain unqualified.
+This amendment supplies no ADR ratification, numerical RunConfig, live authorization or
+passed task; absent setup or failed/missing recovery evidence blocks its dependent claim.
 
 ## Requirements
 - **FR-001**: MUST satisfy each clause below.
   - **C001.1**: Require one operator-approved sandbox project ID and region.
   - **C001.2**: Require approved price/exposure calculation.
-  - **C001.3**: Require two independently usable escrow holders, unless operator amends that requirement.
+  - **C001.3**: Require two independently usable escrow holders, unless operator amends that requirement. For initial development, the approved [D49 amendment](#development-custody-amendment-d49) requires one maintainer plus a separately encrypted sealed offline copy, with independent usability and actual recovery evidence.
   - **C001.4**: Require scoped runner and cleanup authority.
   - **C001.5**: Require completed approved cost/sandbox design before live admission.
 - **FR-002**: MUST satisfy each clause below.
@@ -56,7 +76,7 @@ with no promotion of an unprobed tuple. Independent test: V008.
   - **C004.2**: Prove encrypted saved-plan handling.
   - **C004.3**: Prove bootstrap before KMS.
   - **C004.4**: Prove independently decryptable backup.
-  - **C004.5**: Restore known data in a clean runner without original KMS.
+  - **C004.5**: Restore known data in a clean runner without the original account or KMS.
   - **C004.6**: Never claim a fallback decrypts data written by another method.
 - **FR-005**: MUST satisfy each clause below.
   - **C005.1**: Prove scoped fixture A cannot read/write B state or artifacts, and vice versa.
@@ -140,7 +160,7 @@ check has run. Evidence below is initially `not-run`; paths are under `.local/ev
 | --- | --- | --- | --- | --- |
 | V001 | FR-001, FR-002, SC-001 | approved admission succeeds; missing/wrong project, unknown cost, stale billing, exhausted cap or unhealthy cleanup blocks; cleanup still admitted | `task test:sandbox-admission; task live:preflight` | `003/admission.json` |
 | V002 | FR-003, SC-001 | injected crash/partial create/reaper outage leave recorded ids; recovery empties owned fixture inventory with no foreign deletion | `task test:sandbox-reaper; task spike:sandbox-failure` | `003/sandbox-failure.json` |
-| V003 | FR-004 | actual pinned-tool state and saved plans decrypt/consume with the correct key, reject missing/wrong keys and plaintext input; separate state/plan-enforcement mutations fail; private canary scan finds no plaintext canary; fresh runner restores known data without original KMS, wrong escrow and same-key replica fail, empty bootstrap imports ids/reissues secrets | `task spike:recovery` | `003/recovery.json` |
+| V003 | FR-004 | actual pinned-tool state and saved plans decrypt/consume with the correct key, reject missing/wrong keys and plaintext input; separate state/plan-enforcement mutations fail; private canary scan finds no plaintext canary; fresh runner restores known data without the original account or KMS, wrong escrow and same-key replica fail, empty bootstrap imports ids/reissues secrets | `task spike:recovery` | `003/recovery.json` |
 | V004 | FR-005 | A control reads/writes own state and decrypts own fixture; A→B and B→A read/write/decrypt/artifact probes deny with attributable reasons | `task spike:state-isolation` | `003/isolation.json` |
 | V005 | FR-005 | two writers serialize; interrupted lock recovered only after owner-death proof; promotion disables primary writes, replica lag within approved bound; old writer is denied | `task spike:locking-promotion` | `003/locking.json` |
 | V006 | FR-006 | per-route positive/denial controls cover delete, floor/policy self-removal, missing/present tags, cross-tenant retagging and applicable child operations; native recovery works during federation failure; IAM limits/counts have source-bound or explicit unknown status and allow/deny propagation is measured within the deadline; absent subcontrol blocks spike-3/envelope-authority pass | `task spike:deny-floor` | `003/deny-floor.json` |
@@ -173,8 +193,12 @@ No live work is authorized by this planning request. Baseline is one pre-existin
 sandbox project under D8, with two separately scoped state/artifact fixtures inside it;
 this tests those routes, not cross-project or account isolation. Region and backup
 location must be explicitly approved; no pool or second region is assumed. Account-scoped
-IAM/federation, backup placement, state-project ownership and second escrow holder remain
-operator decisions. If required recovery/account scope is absent, the affected probe
+IAM/federation, backup placement and state-project ownership retain their separately
+recorded operator dispositions and actual setup gates. D49 settles initial-development
+custody as one maintainer plus a separately encrypted sealed offline copy; actual package
+availability and independent recovery remain unverified. No second human is required for
+that limited scope, and maintainer-loss/production two-person recovery is not qualified.
+If required recovery/account scope is absent, the affected probe
 remains blocked; a project's existence does not authorize account-wide changes.
 Protected scoped runners, cleanup identity and numerical runtime/lag/credential windows
 are required. Cost/sandbox ADR precedes admission implementation. No automatic orders,

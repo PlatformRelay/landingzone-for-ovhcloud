@@ -7,7 +7,8 @@ All targets are planned, not authorized or run by this planning request.
 require explicit approved RunConfig, allowed candidate and healthy lease/cleanup boundary.
 Live preflight may not create orders/carts. No automatically retried purchase or destroy.
 Admission refuses unknown cost, stale billing/inventory, unhealthy reaper, excess reservations,
-missing timeout/cleanup authority/holders or non-allowlisted resource scope. Cleanup keeps
+missing timeout/cleanup authority, missing maintainer custody or independently usable sealed
+offline copy under D49, or non-allowlisted resource scope. Cleanup keeps
 its separate authority and does not need a new admitted lease to remove known owned ids.
 Replica promotion fails before activation if any original writer path is unfenced. An
 expired token or removed secret reference is not proof of old-writer revocation.
@@ -17,6 +18,13 @@ requires floor-binding/policy self-removal, missing/present tags, cross-tenant r
 applicable child-operation tests; unavailable subcontrols block spike-3/envelope authority.
 V003 requires actual pinned-tool state and saved-plan format/key controls, plaintext-input
 refusal and separate enforcement mutants, plus private canary scans and valid-key consume.
+For initial development, the operator-approved [D49 custody amendment](../spec.md#development-custody-amendment-d49)
+requires one maintainer plus a separately encrypted sealed offline copy. T006 checks actual
+custody/package inventory and independently usable access; T009–T010/V003 must prove clean
+recovery without the original account or KMS, retaining wrong/missing-key, wrong-escrow and
+same-key-replica negatives. Package presence alone does not qualify restore. No second human
+custodian, maintainer-loss recovery or production two-person custody is claimed. Actual
+setup and recovery evidence remain required; the amendment grants no live authority.
 Federation
 requires a disposable account-level scope; no singleton replacement in ordinary account.
 Each issuer-specific case uses already-issued credentials; residual windows are recorded
