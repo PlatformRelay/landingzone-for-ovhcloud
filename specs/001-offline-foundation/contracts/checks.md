@@ -4,7 +4,8 @@ Host entry: `<approved-absolute-path>/lz-offline --candidate <checkout> -- task 
 (T003). Its independently reviewed source/binary digest and installation live outside the
 candidate. It ignores candidate Taskfiles/includes/hooks/config on the host, fetches/extracts
 rooted candidate data safely, then enters isolation. Task/Go invocations below are child
-commands; no advertised shortcut may load a candidate Taskfile to reach this boundary.
+commands, except the explicitly approved T002 proof-orchestration procedure below;
+no advertised shortcut may load a candidate Taskfile to reach this boundary.
 
 ## Preparation and capture order
 
@@ -56,6 +57,15 @@ The following drivers are planned deliverables, not existing executable prerequi
   and cannot be reused as production admission. T003 separately approves/builds/installs
   the actual entry, repeats the complete suite green and proves capture refusal before
   tool invocation/publication. Candidate code cannot select, build or replace a host driver.
+
+T002 alone may use a separately approved compile-then-run proof procedure: build only
+the frozen allowlisted stub and test packages in private network-isolated children,
+record their resulting binary digests, then execute those exact test binaries as
+explicitly reviewed external host orchestration. Host trust is limited to that frozen
+driver/test/build/input closure; ordinary candidate source, Task configuration and
+arbitrary test binaries remain excluded. The permissive subject and its literal hostile
+fixtures execute only inside disposable containment, with calibration in a separate
+network-isolated sibling. This exception grants no production entry or capture authority.
 
 | Control / row in the [historical T001 matrix](../evidence/T001.md#historical-original-preparation-verification-matrix) | Test/control creator | Required proof owner and use barrier |
 | --- | --- | --- |
