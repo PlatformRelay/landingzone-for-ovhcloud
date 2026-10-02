@@ -19,8 +19,14 @@ Do not run acceptance commands until their implementation and prerequisites have
 7. Complete independent review and record every non-docs check before changing to done.
 
 Full 001 exit needs actual forge evidence, naming implementation and the
-exclusive-runner benchmark. The operator authorized only T001–T009 for the current
-run, followed by conditional minimal CI T023 after evidenced completion. The 2026-10-02
+exclusive-runner benchmark. The current goal (2026-10-02, local decision D61) authorizes
+all locally implementable portions of specs 001–004 whose dependencies and required
+decisions are satisfied. T001–T009 remain minimum safety before dependent work, followed
+by conditional minimal CI T023 after evidenced completion. Publish independently reviewed
+coherent increments, including stacked PRs with explicit parent branches and review order;
+continue other eligible work when one task is blocked. No PRs may be merged during this
+goal; earlier merge permission is superseded. D29's hardened persistence/export remains
+deferred until real profile schemas exist. The 2026-10-02
 operator priority exception (local decision D60) accepts C2 (C010.5/P4) as DEFERRED,
 nonblocking [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md)
 for current private maintainer development, publication, review PR creation and merge.
@@ -28,8 +34,9 @@ Frozen workflows, a no-bypass ruleset and the disposable source-admission experi
 remain later obligations. Whole-feature hardened guarantees remain unqualified; neither
 the constitution nor ADRs change. Review PR creation does not establish merge readiness.
 Exact pins, read-only CI authority and T003 isolation remain required. TDD, predefined evidence,
-independent review, actual required checks/PR-head CI and mergeability gate the granted
-merge permission. Structure, constitution and committed scaffold decisions are confirmed.
+independent review, actual required checks/PR-head CI and mergeability remain required
+for eventual merge readiness; they do not override this goal's no-merge instruction.
+Structure, constitution and committed scaffold decisions are confirmed.
 Create directories with their first real artifact. Exact pins, image/cache and actual
 tool/isolation premises remain unobserved until their proof tasks run. The subset uses
 real fixture modules for static checks; absent modules/naming stays not-run. Later

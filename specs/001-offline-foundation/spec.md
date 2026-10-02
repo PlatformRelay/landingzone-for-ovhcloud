@@ -6,10 +6,15 @@ Give contributors a free, deterministic feedback loop before any cloud resource 
 Deliver the first pure naming module and the verification harness it exercises.
 Exclude provisioning, auto-merge execution, runtime families, cloud scans and release claims.
 
-## Authorized increment
-The operator authorized T001–T009 on 2026-10-01 with tests first, predefined evidence and
-independent reviews, then granted merge permission subject to actual gates/CI/review and
-mergeability. Conditional T023 adds only minimal GitHub CI after the foundation passes.
+## Authorized delivery scope
+The current goal (2026-10-02, local decision D61) authorizes all locally implementable
+portions of specs 001–004 whose dependencies and required decisions are satisfied, with
+tests first, predefined evidence and independent reviews. Publish coherent increments,
+including stacked PRs with explicit parent branches and review order; continue eligible
+work without waiting for operator review. No PRs may be merged during this goal; earlier
+merge permission is superseded. T001–T009 remain minimum safety before dependent work;
+conditional T023 adds only minimal GitHub CI after those tasks have evidenced completion.
+D29's hardened persistence/export deferral until real profile schemas exist remains in force.
 The 2026-10-02 operator priority exception (local decision D60) accepts C2 as
 **DEFERRED**, nonblocking technical debt [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md)
 for current private maintainer development, branch publication, review PR creation and
@@ -18,10 +23,11 @@ unqualified. This exception changes neither the constitution nor ADRs. Creating 
 PR does not establish merge readiness: actual checks, exact-head CI and independent review remain required.
 ADR-0002 is Accepted,
 constitution 1.2.0 is ratified and reusable `.specify/` scaffolding stays committed.
-Create each implementation directory with its first real artifact. T010–T022 remain
-planned outside this increment; no whole-feature V/FR/SC pass or supported tuple is
-claimed from the foundation subset. Prepare the next bounded IAM/state feasibility
-slice only after this minimum safety, with separate live authority and prerequisites.
+Create each implementation directory with its first real artifact. T010–T022 become
+eligible according to their own prerequisites; no whole-feature V/FR/SC pass or supported
+tuple is claimed from the foundation subset. Dependent IAM/state implementation follows
+minimum safety, with separate live authority and prerequisites. Independent documentation
+may proceed earlier; a blocked task does not stop other eligible work.
 
 ## User Scenarios & Testing
 ### User Story 1 — Trust local feedback (Priority: P1)
@@ -143,8 +149,9 @@ Go probe/test helpers live in `tools/internal/probes/`; root `tests/` holds thei
 `pipelines/{github,gitlab}/` (including T023's foundation source manifest), `AGENTS.md`, `harness/guides/`, `docs/reference/decision-map.md`.
 
 ## Dependencies and stop conditions
-The structure, ratification and workflow-location decisions are confirmed; implementation
-authorization is limited to T001–T009 plus conditional T023. Tool preparation and actual P1/P2 observations
+The structure, ratification and workflow-location decisions are confirmed; D61 expands
+implementation authorization to eligible work across specs 001–004 without changing task
+dependencies or granting merge authority. Tool preparation and actual P1/P2 observations
 remain due in those bounded proof tasks; failure blocks dependent work. Minimum local safety
 for dependent probes is T001–T009; naming, forge and latency do not gate that subset.
 T003 qualifies local entry; T023 retains independently reviewed workflow/launcher source,

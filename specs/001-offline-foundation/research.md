@@ -3,6 +3,16 @@
 Bundled Bash templates and generic command documents are vendored with their source
 revision and licence in .specify/UPSTREAM.md. Project overrides require predefined
 verification for behavioral work; workstation versions are private observations.
+## Current delivery authorization
+The 2026-10-02 delivery goal (local decision D61) covers all locally implementable portions
+of specs 001–004 whose dependencies and required decisions are satisfied. T001–T009 remain
+minimum safety before dependent implementation; minimal CI T023 follows their evidenced
+completion. Publish independently reviewed coherent increments, including stacked PRs
+with explicit parent branches and review order. Continue eligible independent work when
+a task is blocked. No PRs may be merged during this goal; earlier merge permission is
+superseded. D29 still defers hardened persistence/export until real profile schemas exist.
+Activation does not close tasks, waive execution/capture prerequisites or qualify cloud,
+forge, CI or full-feature behavior.
 ## Decision: a prepared offline boundary
 Rationale: removing OVH_* variables cannot block a provider or external subprocess from
 making calls. Prepare checksum-verified tools/provider filesystem mirror and lockfile separately; run the suite in
@@ -79,4 +89,4 @@ These describe mechanisms; T003 owes pinned-runtime/isolation evidence and T023 
 actual minimal CI evidence. Source denial/admission evidence remains deferred to KI-001.
 
 ## Upstream input trace
-Naming reference inputs: the pinned scalar context example in ../../docs/reference/upstream-reference-map.md is a comparison input for later T013–T016/V004–V006, not a released schema. Use independent expected vectors, not copied generated outputs. These tasks remain outside the foundation run.
+Naming reference inputs: the pinned scalar context example in ../../docs/reference/upstream-reference-map.md is a comparison input for T013–T016/V004–V006, not a released schema. Use independent expected vectors, not copied generated outputs. These tasks are eligible under D61 after their dependencies and concrete-consumer diagnosis.

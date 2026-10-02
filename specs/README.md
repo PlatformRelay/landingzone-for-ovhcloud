@@ -8,16 +8,19 @@ later naming consumers still need module-split diagnosis and implementation evid
 
 | Spec | Outcome | Gate and independent dependencies |
 | --- | --- | --- |
-| [001-offline-foundation](001-offline-foundation/spec.md) | Pinned offline checks, reporting, naming/labels and traceability | T001–T009 plus conditional GitHub CI bootstrap T023 authorized with TDD and independent review; merge permission granted subject to actual checks, PR-head CI and mergeability. Structure, constitution and scaffold dispositions are confirmed. Full exit still needs V001–V009 green and docs review; naming, full forge qualification and latency remain outside this subset. |
+| [001-offline-foundation](001-offline-foundation/spec.md) | Pinned offline checks, reporting, naming/labels and traceability | T001–T009 remain minimum safety; T023 follows their evidenced completion. Naming, forge adapters and later checks are eligible when their own dependencies and decisions are satisfied. Structure, constitution and scaffold dispositions are confirmed. Full exit still needs V001–V009 green and docs review, including the deferred guarantees below; no partial increment claims full qualification. |
 | [002-transaction-rehearsal](002-transaction-rehearsal/spec.md) | Local two-tenant graph, publication, binding and reservation rehearsals; separate forge qualification | Local exit: V001–V006 green plus V007 pass or explicit blocked record per unavailable forge. Blocked V007 cannot qualify that forge or satisfy SC-003. |
 | [003-platform-feasibility](003-platform-feasibility/spec.md) | Protected recovery, isolation, floor, credential, sandbox and locking probes | Docs-only T001 can start independently. Code/probes require 001/T009 plus their admission/reaper and operator gates. Aggregate needs local 002/T008, T012, T016, not live forge adapters. Every refutation blocks its named downstream claim; incomplete observations remain blocked. |
-| [004-guided-preconfiguration](004-guided-preconfiguration/spec.md) | Draft friendly terminal journey, defaults, progress and save/resume proposal | Bounded renderer prototype and written journey approved; hardened persistence/export deferred until real profile schemas exist. Its draft needs follow-up alignment; no 004 implementation is part of the 001 foundation run. Synthetic qualification is not real export readiness. |
+| [004-guided-preconfiguration](004-guided-preconfiguration/spec.md) | Draft friendly terminal journey, defaults, progress and save/resume proposal | Bounded renderer prototype and written journey approved; align its draft and satisfy task and execution/capture prerequisites before dependent work. D29 defers hardened persistence/export until real profile schemas exist. Synthetic qualification is not real export readiness. |
 
-Feature numbers identify documents, not a complete delivery schedule. The approved next
-increment is 001/T001–T009 plus CI bootstrap T023, followed by preparation of a bounded
-IAM/state feasibility slice. That sequence does not authorize live actions or every task
-in the later drafts. The recorded downstream choices still need their own alignment,
-implementation and qualification.
+Feature numbers identify documents, not a complete delivery schedule. The current goal
+(2026-10-02, local decision D61) covers all locally implementable portions of specs 001–004
+whose dependencies and required decisions are satisfied. Publish independently reviewed
+coherent increments, including stacked PRs with parent branches and review order stated;
+continue eligible work without waiting for operator review. No PRs may be merged during
+this goal; earlier merge permission is superseded. Keep 001/T001–T009 minimum safety before
+dependent implementation and retain separate live authority and qualification prerequisites.
+An unmet dependency blocks that task, not other independent eligible work.
 Local models do not prove cloud isolation or forge enforcement. Platform probes qualify only
 named fixtures. A future adoption slice needs its own spec and the decisions for its areas;
 no runtime, network or regulated support is implied.
@@ -34,8 +37,10 @@ the constitution and ADRs are unchanged.
 ## Activation gates
 The operator accepted ADR-0002, ratified constitution 1.2.0 and selected committed reusable
 workflow scaffolding on 2026-10-01. Create directories with their first real artifact.
-Only 001/T001–T009 plus conditional T023 have implementation authorization here; observed premises, task evidence
-and independent reviews remain required. No whole-feature acceptance is implied. Live work
+All eligible portions of specs 001–004 have implementation authorization under D61;
+observed premises, task dependencies, required decisions, evidence and independent reviews
+remain required. D29's persistence/export deferral is unchanged. No whole-feature acceptance
+or merge authority is implied. Live work
 additionally needs approved scope, budget, cleanup
 health, recovery setup and numerical RunConfig. A newly created project alone supplies no
 account-scoped IAM/federation authority. Later naming consumers and real profile exports
