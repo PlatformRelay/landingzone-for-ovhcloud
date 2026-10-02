@@ -21,14 +21,21 @@ tool-output test fixture. T004 capture waits for T003's evidenced capture/isolat
 
 ## Authorized run boundary
 
-Only T001–T009 plus conditional T023 are authorized for this run, with TDD, predefined
-evidence and independent reviews. The operator granted merge permission subject to actual
-gates, PR-head CI, review and mergeability; missing CI is not a green gate.
+The current goal (2026-10-02, local decision D61) authorizes all locally implementable
+portions of specs 001–004 whose dependencies and required decisions are satisfied, with
+TDD, predefined evidence and independent reviews. Publish coherent increments as scoped
+PRs, including stacks with explicit parent branches and review order; continue eligible
+work without waiting for operator review. No PRs may be merged during this goal; earlier
+merge permission is superseded. Missing CI is not a green gate, and publication does not
+establish merge readiness. T001–T009 remain minimum safety before dependent work, with
+conditional T023 after their evidenced completion. D29 still defers hardened persistence/
+export until real profile schemas exist.
 On 2026-10-01 the operator accepted ADR-0002, ratified constitution
 1.2.0 and chose committed reusable workflow scaffolding. Those earlier external gates
 are resolved. Add directories with their first real artifact. Exact tool/image pins,
 prepared local runtime/mirror and P1/P2 qualification remain implementation premises,
-not passed observations. T010–T022 are not activated by completing this subset.
+not passed observations. T010–T022 are eligible only when their own dependencies and
+required decisions are satisfied; completing the minimum subset does not qualify them.
 
 The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
 as **DEFERRED**, nonblocking technical debt [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) for current private
@@ -111,7 +118,7 @@ Independent test: V001–V003, V006–V007.
 Independent test: V004–V005.
 
 - [ ] T013 [US2] Author two independent organisation vectors and provider-free module tests in modules/naming/tests/unit.tftest.hcl, modules/naming/tests/contract.tftest.hcl and tests/fixtures/naming/
-  - Requirements: FR-005, SC-004; ADRs: 0003, 0008. Depends on: T007, T009; concrete-consumer diagnosis of module splitting for the selected scalar/shared-context interface. Outside the foundation run.
+  - Requirements: FR-005, SC-004; ADRs: 0003, 0008. Depends on: T007, T009; concrete-consumer diagnosis of module splitting for the selected scalar/shared-context interface. Eligible under D61 when these prerequisites are satisfied.
   - Verify: `mise exec -- tofu -chdir=modules/naming test`: compiling pure module stub produces behavioural red for concrete expected names/labels; valid unusual template, collision/truncation/import/upgrade cases and expect_failures for validations; record actual CLI output.
   - Evidence: `.local/evidence/001/t013-naming-red.json`; initial status `not-run`.
 
@@ -137,7 +144,7 @@ import overrides, pinned name recipe upgrades, metadata-only stability, separate
 projections and stable selector subsets. Each applicable clause needs independent valid/red/green
 controls. Scalar cardinality/shared context is selected; detailed call sites/fields and
 module splitting remain illustrative pending concrete-consumer diagnosis. These tasks
-remain outside the foundation run.
+are eligible under D61 after their dependencies; no naming qualification is claimed here.
 
 ## US3
 
@@ -223,15 +230,16 @@ Test tasks precede their implementation; all external gates remain blocked until
 observed. A command may be defined with an explicit blocked result before its live
 prerequisites exist; defining it does not close its acceptance check.
 
-Authorized minimum: T001–T009 supplies offline/report/traceability and fixture-based
+Minimum safety: T001–T009 supplies offline/report/traceability and fixture-based
 dependency/static checks without cloud resources. Review the foundation, then run T023
 only if those tasks have evidenced completion; C2 source admission remains deferred to
-KI-001. Review PR creation may precede merge readiness; review the bounded branch and
-actual exact-head CI before merge.
-Naming, full forge qualification, AgentEx and whole-feature exit tasks remain outside its
-authorization; T022 still requires real forge evidence and whole-suite latency.
-Prepare a bounded IAM/state feasibility slice after minimum safety, retaining its
-separate live action/account/recovery/budget authority and task prerequisites.
+KI-001. Review PR creation may precede merge readiness; no merges occur during this goal.
+Naming, forge adapters, AgentEx and later checks are eligible when their own prerequisites
+are satisfied. T022 still requires real forge evidence, whole-suite latency and the
+deferred guarantees identified in its verification contract. Dependent IAM/state
+implementation follows minimum safety, retaining its separate live action/account/
+recovery/budget authority and task prerequisites. Independent documentation may proceed
+earlier; record a blocked task's precise prerequisite and continue other eligible work.
 
 ## Parallel opportunities
 

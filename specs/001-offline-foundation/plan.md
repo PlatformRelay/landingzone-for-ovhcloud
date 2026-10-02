@@ -6,15 +6,20 @@ Build a narrow Go-based check/report harness around the first provider-free nami
 Use Task as the in-child check interface; use a separately approved launcher as the host entry.
 Do not add an agent framework or provision cloud resources.
 
-The authorized increment is T001–T009: toolchain, local isolation, reports, trace/DoD
-and dependency/static checks, plus conditional GitHub CI bootstrap T023 after those pass.
-The full feature remains draft. TDD, independent review, actual gates/PR-head CI and
-mergeability are required; the operator granted merge permission. Structure, constitution
-ratification and committed workflow decisions are confirmed. Add directories with their
-first real artifact; do not create an empty architecture tree. Naming, forge adapters,
-latency and full feature exit remain planned outside this increment. Minimum safety
-precedes preparation of the next bounded IAM/state feasibility slice, whose live
-authority and operating prerequisites remain separate.
+The current goal (2026-10-02, local decision D61) covers all locally implementable portions
+of specs 001–004 whose dependencies and required decisions are satisfied. T001–T009 remain
+minimum safety: toolchain, local isolation, reports, trace/DoD and dependency/static checks;
+conditional GitHub CI bootstrap T023 follows their evidenced completion. Naming, forge
+adapters, latency and full exit retain their own prerequisites and qualification duties.
+The full feature remains draft. Use TDD, actual applicable checks and independent review,
+then publish coherent increments as scoped PRs, including stacks with explicit parent
+branches and review order. Continue eligible work without waiting for operator review;
+no PRs may be merged during this goal, superseding earlier merge permission.
+Structure, constitution ratification and committed workflow decisions are confirmed.
+Add directories with their first real artifact. Minimum safety precedes dependent
+IAM/state implementation; independent documentation can proceed earlier. Live authority
+and operating prerequisites remain separate. D29 still defers hardened persistence/export
+until real profile schemas exist.
 
 The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
 as **DEFERRED**, nonblocking technical debt [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) for current private
@@ -75,9 +80,9 @@ the constitution and ADRs are unchanged.
 | III Test first | Behaviour controls precede implementation; every sensor clause challenged; actual pinned output fixtures required. |
 | IV Authority | One state owner, trusted evaluator and protected execution boundaries explicit; no authoring cloud authority. |
 | V Recovery | Missing observations fail closed; private evidence and separate cleanup/recovery paths required. Live readiness remains blocked on setup. |
-| VI Scope | Bounded first increment; no supported-tuple claim, broad scaffolding or runtime rollout. |
+| VI Scope | Dependency-led bounded increments across eligible specs; no supported-tuple claim, broad scaffolding or runtime rollout. |
 | VII Useful outcomes | Preserve the reference baseline and differentiators; existing acceptance cases cover visible reports/status and failure paths; no new portal/CLI implied. |
-| VIII Decisions | Scalar naming/shared context and handwritten independent projections are selected; later module splitting needs concrete-consumer diagnosis. This does not activate naming tasks in the foundation run. |
+| VIII Decisions | Scalar naming/shared context and handwritten independent projections are selected; module splitting needs concrete-consumer diagnosis. Naming tasks are eligible under D61 after their dependencies and this diagnosis. |
 
 
 This table reviews the full design, not evidence that future gates passed. D60 defers
@@ -139,7 +144,9 @@ Approved T001 preparation and control proof → approved T002 valid/red boundary
 approved T003 actual entry and green capture/isolation gate → T004 tool-output capture →
 report/registry → module + projections → forge checks. No later-created gate is a T001
 prerequisite; T001 instead owns preparation refusal/cleanup before its outputs are consumed.
-The current T001–T009 run stops at the report/registry and dependency/static foundation.
+T001–T009 establish the report/registry and dependency/static foundation; D61 permits
+subsequent eligible tasks rather than ending the run at that minimum. A blocked task
+does not stop other independent work whose prerequisites are satisfied.
 T023 may then bootstrap only those implemented checks; missing foundation evidence
 blocks it. C2 source admission remains deferred to KI-001. A valid actual GitHub PR-head
 run and a failing behavior control remain required for merge, not review PR creation.

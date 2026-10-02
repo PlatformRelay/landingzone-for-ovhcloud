@@ -12,14 +12,17 @@ The minimum code prerequisite for protected platform experiments is
 [001 T001–T009](../../specs/001-offline-foundation/tasks.md): exact pins, isolated
 execution, real report fixtures, traceability and applicable dependency/static checks.
 It does not require the naming API, live both-forge qualification or latency benchmark.
-The operator authorized that subset on 2026-10-01 with TDD, predefined evidence and
-independent review. ADR-0002 is Accepted, constitution 1.2.0 is ratified and the reusable
-workflow remains committed. Create directories with their first real artifact.
-Keep the complete feature draft: naming, full forge qualification, latency and full exit
-are outside this increment. After T001–T009 pass, conditional T023 supplies minimal
-GitHub CI for the implemented foundation. The operator granted merge permission;
-independent review, actual required checks, PR-head CI and mergeability remain gates.
-Missing CI is not a green gate. Material implementation choices are logged for validation.
+The current delivery goal (2026-10-02, local decision D61) authorizes all locally
+implementable portions of specs 001–004 whose dependencies and required decisions are
+satisfied, with TDD, predefined evidence and independent review. ADR-0002 is Accepted,
+constitution 1.2.0 is ratified and the reusable workflow remains committed. Create
+directories with their first real artifact. T001–T009 remain the minimum safety subset;
+after they pass, conditional T023 supplies minimal GitHub CI. Naming, forge adapters,
+latency and full exit retain their own prerequisites and evidence requirements.
+Publish independently reviewed coherent increments, including stacked PRs, and continue
+eligible work without waiting for operator review or merge. No PRs may be merged during this goal;
+earlier merge permission is superseded. Missing CI is not a green gate, and publication
+does not establish merge readiness. Material implementation choices are logged for validation.
 
 The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
 as **DEFERRED**, nonblocking technical debt [KI-001](../known-issues/KI-001-ci-source-admission-unqualified.md) for current private
@@ -53,10 +56,11 @@ both actual forges qualify. A negative aggregate decision remains a failing/bloc
 qualification, even when its report is complete.
 
 Scalar naming with shared context and handwritten independent projections is selected;
-its later implementation still needs concrete-consumer diagnosis and is outside this run. The
+its implementation is eligible after concrete-consumer diagnosis and its task dependencies. The
 [004 proposal](../../specs/004-guided-preconfiguration/tasks.md) now permits a bounded
 renderer prototype and written journey; hardened persistence/export waits for real profile
-schemas. Its draft needs follow-up alignment and is outside this foundation run.
+schemas under D29. Align its draft before dependent work; the bounded prototype still
+needs its own approved execution/capture path and evidence.
 The [upstream trace](../reference/upstream-reference-map.md#translation-into-the-planning-set)
 identifies existing checks and future adaptation specs. Network/firewall topology,
 real profile exports and the installation-doc renderer are future consumer work.
@@ -81,6 +85,9 @@ real profile exports and the installation-doc renderer are future consumer work.
 6. Close only the part supported by evidence. Docs-only authoring needs content review,
    not invented behavioral tests. Mixed code/configuration/examples require their checks.
    Update the task state and keep a resumable local progress record.
+7. Publish the independently reviewed increment as a scoped PR. Dependent PRs target their
+   parent branch and document the dependency and parent-first review order. Continue the
+   next eligible task without waiting for operator review; do not merge during this goal.
 
 Commit subjects use `:gitmoji: type(scope): summary`. Preserve linear history. Never
 add authoring/review attribution to product files or commit/PR text. A change accepting
@@ -106,5 +113,7 @@ IAM/federation approval from a project's creation or change the ordinary account
 
 At the selected task limit, report closed tasks, open owner gates, actual checks,
 evidence paths, review findings and commit IDs. Re-run cross-artifact consistency and
-dependency checks after any task/spec change. Hand off a reviewable branch; publishing,
-merging or live actions require the authority for that specific run.
+dependency checks after any task/spec change. Deliver scoped, independently reviewed PRs
+and record precise blockers for remaining work. Continue other eligible work when one
+task is blocked. Publishing and stacks are authorized; merges are prohibited during this
+goal, and live actions retain their separate authority requirements.
