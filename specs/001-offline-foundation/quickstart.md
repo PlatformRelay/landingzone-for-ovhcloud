@@ -14,16 +14,20 @@ Do not run acceptance commands until their implementation and prerequisites have
 4. Run this spec's V checks in table order after their creators exist. Each emits the
    001 report envelope to private .local/evidence/001/; preserve sanitized summaries.
 5. Run the appropriate negative controls, clause mutations, crash and concurrency cases.
-6. Keep absent tools, unavailable forge/credentials and unobserved mechanisms blocked.
+6. Keep absent tools, unavailable forge/credentials and unobserved mechanisms blocked,
+   except C010.5/P4 explicitly DEFERRED to KI-001 within the scoped exception below.
 7. Complete independent review and record every non-docs check before changing to done.
 
 Full 001 exit needs actual forge evidence, naming implementation and the
 exclusive-runner benchmark. The operator authorized only T001–T009 for the current
-run, followed by conditional T023 after evidenced completion. T023 first creates and
-qualifies pre-execution CI source admission with Actions disabled during source publication;
-its setup is tested in a disposable repository and independently reviewed before target writes. Candidate publication waits for approved source plus
-active no-bypass workflow-path rules and actual valid/denied push controls; no such
-workflow/ruleset is qualified now. An owned-branch filter or post-run source check is insufficient. TDD, predefined evidence,
+run, followed by conditional minimal CI T023 after evidenced completion. The 2026-10-02
+operator priority exception (local decision D60) accepts C2 (C010.5/P4) as DEFERRED,
+nonblocking [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md)
+for current private maintainer development, publication, review PR creation and merge.
+Frozen workflows, a no-bypass ruleset and the disposable source-admission experiment
+remain later obligations. Whole-feature hardened guarantees remain unqualified; neither
+the constitution nor ADRs change. Review PR creation does not establish merge readiness.
+Exact pins, read-only CI authority and T003 isolation remain required. TDD, predefined evidence,
 independent review, actual required checks/PR-head CI and mergeability gate the granted
 merge permission. Structure, constitution and committed scaffold decisions are confirmed.
 Create directories with their first real artifact. Exact pins, image/cache and actual

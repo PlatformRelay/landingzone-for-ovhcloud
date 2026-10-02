@@ -19,21 +19,30 @@ in the prepared isolated image. Fetch/publish tokens stay in the outer trusted j
 workflow or Taskfile controls mounts, image or launch arguments. Required checks bind expected
 publisher and candidate digest; qualify actual enforcement on both forges. Alternative trusting
 a candidate `task check` to enter its own isolation rejected. Parent-run checks only are certified.
-## Bounded GitHub source-admission hypothesis
+## Deferred GitHub source-admission hypothesis (C2 / KI-001)
+The 2026-10-02 operator priority exception (local decision D60) accepts C010.5/P4 as
+DEFERRED, nonblocking [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md)
+for current private maintainer development, publication, review PR creation and merge.
+The hypothesis below is retained for later qualification, outside minimal T023.
+Whole-feature hardened guarantees remain unqualified; the constitution and ADRs are
+unchanged. Review PR creation does not establish merge readiness: T001–T009 evidence,
+independent review, exact pins, read-only CI authority, T003 isolation and actual exact-head
+CI remain required for merge.
 Owned-branch push filters do not select trusted workflow source: GitHub resolves YAML from
 the event SHA/ref. Manual dispatch also resolves its ref and requires a default-branch
 workflow; changing the event alone cannot close this gate. Post-run digest review is too late.
-T023 proposes one independently approved source publication on a ref that cannot execute
+The deferred KI-001 hypothesis proposes one independently approved source publication on a ref that cannot execute
 candidates with Actions disabled and candidate publication suspended, followed by an active no-bypass push
 ruleset restricting every workflow path before candidate admission. Frozen YAML invokes only
 full-SHA/digest-pinned approved host code. Qualification must accept the exact intended
 initial source publication, candidate history and final rebase-merge under the repo-wide freeze and reject a second unreviewed push, added YAML and edit/rename/deletion
 through available push/API paths before any runner executes. Read back Actions disabled before publication, then active rules/no bypass and source
-closure before re-enabling. T023 creates/probes this setup on a disposable repository first,
+closure before re-enabling. Later KI-001 qualification probes this setup on a disposable repository first,
 with bounded finally cleanup; failed setup/source updates retain disabled execution until
 requalified. Source updates repeat the gate.
 GitHub documents private push rulesets for Team; plan availability is not enforcement proof.
-No source/rule is already qualified. If this mechanism fails, T023 and merge remain blocked;
+No source/rule is already qualified. Failure blocks the hardened source-admission claim,
+not minimal T023 or current private maintainer publication/PR/merge under this exception;
 a protected external/base-source evaluator plus scoped publisher is an alternative requiring
 separate setup/authority disposition, not a claimed existing fallback.
 ## Decision: one pure module first
@@ -66,7 +75,8 @@ No cloud name/tag constraint is promoted from prose to observed API behaviour he
 - [Push ruleset availability](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)
 - [Workflow path restrictions](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#restrict-file-paths)
 - [OpenTofu mirror installation](https://opentofu.org/docs/cli/config/config-file/#explicit-installation-method-configuration)
-These describe mechanisms; T003/T023 owe pinned-runtime and actual denial/admission evidence.
+These describe mechanisms; T003 owes pinned-runtime/isolation evidence and T023 owes
+actual minimal CI evidence. Source denial/admission evidence remains deferred to KI-001.
 
 ## Upstream input trace
 Naming reference inputs: the pinned scalar context example in ../../docs/reference/upstream-reference-map.md is a comparison input for later T013–T016/V004–V006, not a released schema. Use independent expected vectors, not copied generated outputs. These tasks remain outside the foundation run.

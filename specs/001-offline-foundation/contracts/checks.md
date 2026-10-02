@@ -70,30 +70,33 @@ The following drivers are planned deliverables, not existing executable prerequi
 
 No row is waived by this ordering. T001 preparation controls remain required for T001
 closure; T002/T003 own capture admission because they create its tests/implementation.
-T003 results do not close later latency/forge/CI duties. CI publication/merge remains
-blocked on qualified independent evaluation source; candidate self-reports are insufficient.
+T003 results do not close later latency/forge/CI duties. Candidate self-reports are insufficient.
+
+The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
+as **DEFERRED**, nonblocking technical debt [KI-001](../../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) for current private
+maintainer development, publication, review PR creation and merge. Frozen workflows,
+a no-bypass ruleset and the disposable source-admission experiment are later obligations,
+not immediate T023 prerequisites. Review PR creation does not establish merge readiness:
+tests/evidence, exact pins, read-only authority, T003 isolation, exact-head CI and
+independent review remain required. Whole-feature hardened guarantees remain unqualified;
+the constitution and ADRs are unchanged.
 
 ## Planned child targets
 
 - `task test:foundation-ci`, `task ci:foundation` (T023): only after T001–T009 have evidenced
   completion, test/bootstrap the implemented foundation on GitHub. Exact Action pins,
-  reviewed workflow/launcher and image digests, qualified pre-execution source admission, ephemeral hosted
-  runner, read-only outer fetch, network-isolated candidate execution and 10-minute timeout.
+  independently reviewed workflow/launcher and image digests, ephemeral hosted runner,
+  read-only outer fetch, network-isolated candidate execution and 10-minute timeout.
   No cloud/deployment/secret-bearing environment. Require actual matching PR-head run/check
-  evidence and behavioral red/green controls; missing/stale/skipped/zero-discovery results
-  block merge. The proposed source gate is controlled independent source publication with Actions disabled and
-  candidate publication suspended, then active no-bypass push rules restricting all
-  `.github/workflows/**` before candidate pushes. Actual initial source publication, candidate admission and final rebase-merge under the freeze
-  and second unreviewed source push, new automatic YAML, rename/deletion/edit denial must
-  precede runner execution. Read back Actions disabled before source publication, then
-  active rules/no bypass and frozen source before enabling; no pending candidate run. T023
-  creates/probes this setup first in a bounded disposable repository with finally cancellation,
-  disabled execution and recorded-resource cleanup. Target failure/source update retains
-  disabled Actions and suspended publication until requalified. Record rules and bypass metadata plus approved source closure.
-  Frozen YAML executes only pinned approved host code; source changes suspend candidate
-  publication and repeat qualification. Entitlement or matching-source inspection afterward
-  is insufficient. No source workflow/ruleset is qualified yet; failure blocks T023 and merge.
-  This does not close full both-forge/fork/publisher qualification.
+  evidence and behavioral red/green controls; missing/foreign/stale/cancelled/skipped/
+  zero-discovery results block merge, not review PR creation. Candidate commands execute
+  only inside verified T003 isolation; fetch tokens stay outside it, with no privileged
+  runner or writable shared cache. YAML executes only pinned approved host code.
+  C010.5/P4 are DEFERRED to [KI-001](../../../docs/known-issues/KI-001-ci-source-admission-unqualified.md): the frozen-workflow/
+  no-bypass ruleset, disposable source-admission experiment and its admission/denial,
+  setup/cleanup/recovery evidence are later obligations, not immediate T023 prerequisites.
+  Minimal CI does not qualify pre-execution source enforcement or close full both-forge/
+  fork/publisher qualification; record the deferred criteria explicitly in evidence.
 - `task verify:toolchain` (T003): versions/pins and required cache/image identity, fail on mismatch;
   capture admission requires those identities and proven isolation, not preparation metadata alone.
 - `task check`: credential-free prepared image, no network, required L0–L4 applicable to

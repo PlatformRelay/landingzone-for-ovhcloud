@@ -68,3 +68,7 @@ defines the requested terminal journey alongside those phases; its implementatio
 
 The [first implementation guide](docs/how-to/first-implementation.md) explains the minimum
 safety subset, local versus live qualification, evidence and stop conditions.
+
+The [known issues](docs/known-issues/README.md) record verified findings and accepted
+limitations, including [C2's unqualified CI source admission](docs/known-issues/KI-001-ci-source-admission-unqualified.md),
+its nonblocking private-development disposition and reassessment trigger.

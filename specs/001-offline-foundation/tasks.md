@@ -30,6 +30,15 @@ are resolved. Add directories with their first real artifact. Exact tool/image p
 prepared local runtime/mirror and P1/P2 qualification remain implementation premises,
 not passed observations. T010–T022 are not activated by completing this subset.
 
+The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
+as **DEFERRED**, nonblocking technical debt [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) for current private
+maintainer development, publication, review PR creation and merge. Frozen workflows,
+a no-bypass ruleset and the disposable source-admission experiment are later obligations,
+not immediate T023 prerequisites. Review PR creation does not establish merge readiness:
+tests/evidence, exact pins, read-only authority, T003 isolation, exact-head CI and
+independent review remain required. Whole-feature hardened guarantees remain unqualified;
+the constitution and ADRs are unchanged.
+
 ## Setup and foundation
 
 - [x] T001 Select exact signed/checksummed tool and image pins in mise.toml, bootstrap tools/go.mod and qualify approved preparation with a bounded external control driver — closed 2026-10-02, evidence: evidence/T001.md
@@ -44,7 +53,7 @@ not passed observations. T010–T022 are not activated by completing this subset
 
 - [ ] T003 Implement trusted preparation, external host entry and local isolation in tools/cmd/lz-offline/, tools/internal/checks/offline.go, harness/capabilities.yaml and Taskfile.yml
   - Requirements: FR-001, FR-002; ADRs: 0007, 0011, 0021. Depends on: T002.
-  - Verify: Planned `<approved-absolute-path>/lz-offline --candidate <checkout> -- task verify:toolchain` and the same entry with `task test:offline-boundary`: valid prepared image succeeds; wrong/missing pin, mismatched artifact/image, credential/socket/cache mount, outbound child or candidate-controlled launch rejects. Implement capture admission in this entry and its toolchain target: matching pinned tool/artifact identities and proven capture/isolation gate are prerequisites to every tool-output fixture capture. Independently approve the preparation/launcher source and build closure before building, then approve binary/image digests and install outside the candidate; repeat all T002 controls green through this actual entry, including pre-invocation/pre-publication capture refusal and gate-off sensitivity. Requalify the T001 preparation controls against any new preparation closure before it is used. Prepared provider mirror/lockfile and explicit mirror-only CLI config must support real `tofu init -backend=false -lockfile=readonly` with network=none; missing provider/hash or network fallback fails. Creates lz-offline, capture admission and both child targets. T023 qualifies its own CI source admission; full forge wrapper stays T011.
+  - Verify: Planned `<approved-absolute-path>/lz-offline --candidate <checkout> -- task verify:toolchain` and the same entry with `task test:offline-boundary`: valid prepared image succeeds; wrong/missing pin, mismatched artifact/image, credential/socket/cache mount, outbound child or candidate-controlled launch rejects. Implement capture admission in this entry and its toolchain target: matching pinned tool/artifact identities and proven capture/isolation gate are prerequisites to every tool-output fixture capture. Independently approve the preparation/launcher source and build closure before building, then approve binary/image digests and install outside the candidate; repeat all T002 controls green through this actual entry, including pre-invocation/pre-publication capture refusal and gate-off sensitivity. Requalify the T001 preparation controls against any new preparation closure before it is used. Prepared provider mirror/lockfile and explicit mirror-only CLI config must support real `tofu init -backend=false -lockfile=readonly` with network=none; missing provider/hash or network fallback fails. Creates lz-offline, capture admission and both child targets. T023 supplies minimal CI; C2 source admission is deferred to KI-001; full forge wrapper stays T011.
   - Evidence: `.local/evidence/001/t003-boundary-green.json`; initial status `not-run`.
 
 - [ ] T004 Capture pinned passing/failing/truncated tofu JSON streams and write report tests in tools/internal/report/report_test.go and tests/fixtures/tofu/
@@ -163,7 +172,7 @@ Independent test: V003, V008.
 
 - [ ] T022 Run foundation exit checks and independent evidence inspection through harness/checks.yaml
   - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, SC-001, SC-002, SC-003, SC-004, SC-005; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T019, T021, T023.
-  - Verify: Run every V001–V009 command from spec.md and `task check -- modules/naming`; valid cases pass, every guarded clause has a killed behavioural mutant/valid unusual case; absent tool, forge proof or expert review prevents phase exit.
+  - Verify: Run every V001–V009 command from spec.md and `task check -- modules/naming`; valid cases pass, every guarded clause has a killed behavioural mutant/valid unusual case; absent tool, forge proof or expert review prevents phase exit. Deferred C010.5/P4 (KI-001) also prevent whole-feature hardened acceptance; the current private increment does not close T022.
   - Aggregate ADR rationale: 0002 paths/layers; 0003 names/labels; 0007 forge execution; 0008 checks/evidence; 0011 pins; 0019 diagnostics/DoD; 0021 protected boundary.
   - Evidence: `.local/evidence/001/t022-exit.json`; initial status `not-run`.
 
@@ -200,14 +209,12 @@ Independent test: V003, V008.
 
 ## Conditional CI bootstrap
 
-- [ ] T023 Test first, then qualify source admission and implement minimal GitHub foundation CI in .github/workflows/foundation.yml, pipelines/github/foundation-source.json, tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
-  - Requirements: FR-010, SC-005; ADRs: 0007, 0008, 0011, 0021. Depends on: T009; evidenced T001–T009 completion and independent approval of exact workflow/launcher closure before controlled source publication; repository/disposable-probe setup access and actual GitHub execution available. T023 creates and qualifies its own source-admission prerequisite; no pre-existing trusted workflow/ruleset is assumed. Its unqualified state blocks candidate push/CI/merge, not the bounded setup proof.
-  - Verify: Planned child `task test:foundation-ci; task ci:foundation`. Write approved-source/candidate fixtures first; retain behavioral red for each C010 clause before implementation. Reject unpinned Actions, widened authority, candidate host execution, omitted/zero/skipped checks and stale source/head.
-  - Source-admission proof (created here): setup runs only through a separately reviewed external driver; fetch/settings credentials never enter candidate tasks. First trial the exact setup in a disposable repository. Suspend candidate publication; disable Actions and read back disabled execution. Independently approve the complete workflow/Action/launcher/image closure, then publish it on a ref that cannot trigger candidate execution. Activate a no-bypass push ruleset covering every `.github/workflows/**` path; read back active rules, empty bypass list and matching approved closure before enabling Actions, with no queued/started candidate run. A candidate-owned source manifest cannot approve itself.
-  - Admission controls: prove the exact intended initial source-publication history, unchanged approved-source candidate push and final rebase-merge under the repo-wide freeze; source bytes must remain independently approved throughout. Ordinary file-push success alone is insufficient. Workflow edit, deletion, rename, newly added automatic YAML and a second unreviewed source push are refused before any runner executes; exercise available Git push/API paths and record actual denials. Unavailable enforcement, rejected initial publication/valid history/rebase-merge or any host execution blocks T023/merge; no candidate-CI fallback. Independently review the tested setup before target settings writes.
-  - Cleanup/recovery: bound the disposable probe's deadline and finally cancel runs, disable Actions and remove only recorded temporary refs/resources; cleanup error blocks qualification. Target setup failure/source update leaves Actions disabled and candidate publication suspended. Retain the setup/source snapshot; repeat independent source approval and qualification before re-enabling. Never remove enforcement while execution is enabled.
-  - CI proof: only after source admission passes, execute the T003/T005/T007/T009 aggregate in T003 isolation. Frozen YAML uses full-SHA Actions and digest-pinned approved host launcher/image, owned-branch push triggers, ephemeral hosted runner, contents-read outer fetch and 10-minute timeout; candidate archive is data, never host checkout/build/source/execution. Tokens stay outside the child. Retain tests green, an actual failing behavioral run and valid GitHub run/check on the foundation PR head. Verify executed workflow/launcher/image/publisher identities, exact candidate SHA, counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge; no cloud/deployment/protected-environment authority. Creates both child targets, source manifest and V009 packet; full T010–T012 qualification remains open.
-  - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain the pre-implementation red, green controls, source review/freeze identity, valid admission and denied-push observations, actual run/check IDs and exact head/source bindings, plus the V009 packet reference.
+- [ ] T023 Test first, then implement minimal GitHub foundation CI in .github/workflows/foundation.yml, pipelines/github/foundation-source.json, tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
+  - Requirements: FR-010 active clauses C010.1–C010.4/C010.6, SC-005; ADRs: 0007, 0008, 0011, 0021. Depends on: T009; evidenced T001–T009 completion, independent review of exact workflow/launcher closure and actual GitHub execution available. C010.5/P4 remain DEFERRED under D60, not prerequisites for this task or current private maintainer publication/PR/merge.
+  - Verify: Planned child `task test:foundation-ci; task ci:foundation`. Write approved-source/candidate fixtures first; retain behavioral red for each active C010 clause before implementation. Reject unpinned Actions, widened authority, candidate host execution, omitted/zero/skipped checks and stale source/head.
+  - Deferred source admission: [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) retains the frozen-workflow/no-bypass ruleset, disposable source-admission experiment, initial-history/rebase-merge admission, edit/add/rename/delete/second-push denials and setup/cleanup/recovery qualification. These remain owed, not green; minimal T023 does not qualify pre-execution source enforcement.
+  - CI proof: execute the T003/T005/T007/T009 aggregate in T003 isolation. Independently reviewed YAML uses full-SHA Actions and digest-pinned approved host launcher/image, owned-branch push triggers, ephemeral hosted runner, contents-read outer fetch and 10-minute timeout; candidate archive is data, never host checkout/build/source/execution. Tokens stay outside the child. Retain tests green, an actual failing behavioral run and valid GitHub run/check on the foundation PR head. Verify executed workflow/launcher/image/publisher identities, exact candidate SHA, counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge, not review PR creation; no cloud/deployment/protected-environment authority. Creates both child targets, source manifest and the active V009 packet; full T010–T012 qualification remains open.
+  - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain pre-implementation red, green controls, independent source review, actual run/check IDs and exact head/source bindings, plus the V009 packet reference. Record C010.5/P4 as DEFERRED to KI-001, never passed or silently omitted.
 
 ## Dependencies & execution order
 
@@ -218,8 +225,9 @@ prerequisites exist; defining it does not close its acceptance check.
 
 Authorized minimum: T001–T009 supplies offline/report/traceability and fixture-based
 dependency/static checks without cloud resources. Review the foundation, then run T023
-only if those tasks have evidenced completion; T023 creates and qualifies CI source
-admission before candidate publication. Review the bounded branch and actual CI.
+only if those tasks have evidenced completion; C2 source admission remains deferred to
+KI-001. Review PR creation may precede merge readiness; review the bounded branch and
+actual exact-head CI before merge.
 Naming, full forge qualification, AgentEx and whole-feature exit tasks remain outside its
 authorization; T022 still requires real forge evidence and whole-suite latency.
 Prepare a bounded IAM/state feasibility slice after minimum safety, retaining its
@@ -237,4 +245,6 @@ Rerun spec acceptance commands and inspect matching evidence; do not close a tas
 a missing-binary result, empty discovery, self-authored green assertion or a simulation
 standing in for required live proof. Docs-only work remains exempt. Only the operator
 activates dependent live experiments/ratifies ADRs. A refuted observed premise gets its
-explicit downstream stop decision; an unrun required experiment stays owed and blocked.
+explicit downstream stop decision; an unrun required experiment stays owed and blocked
+unless explicitly deferred within the scoped D60 exception. C2 stays DEFERRED in KI-001,
+not passed, and remains required for whole-feature hardened acceptance.

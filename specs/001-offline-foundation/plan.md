@@ -16,6 +16,15 @@ latency and full feature exit remain planned outside this increment. Minimum saf
 precedes preparation of the next bounded IAM/state feasibility slice, whose live
 authority and operating prerequisites remain separate.
 
+The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
+as **DEFERRED**, nonblocking technical debt [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) for current private
+maintainer development, publication, review PR creation and merge. Frozen workflows,
+a no-bypass ruleset and the disposable source-admission experiment are later obligations,
+not immediate T023 prerequisites. Review PR creation does not establish merge readiness:
+tests/evidence, exact pins, read-only authority, T003 isolation, exact-head CI and
+independent review remain required. Whole-feature hardened guarantees remain unqualified;
+the constitution and ADRs are unchanged.
+
 ## Technical Context
 - Language: OpenTofu HCL, Go (one tools/go.mod), JSON Schema, YAML, thin Task/Bash glue.
 - First implementation pins: OpenTofu 1.13.0, Terramate 0.17.3, ovh/ovh 2.21.0 when
@@ -41,32 +50,15 @@ authority and operating prerequisites remain separate.
   digests and expected publisher; required-check origin enforcement must be qualified.
   Ordinary candidate CI is advisory until that trusted result exists; no pull_request_target
   checkout of fork code. This certifies parent-run fork checks, not fork-owned infrastructure.
-  T023 first qualifies CI source admission, then supplies actual CI for the owned foundation
-  branch. Its proposed mechanism is one controlled publication of independently reviewed
-  workflow source with Actions disabled and candidate publication suspended, followed by an
-  active push ruleset with no bypass restricting every `.github/workflows/**` path.
-  Read back Actions disabled before source publication; the source publication
-  ref must not trigger candidate execution. T023 creates this prerequisite as a bounded
-  disposable-repository proof after T001–T009, not an unexplained pre-existing wrapper.
-  Independently review tested setup before target writes; read back active rules, no bypass
-  and frozen source before enabling Actions, with no pending candidate run. The probe
-  finally cancels runs, disables Actions and cleans only recorded temporary refs/resources;
-  cleanup error blocks. Failure/source updates leave execution disabled and publication
-  suspended; never remove enforcement while execution is enabled. Before the first candidate push, prove that an
-  unchanged approved workflow admits the intended initial source history, candidate push and
-  final rebase-merge while edits, deletion, rename and an
-  added automatic workflow are refused before runner execution. Test a second unreviewed
-  push and all available candidate push/API paths. If initial history admission or enforcement
-  fails, T023 and merge stay blocked; do not relax the rule or allow a review-after-run bypass.
-  The frozen YAML executes only full-SHA Actions and an approved digest-pinned launcher/image
-  closure outside the candidate; no host checkout/build/source of candidate scripts. It uses
-  an ephemeral GitHub-hosted runner, contents-read fetch only, isolated candidate commands
-  and a 10-minute timeout. Tokens remain outside the child. Workflow/launcher updates suspend
-  candidate publication and repeat independent approval plus source-admission qualification.
-  Actual source/head/image/publisher metadata binds the result; this supplements pre-execution
-  enforcement. No source workflow or ruleset is qualified yet. Team-plan availability is a
-  prerequisite observation, not denial proof. No deployment/protected-environment authority
-  is added; T010–T012 full fork/both-forge/publisher qualification remains planned.
+  T023 supplies minimal CI for the owned foundation branch after T001–T009 pass.
+  Independently reviewed YAML uses full-SHA Actions and an approved digest-pinned
+  launcher/image closure outside the candidate; no host checkout/build/source of
+  candidate scripts. An ephemeral GitHub-hosted runner provides contents-read fetch,
+  isolated candidate commands and a 10-minute timeout. Tokens remain outside the child.
+  Actual reviewed source/head/image/publisher metadata binds the result.
+  C2 source enforcement remains DEFERRED to [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) under D60,
+  not a prerequisite for current private maintainer publication/PR/merge. No workflow/
+  ruleset enforcement is qualified. T010–T012 full fork/both-forge/publisher duties remain.
 - Storage: tracked schemas, independent vectors and sanitised tool fixtures; raw results in
   gitignored `.local/evidence/`. No hosted service, cloud state or telemetry.
 - Tests: Go unit/contract tests, pure `tofu test` plan tests, Conftest and assent fixtures,
@@ -88,7 +80,8 @@ authority and operating prerequisites remain separate.
 | VIII Decisions | Scalar naming/shared context and handwritten independent projections are selected; later module splitting needs concrete-consumer diagnosis. This does not activate naming tasks in the foundation run. |
 
 
-Draft design conforms; this table is a review of the design, not evidence that future gates passed.
+This table reviews the full design, not evidence that future gates passed. D60 defers
+C2 implementation within the private increment; it does not qualify the hardened design.
 
 
 ## Project Structure
@@ -148,8 +141,8 @@ report/registry → module + projections → forge checks. No later-created gate
 prerequisite; T001 instead owns preparation refusal/cleanup before its outputs are consumed.
 The current T001–T009 run stops at the report/registry and dependency/static foundation.
 T023 may then bootstrap only those implemented checks; missing foundation evidence
-blocks it. Unqualified pre-execution source admission blocks candidate publication/CI. A valid actual GitHub PR-head run and a failing behavior
-control are required.
+blocks it. C2 source admission remains deferred to KI-001. A valid actual GitHub PR-head
+run and a failing behavior control remain required for merge, not review PR creation.
 Its real-tool controls use fixture modules; absent modules/naming checks stay not-run.
 Schema validation joins at T016. Partial V001/V006 observations cannot close their
 later latency/schema/forge duties or claim a full requirement pass.
