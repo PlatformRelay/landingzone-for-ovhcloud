@@ -1,10 +1,13 @@
 # Feature Specification: Friendly, resumable repository preconfiguration
 Created: 2026-10-01 · Status: draft · ADRs: 0001, 0002, 0003, 0005, 0007, 0008, 0011, 0013, 0019, 0021, 0023
 
-**Owner gate — scope and schedule pending:** D16 approves the direction. The scope of
-this draft (prototype/walkthrough versus synthetic controller and hardened persistence)
-awaits operator decision. No task in 004 starts solely because 001 prerequisites exist.
-Real profile-schema creators are absent; real export readiness remains blocked.
+**Active slice — D29:** The early written journey (T014), bounded renderer comparison
+(T001) and minimal in-memory controller portion of T002–T003 are authorized. T014 is
+documentation only; prototype implementation/execution waits for actual 001/T003 safety
+and capture qualification and independent review of the exact experiment packet.
+Hardened persistence and export, including synthetic implementations, remain deferred
+until real profile schemas exist. Full terminal/save/resume integration, final guide T012
+and aggregate T013 remain open. D61 widens eligible work without removing these gates.
 
 ## Why and scope
 Help an operator understand choices and prepare a reviewable repository configuration through
@@ -12,6 +15,8 @@ a friendly terminal journey. Save valid progress and explain consequences/next s
 calls, secret collection, procurement, deployment or configuration-file writes are included.
 Only owned checkpoint/staging/evidence areas in data-model.md may change; inventory all other paths.
 This is a setup helper through Task, not a general management CLI.
+Those write areas and saved-state transitions describe the eventual product, not permission
+for the in-memory prototype to save or export. The early journey produces prose only.
 
 ## Decisions and proposals
 The terminal journey, friendly explanations, helper checks and resumability are approved direction.
@@ -85,6 +90,11 @@ bundle. No existing repository file or cloud object changes. Checks: V003–V005
   - **C010.4**: Preview changed defaults after a use-case edit.
   - **C010.5**: Retain qualification and customer-action gates on unsupported/regulated selections.
 
+The requirements above retain the full product contract. The active prototype exercises
+only in-memory choice/help/back/edit/progress behavior; save/resume, helper integration and
+export clauses stay owed to their later creators. T014 illustrates that behavior without
+claiming any V-check or success criterion has passed.
+
 Each numbered clause inherits its parent requirement’s V-check and creating tasks.
 For every guarded clause, implementation records a distinct expected outcome and
 valid/defect control; parent coverage alone cannot satisfy an untested child clause.
@@ -118,9 +128,11 @@ unsupported tuple, missing tool, long helper run, symlink destination, secret-li
 ## Dependencies and stop conditions
 Phase 001 T001 pins tools; its T007 report/evidence contract supports local integration.
 The checkpoint has its own strict schema; it does not require the naming module/interface choice.
-Phase 001 T016 naming schemas are required at real-export integration. Synthetic fixture work
-may precede real profile data, explicitly
-without readiness claims. Real exports wait for the required schema/profile/naming contract
-creators and any joint interface choice; no invented runnable cloud configuration. A renderer
-comparison may use credential-free preparation; protected execution remains isolated. Missing
-platform qualification blocks that platform's claim, not prose or independent fixture work.
+Phase 001 T016 naming schemas are required at real-export integration. Only in-memory
+synthetic choice vectors may precede real profile data; they do not authorize synthetic
+checkpointing or export. T004–T005 and T010–T011 wait for real profile schemas; real export
+also needs configuration/catalogue/naming contract creators and any dependent interface
+decision. Preserve all fault, permission, concurrency and publication controls for that work.
+A renderer comparison needs exact reviewed pins, finite bounds and actual 001/T003 safety/
+capture qualification before implementation/execution in this lane. Missing platform
+qualification blocks that platform's claim, not T014 prose. No invented runnable cloud configuration.

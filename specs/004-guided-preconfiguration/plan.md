@@ -1,10 +1,11 @@
 # Implementation Plan: Guided preconfiguration
 Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft
 
-**Owner gate — scope and schedule pending:** D16 approves the direction. The scope of
-this draft (prototype/walkthrough versus synthetic controller and hardened persistence)
-awaits operator decision. No task in 004 starts solely because 001 prerequisites exist.
-Real profile-schema creators are absent; real export readiness remains blocked.
+**Active slice — D29:** Deliver T014's early written journey independently. Prepare the
+requirements for T001's bounded renderer experiment and the in-memory T002–T003 portion;
+implementation/execution waits for actual 001/T003 safety/capture qualification and exact
+experiment review. Persistence/export, including synthetic versions, wait for real profile
+schemas. D61 does not waive this deferral. T012 remains the final guide after T009/T011.
 
 ## Summary
 Build one setup helper behind Task with a pure journey controller, strict versioned session,
@@ -35,8 +36,32 @@ Paths in spec.md; model in data-model.md; command/interaction contracts in contr
 quickstart.md is a planned verification guide, not a claim the executable exists.
 
 ## Delivery phases
-Tool/renderer capture → controller red/green → checkpoint red/green → trusted helper red/green →
-real terminal integration → export red/green → guide → independent journey/evidence inspection.
+T014 written journey → independent task-boundary and prose review. This branch has no runtime
+dependency and cannot close T012 or qualify V001–V005.
+
+After actual 001/T003 safety/capture qualification and exact experiment review:
+T001 bounded renderer comparison → T002–T003 in-memory choice/controller red/green.
+Keep terminal observations scoped to the measured renderer/platform. An in-memory cancel
+discards answers; it must not imply a checkpoint or resume feature.
+
+Later: real profile schemas → checkpoint red/green; trusted helper work also needs the
+actual 001/T007 report contract. Checkpoint + helper integration → full terminal integration →
+export red/green with real schema/catalogue/naming creators → final T012 guide → T013 aggregate.
+The full controls remain in tasks.md; prototype completion never closes their deferred clauses.
+
+## Next prototype packet (requirements only)
+After the safety prerequisite is available, fix exact Huh/Gum package/library pins and
+Linux amd64 terminal dimensions/input events. Review finite elapsed-time, process/descendant,
+output and answer limits, source/input/build/destination/command bindings and capture admission
+before running the experiment. Measure help, cancel, back, plain/no-TTY and narrow behavior;
+retain unsupported-platform and wrong/missing-pin refusals and actual pinned captures.
+No mock terminal output can supply qualification. Record missing evidence as not-run.
+
+For the in-memory controller, prepare independent vectors for explicit versus suggested equal
+values, changed use-case defaults, valid override retention, dependent invalidation, conditional
+counts and unsupported/regulated gates. Use tests first against a compiling subject after the
+safety gate; code, terminal captures and Task integration are not part of T014. Task integration
+also requires the real trusted entry. No save/resume, synthetic exporter or second product CLI.
 
 ## Verification strategy
 Use independent synthetic choice vectors and actual pinned terminal/tool captures. Exercise every
@@ -48,8 +73,8 @@ automation never supplies that review. Documentation-only guide authoring is exe
 
 ## Dependencies and stop conditions
 Within-feature DAG is in tasks.md. Phase 001 supplies pinned tools, reporting and strict schema
-integration; real profile/catalogue data is another creator gate. Fixture work can proceed without
-those future live artefacts; a fixture result is marked as such. No applying the draft bundle,
+integration; real profile/catalogue data is another creator gate. Only the authorized in-memory
+choice fixtures can precede that gate; synthetic persistence/export stays deferred. No applying the draft bundle,
 cloud credential collection or deployment. Pending joint naming choice remains respected.
 
 ## Complexity tracking
