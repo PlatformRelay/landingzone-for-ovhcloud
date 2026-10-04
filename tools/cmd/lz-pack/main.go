@@ -4,16 +4,17 @@
 // The layer holds runtime/ (the bundle with its entry) and host/bwrap.
 //
 // Before anything is written the bundle passes the entry's own admission
-// (internal/bundle) for the manifest digest the entry was built with, and the
-// entry must carry that digest, so a layout is produced only for a bundle the
-// entry admits.
+// (internal/bundle) for the manifest digest the entry was built with. After
+// writing, the layer is extracted again and what it holds must pass the same
+// admission, and its entry must have that digest compiled in, so a layout is
+// kept only if the entry it carries admits the bundle it carries.
 package main
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -99,19 +100,11 @@ func outside(dir, out string) error {
 	return nil
 }
 
-// plan admits the bundle as the entry would, checks that the entry carries
-// the manifest digest, and returns the layer's entries in order: host/,
-// host/bwrap, then the bundle under runtime/ in walk order.
+// plan admits the bundle as the entry would and returns the layer's entries
+// in order: host/, host/bwrap, then the bundle under runtime/ in walk order.
 func plan(dir, launcher, manifestSHA string) ([]item, error) {
 	if _, err := bundle.Admit(dir, manifestSHA, launcher); err != nil {
 		return nil, err
-	}
-	entry, err := bundle.Regular(filepath.Join(dir, "lz-offline"))
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Contains(entry, []byte(manifestSHA)) {
-		return nil, fmt.Errorf("PACK_INPUT: entry not built for manifest %s", manifestSHA)
 	}
 	// Admission has read the launcher as a single-link regular file.
 	launcherInfo, err := os.Lstat(launcher)
@@ -202,6 +195,142 @@ type count struct{ n int64 }
 
 func (c *count) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
 
+// compiledDigest returns the manifest digest compiled into the entry at
+// path: the value of its main.manifestSHA string, read through the symbol
+// table, not any bytes that merely appear in the file.
+func compiledDigest(path string) (string, error) {
+	file, err := elf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("PACK_ENTRY: %w", err)
+	}
+	defer file.Close()
+	symbols, err := file.Symbols()
+	if err != nil {
+		return "", fmt.Errorf("PACK_ENTRY: %w", err)
+	}
+	read := func(address, size uint64) ([]byte, error) {
+		for _, section := range file.Sections {
+			// An unset string lies in zero-filled data and reads as empty.
+			if address >= section.Addr && address+size <= section.Addr+section.Size {
+				data := make([]byte, size)
+				_, err := section.ReadAt(data, int64(address-section.Addr))
+				return data, err
+			}
+		}
+		return nil, fmt.Errorf("PACK_ENTRY: no initialised data at %#x", address)
+	}
+	for _, symbol := range symbols {
+		if symbol.Name != "main.manifestSHA" {
+			continue
+		}
+		// A Go string is a data pointer and a length.
+		header, err := read(symbol.Value, 16)
+		if err != nil {
+			return "", err
+		}
+		value, err := read(file.ByteOrder.Uint64(header[:8]), file.ByteOrder.Uint64(header[8:]))
+		return string(value), err
+	}
+	return "", fmt.Errorf("PACK_ENTRY: no main.manifestSHA symbol")
+}
+
+// extract unpacks a layer this program wrote into the new directory dest,
+// restoring modes and links; directory modes are set last so a private
+// directory can still be filled.
+func extract(layer, dest string) error {
+	file, err := os.Open(layer)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	unzipped, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	reader := tar.NewReader(unzipped)
+	var directories []*tar.Header
+	for {
+		h, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		// The names are the ones layer wrote: host/ and runtime/ only.
+		path := filepath.Join(dest, h.Name)
+		switch h.Typeflag {
+		case tar.TypeDir:
+			if err := os.Mkdir(path, 0o700); err != nil {
+				return err
+			}
+			directories = append(directories, h)
+		case tar.TypeReg:
+			out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(out, reader)
+			if closeErr := out.Close(); err == nil {
+				err = closeErr
+			}
+			if err == nil {
+				err = os.Chmod(path, fs.FileMode(h.Mode))
+			}
+			if err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			if err := os.Symlink(h.Linkname, path); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("PACK_VERIFY: unexpected entry type: %s", h.Name)
+		}
+	}
+	for i := len(directories) - 1; i >= 0; i-- {
+		if err := os.Chmod(filepath.Join(dest, directories[i].Name), fs.FileMode(directories[i].Mode)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verify extracts the written layer beside out and requires that the bundle
+// it carries passes admission with the launcher it carries, and that the
+// entry it carries was compiled for manifestSHA. It judges the bytes that
+// were archived, whatever happened to the inputs meanwhile.
+func verify(out, layerDigest, manifestSHA string) error {
+	parent, err := filepath.EvalSymlinks(filepath.Dir(out))
+	if err != nil {
+		return err
+	}
+	scratch, err := os.MkdirTemp(parent, ".lz-pack-verify-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(scratch)
+	if err := extract(filepath.Join(out, "blobs", "sha256", strings.TrimPrefix(layerDigest, "sha256:")), scratch); err != nil {
+		return err
+	}
+	runtime := filepath.Join(scratch, "runtime")
+	if _, err := bundle.Admit(runtime, manifestSHA, filepath.Join(scratch, "host", "bwrap")); err != nil {
+		return fmt.Errorf("PACK_VERIFY: packed bundle refused: %w", err)
+	}
+	compiled, err := compiledDigest(filepath.Join(runtime, "lz-offline"))
+	if err != nil {
+		return err
+	}
+	if compiled != manifestSHA {
+		return fmt.Errorf("PACK_VERIFY: entry compiled for manifest %q, not %s", compiled, manifestSHA)
+	}
+	return nil
+}
+
+// beforeWrite runs between planning and writing; tests use it to change the
+// inputs in that gap.
+var beforeWrite = func() {}
+
 // store writes data as a blob and returns its descriptor.
 func store(out, mediaType string, value any) (descriptor, error) {
 	data, err := json.Marshal(value)
@@ -243,6 +372,7 @@ func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
 	if err != nil {
 		return packed{}, err
 	}
+	beforeWrite()
 	layerDigest, layerSize, diffID, err := layer(file, items)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
@@ -251,6 +381,9 @@ func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
 		return packed{}, err
 	}
 	if err := os.Rename(file.Name(), filepath.Join(blobs, strings.TrimPrefix(layerDigest, "sha256:"))); err != nil {
+		return packed{}, err
+	}
+	if err := verify(out, layerDigest, manifestSHA); err != nil {
 		return packed{}, err
 	}
 	config, err := store(out, "application/vnd.oci.image.config.v1+json", map[string]any{

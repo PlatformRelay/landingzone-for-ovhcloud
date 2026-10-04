@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -160,5 +161,48 @@ func TestAdmitRefuses(t *testing.T) {
 				t.Errorf("BEHAVIORAL_RED: %s gave %v, want %s", name, err, c.want)
 			}
 		})
+	}
+}
+
+// The first difference in lexical order is the one reported, and the walk
+// stops there: an unlisted resources/a is reported before a named pipe at
+// resources/z is reached, as the entry always did.
+func TestAdmitReportsFirstDifference(t *testing.T) {
+	b := bundletest.Write(t, nil)
+	if err := os.WriteFile(filepath.Join(b.Dir, "resources/a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(b.Dir, "resources/z"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle.Admit(b.Dir, b.ManifestSHA, b.Launcher); err == nil || err.Error() != "RESOURCE_IDENTITY: resources/a" {
+		t.Errorf("BEHAVIORAL_RED: first difference %v", err)
+	}
+}
+
+// Inventory's identities, written out independently of it.
+func TestInventory(t *testing.T) {
+	b := bundletest.Write(t, nil)
+	got, err := bundle.Inventory(b.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bundle.Identity{
+		"resources":                    {Kind: "directory", Mode: 0o700},
+		"resources/rootfs":             {Kind: "directory", Mode: 0o755},
+		"resources/rootfs/bin":         {Kind: "directory", Mode: 0o755},
+		"resources/rootfs/bin/busybox": {Kind: "file", Value: "9d75f0d7c398df565d7ac04c6819b62d6d8f9560f5eb4672596ecd8f7e96ae91", Mode: 0o755},
+		"resources/rootfs/usr":         {Kind: "directory", Mode: 0o755},
+		"resources/rootfs/usr/bin":     {Kind: "directory", Mode: 0o755},
+		"resources/rootfs/usr/bin/ls":  {Kind: "symlink", Value: "../../bin/busybox", Mode: 0o777},
+		"resources/rootfs/usr/bin/sh":  {Kind: "symlink", Value: "/bin/busybox", Mode: 0o777},
+		"resources/rootfs/usr/top":     {Kind: "symlink", Value: "..", Mode: 0o777},
+		"resources/tofu":               {Kind: "file", Value: "cc52e9ceb39eabd803ce34abace35a582f9869d00844af61740120b0f42bdc81", Mode: 0o700},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BEHAVIORAL_RED: inventory\n got %+v\nwant %+v", got, want)
+	}
+	if bundle.Hash([]byte("busybox")) != want["resources/rootfs/bin/busybox"].Value {
+		t.Errorf("fixture digest of busybox changed")
 	}
 }

@@ -72,13 +72,13 @@ func Regular(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// Inventory returns the identity of every entry under root/resources, keyed
-// by its path relative to root. Links are admitted only inside
-// resources/rootfs and must resolve inside it, an absolute target counting
-// from the rootfs; other links and special files are refused.
-func Inventory(root string) (map[string]Identity, error) {
-	actual := map[string]Identity{}
-	err := filepath.WalkDir(filepath.Join(root, "resources"), func(path string, entry os.DirEntry, incoming error) error {
+// walk visits every entry under root/resources in lexical order with its
+// identity and its path relative to root, stopping at the first error. Links
+// are admitted only inside resources/rootfs and must resolve inside it, an
+// absolute target counting from the rootfs; other links and special files
+// are refused.
+func walk(root string, visit func(relative string, value Identity) error) error {
+	return filepath.WalkDir(filepath.Join(root, "resources"), func(path string, entry os.DirEntry, incoming error) error {
 		if incoming != nil {
 			return incoming
 		}
@@ -124,6 +124,15 @@ func Inventory(root string) (map[string]Identity, error) {
 		default:
 			return fmt.Errorf("RESOURCE_TYPE: %s", relative)
 		}
+		return visit(relative, value)
+	})
+}
+
+// Inventory returns the identity of every entry under root/resources, keyed
+// by its path relative to root, under the rules of walk.
+func Inventory(root string) (map[string]Identity, error) {
+	actual := map[string]Identity{}
+	err := walk(root, func(relative string, value Identity) error {
 		actual[relative] = value
 		return nil
 	})
@@ -160,16 +169,20 @@ func Admit(root, manifestSHA, launcher string) (Resources, error) {
 	if err != nil || Hash(helper) != r.BwrapSHA {
 		return r, fmt.Errorf("RESOURCE_HELPER: launcher differs")
 	}
-	actual, err := Inventory(root)
+	// Each identity is compared as the walk reaches it, so the first
+	// difference in lexical order is the one reported.
+	seen := 0
+	err = walk(root, func(relative string, value Identity) error {
+		if expected, ok := r.Files[relative]; !ok || expected != value {
+			return fmt.Errorf("RESOURCE_IDENTITY: %s", relative)
+		}
+		seen++
+		return nil
+	})
 	if err != nil {
 		return r, err
 	}
-	for relative, value := range actual {
-		if expected, ok := r.Files[relative]; !ok || expected != value {
-			return r, fmt.Errorf("RESOURCE_IDENTITY: %s", relative)
-		}
-	}
-	if len(actual) != len(r.Files) {
+	if seen != len(r.Files) {
 		return r, fmt.Errorf("RESOURCE_IDENTITY: missing prepared resource")
 	}
 	return r, nil
