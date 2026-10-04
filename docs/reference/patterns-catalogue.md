@@ -9,7 +9,7 @@ an evidence grade; behaviour and security rules outrank cosmetic ones, and a rul
 can be satisfied without the intended behaviour is a defect in the rule.
 Enforcement columns describe planned checks until their creating tasks land and evidence is
 recorded; this catalogue is not a passing run. ADRs and the constitution own the rules; this is
-their summary. Naming interface/cardinality remains a joint decision (ADR-0003).
+their summary. Naming uses a scalar interface with shared context (ADR-0003); final field names await concrete-consumer diagnosis.
 
 ## 1. HCL idioms and module interface
 | Id | Pattern | Why | Enforced by |

@@ -14,7 +14,7 @@ adapters, latency and full exit retain their own prerequisites and qualification
 The full feature remains draft. Use TDD, actual applicable checks and independent review,
 then publish coherent increments as scoped PRs, including stacks with explicit parent
 branches and review order. Continue eligible work without waiting for operator review;
-no PRs may be merged during this goal, superseding earlier merge permission.
+a PR merges after an independent review and green applicable checks.
 Structure, constitution ratification and committed workflow decisions are confirmed.
 Add directories with their first real artifact. Minimum safety precedes dependent
 IAM/state implementation; independent documentation can proceed earlier. Live authority

@@ -73,7 +73,7 @@ Owned writes are limited to checkpoint/temporary/staging files under `.local/con
 reports under `.local/evidence/004/`. Inventory every other path during verification, including
 ignored files. Publish a complete bundle atomically; retry cannot bless partial or changed content.
 Neither export nor a completed wizard authorizes cloud work, commits, auto-merge or procurement.
-The naming module interface remains a joint decision; the wizard can collect convention data
+The naming module interface is selected (ADR-0003: scalar with shared context) and its final field names await concrete-consumer diagnosis; the wizard can collect convention data
 without inventing that module's final input schema. A session is local convenience, never authority.
 
 ## Consequences

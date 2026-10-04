@@ -24,8 +24,8 @@ all locally implementable portions of specs 001–004 whose dependencies and req
 decisions are satisfied. T001–T009 remain minimum safety before dependent work, followed
 by conditional minimal CI T023 after evidenced completion. Publish independently reviewed
 coherent increments, including stacked PRs with explicit parent branches and review order;
-continue other eligible work when one task is blocked. No PRs may be merged during this
-goal; earlier merge permission is superseded. D29's hardened persistence/export remains
+continue other eligible work when one task is blocked. A PR merges after an independent
+review and green applicable checks. D29's hardened persistence/export remains
 deferred until real profile schemas exist. The 2026-10-02
 operator priority exception (local decision D60) accepts C2 (C010.5/P4) as DEFERRED,
 nonblocking [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md)
@@ -35,7 +35,7 @@ remain later obligations. Whole-feature hardened guarantees remain unqualified; 
 the constitution nor ADRs change. Review PR creation does not establish merge readiness.
 Exact pins, read-only CI authority and T003 isolation remain required. TDD, predefined evidence,
 independent review, actual required checks/PR-head CI and mergeability remain required
-for eventual merge readiness; they do not override this goal's no-merge instruction.
+for merge readiness.
 Structure, constitution and committed scaffold decisions are confirmed.
 Create directories with their first real artifact. Exact pins, image/cache and actual
 tool/isolation premises remain unobserved until their proof tasks run. The subset uses
