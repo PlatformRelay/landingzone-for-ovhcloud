@@ -40,7 +40,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check"]},
     {"id": "test:dependencies", "requirements": ["FR-007"], "command": "task test:dependencies", "creator": "T009", "kind": "behavioral",
      "scope": ["tools/internal/checks/dependencies.go", "tests/check/fixtures/dependencies"],
-     "inputs": ["Taskfile.yml", "tools/go.mod"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/go.sum", "tools/vendor/modules.txt", "tools/internal/checks", "tools/cmd/lz-check"]},
     {"id": "test:static", "requirements": ["FR-007"], "command": "task test:static", "creator": "T009", "kind": "behavioral",
      "scope": ["tools/internal/checks/static.go", "tests/check/fixtures/static", ".tflint.hcl"],
      "inputs": ["Taskfile.yml", "tools/go.mod"]},

@@ -181,6 +181,21 @@ func TestDependenciesRejected(t *testing.T) {
 	}
 }
 
+// Fixture trees are input data for checkers, not configuration of the
+// repository that holds them, so a broken fixture is not reported.
+func TestDependenciesIgnoreFixtures(t *testing.T) {
+	root := writeModules(t, map[string]string{
+		"modules/a/main.tf":                                  `variable "x" {}`,
+		"tests/check/fixtures/bad/modules/x/main.tf":         `module "m" { source = "../missing" }`,
+		"tools/cmd/lz-offline/fixtures/provider/main.tf":     `variable "x" {}`,
+		"tests/check/fixtures/bad/misc/unclassified/main.tf": `variable "x" {}`,
+	})
+	g, findings := ScanDependencies(root)
+	if len(findings) != 0 || !reflect.DeepEqual(g.Layers, map[string]string{"modules/a": LayerLibrary}) {
+		t.Errorf("BEHAVIORAL_RED: fixture data scanned as configuration: %v %+v", g.Layers, findings)
+	}
+}
+
 // A symlinked directory could alias a module under another layer, so it is
 // refused rather than followed or skipped.
 func TestDependenciesRefuseSymlinks(t *testing.T) {
