@@ -8,15 +8,16 @@ import (
 
 // These are identity inputs, not fabricated tool-output/parser fixtures. Archive
 // identities are copied from the independently qualified T001 preparation and
-// the official Task 3.53.1 release.
+// the official Task 3.53.1 and TFLint 0.64.0 releases.
 func qualifiedInput() Prepared {
 	return Prepared{
-		Versions: map[string]string{"go": "1.27.1", "tofu": "1.13.0", "terramate": "0.17.3", "task": "3.53.1"},
+		Versions: map[string]string{"go": "1.27.1", "tofu": "1.13.0", "terramate": "0.17.3", "task": "3.53.1", "tflint": "0.64.0"},
 		Artifacts: map[string]string{
 			"go":        "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445",
 			"tofu":      "1f0cb37fc85dea4e7633a72aca2332b801f72650a32be911b8b9b32907f214fb",
 			"terramate": "303fd597a76af00c728b3eb626493dc2a71585dcd679c5e07a338da44d24a060",
 			"task":      "a54a408f6861ff921f6e87774180db31bacd8c1e7c944ca696db9fea49a82fc7",
+			"tflint":    "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
 		},
 		Image: "cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26",
 	}
@@ -45,7 +46,7 @@ func TestToolchainValid(t *testing.T) {
 }
 
 func TestToolchainCaptureAdmission(t *testing.T) {
-	for _, tool := range []string{"go", "tofu", "terramate", "task"} {
+	for _, tool := range []string{"go", "tofu", "terramate", "task", "tflint"} {
 		t.Run("wrong-"+tool, func(t *testing.T) { p := qualifiedInput(); p.Versions[tool] = "0.0.0"; assertCaptureDenied(t, p) })
 		t.Run("missing-"+tool, func(t *testing.T) { p := qualifiedInput(); delete(p.Versions, tool); assertCaptureDenied(t, p) })
 		t.Run("artifact-"+tool, func(t *testing.T) {

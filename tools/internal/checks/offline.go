@@ -32,7 +32,7 @@ func MountDevices(mountinfo string) []string {
 // Mount points lz-offline creates. Anything else, a writable trusted mount or a
 // host-backed or unbounded writable area refuses admission.
 var (
-	readOnlyMounts = map[string]bool{"/": true, "/tcb": true, "/tools": true, "/tools/go": true, "/tcb/task": true,
+	readOnlyMounts = map[string]bool{"/": true, "/tcb": true, "/tools": true, "/tools/go": true, "/tcb/task": true, "/tcb/tflint": true,
 		"/tcb/tofu": true, "/tcb/terramate": true, "/tcb/lz-offline": true, "/mirror": true, "/run/lz/tofurc": true,
 		"/run/lz/admission.json": true, "/run/lz/src": true}
 	optionalReadOnlyMounts = map[string]bool{"/tcb/probe": true}
@@ -193,6 +193,7 @@ func VerifyRuntime() error {
 			{"tofu", "/tcb/tofu", []string{"version", "-json"}, "1.13.0"},
 			{"terramate", "/tcb/terramate", []string{"version"}, "0.17.3"},
 			{"task", "/tcb/task", []string{"--version"}, "3.53.1"},
+			{"tflint", "/tcb/tflint", []string{"--version"}, "TFLint version 0.64.0"},
 		}
 		for _, tool := range commands {
 			cmd := exec.Command(tool.path, tool.args...)
@@ -211,6 +212,10 @@ func VerifyRuntime() error {
 					return fmt.Errorf("PIN_TOOL: malformed tofu version")
 				}
 				observed = version.Version
+			}
+			if tool.name == "tflint" {
+				// Later lines list the bundled rulesets.
+				observed, _, _ = strings.Cut(observed, "\n")
 			}
 			if observed != tool.expected {
 				return fmt.Errorf("PIN_VERSION: %s", tool.name)

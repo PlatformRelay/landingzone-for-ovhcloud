@@ -14,6 +14,7 @@ import stat
 import subprocess
 import tarfile
 import time
+import zipfile
 
 IMAGE = 'cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26'
 PROVIDER_URL = 'https://github.com/ovh/terraform-provider-ovh/releases/download/v2.21.0/terraform-provider-ovh_2.21.0_linux_amd64.zip'
@@ -47,6 +48,22 @@ def extract_task(destination):
             raise RuntimeError('Task archive member must be a bounded regular file')
         source = archive.extractfile(member)
         with open(destination, 'xb') as target:
+            shutil.copyfileobj(source, target)
+
+TFLINT = required_path('LZ_TFLINT')             # official TFLint release archive
+# https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_linux_amd64.zip,
+# digest as published in that release's checksums.txt, whose keyless signature
+# was verified against the release workflow identity before use.
+TFLINT_SHA = 'cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537'
+
+def extract_tflint(destination):
+    if digest(TFLINT) != TFLINT_SHA:
+        raise RuntimeError('TFLint archive checksum differs')
+    with zipfile.ZipFile(TFLINT) as archive:
+        members = archive.infolist()
+        if [m.filename for m in members] != ['tflint'] or members[0].is_dir() or members[0].file_size > 128 * 1024 * 1024:
+            raise RuntimeError('TFLint archive must hold exactly one bounded tflint file')
+        with archive.open(members[0]) as source, open(destination, 'xb') as target:
             shutil.copyfileobj(source, target)
 
 def digest(path):
@@ -233,7 +250,8 @@ def prepare():
         shutil.copyfile(OLD / 'tools/tofu/tofu', resources / 'tofu')
         shutil.copyfile(OLD / 'tools/terramate/terramate', resources / 'terramate')
         extract_task(resources / 'task')
-        for name in ('task', 'tofu', 'terramate'):
+        extract_tflint(resources / 'tflint')
+        for name in ('task', 'tflint', 'tofu', 'terramate'):
             (resources / name).chmod(0o700)
         private = stage / 'transport'
         private.mkdir()
@@ -255,7 +273,8 @@ def prepare():
         (resources / 'tofurc').write_text('provider_installation {\n  filesystem_mirror {\n    path = "/mirror"\n    include = ["registry.opentofu.org/ovh/ovh"]\n  }\n}\n')
         artifacts = dict(zip(('go','tofu','terramate'),ARCHIVES.values()))
         artifacts['task'] = TASK_SHA
-        prepared = {'Versions': {'go':'1.27.1','tofu':'1.13.0','terramate':'0.17.3','task':'3.53.1'}, 'Artifacts':artifacts, 'Image':IMAGE}
+        artifacts['tflint'] = TFLINT_SHA
+        prepared = {'Versions': {'go':'1.27.1','tofu':'1.13.0','terramate':'0.17.3','task':'3.53.1','tflint':'0.64.0'}, 'Artifacts':artifacts, 'Image':IMAGE}
         manifest = {'prepared':prepared, 'files':inventory(stage), 'bwrap':'/usr/bin/bwrap','bwrap_sha256':digest(Path('/usr/bin/bwrap'))}
         (stage / 'resources.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
         receipt = {'image':IMAGE,'image_export_sha256':digest(private / 'image.tar'),'image_projection':'rooted filesystem without image /dev; runtime supplies private bwrap /dev; privileged mode bits stripped; owner read added to regular files and owner read/traverse added to directories for resource admission','provider_sha256':digest(package),'resources_sha256':digest(stage / 'resources.json')}

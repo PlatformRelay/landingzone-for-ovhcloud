@@ -663,7 +663,7 @@ func run() (result error) {
 		"--ro-bind", filepath.Join(res, "rootfs"), "/", "--proc", "/proc", "--dev", "/dev",
 		"--size", tmpBytes, "--tmpfs", "/tmp", "--size", runBytes, "--tmpfs", "/run", "--size", homeBytes, "--tmpfs", "/home",
 		"--dir", "/home/offline", "--dir", "/run/lz", "--tmpfs", "/tcb", "--tmpfs", "/tools",
-		"--ro-bind", filepath.Join(res, "go"), "/tools/go", "--ro-bind", filepath.Join(res, "task"), "/tcb/task",
+		"--ro-bind", filepath.Join(res, "go"), "/tools/go", "--ro-bind", filepath.Join(res, "task"), "/tcb/task", "--ro-bind", filepath.Join(res, "tflint"), "/tcb/tflint",
 		"--ro-bind", filepath.Join(res, "tofu"), "/tcb/tofu", "--ro-bind", filepath.Join(res, "terramate"), "/tcb/terramate",
 		"--ro-bind", executable, "/tcb/lz-offline", "--ro-bind", filepath.Join(res, "mirror"), "/mirror",
 		"--ro-bind", filepath.Join(res, "tofurc"), "/run/lz/tofurc", "--ro-bind", gatePath, "/run/lz/admission.json",
@@ -720,7 +720,7 @@ func run() (result error) {
 	}
 	switch target {
 	case "verify:toolchain":
-		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 provider=ovh/ovh@2.21.0 network=none")
+		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 tflint=0.64.0 provider=ovh/ovh@2.21.0 network=none")
 	case "test:offline-boundary":
 		_, err = fmt.Fprintln(os.Stdout, "BOUNDARY_QUALIFIED process=kernel:ENETUNREACH subprocess=kernel:ENETUNREACH")
 	}

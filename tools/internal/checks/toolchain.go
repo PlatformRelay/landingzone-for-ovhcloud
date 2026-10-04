@@ -6,12 +6,13 @@ const Image = "cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265
 
 // Versions and Artifacts pin each tool's release and the SHA256 of its official
 // release archive.
-var Versions = map[string]string{"go": "1.27.1", "tofu": "1.13.0", "terramate": "0.17.3", "task": "3.53.1"}
+var Versions = map[string]string{"go": "1.27.1", "tofu": "1.13.0", "terramate": "0.17.3", "task": "3.53.1", "tflint": "0.64.0"}
 var Artifacts = map[string]string{
 	"go":        "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445",
 	"tofu":      "1f0cb37fc85dea4e7633a72aca2332b801f72650a32be911b8b9b32907f214fb",
 	"terramate": "303fd597a76af00c728b3eb626493dc2a71585dcd679c5e07a338da44d24a060",
 	"task":      "a54a408f6861ff921f6e87774180db31bacd8c1e7c944ca696db9fea49a82fc7",
+	"tflint":    "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
 }
 
 // Prepared carries the tool identities recorded when the bundle was prepared.
