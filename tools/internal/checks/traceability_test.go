@@ -41,7 +41,7 @@ const tasksText = "# Tasks\n\n## Setup\n\n" +
 
 func validTasks() []Task {
 	return []Task{
-		{ID: "T001", Paths: []string{"tools/internal/pin.go", "Taskfile.yml"}, Requirements: []string{"FR-001"}, ADRs: []string{"0011"},
+		{ID: "T001", Done: true, Paths: []string{"tools/internal/pin.go", "Taskfile.yml"}, Requirements: []string{"FR-001"}, ADRs: []string{"0011"},
 			Verify: "`task verify:pins`: a missing tool is rejected and the task fails closed.", Evidence: "`evidence/T001.md`; GREEN."},
 		{ID: "T002", Paths: []string{"trace/DoD", "tools/internal/{trace,dod}.go", "harness/checks.yaml"}, Requirements: []string{"FR-002", "SC-001"}, ADRs: []string{"0008", "0019"},
 			Verify: "`task test:trace`: blanket lists fail.", Evidence: "`.local/evidence/001/t002.json`."},
@@ -103,6 +103,10 @@ func TestTraceabilityParse(t *testing.T) {
 	}
 	if want := validTasks(); !reflect.DeepEqual(tasks, want) {
 		t.Errorf("BEHAVIORAL_RED: parsed tasks\n got %#v\nwant %#v", tasks, want)
+	}
+	// A ticked box, in either case, marks the task done.
+	if tasks, err := ParseTasks("- [x] T001 Done.\n- [X] T002 Done.\n- [ ] T003 Open.\n"); err != nil || !tasks[0].Done || !tasks[1].Done || tasks[2].Done {
+		t.Errorf("BEHAVIORAL_RED: done state: %+v %v", tasks, err)
 	}
 	if tasks, err := ParseTasks("- [ ] T009 Write the guide in AGENTS.md.\n"); err != nil || !reflect.DeepEqual(tasks[0].Paths, []string{"AGENTS.md"}) {
 		t.Errorf("BEHAVIORAL_RED: path ending a sentence: %+v %v", tasks, err)
