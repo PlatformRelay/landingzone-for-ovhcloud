@@ -27,7 +27,8 @@ func candidateTree(t *testing.T) (string, string) {
 func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 	candidate, destination := candidateTree(t)
 	files := map[string]string{"tools/a.go": "package a\n", "tools/.env": "SECRET=x\n", "secrets.txt": "x\n",
-		"specs/001-x/spec.md": "# spec\n", "docs/adr/0001-x.md": "# ADR\n", ".tflint.hcl": "config {}\n"}
+		"specs/001-x/spec.md": "# spec\n", "docs/adr/0001-x.md": "# ADR\n", ".tflint.hcl": "config {}\n",
+		".github/workflows/foundation.yml": "name: foundation\n", "pipelines/github/foundation-source.json": "{}\n"}
 	for name, body := range files {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(candidate, name)), 0700); err != nil {
 			t.Fatal(err)
@@ -39,8 +40,10 @@ func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 	if err := snapshot(context.Background(), candidate, destination); err != nil {
 		t.Fatalf("valid candidate rejected: %v", err)
 	}
-	// Specs and ADRs are data the trace check reads.
-	for _, name := range []string{"tools/a.go", "specs/001-x/spec.md", "docs/adr/0001-x.md", ".tflint.hcl"} {
+	// Specs and ADRs are data the trace check reads; the workflow and its
+	// approved source are data the foundation CI check reads.
+	for _, name := range []string{"tools/a.go", "specs/001-x/spec.md", "docs/adr/0001-x.md", ".tflint.hcl",
+		".github/workflows/foundation.yml", "pipelines/github/foundation-source.json"} {
 		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
 			t.Errorf("allowlisted file missing: %v", err)
 		}
