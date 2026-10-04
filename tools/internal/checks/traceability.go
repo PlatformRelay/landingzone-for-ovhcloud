@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -133,13 +134,14 @@ var (
 	rationaleEntry  = regexp.MustCompile(`^(\d{4})\b\s*(.*)$`)
 	verifyCommand   = regexp.MustCompile("`[^`]+`")
 	targetName      = regexp.MustCompile(`^[a-z][a-z0-9:_-]*$`)
-	commandSplit    = regexp.MustCompile(`;|&&|\|\|`)
 	exemption       = regexp.MustCompile(`^exempt\s+(?:—|-{1,2})\s+docs-only\b;?\s*(.*)$`)
-	evidenceFile    = regexp.MustCompile("^`[\\w.{},/-]*[\\w}]\\.[A-Za-z][A-Za-z0-9]{1,7}`")
+	evidenceFile    = regexp.MustCompile("^`[\\w.{},/-]*[\\w}]\\.[A-Za-z][A-Za-z0-9]*`")
 	// A path is any token with a "/" or of the form name.ext, whatever the
 	// extension. Prose such as "trace/DoD" counts too, which only ever makes
 	// a docs-only exemption stricter.
-	pathToken = regexp.MustCompile(`^[\w.{},-]*/[\w.{},/-]*$|^[\w.{},-]*[\w}]\.[A-Za-z][A-Za-z0-9]{1,7}$`)
+	pathToken = regexp.MustCompile(`^[\w.{},-]*/[\w.{},/-]*$|^[\w.{},-]*[\w}]\.[A-Za-z][A-Za-z0-9]*$`)
+	// placeholder is a documentation placeholder such as <checkout>.
+	placeholder = regexp.MustCompile(`<[a-z][a-z-]*>`)
 )
 
 // ParseSpec returns the requirement and success-criterion ids a spec defines,
@@ -165,25 +167,88 @@ func textPaths(text string) []string {
 	return paths
 }
 
-// verifyRun is one command of a Verify text that runs a check: a Task target,
-// or a direct test command and the directories it exercises.
+// verifyRun is one command of a Verify text that runs a check: a Task target
+// with its arguments, or a direct test command with the package directories it
+// selects exactly (Packages) and the directory trees it selects (Trees).
 type verifyRun struct {
-	Target string
-	Dirs   []string
+	Target   string
+	Args     []string
+	Packages []string
+	Trees    []string
+}
+
+// shellSegments splits a command span into simple commands, honouring single
+// and double quotes, at unquoted ";", "&&" and "||". A segment that uses any
+// other shell syntax — pipes, background, redirection, substitution, globbing,
+// escapes or an unbalanced quote — is returned as nil, so no fragment of it can
+// pass for a command.
+func shellSegments(span string) [][]string {
+	span = placeholder.ReplaceAllString(span, "PLACEHOLDER")
+	var segments [][]string
+	var words []string
+	var word strings.Builder
+	inWord, bad := false, false
+	endWord := func() {
+		if inWord {
+			words = append(words, word.String())
+			word.Reset()
+			inWord = false
+		}
+	}
+	endSegment := func() {
+		endWord()
+		if bad {
+			words = nil
+		}
+		segments = append(segments, words)
+		words, bad = nil, false
+	}
+	for i := 0; i < len(span); i++ {
+		c := span[i]
+		switch {
+		case c == '\'' || c == '"':
+			closing := strings.IndexByte(span[i+1:], c)
+			if closing < 0 {
+				bad, i = true, len(span)
+				continue
+			}
+			quoted := span[i+1 : i+1+closing]
+			if c == '"' && strings.ContainsAny(quoted, "$`\\") {
+				bad = true
+			}
+			word.WriteString(quoted)
+			inWord, i = true, i+1+closing
+		case c == ' ' || c == '\t':
+			endWord()
+		case c == ';':
+			endSegment()
+		case (c == '&' || c == '|') && i+1 < len(span) && span[i+1] == c:
+			endSegment()
+			i++
+		case strings.IndexByte("&|<>$`()*?[]{}\\!#~", c) >= 0:
+			bad = true
+		default:
+			word.WriteByte(c)
+			inWord = true
+		}
+	}
+	endSegment()
+	return segments
 }
 
 // verifyRuns returns the commands inside a Verify text's command spans that
 // actually run something. A command counts only in a restricted grammar:
 // `task <target> [-- args]`, optionally through the offline entry
 // (`…/lz-offline --candidate <checkout> -- task …`); `go [-C dir] test <pkgs>`
-// with only -run, -count, -v, -tags or -timeout; and
-// `[mise exec --] tofu -chdir=<dir> test`. Printing (`echo task x`), dry runs,
-// pipes, listing flags and an empty -run pattern do not count.
+// with only -run (a non-empty pattern other than ^$), -count (a positive
+// integer), -v, -tags or -timeout; and `[mise exec --] tofu -chdir=<dir> test`.
+// Printing (`echo task x`), dry runs, listing flags and unsupported shell syntax
+// do not count.
 func verifyRuns(verify string) []verifyRun {
 	var runs []verifyRun
 	for _, span := range verifyCommand.FindAllString(verify, -1) {
-		for _, segment := range commandSplit.Split(strings.Trim(span, "`"), -1) {
-			if run, ok := parseRun(strings.Fields(segment)); ok {
+		for _, words := range shellSegments(strings.Trim(span, "`")) {
+			if run, ok := parseRun(words); ok {
 				runs = append(runs, run)
 			}
 		}
@@ -203,9 +268,13 @@ func parseRun(words []string) (verifyRun, bool) {
 		if !targetName.MatchString(words[1]) || len(words) > 2 && words[2] != "--" {
 			return verifyRun{}, false
 		}
-		return verifyRun{Target: words[1]}, true
+		run := verifyRun{Target: words[1]}
+		if len(words) > 3 {
+			run.Args = words[3:]
+		}
+		return run, true
 	case len(words) == 3 && words[0] == "tofu" && strings.HasPrefix(words[1], "-chdir=") && words[2] == "test":
-		return verifyRun{Dirs: []string{path.Clean(strings.TrimPrefix(words[1], "-chdir="))}}, true
+		return verifyRun{Trees: []string{path.Clean(strings.TrimPrefix(words[1], "-chdir="))}}, true
 	case len(words) >= 2 && words[0] == "go":
 		return parseGoTest(words[1:])
 	}
@@ -227,7 +296,11 @@ func parseGoTest(words []string) (verifyRun, bool) {
 	words = words[1:]
 	var run verifyRun
 	for len(words) > 0 && !strings.HasPrefix(words[0], "-") {
-		run.Dirs = append(run.Dirs, path.Join(base, words[0]))
+		if tree, ok := strings.CutSuffix(words[0], "/..."); ok {
+			run.Trees = append(run.Trees, path.Join(base, tree))
+		} else {
+			run.Packages = append(run.Packages, path.Join(base, words[0]))
+		}
 		words = words[1:]
 	}
 	for len(words) > 0 {
@@ -239,22 +312,36 @@ func parseGoTest(words []string) (verifyRun, bool) {
 		words = words[1:]
 		if takesValue && !inline {
 			if len(words) == 0 {
-				return verifyRun{}, false
+				return run, false
 			}
 			value, words = words[0], words[1:]
 		}
-		if name == "-run" && strings.Trim(value, `"'`) == "^$" {
-			return verifyRun{}, false
+		switch name {
+		case "-run":
+			if value == "" || value == "^$" {
+				return verifyRun{}, false
+			}
+		case "-count":
+			if n, _ := strconv.Atoi(value); n < 1 {
+				return verifyRun{}, false
+			}
 		}
 	}
 	return run, true
 }
 
-// exercises reports whether a test run covers one of the task's paths.
+// exercises reports whether a test run covers one of the task's paths: a file
+// in a selected package's own directory, or anything under a selected tree.
 func exercises(run verifyRun, paths []string) bool {
-	for _, dir := range run.Dirs {
-		for _, p := range paths {
-			if p == dir || strings.HasPrefix(p, dir+"/") {
+	for _, p := range paths {
+		p = strings.TrimSuffix(p, "/")
+		for _, dir := range run.Packages {
+			if p == dir || path.Dir(p) == dir {
+				return true
+			}
+		}
+		for _, dir := range run.Trees {
+			if p == dir || strings.HasPrefix(p, dir+"/") || dir == "." {
 				return true
 			}
 		}
@@ -486,6 +573,18 @@ func ParseRegistry(data []byte) (Registry, error) {
 	return Registry{Requirements: file.Requirements, Checks: file.Checks, Evaluators: file.Evaluators, Producers: file.Producers, Procedures: file.Procedures}, nil
 }
 
+// evaluates reports whether an evaluator run over args (every check when there
+// are none, else the checks whose scope covers the first argument) judges a
+// check of one of the given requirements.
+func evaluates(checks []CheckDefinition, args []string, requirements []string) bool {
+	for _, c := range checks {
+		if (len(args) == 0 || selects(c.Scope, path.Clean(args[0]))) && shares(c.Requirements, requirements) {
+			return true
+		}
+	}
+	return false
+}
+
 func shares(a, b []string) bool {
 	for _, item := range a {
 		if set(b)[item] {
@@ -597,7 +696,7 @@ func CheckTrace(t Trace) []Finding {
 				targets[run.Target] = true
 				switch {
 				case evaluators[run.Target]:
-					applicable = true
+					applicable = applicable || evaluates(t.Registry.Checks, run.Args, task.Requirements)
 				case !registered[run.Target]:
 					add("UNKNOWN_CHECK", task.ID, "Verify runs task %s, which is neither a registered check nor an evaluator", run.Target)
 				case shares(checkRequirements[run.Target], task.Requirements):
