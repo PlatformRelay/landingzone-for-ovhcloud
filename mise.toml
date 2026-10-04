@@ -5,6 +5,8 @@
 go = "1.27.1"
 opentofu = "1.13.0"
 "aqua:terramate-io/terramate" = "0.17.3"
+task = "3.53.1"
+tflint = "0.64.0"
 
 [env]
 LZ_OFFLINE_IMAGE = "cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26"
