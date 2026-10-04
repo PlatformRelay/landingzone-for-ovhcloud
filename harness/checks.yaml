@@ -19,13 +19,16 @@
   },
   "evaluators": ["dod", "check"],
   "producers": [],
+  "procedures": {
+    "T001": "Preparation was verified by the independently approved external preparation control driver (evidence/T001.md); it runs before any candidate check exists."
+  },
   "checks": [
     {"id": "verify:toolchain", "requirements": ["FR-001", "FR-002"], "command": "task verify:toolchain", "creator": "T003", "kind": "behavioral",
      "scope": ["tools/cmd/lz-offline", "tools/internal/checks/toolchain.go", "tools/internal/checks/offline.go", "harness/capabilities.yaml"],
-     "inputs": ["tools/go.mod"]},
+     "inputs": ["tools/go.mod", "tools/internal/checks"]},
     {"id": "test:offline-boundary", "requirements": ["FR-001", "FR-002"], "command": "task test:offline-boundary", "creator": "T003", "kind": "behavioral",
      "scope": ["tools/cmd/lz-offline", "tools/internal/checks/offline.go", "tools/internal/probes/security"],
-     "inputs": ["tools/go.mod", "tools/internal/checks/toolchain.go"], "review": true},
+     "inputs": ["tools/go.mod", "tools/internal/checks"], "review": true},
     {"id": "test:reports", "requirements": ["FR-003", "SC-002"], "command": "task test:reports", "creator": "T005", "kind": "behavioral",
      "scope": ["tools/internal/report", "tools/cmd/json2junit", "tests/fixtures/tofu", "schemas/check-report.schema.json"],
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
@@ -34,7 +37,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
     {"id": "check:specs", "requirements": ["FR-004", "SC-003"], "command": "task check:specs", "creator": "T007", "kind": "behavioral",
      "scope": ["specs/001-offline-foundation", "harness/checks.yaml", "docs/adr"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks/traceability.go", "tools/cmd/lz-check"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check"]},
     {"id": "test:dependencies", "requirements": ["FR-007"], "command": "task test:dependencies", "creator": "T009", "kind": "behavioral",
      "scope": ["tools/internal/checks/dependencies.go", "tests/check/fixtures/dependencies"],
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
