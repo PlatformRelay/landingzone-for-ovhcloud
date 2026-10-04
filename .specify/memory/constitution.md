@@ -1,11 +1,14 @@
-<!-- Sync impact: constitution 1.2.0 -> 1.2.1, 2026-10-01.
+<!-- Sync impact: constitution 1.2.1 -> 1.2.2, 2026-10-04.
+Reason: operator-requested project rename to landingzone-for-ovhcloud (title only).
+Principles I-VIII unchanged; README, NOTICE and ADR-0015 synchronized.
+Previous: 1.2.0 -> 1.2.1, 2026-10-01.
 Reason: operator-requested removal of employment disclosure from Purpose.
 Principles I-VIII unchanged; no sections added or removed; no deferred placeholders.
 README and ADR-0001 synchronized. Templates/commands read the constitution at runtime
 and contain no matching disclosure, so no template or command edits are needed.
 Ratification, test/evidence, safety and authority requirements remain unchanged. -->
-# OVHcloud Landing Zone Accelerator constitution
-Version: 1.2.1 · Ratified: 2026-10-01 · Last amended: 2026-10-01
+# Landing Zone for OVHcloud constitution
+Version: 1.2.2 · Ratified: 2026-10-01 · Last amended: 2026-10-04
 
 ## Purpose
 Build an inspectable reference baseline for an OVHcloud landing zone through useful

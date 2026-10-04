@@ -1,4 +1,4 @@
-# OVHcloud Landing Zone Accelerator
+# Landing Zone for OVHcloud
 
 > [!IMPORTANT]
 > **A private open-source project — not provided by OVHcloud.** This repository is developed

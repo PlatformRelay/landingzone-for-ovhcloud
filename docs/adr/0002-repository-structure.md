@@ -20,7 +20,7 @@ variants** (ADR-0017, ADR-0018); tenants self-serve through a separate repo gate
 Option 1.
 
 ```
-ovh-landing-zone-accelerator/
+landingzone-for-ovhcloud/
 ├── README.md  LICENSE  NOTICE  CONTRIBUTING.md  SECURITY.md  AGENTS.md
 ├── mise.toml  Taskfile.yml  .tflint.hcl  .editorconfig
 ├── modules/<name>/                 # layer 1: provider-thin primitives (ADR-0003)
