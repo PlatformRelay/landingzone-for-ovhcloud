@@ -17,7 +17,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/PlatformRelay/ovh-landing-zone-accelerator/tools/internal/report"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/report"
 )
 
 const maxStream = 64 << 20

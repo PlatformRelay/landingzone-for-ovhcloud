@@ -30,7 +30,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PlatformRelay/ovh-landing-zone-accelerator/tools/internal/checks"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 var adrFile = regexp.MustCompile(`^(\d{4})-.+\.md$`)

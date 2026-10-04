@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlatformRelay/ovh-landing-zone-accelerator/tools/internal/checks"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 const spec = "- **FR-001**: MUST pin tools.\n- **SC-001**: Fast.\n"
