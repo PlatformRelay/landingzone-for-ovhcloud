@@ -80,6 +80,10 @@ func ValidateMounts(mountinfo string, hostDevices map[string]bool) error {
 			if fstype != kernelMounts[point] {
 				return fmt.Errorf("ISOLATION_MOUNT: %s has unexpected type %s", point, fstype)
 			}
+			// /dev itself is writable scratch, so it must be private like the others.
+			if point == "/dev" && (mount[3] != "/" || hostDevices[mount[2]]) {
+				return fmt.Errorf("ISOLATION_MOUNT: /dev must be a private tmpfs, not host storage")
+			}
 		default:
 			return fmt.Errorf("ISOLATION_MOUNT: unexpected mount %s", point)
 		}

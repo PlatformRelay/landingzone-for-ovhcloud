@@ -134,6 +134,25 @@ func TestSnapshotDeadlineDuringWork(t *testing.T) {
 	}
 }
 
+// After cleanup removes the destination, a late snapshot must not recreate it.
+func TestSnapshotDoesNotRecreateRemovedDestination(t *testing.T) {
+	candidate, _ := candidateTree(t)
+	if err := os.WriteFile(filepath.Join(candidate, "tools/a.go"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	destination := filepath.Join(scratch, "candidate")
+	if err := os.RemoveAll(scratch); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot(context.Background(), candidate, destination); err == nil {
+		t.Error("BEHAVIORAL_RED: snapshot into a removed destination succeeded")
+	}
+	if _, err := os.Stat(scratch); err == nil {
+		t.Error("BEHAVIORAL_RED: snapshot recreated removed scratch")
+	}
+}
+
 func TestSnapshotHonoursDeadline(t *testing.T) {
 	candidate, destination := candidateTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
