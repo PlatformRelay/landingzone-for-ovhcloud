@@ -76,10 +76,10 @@ the constitution and ADRs are unchanged.
   - Verify: `go -C tools test ./internal/report -run TestReport -count=1`: record exact generating `tofu test -json` command/version; valid stream preserved, zero tests, required skip, crash, truncated/invalid stream and cleanup fault cause behavioural red before adapter.
   - Evidence: `evidence/T004.md`; behavioural RED recorded against the permissive report stub.
 
-- [ ] T005 Implement observation schema and JSON/JUnit adapters in schemas/check-report.schema.json, tools/internal/report/ and tools/cmd/json2junit/
+- [x] T005 Implement observation schema and JSON/JUnit adapters in schemas/check-report.schema.json, tools/internal/report/ and tools/cmd/json2junit/ — closed 2026-10-04, evidence: evidence/T005.md
   - Requirements: FR-003, SC-002; ADRs: 0008, 0019. Depends on: T004.
   - Verify: `task test:reports`: all V002 valid/fault cases and each-clause mutants green as a suite; preserve actual upstream diagnostics; creates target.
-  - Evidence: `.local/evidence/001/t005-reports.json`; initial status `not-run`.
+  - Evidence: `evidence/T005.md`; GREEN with 12/12 clause mutants killed; `task test:reports` through the entry.
 
 - [ ] T006 Write trace/DoD tests in tools/internal/checks/traceability_test.go, including docs exemption and stale/forged evidence
   - Requirements: FR-004, SC-003; ADRs: 0008, 0019. Depends on: T005.

@@ -75,49 +75,45 @@ func TestReportPreservesDiagnostics(t *testing.T) {
 	}
 }
 
+// Each case must fail for its own clause, so removing any one rule turns its
+// case red even when the stream also trips another rule.
 func TestReportRejects(t *testing.T) {
 	pass, passMeta := fixture(t, "pass")
-	withoutSummary := bytes.Join(bytes.SplitN(pass, []byte("\n"), -1)[:4], []byte("\n"))
-	cases := map[string]struct {
+	lines := bytes.SplitAfter(pass, []byte("\n"))
+	join := func(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
+	type rejection struct {
 		stream []byte
 		exit   int
 		reason string
-	}{}
-	for _, name := range []string{"fail", "skip", "zero", "cleanup", "truncated"} {
-		stream, m := fixture(t, name)
-		cases[name] = struct {
-			stream []byte
-			exit   int
-			reason string
-		}{stream, m.EntryExit, ""}
 	}
-	// Derived cases: the passing stream with a crash exit status, without its
-	// summary, empty, and not JSON at all.
-	cases["crash-exit"] = struct {
-		stream []byte
-		exit   int
-		reason string
-	}{pass, 11, ""}
-	cases["missing-summary"] = struct {
-		stream []byte
-		exit   int
-		reason string
-	}{append(withoutSummary, '\n'), passMeta.EntryExit, ""}
-	cases["empty"] = struct {
-		stream []byte
-		exit   int
-		reason string
-	}{nil, 0, ""}
-	cases["malformed"] = struct {
-		stream []byte
-		exit   int
-		reason string
-	}{[]byte("panic: runtime error\n"), 0, ""}
+	cases := map[string]rejection{}
+	for name, reason := range map[string]string{
+		"fail": ReasonFailed, "skip": ReasonSkipped, "zero": ReasonZeroTests,
+		"cleanup": ReasonCleanupFailed, "truncated": ReasonTruncated,
+	} {
+		stream, m := fixture(t, name)
+		cases[name] = rejection{stream, m.EntryExit, reason}
+	}
+	// Derived from the captured passing stream: lines 0 version, 1 abstract,
+	// 2 file, 3 run, 4 summary.
+	errorDiagnostic := []byte(`{"@level":"error","@message":"Error: synthetic","diagnostic":{"severity":"error","summary":"synthetic","detail":"synthetic"},"type":"diagnostic"}` + "\n")
+	twoRuns := bytes.Replace(lines[1], []byte(`["greets"]`), []byte(`["greets","other"]`), 1)
+	cases["crash-exit"] = rejection{pass, 11, ReasonExitStatus}
+	cases["missing-summary"] = rejection{join(lines[0], lines[1], lines[2], lines[3]), passMeta.EntryExit, ReasonMissingSummary}
+	cases["missing-version"] = rejection{join(lines[1:]...), passMeta.EntryExit, ReasonMissingVersion}
+	cases["error-diagnostic"] = rejection{join(lines[0], lines[1], lines[2], lines[3], errorDiagnostic, lines[4]), passMeta.EntryExit, ReasonErrorDiagnostic}
+	cases["count-mismatch"] = rejection{join(lines[0], twoRuns, lines[2], lines[3], lines[4]), passMeta.EntryExit, ReasonCountMismatch}
+	cases["empty"] = rejection{nil, 0, ReasonEmpty}
+	cases["malformed"] = rejection{[]byte("panic: runtime error\n"), 0, ReasonMalformed}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			o := Evaluate(c.stream, c.exit)
-			if o.Status != Fail || len(o.Reasons) == 0 {
-				t.Errorf("BEHAVIORAL_RED: %s accepted: %+v", name, o)
+			found := false
+			for _, reason := range o.Reasons {
+				found = found || reason == c.reason
+			}
+			if o.Status != Fail || !found {
+				t.Errorf("BEHAVIORAL_RED: %s not rejected for %s: %s", name, c.reason, o)
 			}
 		})
 	}

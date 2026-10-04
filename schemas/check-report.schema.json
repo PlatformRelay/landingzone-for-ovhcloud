@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/ovh-landing-zone-accelerator/schemas/check-report.schema.json",
+  "title": "Check report observation",
+  "description": "One observation of a pinned `tofu test -json` run, produced by tools/internal/report. The status is pass only when no reason was found; upstream diagnostics are kept verbatim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "tool", "tool_version", "exit_code", "discovered", "passed", "failed", "errored", "skipped", "runs", "diagnostics", "reasons"],
+  "properties": {
+    "status": { "enum": ["pass", "fail"] },
+    "tool": { "const": "tofu" },
+    "tool_version": { "type": "string" },
+    "exit_code": { "type": "integer" },
+    "discovered": { "type": "integer", "minimum": 0 },
+    "passed": { "type": "integer", "minimum": 0 },
+    "failed": { "type": "integer", "minimum": 0 },
+    "errored": { "type": "integer", "minimum": 0 },
+    "skipped": { "type": "integer", "minimum": 0 },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "name", "status"],
+        "properties": {
+          "file": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "summary"],
+        "properties": {
+          "severity": { "type": "string" },
+          "summary": { "type": "string" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "enum": ["EMPTY_STREAM", "TRUNCATED_STREAM", "MALFORMED_STREAM", "MISSING_VERSION", "MISSING_SUMMARY", "NONZERO_EXIT", "ZERO_TESTS", "SKIPPED_RUN", "TESTS_FAILED", "COUNT_MISMATCH", "ERROR_DIAGNOSTIC", "CLEANUP_FAILED"]
+      }
+    }
+  }
+}
