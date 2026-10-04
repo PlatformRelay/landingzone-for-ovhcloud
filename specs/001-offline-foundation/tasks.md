@@ -89,7 +89,7 @@ the constitution and ADRs are unchanged.
 - [x] T007 Implement shared registry, trace and DoD evaluator in harness/checks.yaml, tools/internal/checks/traceability.go and tools/cmd/lz-check/
   - Requirements: FR-004, SC-003; ADRs: 0008, 0019. Depends on: T006.
   - Verify: `task test:traceability; task check:specs; task dod -- modules/naming`: focused trace and justified aggregate fixtures pass, blanket/unmapped/forged cases fail, unimplemented naming checks report not-run until T014/T018; no missing evidence passes. Creates all three targets.
-  - Evidence: `evidence/T007.md`; GREEN through the entry with 118/118 guard-site mutants killed; DoD for modules/naming is not-run until its checks exist.
+  - Evidence: `evidence/T007.md`; GREEN through the entry with 133/133 guard-site mutants killed; DoD for modules/naming is not-run until its checks exist.
 
 - [ ] T008 Write layer/changed-closure and real-tool static tests in tools/internal/checks/{dependencies,static}_test.go and tests/check/fixtures/{dependencies,static}/
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T007.

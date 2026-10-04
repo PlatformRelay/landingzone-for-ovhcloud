@@ -23,7 +23,7 @@ const tasksText = "# Tasks\n\n## Setup\n\n" +
 	"  - Requirements: FR-001; ADRs: 0011. Depends on: none, confirmed 2026-10-01.\n" +
 	"  - Verify: `task verify:pins`: a missing tool is rejected and the task fails closed.\n" +
 	"  - Evidence: `evidence/T001.md`; GREEN.\n\n" +
-	"- [ ] T002 [P] [US1] Implement trace/DoD rules in tools/internal/{trace,dod}.go, harness/checks.yaml (1.13.0 e.g.)\n" +
+	"- [ ] T002 [P] [US1] Implement trace/DoD rules in tools/internal/{trace,dod}.go, harness/checks.yaml (pinned 1.13.0)\n" +
 	"  - Requirements: FR-002 active clauses C002.1–C002.2/C002.4, SC-001; ADRs: 0008, 0019. Depends on: T001.\n" +
 	"  - Verify: `task test:trace`: blanket lists fail.\n" +
 	"  - Evidence: `.local/evidence/001/t002.json`.\n\n" +
@@ -217,6 +217,60 @@ var traceControls = map[string]struct {
 	"printed target is not a run": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`echo task check`: prints only."
 	}, []string{"NO_APPLICABLE_CHECK"}},
+	"evaluator over checks of other requirements": {func(tr *Trace) {
+		tr.Tasks = append(tr.Tasks, Task{ID: "T005", Paths: []string{"tools/x.go"}, Requirements: []string{"FR-001"}, ADRs: []string{"0011"},
+			Verify: "`task check -- AGENTS.md`", Evidence: "`x.json`"})
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"evaluator over checks of the task's requirements": {func(tr *Trace) {
+		tr.Tasks = append(tr.Tasks, Task{ID: "T005", Paths: []string{"tools/x.go"}, Requirements: []string{"FR-001"}, ADRs: []string{"0011"},
+			Verify: "`task check -- tools/internal`", Evidence: "`x.json`"})
+	}, nil},
+	"go test of the parent package only": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"harness/sub/checks.yaml"}
+		task(tr, "T004").Verify = "`go test ./harness -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"go test of a package tree": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test ./... -count=1`"
+	}, nil},
+	"commands inside quotes are printed, not run": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`echo 'x; task check; x'`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"double-quoted commands are printed, not run": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`echo \"x && task check\"`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"unbalanced quote": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`echo 'x; task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"valid-looking command before an unbalanced quote": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`task check '`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"expansion inside double quotes": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test ./harness -run \"$PATTERN\"`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"command after &&": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`true && task check`"
+	}, nil},
+	"command after ||": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`false || task check`"
+	}, nil},
+	"substitution": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`task check -- $(pwd)`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"redirection": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test ./harness > /dev/null`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"background operator": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`task check & true`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"zero test repetitions": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test ./harness -count=0`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"non-numeric repetitions": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test ./harness -count x`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"empty run pattern": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test ./harness -run=`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
 	"evaluator name printed by another command": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`echo check`: prints only."
 	}, []string{"NO_APPLICABLE_CHECK"}},
@@ -257,8 +311,11 @@ var traceControls = map[string]struct {
 		task(tr, "T001").Verify = "`<approved-absolute-path>/lz-offline --candidate <checkout> -- task verify:pins`"
 	}, nil},
 	"target with an argument": {func(tr *Trace) {
-		task(tr, "T004").Verify = "`task check -- modules/naming`"
+		task(tr, "T004").Verify = "`task check -- tools/internal`"
 	}, nil},
+	"evaluator over a path no check covers": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`task check -- modules/naming`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
 	"registered procedure": {func(tr *Trace) {
 		tr.Registry.Procedures = map[string]string{"T004": "approved external procedure"}
 		task(tr, "T004").Verify = "Procedure: run `go list -m` and compare."
@@ -320,7 +377,7 @@ func TestTraceabilityRejected(t *testing.T) {
 // The exemption is judged on every path the title names, whatever its
 // extension, from the parsed text rather than a hand-built Task.
 func TestTraceabilityParsedExemption(t *testing.T) {
-	for _, extra := range []string{"tools/guide.js", "tools/bin/guide", "guide.py"} {
+	for _, extra := range []string{"tools/guide.js", "tools/bin/guide", "guide.py", "main.c", "build.gradle", "guide.typescript"} {
 		text := strings.Replace(tasksText, "harness/guides/{checks,naming}.md\n", "harness/guides/{checks,naming}.md and "+extra+"\n", 1)
 		tasks, err := ParseTasks(text)
 		if err != nil {
