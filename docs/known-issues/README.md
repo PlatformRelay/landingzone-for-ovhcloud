@@ -31,3 +31,4 @@ Read this index before changing the areas it names to avoid duplicate findings.
 | Id | Severity | Kind | Status | Title | Issue |
 |---|---|---|---|---|---|
 | [KI-001](KI-001-ci-source-admission-unqualified.md) | medium | limitation | accepted | CI workflow/evaluator source admission is unqualified (C2) | |
+| [KI-002](KI-002-offline-entry-memory-process-limits.md) | low | security | open | The offline entry bounds disk and time but not memory or process count | |
