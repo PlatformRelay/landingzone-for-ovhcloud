@@ -178,10 +178,10 @@ type verifyRun struct {
 }
 
 // shellSegments splits a command span into simple commands, honouring single
-// and double quotes, at unquoted ";", "&&" and "||". A segment that uses any
-// other shell syntax — pipes, background, redirection, substitution, globbing,
-// escapes or an unbalanced quote — is returned as nil, so no fragment of it can
-// pass for a command.
+// and double quotes, at unquoted ";", "&&" and "||". Any other shell syntax —
+// pipes, background, redirection, substitution, globbing, comments, escapes or
+// an unbalanced quote — may move where commands begin and end, so a span using
+// it anywhere yields no commands at all.
 func shellSegments(span string) [][]string {
 	span = placeholder.ReplaceAllString(span, "PLACEHOLDER")
 	var segments [][]string
@@ -197,11 +197,8 @@ func shellSegments(span string) [][]string {
 	}
 	endSegment := func() {
 		endWord()
-		if bad {
-			words = nil
-		}
 		segments = append(segments, words)
-		words, bad = nil, false
+		words = nil
 	}
 	for i := 0; i < len(span); i++ {
 		c := span[i]
@@ -233,6 +230,9 @@ func shellSegments(span string) [][]string {
 		}
 	}
 	endSegment()
+	if bad {
+		return nil
+	}
 	return segments
 }
 
@@ -335,8 +335,11 @@ func parseGoTest(words []string) (verifyRun, bool) {
 func exercises(run verifyRun, paths []string) bool {
 	for _, p := range paths {
 		p = strings.TrimSuffix(p, "/")
+		// Only a file lies in its parent package; a directory is a package of
+		// its own and must be selected itself.
+		file := strings.Contains(path.Base(p), ".")
 		for _, dir := range run.Packages {
-			if p == dir || path.Dir(p) == dir {
+			if p == dir || file && path.Dir(p) == dir {
 				return true
 			}
 		}

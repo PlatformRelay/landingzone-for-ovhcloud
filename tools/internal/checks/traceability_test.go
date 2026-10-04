@@ -247,6 +247,24 @@ var traceControls = map[string]struct {
 	"expansion inside double quotes": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`go test ./harness -run \"$PATTERN\"`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
+	"comment hides the following commands": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`echo ignored # ; task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"unsupported syntax anywhere voids the span": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`echo $(x); task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"directory path is not in its parent package": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"harness/sub/"}
+		task(tr, "T004").Verify = "`go test ./harness -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"extensionless path is not in its parent package": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"harness/sub"}
+		task(tr, "T004").Verify = "`go test ./harness -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"directory path selected exactly": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"harness/sub/"}
+		task(tr, "T004").Verify = "`go test ./harness/sub -count=1`"
+	}, nil},
 	"command after &&": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`true && task check`"
 	}, nil},
