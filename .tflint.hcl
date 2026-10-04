@@ -10,3 +10,13 @@ plugin "terraform" {
   enabled = true
   preset  = "recommended"
 }
+
+# Generated interface documentation (ADR-0013) needs every input and output
+# described; the recommended preset does not require it.
+rule "terraform_documented_variables" {
+  enabled = true
+}
+
+rule "terraform_documented_outputs" {
+  enabled = true
+}

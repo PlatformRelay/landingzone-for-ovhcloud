@@ -16,11 +16,9 @@ const staticFixtures = "../../../tests/check/fixtures/static/"
 
 func pinnedTools(t *testing.T) StaticTools {
 	t.Helper()
-	config, err := filepath.Abs("../../../.tflint.hcl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return StaticTools{Tofu: "/tcb/tofu", TFLint: "/tcb/tflint", TFLintConfig: config}
+	// A relative configuration path, as lz-check passes it: the tools run
+	// inside the module directory, so RunStatic must resolve it first.
+	return StaticTools{Tofu: "/tcb/tofu", TFLint: "/tcb/tflint", TFLintConfig: "../../../.tflint.hcl"}
 }
 
 // staticFixture copies a fixture into private scratch: tofu init writes state
@@ -81,25 +79,29 @@ func TestStaticRejected(t *testing.T) {
 	tools := pinnedTools(t)
 	requireTools(t, tools)
 	for name, c := range map[string]struct {
-		want    map[string]string
-		message string
+		want   map[string]string
+		detail map[string]string // clause → upstream text it must keep
 	}{
-		"unformatted": {map[string]string{"fmt": "fail UNFORMATTED", "init": "pass ", "validate": "pass ", "tflint": "pass "}, "main.tf"},
-		"lint":        {map[string]string{"fmt": "pass ", "init": "pass ", "validate": "pass ", "tflint": "fail LINT_ISSUES"}, "terraform_typed_variables"},
-		"malformed":   {map[string]string{"fmt": "fail FORMAT_ERROR", "init": "fail INIT_FAILED", "validate": "fail INVALID", "tflint": "fail LINT_ERROR"}, "Invalid expression"},
+		"unformatted": {map[string]string{"fmt": "fail UNFORMATTED", "init": "pass ", "validate": "pass ", "tflint": "pass "},
+			map[string]string{"fmt": "main.tf"}},
+		"lint": {map[string]string{"fmt": "pass ", "init": "pass ", "validate": "pass ", "tflint": "fail LINT_ISSUES"},
+			map[string]string{"tflint": "terraform_typed_variables"}},
+		// Flagged only by the repository configuration, not by TFLint's defaults.
+		"undocumented": {map[string]string{"fmt": "pass ", "init": "pass ", "validate": "pass ", "tflint": "fail LINT_ISSUES"},
+			map[string]string{"tflint": "terraform_documented_outputs"}},
+		"malformed": {map[string]string{"fmt": "fail FORMAT_ERROR", "init": "fail INIT_FAILED", "validate": "fail INVALID", "tflint": "fail LINT_ERROR"},
+			map[string]string{"fmt": "Invalid expression", "init": "Invalid expression", "validate": "Invalid expression", "tflint": "Invalid expression"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			o := RunStatic(tools, staticFixture(t, name))
 			if got := clauses(o); !reflect.DeepEqual(got, c.want) || o.Pass {
 				t.Errorf("BEHAVIORAL_RED: clauses %v (pass=%v), want %v", got, o.Pass, c.want)
 			}
-			var messages []string
 			for _, r := range o.Results {
-				messages = append(messages, r.Files...)
-				messages = append(messages, r.Messages...)
-			}
-			if !strings.Contains(strings.Join(messages, "\n"), c.message) {
-				t.Errorf("BEHAVIORAL_RED: upstream detail %q not kept: %+v", c.message, o.Results)
+				kept := strings.Join(append(append([]string{}, r.Files...), r.Messages...), "\n")
+				if want, ok := c.detail[r.Clause]; ok && !strings.Contains(kept, want) {
+					t.Errorf("BEHAVIORAL_RED: %s did not keep %q: %+v", r.Clause, want, r)
+				}
 			}
 		})
 	}
@@ -116,6 +118,18 @@ func TestStaticNoDiscovery(t *testing.T) {
 	}
 	if o := RunStatic(tools, filepath.Join(t.TempDir(), "absent")); o.Pass || clauses(o)["discovery"] != "fail NO_DISCOVERY" {
 		t.Errorf("BEHAVIORAL_RED: missing scope accepted: %+v", o)
+	}
+	// Module copies tofu init leaves in .terraform are tool state, not the
+	// directory's own configuration.
+	state := staticFixture(t, "empty")
+	if err := os.MkdirAll(filepath.Join(state, ".terraform/modules/m"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, ".terraform/modules/m/main.tf"), []byte("variable \"x\" {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if o := RunStatic(tools, state); o.Pass || clauses(o)["discovery"] != "fail NO_DISCOVERY" {
+		t.Errorf("BEHAVIORAL_RED: tool state counted as configuration: %+v", o)
 	}
 }
 

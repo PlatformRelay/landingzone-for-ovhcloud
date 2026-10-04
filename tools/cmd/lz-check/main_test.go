@@ -186,3 +186,26 @@ func TestDependencyCommands(t *testing.T) {
 		}
 	}
 }
+
+// Without the pinned tools (outside the offline entry, or a wrong path) lint
+// is blocked, and a module directory that does not exist yet is not run; both
+// exit non-zero. The real tool runs are covered by task test:static.
+func TestLintWithoutTools(t *testing.T) {
+	root := repo(t, map[string]string{"modules/a/main.tf": `variable "x" {}`, ".tflint.hcl": "config {}\n"})
+	absent := []string{"-tofu", filepath.Join(root, "no-tofu"), "-tflint", filepath.Join(root, "no-tflint")}
+	if code, out := lzCheck(root, append(absent, "lint", "modules/a")...); code != 1 || !strings.Contains(out, "blocked fmt TOOL_ABSENT") || !strings.Contains(out, "LINT_BLOCKED modules/a") {
+		t.Errorf("BEHAVIORAL_RED: absent tools not blocked: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, append(absent, "lint", "modules/naming")...); code != 1 || !strings.Contains(out, "LINT_NOT_RUN modules/naming") {
+		t.Errorf("BEHAVIORAL_RED: missing module not reported as not run: code=%d\n%s", code, out)
+	}
+	empty := repo(t, map[string]string{"modules/a/README.md": "# a\n"})
+	if code, out := lzCheck(empty, append(absent, "lint", "modules/a")...); code != 1 || !strings.Contains(out, "fail discovery NO_DISCOVERY") || !strings.Contains(out, "LINT_FAIL modules/a") {
+		t.Errorf("BEHAVIORAL_RED: empty module accepted: code=%d\n%s", code, out)
+	}
+	for _, args := range [][]string{{"lint"}, {"lint", "a", "b"}, {"lint", "../outside"}, {"lint", "/etc"}} {
+		if code, _ := lzCheck(root, append(absent, args...)...); code != 2 {
+			t.Errorf("BEHAVIORAL_RED: %v accepted (code %d)", args, code)
+		}
+	}
+}
