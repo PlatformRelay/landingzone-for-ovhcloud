@@ -6,6 +6,8 @@
 //	lz-check [-root <repo>] deps
 //	lz-check [-root <repo>] select <changed-path>
 //	lz-check [-root <repo>] [-tofu <bin>] [-tflint <bin>] lint <module-dir>
+//	lz-check [-root <repo>] ci-workflow
+//	lz-check [-root <repo>] ci-source <spec-dir>
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
@@ -14,7 +16,10 @@
 // of ADR-0002 and exits 1 on any finding; select prints the directories a
 // changed path requires to be checked. lint runs the pinned fmt, init, validate
 // and TFLint clauses on one module directory and exits 1 unless all pass.
-// Usage and input errors exit 2.
+// ci-workflow prints the foundation workflow rendered from its approved source;
+// ci-source judges that source against the registry and <spec-dir>/tasks.md
+// and the committed workflow against the rendered one, and exits 1 on any
+// finding. Usage and input errors exit 2.
 package main
 
 import (
@@ -53,8 +58,10 @@ func run(args []string, out io.Writer) int {
 		return deps(out, *root)
 	case flags.NArg() == 2 && flags.Arg(0) == "select":
 		return selectChanged(out, *root, flags.Arg(1))
+	case flags.NArg() == 1 && flags.Arg(0) == "ci-workflow":
+		return ciWorkflow(out, *root)
 	case flags.NArg() != 2 || flags.Arg(0) == "deps":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path>")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | ci-workflow | ci-source <spec-dir>")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -67,6 +74,8 @@ func run(args []string, out io.Writer) int {
 		return specs(out, *root, flags.Arg(1), registry)
 	case "dod":
 		return dod(out, *root, filepath.Join(*root, *evidenceDir), flags.Arg(1), registry)
+	case "ci-source":
+		return ciSource(out, *root, flags.Arg(1), registry)
 	}
 	fmt.Fprintf(out, "unknown command %q\n", flags.Arg(0))
 	return 2
@@ -204,6 +213,66 @@ func scan(out io.Writer, root string) (checks.DependencyGraph, bool) {
 		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
 	}
 	return g, len(findings) == 0
+}
+
+// readFoundationSource reads the approved CI source, reporting its absence as
+// an input error.
+func readFoundationSource(out io.Writer, root string) ([]byte, bool) {
+	data, err := os.ReadFile(filepath.Join(root, checks.FoundationSourcePath))
+	if err != nil {
+		fmt.Fprintln(out, "SOURCE_MISSING:", err)
+		return nil, false
+	}
+	return data, true
+}
+
+func ciWorkflow(out io.Writer, root string) int {
+	data, ok := readFoundationSource(out, root)
+	if !ok {
+		return 2
+	}
+	source, err := checks.ParseFoundationSource(data)
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return 2
+	}
+	fmt.Fprint(out, checks.RenderFoundationWorkflow(source))
+	return 0
+}
+
+// ciSource judges the source and the committed workflow; an absent workflow
+// is judged as an empty one, so it is drift, not an input error.
+func ciSource(out io.Writer, root, dir string, registry checks.Registry) int {
+	data, ok := readFoundationSource(out, root)
+	if !ok {
+		return 2
+	}
+	tasksText, err := os.ReadFile(filepath.Join(root, dir, "tasks.md"))
+	if err != nil {
+		fmt.Fprintln(out, "TASKS_MISSING:", err)
+		return 2
+	}
+	tasks, err := checks.ParseTasks(string(tasksText))
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return 2
+	}
+	workflow, err := os.ReadFile(filepath.Join(root, checks.FoundationWorkflow))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintln(out, "WORKFLOW_UNREADABLE:", err)
+		return 2
+	}
+	findings := checks.CheckFoundationCI(data, workflow, registry, tasks)
+	for _, f := range findings {
+		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
+	}
+	if len(findings) > 0 {
+		fmt.Fprintf(out, "FOUNDATION_CI_FAIL findings=%d\n", len(findings))
+		return 1
+	}
+	source, _ := checks.ParseFoundationSource(data)
+	fmt.Fprintf(out, "FOUNDATION_CI_OK targets=%d deferred=%d\n", len(source.Targets), len(source.Deferred))
+	return 0
 }
 
 func deps(out io.Writer, root string) int {
