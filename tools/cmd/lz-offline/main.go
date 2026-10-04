@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -165,7 +166,7 @@ func admitBundle(root string) (resources, error) {
 	if err := decoder.Decode(&r); err != nil {
 		return r, fmt.Errorf("RESOURCE_MANIFEST: %w", err)
 	}
-	if err := checks.AdmitCapture(r.Prepared); err != nil {
+	if err := checks.AdmitPins(r.Prepared); err != nil {
 		return r, err
 	}
 	if r.Bwrap != "/usr/bin/bwrap" {
@@ -237,21 +238,37 @@ func admitBundle(root string) (resources, error) {
 	return r, nil
 }
 
+// Snapshot budgets. Every enumerated entry counts, including excluded names.
+const (
+	maxEntries    = 10000
+	maxDepth      = 64
+	maxFileBytes  = 16 << 20
+	maxTotalBytes = 128 << 20
+)
+
 // Snapshot an explicit input allowlist, never the repository root. Every copied
 // file is regular/single-link and bounded; secrets/cache/config are excluded.
-func snapshot(candidate, destination string) error {
+// The probe.sh, included.yml, bin and lz-offline names admit the boundary
+// suite's hostile fixtures, so the suite can show they have no effect.
+func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := realDirectory(candidate); err != nil {
 		return err
 	}
 	allowed := []string{"Taskfile.yml", "mise.toml", "tools", "harness", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
-	var copyEntry func(*os.File, string, int) error
-	copyEntry = func(file *os.File, target string, depth int) error {
+	charge := func(depth int) error {
 		entries++
-		if entries > 10000 || depth > 64 {
+		if entries > maxEntries || depth > maxDepth {
 			return fmt.Errorf("INPUT_LIMIT: entry/depth budget exceeded")
 		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("INPUT_DEADLINE: %w", ctx.Err())
+		}
+		return nil
+	}
+	var copyEntry func(*os.File, string, int) error
+	copyEntry = func(file *os.File, target string, depth int) error {
 		info, err := file.Stat()
 		if err != nil {
 			return err
@@ -263,6 +280,9 @@ func snapshot(candidate, destination string) error {
 			for {
 				children, readErr := file.ReadDir(128)
 				for _, child := range children {
+					if err := charge(depth + 1); err != nil {
+						return err
+					}
 					base := child.Name()
 					if base == ".git" || base == ".local" || base == ".terraform" || base == ".cache" || base == ".env" || strings.HasPrefix(base, ".env.") || base == ".envrc" {
 						continue
@@ -289,11 +309,11 @@ func snapshot(candidate, destination string) error {
 				}
 			}
 		}
-		if count >= 10000 {
+		if count >= maxEntries {
 			return fmt.Errorf("INPUT_LIMIT: file count exceeded")
 		}
-		limit := int64(16 << 20)
-		if remaining := int64(128<<20) - total; remaining < limit {
+		limit := int64(maxFileBytes)
+		if remaining := int64(maxTotalBytes) - total; remaining < limit {
 			limit = remaining
 		}
 		data, sourceMode, err := readCandidate(file, limit)
@@ -312,6 +332,9 @@ func snapshot(candidate, destination string) error {
 		return os.WriteFile(target, data, mode)
 	}
 	for _, name := range allowed {
+		if err := charge(0); err != nil {
+			return err
+		}
 		path := filepath.Join(candidate, name)
 		file, err := openCandidate(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -335,16 +358,32 @@ func snapshot(candidate, destination string) error {
 	return nil
 }
 
+// Scratch budgets inside the sandbox. Each writable area is a private tmpfs;
+// the candidate never writes to host-backed storage.
+const (
+	tmpBytes       = "2147483648"
+	candidateBytes = "1073741824"
+	runBytes       = "16777216"
+	homeBytes      = "67108864"
+	childDeadline  = 120 * time.Second
+)
+
+// Targets the entry runs itself. Their success is computed by trusted code and
+// never by the candidate's Taskfile, which could define them as no-ops.
+var trustedTargets = map[string]bool{"verify:toolchain": true, "test:offline-boundary": true}
+
+//go:embed fixtures/provider/main.tf fixtures/provider/.terraform.lock.hcl
+var providerFixture embed.FS
+
 func boundary() error {
-	if _, err := checks.RuntimePrepared(); err != nil {
+	if _, _, err := checks.RuntimePrepared(); err != nil {
 		return err
 	}
-	address := "192.0.2.1:9"
-	_, err := net.Dial("tcp4", address)
-	if !errors.Is(err, syscall.ENETUNREACH) {
-		return fmt.Errorf("BOUNDARY_NETWORK: strict kernel ENETUNREACH required: %v", err)
+	if err := networkDenied(); err != nil {
+		return err
 	}
 	child := exec.Command("/tcb/lz-offline", "--network-probe")
+	child.Dir = "/tmp"
 	child.Env = []string{"PATH=/tcb:/usr/bin:/bin", "HOME=/home/offline"}
 	if output, err := child.CombinedOutput(); err != nil {
 		return fmt.Errorf("BOUNDARY_SUBPROCESS: %w: %s", err, output)
@@ -352,30 +391,120 @@ func boundary() error {
 	return nil
 }
 
+// networkDenied requires the kernel's own refusal, not a DNS failure or timeout.
+func networkDenied() error {
+	_, err := net.DialTimeout("tcp4", "192.0.2.1:9", 5*time.Second)
+	if !errors.Is(err, syscall.ENETUNREACH) {
+		return fmt.Errorf("BOUNDARY_NETWORK: strict kernel ENETUNREACH required: %v", err)
+	}
+	return nil
+}
+
+// providerInit installs the pinned ovh provider from the read-only mirror into a
+// trusted copy of the fixture, with the lock file read-only and no network.
+func providerInit() error {
+	directory := "/tmp/lz-provider"
+	if err := os.Mkdir(directory, 0700); err != nil {
+		return err
+	}
+	for _, name := range []string{"main.tf", ".terraform.lock.hcl"} {
+		data, err := providerFixture.ReadFile("fixtures/provider/" + name)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(directory, name), data, 0600); err != nil {
+			return err
+		}
+	}
+	command := exec.Command("/tcb/tofu", "-chdir="+directory, "init", "-backend=false", "-lockfile=readonly", "-input=false", "-no-color")
+	command.Dir = "/tmp"
+	command.Env = []string{"PATH=/tcb:/usr/bin:/bin", "HOME=/home/offline", "TF_CLI_CONFIG_FILE=/run/lz/tofurc"}
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("PROVIDER_INIT: %w: %s", err, output)
+	}
+	installed := filepath.Join(directory, ".terraform/providers/registry.opentofu.org/ovh/ovh/2.21.0/linux_amd64")
+	if info, err := os.Stat(installed); err != nil || !info.IsDir() {
+		return fmt.Errorf("PROVIDER_INIT: ovh 2.21.0 not installed from the mirror")
+	}
+	return nil
+}
+
+// copyTree copies the read-only snapshot into the private writable /candidate.
+// The snapshot holds only directories and regular files written by the entry.
+func copyTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, incoming error) error {
+		if incoming != nil {
+			return incoming
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case entry.IsDir():
+			if relative == "." {
+				return nil
+			}
+			return os.Mkdir(target, 0700)
+		case info.Mode().IsRegular():
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, info.Mode().Perm())
+		default:
+			return fmt.Errorf("INPUT_FILE: unexpected snapshot entry %s", relative)
+		}
+	})
+}
+
+// inside runs in the sandbox. The gate is checked before any candidate file is
+// interpreted; trusted targets never reach the candidate's Taskfile.
+func inside(target string) error {
+	if err := checks.VerifyRuntime(); err != nil {
+		return err
+	}
+	switch target {
+	case "verify:toolchain":
+		return providerInit()
+	case "test:offline-boundary":
+		return boundary()
+	}
+	if err := copyTree("/run/lz/src", "/candidate"); err != nil {
+		return err
+	}
+	// Absolute trusted Task ignores candidate bin/launcher replacements.
+	command := exec.Command("/tcb/task", "--taskfile", "/candidate/Taskfile.yml", target)
+	command.Env = os.Environ()
+	command.Dir = "/candidate"
+	command.Stdin, command.Stdout, command.Stderr = nil, os.Stdout, os.Stderr
+	return command.Run()
+}
+
 func run() (result error) {
 	if len(os.Args) == 2 {
 		switch os.Args[1] {
-		case "--verify":
-			return checks.VerifyRuntime()
-		case "--boundary":
-			return boundary()
 		case "--network-probe":
-			if _, err := checks.RuntimePrepared(); err != nil {
+			if _, _, err := checks.RuntimePrepared(); err != nil {
 				return err
 			}
-			_, err := net.Dial("tcp4", "192.0.2.1:9")
-			if !errors.Is(err, syscall.ENETUNREACH) {
-				return fmt.Errorf("BOUNDARY_NETWORK: %v", err)
-			}
-			return nil
+			return networkDenied()
 		}
 	}
 	if len(os.Args) < 6 || os.Args[1] != "--candidate" || os.Args[3] != "--" || os.Args[4] != "task" {
 		return fmt.Errorf("USAGE: lz-offline --candidate <absolute-checkout> -- task <target>")
 	}
-	if len(os.Args) != 6 || !map[string]bool{"verify:toolchain": true, "test:offline-boundary": true, "probe": true}[os.Args[5]] {
+	if len(os.Args) != 6 || !(trustedTargets[os.Args[5]] || os.Args[5] == "probe") {
 		return fmt.Errorf("COMMAND_ADMISSION: explicit child target required")
 	}
+	// One deadline covers admission, snapshot and the sandboxed child.
+	ctx, cancel := context.WithTimeout(context.Background(), childDeadline)
+	defer cancel()
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -395,8 +524,8 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	// All candidate interpretation follows admission and occurs inside a copied
-	// private snapshot; only Go filesystem reads occur here on the host.
+	// The candidate is copied into private host scratch that the sandbox sees
+	// read-only. Only this process writes there, so cleanup cannot be obstructed.
 	scratch, err := os.MkdirTemp(filepath.Dir(root), "offline-")
 	if err != nil {
 		return err
@@ -413,8 +542,10 @@ func run() (result error) {
 	if err := os.Mkdir(copyRoot, 0700); err != nil {
 		return err
 	}
-	if err := snapshot(candidate, copyRoot); err != nil {
-		return err
+	if !trustedTargets[os.Args[5]] {
+		if err := snapshot(ctx, candidate, copyRoot); err != nil {
+			return err
+		}
 	}
 	namespace, err := os.Readlink("/proc/self/ns/net")
 	if err != nil {
@@ -430,17 +561,19 @@ func run() (result error) {
 	}
 	res := filepath.Join(root, "resources")
 	args := []string{"--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-net", "--cap-drop", "ALL",
-		"--ro-bind", filepath.Join(res, "rootfs"), "/", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run", "--tmpfs", "/home",
+		"--ro-bind", filepath.Join(res, "rootfs"), "/", "--proc", "/proc", "--dev", "/dev",
+		"--size", tmpBytes, "--tmpfs", "/tmp", "--size", runBytes, "--tmpfs", "/run", "--size", homeBytes, "--tmpfs", "/home",
 		"--dir", "/home/offline", "--dir", "/run/lz", "--tmpfs", "/tcb", "--tmpfs", "/tools",
 		"--ro-bind", filepath.Join(res, "go"), "/tools/go", "--ro-bind", filepath.Join(res, "task"), "/tcb/task",
 		"--ro-bind", filepath.Join(res, "tofu"), "/tcb/tofu", "--ro-bind", filepath.Join(res, "terramate"), "/tcb/terramate",
 		"--ro-bind", executable, "/tcb/lz-offline", "--ro-bind", filepath.Join(res, "mirror"), "/mirror",
 		"--ro-bind", filepath.Join(res, "tofurc"), "/run/lz/tofurc", "--ro-bind", gatePath, "/run/lz/admission.json",
-		"--bind", copyRoot, "/candidate", "--clearenv", "--setenv", "PATH", "/tcb:/tools/go/bin:/usr/bin:/bin", "--setenv", "HOME", "/home/offline",
+		"--ro-bind", copyRoot, "/run/lz/src", "--size", candidateBytes, "--tmpfs", "/candidate",
+		"--clearenv", "--setenv", "PATH", "/tcb:/tools/go/bin:/usr/bin:/bin", "--setenv", "HOME", "/home/offline",
 		"--setenv", "TF_CLI_CONFIG_FILE", "/run/lz/tofurc", "--setenv", "GOTOOLCHAIN", "local", "--setenv", "GOENV", "off", "--setenv", "GOWORK", "off",
 		"--setenv", "GOPROXY", "off", "--setenv", "GOSUMDB", "off", "--setenv", "GOCACHE", "/tmp/go-cache", "--setenv", "GOPATH", "/tmp/go-path", "--setenv", "CGO_ENABLED", "0"}
-	// The bounded independent proof driver supplies only exact synthetic metadata.
-	// These values cannot select mounts, helpers, config or launch arguments.
+	// The external boundary suite supplies only synthetic metadata. These values
+	// cannot select mounts, helpers, config or launch arguments.
 	if os.Args[5] == "probe" {
 		for _, name := range []string{"LZ_HOST", "LZ_URL"} {
 			value := os.Getenv(name)
@@ -459,11 +592,8 @@ func run() (result error) {
 		}
 		args = append(args, "--ro-bind", probe, "/tcb/probe", "--setenv", "LZ_PROBE", "1", "--setenv", "LZ_PROBE_BINARY", "/tcb/probe")
 	}
-	// Verify the actual namespace/mount gate before loading the candidate Taskfile.
 	// Tool mount points live on private tmpfs; seal them before the child starts.
 	args = append(args, "--remount-ro", "/tcb", "--remount-ro", "/tools", "--chdir", "/candidate", "/tcb/lz-offline", "--inside", os.Args[5])
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
 	output := &childOutput{cancel: cancel}
 	command := exec.CommandContext(ctx, r.Bwrap, args...)
 	command.Env = []string{}
@@ -486,28 +616,16 @@ func run() (result error) {
 	}
 	switch os.Args[5] {
 	case "verify:toolchain":
-		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 network=none")
+		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 provider=ovh/ovh@2.21.0 network=none")
 	case "test:offline-boundary":
 		_, err = fmt.Fprintln(os.Stdout, "BOUNDARY_QUALIFIED process=kernel:ENETUNREACH subprocess=kernel:ENETUNREACH")
 	}
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func main() {
 	if len(os.Args) == 3 && os.Args[1] == "--inside" {
-		if err := checks.VerifyRuntime(); err != nil {
-			fail(err)
-		}
-		// Absolute trusted Task ignores candidate bin/launcher replacements.
-		args := []string{"--taskfile", "/candidate/Taskfile.yml", os.Args[2]}
-		command := exec.Command("/tcb/task", args...)
-		command.Env = os.Environ()
-		command.Dir = "/candidate"
-		command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
-		if err := command.Run(); err != nil {
+		if err := inside(os.Args[2]); err != nil {
 			fail(err)
 		}
 		return
