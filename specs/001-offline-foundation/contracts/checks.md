@@ -1,7 +1,8 @@
 # Offline command and report contracts
 All commands are planned and must be created by tasks.md; no acceptance check runs yet.
-Host entry: `<approved-absolute-path>/lz-offline --candidate <checkout> -- task <target>`
-(T003). Its independently reviewed source/binary digest and installation live outside the
+Host entry: `<approved-absolute-path>/lz-offline --candidate <checkout> -- task <target> [-- <path>]`
+(T003; the optional path, added for `task dod`, must be one clean relative path and is refused
+for trusted targets). Its independently reviewed source/binary digest and installation live outside the
 candidate. It ignores candidate Taskfiles/includes/hooks/config on the host, fetches/extracts
 rooted candidate data safely, then enters isolation. Task/Go invocations below are child
 commands, except the explicitly approved T002 proof-orchestration procedure below;

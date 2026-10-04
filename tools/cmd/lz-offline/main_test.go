@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,7 +26,12 @@ func candidateTree(t *testing.T) (string, string) {
 
 func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 	candidate, destination := candidateTree(t)
-	for name, body := range map[string]string{"tools/a.go": "package a\n", "tools/.env": "SECRET=x\n", "secrets.txt": "x\n"} {
+	files := map[string]string{"tools/a.go": "package a\n", "tools/.env": "SECRET=x\n", "secrets.txt": "x\n",
+		"specs/001-x/spec.md": "# spec\n", "docs/adr/0001-x.md": "# ADR\n"}
+	for name, body := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(candidate, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(candidate, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -33,8 +39,11 @@ func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 	if err := snapshot(context.Background(), candidate, destination); err != nil {
 		t.Fatalf("valid candidate rejected: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(destination, "tools/a.go")); err != nil {
-		t.Errorf("allowlisted file missing: %v", err)
+	// Specs and ADRs are data the trace check reads.
+	for _, name := range []string{"tools/a.go", "specs/001-x/spec.md", "docs/adr/0001-x.md"} {
+		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
+			t.Errorf("allowlisted file missing: %v", err)
+		}
 	}
 	for _, name := range []string{"tools/.env", "secrets.txt"} {
 		if _, err := os.Stat(filepath.Join(destination, name)); err == nil {
@@ -162,6 +171,55 @@ func TestTargetAdmission(t *testing.T) {
 	for _, name := range []string{"", "-x", "--taskfile", "a b", "../x", "x/y", "Upper", "x;y", strings.Repeat("a", 65)} {
 		if err := admitTarget(name); err == nil {
 			t.Errorf("BEHAVIORAL_RED: target %q admitted", name)
+		}
+	}
+}
+
+// One relative path may follow a second "--" for candidate targets such as
+// dod; it can never become a flag, an absolute path or a parent reference, and
+// trusted targets take none.
+func TestCommandAdmission(t *testing.T) {
+	prefix := []string{"--candidate", "/abs/checkout", "--", "task"}
+	for _, c := range []struct {
+		args   []string
+		target string
+		extra  []string
+	}{
+		{[]string{"test:reports"}, "test:reports", nil},
+		{[]string{"dod", "--", "modules/naming"}, "dod", []string{"modules/naming"}},
+		{[]string{"dod", "--", "tools/internal/checks/traceability.go"}, "dod", []string{"tools/internal/checks/traceability.go"}},
+	} {
+		target, extra, err := parseCommand(append(append([]string{}, prefix...), c.args...))
+		if err != nil || target != c.target || !reflect.DeepEqual(extra, c.extra) {
+			t.Errorf("%v: got %q %v %v", c.args, target, extra, err)
+		}
+	}
+	for name, args := range map[string][]string{
+		"no target":               {},
+		"two targets":             {"dod", "lint"},
+		"argument without --":     {"dod", "modules/naming"},
+		"two arguments":           {"dod", "--", "a", "b"},
+		"argument without its --": {"dod", "x", "modules/naming"},
+		"flag argument":           {"dod", "--", "-x"},
+		"absolute argument":       {"dod", "--", "/etc"},
+		"parent argument":         {"dod", "--", "modules/../.."},
+		"leading parent":          {"dod", "--", "../x"},
+		"shell argument":          {"dod", "--", "a;b"},
+		"space argument":          {"dod", "--", "a b"},
+		"empty argument":          {"dod", "--", ""},
+		"long argument":           {"dod", "--", strings.Repeat("a", 257)},
+		"trusted with arg":        {"verify:toolchain", "--", "x"},
+		"boundary with arg":       {"test:offline-boundary", "--", "x"},
+		"bad target":              {"-x"},
+		"bad target with arg":     {"x;y", "--", "a"},
+		"wrong command prefix":    nil,
+	} {
+		full := append(append([]string{}, prefix...), args...)
+		if name == "wrong command prefix" {
+			full = []string{"--candidate", "/abs", "task", "x"}
+		}
+		if _, _, err := parseCommand(full); err == nil {
+			t.Errorf("BEHAVIORAL_RED: %s admitted: %v", name, full)
 		}
 	}
 }
