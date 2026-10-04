@@ -153,7 +153,11 @@ func validateResult(stdout, stderr string, code int) StaticResult {
 		r.Status, r.Reason, r.Messages = StatusFail, "MALFORMED_OUTPUT", append(lines(stdout), lines(stderr)...)
 		return r
 	}
+	errorDiagnostics := 0
 	for _, d := range *report.Diagnostics {
+		if d.Severity == "error" {
+			errorDiagnostics++
+		}
 		var where sourceRange
 		if d.Range != nil {
 			where = *d.Range
@@ -161,9 +165,11 @@ func validateResult(stdout, stderr string, code int) StaticResult {
 		r.Messages = append(r.Messages, located(where.Filename, where.Start.Line, where.Start.Column, fmt.Sprintf("%s: %s: %s", d.Severity, d.Summary, d.Detail)))
 	}
 	r.Messages = append(r.Messages, lines(stderr)...)
-	// The exit status and the report must agree.
+	// The exit status, the summary and the diagnostics must all agree.
 	clean := *report.Valid && *report.ErrorCount == 0
 	switch {
+	case errorDiagnostics != *report.ErrorCount:
+		r.Status, r.Reason = StatusFail, "INCONSISTENT_OUTPUT"
 	case code == 0 && clean:
 		r.Status = StatusPass
 	case code == 1 && !*report.Valid:
