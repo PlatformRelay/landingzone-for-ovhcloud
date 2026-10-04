@@ -1,0 +1,13 @@
+schema_version: 1
+offline:
+  host_entry: separately-installed-digest-approved-lz-offline
+  platform: linux-amd64
+  image: cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26
+  candidate_execution: after-source-snapshot-and-runtime-admission
+  network: none
+  credentials: none
+  runtime_socket: none
+  shared_writable_cache: none
+  provider_installation: filesystem-mirror-only
+  provider: registry.opentofu.org/ovh/ovh@2.21.0
+  tool_fixture_capture: requires-pins-artifacts-image-and-runtime-gate

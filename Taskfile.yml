@@ -1,0 +1,11 @@
+version: '3'
+tasks:
+  verify:toolchain:
+    desc: Verify prepared tool identities after entering the offline boundary
+    cmds:
+      - /tcb/lz-offline --verify
+      - /tcb/tofu -chdir=tools/cmd/lz-offline/fixtures/provider init -backend=false -lockfile=readonly
+  test:offline-boundary:
+    desc: Verify process and subprocess denial in the admitted boundary
+    cmds:
+      - /tcb/lz-offline --boundary
