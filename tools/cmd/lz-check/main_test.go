@@ -155,3 +155,34 @@ func TestUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestDependencyCommands(t *testing.T) {
+	root := repo(t, map[string]string{
+		"modules/naming/main.tf":          `variable "name" {}`,
+		"components/runtime/kube/main.tf": `module "n" { source = "../../../modules/naming" }`,
+	})
+	if code, out := lzCheck(root, "deps"); code != 0 || !strings.Contains(out, "DEPENDENCIES_OK dirs=2") {
+		t.Errorf("BEHAVIORAL_RED: valid graph refused: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "select", "modules/naming/main.tf"); code != 0 || !strings.Contains(out, "SELECT components/runtime/kube modules/naming") {
+		t.Errorf("BEHAVIORAL_RED: selection not printed: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "select", "misc/x.txt"); code != 0 || !strings.Contains(out, "SELECT_FULL UNKNOWN_PATH") {
+		t.Errorf("BEHAVIORAL_RED: unknown path not widened: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "select", "docs/x.md"); code != 0 || !strings.Contains(out, "SELECT_NONE DOCS_ONLY") {
+		t.Errorf("BEHAVIORAL_RED: docs-only change not explicit: code=%d\n%s", code, out)
+	}
+	broken := repo(t, map[string]string{"modules/naming/main.tf": `module "k" { source = "../../components/runtime/kube" }`, "components/runtime/kube/main.tf": `variable "x" {}`})
+	if code, out := lzCheck(broken, "deps"); code != 1 || !strings.Contains(out, "LAYER_VIOLATION modules/naming") {
+		t.Errorf("BEHAVIORAL_RED: reversed edge accepted: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(broken, "select", "modules/naming/main.tf"); code != 1 || !strings.Contains(out, "LAYER_VIOLATION") {
+		t.Errorf("BEHAVIORAL_RED: selection on a broken graph accepted: code=%d\n%s", code, out)
+	}
+	for _, args := range [][]string{{"deps", "x"}, {"select"}, {"select", "a", "b"}} {
+		if code, _ := lzCheck(root, args...); code != 2 {
+			t.Errorf("BEHAVIORAL_RED: %v accepted (code %d)", args, code)
+		}
+	}
+}

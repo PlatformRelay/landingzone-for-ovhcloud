@@ -17,6 +17,12 @@ tasks:
     cmds:
       - go -C tools test -count=1 ./internal/checks ./cmd/lz-check
 
+  test:dependencies:
+    desc: Layer, reference and changed-closure rules on their fixtures, then this repository's own module graph (V006)
+    cmds:
+      - go -C tools test -count=1 -run 'TestDependenc' ./internal/checks ./cmd/lz-check
+      - go -C tools run ./cmd/lz-check -root .. deps
+
   check:specs:
     desc: Trace every spec 001 requirement and task through harness/checks.yaml (V003)
     cmds:

@@ -3,11 +3,15 @@
 //
 //	lz-check [-root <repo>] specs <spec-dir>
 //	lz-check [-root <repo>] [-evidence <dir>] dod <path>
+//	lz-check [-root <repo>] deps
+//	lz-check [-root <repo>] select <changed-path>
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
 // check whose scope covers <path> from <evidence>/<check-id>.json and exits 1
-// unless every one passes or is a docs exemption. Usage and input errors exit 2.
+// unless every one passes or is a docs exemption. deps checks the module graph
+// of ADR-0002 and exits 1 on any finding; select prints the directories a
+// changed path requires to be checked. Usage and input errors exit 2.
 package main
 
 import (
@@ -20,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/PlatformRelay/ovh-landing-zone-accelerator/tools/internal/checks"
 )
@@ -34,8 +39,13 @@ func run(args []string, out io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 2 {
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path>")
+	switch {
+	case flags.NArg() == 1 && flags.Arg(0) == "deps":
+		return deps(out, *root)
+	case flags.NArg() == 2 && flags.Arg(0) == "select":
+		return selectChanged(out, *root, flags.Arg(1))
+	case flags.NArg() != 2 || flags.Arg(0) == "deps":
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path>")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -141,6 +151,45 @@ func dod(out io.Writer, root, evidenceDir, target string, registry checks.Regist
 		return 1
 	}
 	fmt.Fprintf(out, "DOD_PASS %s\n", target)
+	return 0
+}
+
+// scan reports every dependency finding and whether the graph is usable.
+func scan(out io.Writer, root string) (checks.DependencyGraph, bool) {
+	g, findings := checks.ScanDependencies(root)
+	for _, f := range findings {
+		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
+	}
+	return g, len(findings) == 0
+}
+
+func deps(out io.Writer, root string) int {
+	g, ok := scan(out, root)
+	if !ok {
+		fmt.Fprintln(out, "DEPENDENCIES_FAIL")
+		return 1
+	}
+	fmt.Fprintf(out, "DEPENDENCIES_OK dirs=%d\n", len(g.Layers))
+	return 0
+}
+
+// selectChanged prints the directories a changed path requires to be
+// checked. A broken graph cannot select safely, so it fails instead.
+func selectChanged(out io.Writer, root, changed string) int {
+	g, ok := scan(out, root)
+	if !ok {
+		fmt.Fprintln(out, "SELECT_FAIL")
+		return 1
+	}
+	s := checks.SelectChanged(g, []string{changed})
+	switch {
+	case s.Full:
+		fmt.Fprintf(out, "SELECT_FULL %s\n", s.Reason)
+	case len(s.Dirs) == 0:
+		fmt.Fprintf(out, "SELECT_NONE %s\n", s.Reason)
+	default:
+		fmt.Fprintf(out, "SELECT %s\n", strings.Join(s.Dirs, " "))
+	}
 	return 0
 }
 
