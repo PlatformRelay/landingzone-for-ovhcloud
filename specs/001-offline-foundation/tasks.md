@@ -91,16 +91,16 @@ the constitution and ADRs are unchanged.
   - Verify: `task test:traceability; task check:specs; task dod -- modules/naming`: focused trace and justified aggregate fixtures pass, blanket/unmapped/forged cases fail, unimplemented naming checks report not-run until T014/T018; no missing evidence passes. Creates all three targets.
   - Evidence: `evidence/T007.md`; GREEN through the entry with 133/133 guard-site mutants killed; DoD for modules/naming is not-run until its checks exist.
 
-- [ ] T008 Write layer/changed-closure and real-tool static tests in tools/internal/checks/{dependencies,static}_test.go and tests/check/fixtures/{dependencies,static}/
+- [x] T008 Write layer/changed-closure and real-tool static tests in tools/internal/checks/{dependencies,static}_test.go and tests/check/fixtures/{dependencies,static}/
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T007.
   - Verify: `go -C tools test ./internal/checks -run "TestDependencies|TestStatic" -count=1`: leaf+consumer and shared-tool changes select exact closure; reverse edge/cycle/unresolved reference fail; unknown path selects full suite. Include separate aliases, generated files, nested subdirectories, external sources and generated-instance fixtures from ADR-0002; classify every directory/edge and retain transitive consumers. An unresolved external/package boundary fails or widens, never silently disappears. Drop a consumer or classification for each fixture class and require behavioural red; no generator is implemented. Also run pinned `tofu fmt -check`, `tofu validate -json` and configured tflint on valid/unformatted/malformed/linter-offence fixture modules; bypass each clause and require behavioural red, not missing-tool failure.
-  - Evidence: `.local/evidence/001/t008-dependencies-red.json`; initial status `not-run`.
+  - Evidence: `evidence/T008.md`; RED recorded for the dependency and static controls before implementation.
 
-- [ ] T009 Implement dependency scanning, applicable L0 runners and full-suite fallback in tools/internal/checks/{dependencies,static}.go, .tflint.hcl and Taskfile.yml
+- [x] T009 Implement dependency scanning, applicable L0 runners and full-suite fallback in tools/internal/checks/{dependencies,static}.go, .tflint.hcl and Taskfile.yml
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T008.
   - Verify: `task test:dependencies; task test:static`: V006 valid/dependency/static controls include every T008/ADR-0002 fixture class; deleting consumer selection, dropping an alias/generated/nested/external/generated-instance edge or accepting reversed layer edge fails its own control. Creates test:dependencies, test:static and lint targets plus changed-path selection for task check. `task lint -- modules/naming` runs real pinned `tofu fmt -check -recursive modules/naming`, mirror-only `tofu -chdir=modules/naming init -backend=false -lockfile=readonly`, `tofu -chdir=modules/naming validate -json`, and `tflint --chdir=modules/naming --format=json`; actual counted observations only. Schema result joins after T016; resource scanning is not-applicable, docs-only tests exempt.
   - Subset outcome: verify the real-tool runner on T008's fixture modules. Before T014 creates modules/naming, its lint/DoD result is not-run with nonzero required-check status; never fabricate a module pass or close V006's later schema duties.
-  - Evidence: `.local/evidence/001/t009-dependencies.json`; initial status `not-run`.
+  - Evidence: `evidence/T008.md`; GREEN through the entry with every guard site killed by a mutant; `task lint -- modules/naming` is not-run until T014.
 
 ## US1
 

@@ -8,5 +8,6 @@ variable "name" {
 }
 
 output "upper" {
-  value = upper(var.name)
+  description = "The name in upper case."
+  value       = upper(var.name)
 }

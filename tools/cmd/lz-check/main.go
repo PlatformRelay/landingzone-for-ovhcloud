@@ -5,13 +5,16 @@
 //	lz-check [-root <repo>] [-evidence <dir>] dod <path>
 //	lz-check [-root <repo>] deps
 //	lz-check [-root <repo>] select <changed-path>
+//	lz-check [-root <repo>] [-tofu <bin>] [-tflint <bin>] lint <module-dir>
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
 // check whose scope covers <path> from <evidence>/<check-id>.json and exits 1
 // unless every one passes or is a docs exemption. deps checks the module graph
 // of ADR-0002 and exits 1 on any finding; select prints the directories a
-// changed path requires to be checked. Usage and input errors exit 2.
+// changed path requires to be checked. lint runs the pinned fmt, init, validate
+// and TFLint clauses on one module directory and exits 1 unless all pass.
+// Usage and input errors exit 2.
 package main
 
 import (
@@ -23,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -36,10 +40,15 @@ func run(args []string, out io.Writer) int {
 	flags.SetOutput(out)
 	root := flags.String("root", ".", "repository root")
 	evidenceDir := flags.String("evidence", ".local/evidence/checks", "evidence directory, relative to the root")
+	tofu := flags.String("tofu", "/tcb/tofu", "pinned tofu binary")
+	tflint := flags.String("tflint", "/tcb/tflint", "pinned TFLint binary")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	switch {
+	case flags.NArg() == 2 && flags.Arg(0) == "lint":
+		tools := checks.StaticTools{Tofu: *tofu, TFLint: *tflint, TFLintConfig: filepath.Join(*root, ".tflint.hcl")}
+		return lint(out, *root, flags.Arg(1), tools)
 	case flags.NArg() == 1 && flags.Arg(0) == "deps":
 		return deps(out, *root)
 	case flags.NArg() == 2 && flags.Arg(0) == "select":
@@ -152,6 +161,40 @@ func dod(out io.Writer, root, evidenceDir, target string, registry checks.Regist
 	}
 	fmt.Fprintf(out, "DOD_PASS %s\n", target)
 	return 0
+}
+
+// lint runs the static clauses on one module directory of the repository. A
+// directory that does not exist yet is not run; a missing tool blocks; both
+// exit non-zero, like any failure.
+func lint(out io.Writer, root, dir string, tools checks.StaticTools) int {
+	clean := filepath.ToSlash(filepath.Clean(dir))
+	if filepath.IsAbs(dir) || clean == ".." || strings.HasPrefix(clean, "../") {
+		fmt.Fprintf(out, "lint needs a directory inside the repository, not %q\n", dir)
+		return 2
+	}
+	if info, err := os.Stat(filepath.Join(root, clean)); err != nil || !info.IsDir() {
+		fmt.Fprintf(out, "LINT_NOT_RUN %s: the module directory does not exist yet\n", clean)
+		return 1
+	}
+	o := checks.RunStatic(tools, filepath.Join(root, clean))
+	blocked := false
+	for _, r := range o.Results {
+		fmt.Fprintf(out, "%s %s %s\n", r.Status, r.Clause, r.Reason)
+		for _, detail := range append(append([]string{}, r.Files...), r.Messages...) {
+			fmt.Fprintf(out, "  %s\n", detail)
+		}
+		blocked = blocked || r.Status == checks.StatusBlocked
+	}
+	switch {
+	case o.Pass:
+		fmt.Fprintf(out, "LINT_PASS %s files=%d\n", clean, len(o.Discovered))
+		return 0
+	case blocked && !slices.ContainsFunc(o.Results, func(r checks.StaticResult) bool { return r.Status == checks.StatusFail }):
+		fmt.Fprintf(out, "LINT_BLOCKED %s\n", clean)
+	default:
+		fmt.Fprintf(out, "LINT_FAIL %s\n", clean)
+	}
+	return 1
 }
 
 // scan reports every dependency finding and whether the graph is usable.

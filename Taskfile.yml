@@ -26,7 +26,12 @@ tasks:
   test:static:
     desc: Real pinned fmt, init, validate and TFLint clauses on valid and broken fixtures (V006)
     cmds:
-      - go -C tools test -count=1 -tags offlinetools -run TestStatic ./internal/checks
+      - go -C tools test -count=1 -tags offlinetools -run 'TestStatic|TestLint' ./internal/checks ./cmd/lz-check
+
+  lint:
+    desc: 'Pinned fmt, init, validate and TFLint on one module directory, e.g. task lint -- modules/naming (V006)'
+    cmds:
+      - go -C tools run ./cmd/lz-check -root .. lint {{.CLI_ARGS}}
 
   check:specs:
     desc: Trace every spec 001 requirement and task through harness/checks.yaml (V003)
