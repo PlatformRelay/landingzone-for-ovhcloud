@@ -215,6 +215,13 @@ func TestDependenciesRejected(t *testing.T) {
 		"test configuration with a missing module": {map[string]string{
 			"modules/a/main.tf": none, "modules/a/tests/unit.tftest.hcl": "run \"x\" {\n  module {\n    source = \"../missing\"\n  }\n}\n",
 		}, []string{"UNRESOLVED_REFERENCE"}},
+		"test run block uses a stage": {map[string]string{
+			"modules/a/main.tf": none, "stages/platform/main.tf": none,
+			"modules/a/tests/unit.tftest.hcl": "run \"x\" {\n  module {\n    source = \"../../stages/platform\"\n  }\n}\n",
+		}, []string{"LAYER_VIOLATION"}},
+		"absolute source": {map[string]string{
+			"modules/a/main.tf": `module "m" { source = "/srv/checkout/modules/naming" }`, "modules/naming/main.tf": none,
+		}, []string{"UNRESOLVED_REFERENCE"}},
 		"malformed test configuration": {map[string]string{
 			"modules/a/main.tf": none, "modules/a/tests/unit.tftest.hcl": `run "x" {`,
 		}, []string{"PARSE_ERROR"}},
@@ -241,6 +248,40 @@ func TestDependenciesRejected(t *testing.T) {
 				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
 			}
 		})
+	}
+}
+
+// An absolute source naming a directory inside the scanned tree is refused as
+// well: it does not survive a checkout elsewhere and would otherwise bypass the
+// layer rules as an external source.
+func TestDependenciesAbsoluteSourceInsideRoot(t *testing.T) {
+	root := writeModules(t, map[string]string{"stages/platform/main.tf": `variable "x" {}`})
+	if err := os.MkdirAll(filepath.Join(root, "modules/a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.ToSlash(filepath.Join(root, "stages/platform"))
+	if err := os.WriteFile(filepath.Join(root, "modules/a/main.tf"), []byte(`module "p" { source = "`+source+`" }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, findings := ScanDependencies(root); !reflect.DeepEqual(ruleNames(findings), []string{"UNRESOLVED_REFERENCE"}) {
+		t.Errorf("BEHAVIORAL_RED: absolute source inside the root accepted: %+v", findings)
+	}
+}
+
+// A changed test file selects the module that runs it, even when its tests/
+// directory also holds configuration of its own.
+func TestDependenciesTestOwnerSelection(t *testing.T) {
+	root := writeModules(t, map[string]string{
+		"modules/a/main.tf":               `variable "x" {}`,
+		"modules/a/tests/main.tf":         `variable "helper" {}`,
+		"modules/a/tests/unit.tftest.hcl": `run "x" {}`,
+	})
+	g, findings := ScanDependencies(root)
+	if len(findings) != 0 {
+		t.Fatalf("valid tree rejected: %+v", findings)
+	}
+	if got := SelectChanged(g, []string{"modules/a/tests/unit.tftest.hcl"}); !reflect.DeepEqual(got, Selection{Dirs: []string{"modules/a"}}) {
+		t.Errorf("BEHAVIORAL_RED: changed test file selects %+v, want modules/a", got)
 	}
 }
 
