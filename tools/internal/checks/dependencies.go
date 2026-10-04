@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -219,14 +220,27 @@ func resolve(dir, source string, dirs map[string]bool) (local string, external b
 	return "", true, true
 }
 
-// mentionsSelf reports whether a path component of source, without a ".git"
-// suffix, is exactly one of this repository's names; a repository whose name
-// only contains one is unrelated.
+// mentionsSelf reports whether source names this repository: after decoding
+// percent-escapes until nothing changes, some maximal run of repository-name
+// characters, without a ".git" suffix, is exactly one of its names. Any other
+// character separates, so no separator list has to be complete, and a
+// repository whose name only contains one of the names is unrelated.
 func mentionsSelf(source string) bool {
-	components := strings.FieldsFunc(strings.ToLower(source), func(r rune) bool { return strings.ContainsRune("/:?&=@", r) })
-	for _, component := range components {
+	decoded := strings.ToLower(source)
+	// Each successful decode shortens the text, so the loop ends.
+	for {
+		next, err := url.PathUnescape(decoded)
+		if err != nil || next == decoded {
+			break
+		}
+		decoded = strings.ToLower(next)
+	}
+	runs := strings.FieldsFunc(decoded, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-')
+	})
+	for _, run := range runs {
 		for _, self := range selfRepositories {
-			if strings.TrimSuffix(component, ".git") == path.Base(self) {
+			if strings.TrimSuffix(run, ".git") == path.Base(self) {
 				return true
 			}
 		}

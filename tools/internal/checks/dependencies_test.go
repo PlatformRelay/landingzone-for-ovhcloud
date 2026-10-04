@@ -218,6 +218,15 @@ func TestDependenciesRejected(t *testing.T) {
 		"own repository as a .git path in an unrecognised form": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "s3::https://bucket/landingzone-for-ovhcloud.git/modules/naming" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository encoded in a query value": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?source=github.com%2FPlatformRelay%2Fovh-landing-zone-accelerator.git" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository under its current name, encoded twice": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?source=github.com%252FPlatformRelay%252Flandingzone-for-ovhcloud" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository after another separator": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/x#landingzone-for-ovhcloud,ref" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
 		"own repository under its current name in scp form to a missing module": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "git::git@github.com:PlatformRelay/landingzone-for-ovhcloud.git//modules/gone" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
@@ -268,6 +277,8 @@ func TestDependenciesNameCollisionsAreExternal(t *testing.T) {
 		"git::https://github.com/example/landingzone-for-ovhcloud-fork.git//modules/x?ref=v1",
 		"git::ssh://git@github.com/example/ovh-landing-zone-accelerator2.git//modules/x?ref=v1",
 		"s3::https://bucket/old-ovh-landing-zone-accelerator/modules/naming.zip",
+		"https://mirror.example/module?source=github.com%2Fexample%2Fmy-landingzone-for-ovhcloud.git",
+		"git::https://github.com/example/landingzone-for-ovhcloud.v2.git//modules/x?ref=v1",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph, findings := ScanDependencies(writeModules(t, map[string]string{"modules/a/main.tf": `module "m" { source = "` + source + `" }`}))
