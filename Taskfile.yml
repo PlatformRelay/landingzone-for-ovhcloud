@@ -26,7 +26,7 @@ tasks:
   test:runtime-image:
     desc: Reproducible OCI packing of the runtime bundle and launcher, and its refusals (V009)
     cmds:
-      - go -C tools test -count=1 ./cmd/lz-pack
+      - go -C tools test -count=1 ./cmd/lz-pack ./internal/bundle/...
 
   test:static:
     desc: Real pinned fmt, init, validate and TFLint clauses on valid and broken fixtures (V006)

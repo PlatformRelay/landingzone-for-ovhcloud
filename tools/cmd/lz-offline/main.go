@@ -5,9 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,54 +19,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 // Set by the independently reviewed build recipe, never by candidate flags.
 var manifestSHA string
 
-type identity struct {
-	Kind  string `json:"kind"`
-	Value string `json:"value"`
-	Mode  uint32 `json:"mode"`
-}
-type resources struct {
-	Prepared checks.Prepared     `json:"prepared"`
-	Files    map[string]identity `json:"files"`
-	Bwrap    string              `json:"bwrap"`
-	BwrapSHA string              `json:"bwrap_sha256"`
-}
-
-func fail(err error)          { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-func hash(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
-func realDirectory(path string) error {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return fmt.Errorf("INPUT_PATH: absolute clean directory required")
-	}
-	for current := path; ; current = filepath.Dir(current) {
-		info, err := os.Lstat(current)
-		if err != nil || !info.IsDir() {
-			return fmt.Errorf("INPUT_PATH: real directory required: %s", current)
-		}
-		if current == "/" {
-			break
-		}
-	}
-	return nil
-}
-func regular(path string) ([]byte, error) {
-	if err := realDirectory(filepath.Dir(path)); err != nil {
-		return nil, err
-	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("INPUT_FILE: regular non-symlink file required: %s", path)
-	}
-	if metadata, ok := info.Sys().(*syscall.Stat_t); !ok || metadata.Nlink != 1 {
-		return nil, fmt.Errorf("INPUT_FILE: single link required: %s", path)
-	}
-	return os.ReadFile(path)
-}
+func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
 // Open every component without following links, then enforce the remaining
 // candidate budget before allocating or reading. Growth cannot exceed the reader.
@@ -228,92 +186,6 @@ func parseCommand(args []string) (string, []string, error) {
 	return "", nil, fmt.Errorf("COMMAND_ADMISSION: one Task target and at most one path argument")
 }
 
-func admitBundle(root string) (resources, error) {
-	var r resources
-	data, err := regular(filepath.Join(root, "resources.json"))
-	if err != nil {
-		return r, err
-	}
-	if len(manifestSHA) != 64 || hash(data) != manifestSHA {
-		return r, fmt.Errorf("RESOURCE_MANIFEST: approved digest differs")
-	}
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&r); err != nil {
-		return r, fmt.Errorf("RESOURCE_MANIFEST: %w", err)
-	}
-	if err := checks.AdmitPins(r.Prepared); err != nil {
-		return r, err
-	}
-	if r.Bwrap != "/usr/bin/bwrap" {
-		return r, fmt.Errorf("RESOURCE_HELPER: fixed launcher required")
-	}
-	helper, err := regular(r.Bwrap)
-	if err != nil || hash(helper) != r.BwrapSHA {
-		return r, fmt.Errorf("RESOURCE_HELPER: launcher differs")
-	}
-	actual := map[string]identity{}
-	err = filepath.WalkDir(filepath.Join(root, "resources"), func(path string, entry os.DirEntry, incoming error) error {
-		if incoming != nil {
-			return incoming
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		value := identity{Mode: uint32(info.Mode().Perm())}
-		switch {
-		case entry.IsDir():
-			value.Kind = "directory"
-		case info.Mode().IsRegular():
-			bytes, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			value.Kind = "file"
-			value.Value = hash(bytes)
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			// Prepared rootfs links are allowed only inside its root; candidate
-			// and helper links are never admitted.
-			imageRoot := filepath.Join(root, "resources/rootfs")
-			if !strings.HasPrefix(path, imageRoot+"/") {
-				return fmt.Errorf("RESOURCE_LINK: %s", relative)
-			}
-			resolved := filepath.Clean(filepath.Join(filepath.Dir(path), target))
-			if filepath.IsAbs(target) {
-				resolved = filepath.Join(imageRoot, target)
-			}
-			if resolved != imageRoot && !strings.HasPrefix(resolved, imageRoot+"/") {
-				return fmt.Errorf("RESOURCE_LINK: escaping link")
-			}
-			value.Kind = "symlink"
-			value.Value = target
-		default:
-			return fmt.Errorf("RESOURCE_TYPE: %s", relative)
-		}
-		actual[relative] = value
-		if expected, ok := r.Files[relative]; !ok || expected != value {
-			return fmt.Errorf("RESOURCE_IDENTITY: %s", relative)
-		}
-		return nil
-	})
-	if err != nil {
-		return r, err
-	}
-	if len(actual) != len(r.Files) {
-		return r, fmt.Errorf("RESOURCE_IDENTITY: missing prepared resource")
-	}
-	return r, nil
-}
-
 // Snapshot budgets. Every enumerated entry counts, including excluded names.
 const (
 	maxEntries    = 10000
@@ -328,7 +200,7 @@ const (
 // The probe.sh, included.yml, bin and lz-offline names admit the boundary
 // suite's hostile fixtures, so the suite can show they have no effect.
 func snapshot(ctx context.Context, candidate, destination string) error {
-	if err := realDirectory(candidate); err != nil {
+	if err := bundle.RealDirectory(candidate); err != nil {
 		return err
 	}
 	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
@@ -604,19 +476,19 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	if _, err := regular(executable); err != nil {
+	if _, err := bundle.Regular(executable); err != nil {
 		return err
 	}
 	root := filepath.Dir(executable)
-	if err := realDirectory(root); err != nil {
+	if err := bundle.RealDirectory(root); err != nil {
 		return err
 	}
 	candidate := os.Args[2]
 	if root == candidate || strings.HasPrefix(root, candidate+"/") {
 		return fmt.Errorf("ENTRY_LOCATION: external install required")
 	}
-	var r resources
-	if err := supervise(ctx, func() (err error) { r, err = admitBundle(root); return err }); err != nil {
+	var r bundle.Resources
+	if err := supervise(ctx, func() (err error) { r, err = bundle.Admit(root, manifestSHA, bundle.Launcher); return err }); err != nil {
 		return err
 	}
 	// The candidate is copied into private host scratch that the sandbox sees
@@ -681,12 +553,12 @@ func run() (result error) {
 			}
 		}
 		probe := filepath.Join(root, "probe")
-		data, err := regular(probe)
+		data, err := bundle.Regular(probe)
 		if err != nil {
 			return err
 		}
-		approved, err := regular(filepath.Join(root, "probe.sha256"))
-		if err != nil || hash(data) != strings.TrimSpace(string(approved)) {
+		approved, err := bundle.Regular(filepath.Join(root, "probe.sha256"))
+		if err != nil || bundle.Hash(data) != strings.TrimSpace(string(approved)) {
 			return fmt.Errorf("PROBE_IDENTITY")
 		}
 		args = append(args, "--ro-bind", probe, "/tcb/probe", "--setenv", "LZ_PROBE", "1", "--setenv", "LZ_PROBE_BINARY", "/tcb/probe")
