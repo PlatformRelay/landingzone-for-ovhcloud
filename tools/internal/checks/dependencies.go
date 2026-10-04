@@ -213,12 +213,25 @@ func resolve(dir, source string, dirs map[string]bool) (local string, external b
 			return target, false, hasSub && cleanRelative(target) && dirs[target]
 		}
 	}
-	for _, self := range selfRepositories {
-		if strings.Contains(strings.ToLower(source), path.Base(self)) {
-			return "", false, false
-		}
+	if mentionsSelf(source) {
+		return "", false, false
 	}
 	return "", true, true
+}
+
+// mentionsSelf reports whether a path component of source, without a ".git"
+// suffix, is exactly one of this repository's names; a repository whose name
+// only contains one is unrelated.
+func mentionsSelf(source string) bool {
+	components := strings.FieldsFunc(strings.ToLower(source), func(r rune) bool { return strings.ContainsRune("/:?&=@", r) })
+	for _, component := range components {
+		for _, self := range selfRepositories {
+			if strings.TrimSuffix(component, ".git") == path.Base(self) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // testOwner is the module directory whose tests a test file belongs to: the
