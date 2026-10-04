@@ -7,7 +7,7 @@ module "net" {
 }
 
 module "naming" {
-  source = "git::https://github.com/PlatformRelay/ovh-landing-zone-accelerator.git//modules/naming?ref=v1.0.0"
+  source = "git::https://github.com/PlatformRelay/landingzone-for-ovhcloud.git//modules/naming?ref=v1.0.0"
   name   = "kube"
 }
 

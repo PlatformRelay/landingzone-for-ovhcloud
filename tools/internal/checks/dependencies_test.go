@@ -201,7 +201,7 @@ func TestDependenciesRejected(t *testing.T) {
 			"components/runtime/kube/main.tf": `module "m" { source = "git::https://github.com/PlatformRelay/ovh-landing-zone-accelerator.git//modules/gone?ref=v1" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
 		"own repository without a subdirectory": {map[string]string{
-			"components/runtime/kube/main.tf": `module "m" { source = "github.com/PlatformRelay/ovh-landing-zone-accelerator?ref=v1" }`,
+			"components/runtime/kube/main.tf": `module "m" { source = "github.com/PlatformRelay/landingzone-for-ovhcloud?ref=v1" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
 		"own repository through ssh without a subdirectory": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "git::ssh://git@github.com/PlatformRelay/ovh-landing-zone-accelerator.git?ref=v1" }`,
@@ -211,6 +211,12 @@ func TestDependenciesRejected(t *testing.T) {
 		}, []string{"UNRESOLVED_REFERENCE"}},
 		"own repository in an unrecognised form": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "s3::https://bucket/ovh-landing-zone-accelerator/modules/naming.zip" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository under its current name in an unrecognised form": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "s3::https://bucket/LandingZone-for-OVHcloud/modules/naming.zip" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository under its current name in scp form to a missing module": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "git::git@github.com:PlatformRelay/landingzone-for-ovhcloud.git//modules/gone" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
 		"test configuration with a missing module": {map[string]string{
 			"modules/a/main.tf": none, "modules/a/tests/unit.tftest.hcl": "run \"x\" {\n  module {\n    source = \"../missing\"\n  }\n}\n",
