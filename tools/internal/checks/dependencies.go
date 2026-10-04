@@ -53,10 +53,11 @@ type Selection struct {
 // configuration.
 const generatedHeader = "// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT"
 
-// selfRepository is this repository's address after normalisation; a source
-// naming it with a "//<dir>" subdirectory is a released copy of that local
-// directory.
-const selfRepository = "github.com/platformrelay/ovh-landing-zone-accelerator"
+// selfRepositories are this repository's addresses after normalisation: its
+// current name and the name it had before the rename, which GitHub still
+// redirects. A source naming one with a "//<dir>" subdirectory is a released
+// copy of that local directory.
+var selfRepositories = []string{"github.com/platformrelay/landingzone-for-ovhcloud", "github.com/platformrelay/ovh-landing-zone-accelerator"}
 
 // singletonComponents are the component packages without a family directory.
 var singletonComponents = []string{"account-baseline", "project-factory", "guardrails", "state-backend"}
@@ -206,12 +207,16 @@ func resolve(dir, source string, dirs map[string]bool) (local string, external b
 		return target, false, !strings.HasPrefix(target, "../") && target != ".." && dirs[target]
 	}
 	repository, sub, hasSub := remote(source)
-	if repository == selfRepository {
-		target := path.Clean(sub)
-		return target, false, hasSub && cleanRelative(target) && dirs[target]
+	for _, self := range selfRepositories {
+		if repository == self {
+			target := path.Clean(sub)
+			return target, false, hasSub && cleanRelative(target) && dirs[target]
+		}
 	}
-	if strings.Contains(strings.ToLower(source), "ovh-landing-zone-accelerator") {
-		return "", false, false
+	for _, self := range selfRepositories {
+		if strings.Contains(strings.ToLower(source), path.Base(self)) {
+			return "", false, false
+		}
 	}
 	return "", true, true
 }
