@@ -59,7 +59,7 @@ Scalar naming with shared context and handwritten independent projections is sel
 its implementation is eligible after concrete-consumer diagnosis and its task dependencies. The
 [004 proposal](../../specs/004-guided-preconfiguration/tasks.md) now permits a bounded
 renderer prototype and written journey; hardened persistence/export waits for real profile
-schemas under D29. Align its draft before dependent work; the bounded prototype still
+schemas under D29. The bounded prototype still
 needs its own approved execution/capture path and evidence.
 The [upstream trace](../reference/upstream-reference-map.md#translation-into-the-planning-set)
 identifies existing checks and future adaptation specs. Network/firewall topology,
