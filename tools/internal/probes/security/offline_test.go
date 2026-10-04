@@ -193,6 +193,11 @@ func invoke(t *testing.T, f fixture, entry string, mode int) []observation {
 		cmd.Dir = f.candidate
 	}
 	cmd.Env = f.env
+	if mode == hostControl {
+		// The value a loaded candidate dotenv would set, so the control also
+		// proves the local-config sensor.
+		cmd.Env = append(append([]string{}, f.env...), "LZ_LOCAL_CONFIG=SYNTHETIC-LOCAL-CONFIG")
+	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil || err != nil {
 		t.Fatalf("HARNESS_SETUP: completed probe required: err=%v timeout=%v output=%s", err, ctx.Err(), out)
@@ -228,7 +233,7 @@ func TestOfflineBoundaryControls(t *testing.T) {
 	t.Run("network-on-isolation-off", func(t *testing.T) {
 		rows := invoke(t, f, entry, hostControl)
 		for _, r := range rows {
-			if !r.Network || !r.SubprocessNetwork || !r.CredentialEnv || !r.CredentialFile || !r.Socket || !r.CacheWrite || !r.HostMarker {
+			if !r.Network || !r.SubprocessNetwork || !r.CredentialEnv || !r.CredentialFile || !r.Socket || !r.CacheWrite || !r.HostMarker || !r.LocalConfig {
 				t.Fatalf("HARNESS_SETUP: bounded positive/mutation control unreachable: %+v", r)
 			}
 		}
@@ -329,7 +334,7 @@ func TestOfflineBoundaryProbe(t *testing.T) {
 	cacheErr := os.WriteFile(filepath.Join(host, "cache"), []byte("SYNTHETIC-CACHE-WRITE"), 0600)
 	markerErr := os.WriteFile(filepath.Join(host, "marker"), []byte("SYNTHETIC-HOST-LAUNCH"), 0600)
 	ok, reason := networkProbe()
-	r := observation{CredentialEnv: os.Getenv("OVH_CLIENT_SECRET") != "" || os.Getenv("AUTH_TOKEN") != "", CredentialFile: fileErr == nil, Socket: err == nil, CacheWrite: cacheErr == nil, HostMarker: markerErr == nil, LocalConfig: markerErr == nil && os.Getenv("LZ_LOCAL_CONFIG") != "", Network: ok, NetworkReason: reason}
+	r := observation{CredentialEnv: os.Getenv("OVH_CLIENT_SECRET") != "" || os.Getenv("AUTH_TOKEN") != "", CredentialFile: fileErr == nil, Socket: err == nil, CacheWrite: cacheErr == nil, HostMarker: markerErr == nil, LocalConfig: os.Getenv("LZ_LOCAL_CONFIG") != "", Network: ok, NetworkReason: reason}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Getenv("LZ_PROBE_BINARY"), "-test.run", "^TestOfflineBoundaryProbe$")

@@ -6,108 +6,152 @@ import (
 	"testing"
 )
 
-// mountRow renders one /proc/self/mountinfo line for the gate's parser.
-func mountRow(id int, point, options, fstype, super string) string {
-	return strings.Join([]string{strconv.Itoa(id), "1", "0:1", "/", point, options, "-", fstype, "none", super}, " ")
+// Synthetic device identities: hostDisk and hostShm are mounts the host entry
+// already has; scratch tmpfs mounts created by bwrap get fresh anonymous ids.
+const (
+	hostDisk = "259:2"
+	hostShm  = "0:25"
+)
+
+var hostDevices = map[string]bool{hostDisk: true, hostShm: true}
+
+type mount struct{ point, options, fstype, super, device, root string }
+
+// row renders one /proc/self/mountinfo line for the gate's parser.
+func (m mount) row(id int) string {
+	device, root := m.device, m.root
+	if device == "" {
+		device = hostDisk
+	}
+	if root == "" {
+		root = "/"
+	}
+	return strings.Join([]string{strconv.Itoa(id), "1", device, root, m.point, m.options, "-", m.fstype, "none", m.super}, " ")
 }
 
-// admittedTopology is the mount layout lz-offline creates, as observed inside
-// bwrap 0.11.1 on the qualified preparation.
-func admittedTopology() []string {
-	ro, rw := "ro,nosuid,nodev,relatime", "rw,nosuid,nodev,relatime"
-	rows := []string{
-		mountRow(1, "/", ro, "ext4", "rw"),
-		mountRow(2, "/proc", rw, "proc", "rw"),
-		mountRow(3, "/dev", rw, "tmpfs", "rw,mode=755"),
+const (
+	ro = "ro,nosuid,nodev,relatime"
+	rw = "rw,nosuid,nodev,relatime"
+)
+
+// admittedMounts is the layout lz-offline creates, as observed inside bwrap
+// 0.11.1 on the qualified preparation.
+func admittedMounts() []mount {
+	mounts := []mount{
+		{point: "/", options: ro, fstype: "ext4", super: "rw", root: "/home/user/rootfs"},
+		{point: "/proc", options: rw, fstype: "proc", super: "rw", device: "0:60"},
+		{point: "/dev", options: rw, fstype: "tmpfs", super: "rw,mode=755", device: "0:61"},
 	}
-	for i, device := range []string{"null", "zero", "full", "random", "urandom", "tty"} {
-		rows = append(rows, mountRow(10+i, "/dev/"+device, "rw,nosuid", "devtmpfs", "rw"))
+	for _, device := range []string{"null", "zero", "full", "random", "urandom", "tty"} {
+		mounts = append(mounts, mount{point: "/dev/" + device, options: "rw,nosuid", fstype: "devtmpfs", super: "rw", device: "0:5"})
 	}
-	rows = append(rows,
-		mountRow(20, "/dev/pts", rw, "devpts", "rw"),
-		mountRow(21, "/tmp", rw, "tmpfs", "rw,size=2097152k"),
-		mountRow(22, "/run", rw, "tmpfs", "rw,size=16384k"),
-		mountRow(23, "/home", rw, "tmpfs", "rw,size=65536k"),
-		mountRow(24, "/tcb", ro, "tmpfs", "rw"),
-		mountRow(25, "/tools", ro, "tmpfs", "rw"),
-		mountRow(26, "/tools/go", ro, "ext4", "rw"),
-		mountRow(27, "/tcb/task", ro, "ext4", "rw"),
-		mountRow(28, "/tcb/tofu", ro, "ext4", "rw"),
-		mountRow(29, "/tcb/terramate", ro, "ext4", "rw"),
-		mountRow(30, "/tcb/lz-offline", ro, "ext4", "rw"),
-		mountRow(31, "/mirror", ro, "ext4", "rw"),
-		mountRow(32, "/run/lz/tofurc", ro, "ext4", "rw"),
-		mountRow(33, "/run/lz/admission.json", ro, "ext4", "rw"),
-		mountRow(34, "/run/lz/src", ro, "ext4", "rw"),
-		mountRow(35, "/candidate", rw, "tmpfs", "rw,size=1048576k"),
+	return append(mounts,
+		mount{point: "/dev/pts", options: rw, fstype: "devpts", super: "rw", device: "0:62"},
+		mount{point: "/tmp", options: rw, fstype: "tmpfs", super: "rw,size=2097152k", device: "0:63"},
+		mount{point: "/run", options: rw, fstype: "tmpfs", super: "rw,size=16384k", device: "0:64"},
+		mount{point: "/home", options: rw, fstype: "tmpfs", super: "rw,size=65536k", device: "0:65"},
+		mount{point: "/tcb", options: ro, fstype: "tmpfs", super: "rw", device: "0:66"},
+		mount{point: "/tools", options: ro, fstype: "tmpfs", super: "rw", device: "0:67"},
+		mount{point: "/tools/go", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/tcb/task", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/tcb/tofu", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/tcb/terramate", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/tcb/lz-offline", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/mirror", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/run/lz/tofurc", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/run/lz/admission.json", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/run/lz/src", options: ro, fstype: "ext4", super: "rw"},
+		mount{point: "/candidate", options: rw, fstype: "tmpfs", super: "rw,size=1048576k", device: "0:68"},
 	)
-	return rows
+}
+
+func render(mounts []mount) string {
+	rows := make([]string, len(mounts))
+	for i, m := range mounts {
+		rows[i] = m.row(i + 1)
+	}
+	return strings.Join(rows, "\n") + "\n"
 }
 
 func TestRuntimeMountsAdmitted(t *testing.T) {
-	if err := ValidateMounts(strings.Join(admittedTopology(), "\n") + "\n"); err != nil {
+	if err := ValidateMounts(render(admittedMounts()), hostDevices); err != nil {
 		t.Fatalf("admitted topology rejected: %v", err)
 	}
-	withProbe := append(admittedTopology(), mountRow(40, "/tcb/probe", "ro,nosuid,nodev,relatime", "ext4", "rw"))
-	if err := ValidateMounts(strings.Join(withProbe, "\n")); err != nil {
+	withProbe := append(admittedMounts(), mount{point: "/tcb/probe", options: ro, fstype: "ext4", super: "rw"})
+	if err := ValidateMounts(render(withProbe), hostDevices); err != nil {
 		t.Fatalf("admitted topology with probe rejected: %v", err)
 	}
 }
 
 func TestRuntimeMountsRejected(t *testing.T) {
-	ro, rw := "ro,nosuid,nodev,relatime", "rw,nosuid,nodev,relatime"
-	replace := func(point, row string) []string {
-		rows := admittedTopology()
-		for i, line := range rows {
-			if strings.Fields(line)[4] == point {
-				rows[i] = row
+	change := func(point string, edit func(*mount)) []mount {
+		mounts := admittedMounts()
+		for i := range mounts {
+			if mounts[i].point == point {
+				edit(&mounts[i])
 			}
 		}
-		return rows
+		return mounts
 	}
-	remove := func(point string) []string {
-		var rows []string
-		for _, line := range admittedTopology() {
-			if strings.Fields(line)[4] != point {
-				rows = append(rows, line)
+	remove := func(point string) []mount {
+		var mounts []mount
+		for _, m := range admittedMounts() {
+			if m.point != point {
+				mounts = append(mounts, m)
 			}
 		}
-		return rows
+		return mounts
 	}
-	cases := map[string][]string{
-		"credential-directory":  append(admittedTopology(), mountRow(50, "/home/offline/.config/ovh", ro, "ext4", "rw")),
-		"runtime-socket":        append(admittedTopology(), mountRow(51, "/run/docker.sock", rw, "ext4", "rw")),
-		"shared-cache":          append(admittedTopology(), mountRow(52, "/tmp/go-cache", rw, "ext4", "rw")),
-		"writable-root":         replace("/", mountRow(1, "/", rw, "ext4", "rw")),
-		"writable-tool":         replace("/tcb/task", mountRow(27, "/tcb/task", rw, "ext4", "rw")),
-		"writable-tool-dir":     replace("/tcb", mountRow(24, "/tcb", rw, "tmpfs", "rw")),
-		"writable-source":       replace("/run/lz/src", mountRow(34, "/run/lz/src", rw, "ext4", "rw")),
-		"writable-admission":    replace("/run/lz/admission.json", mountRow(33, "/run/lz/admission.json", rw, "ext4", "rw")),
-		"host-backed-candidate": replace("/candidate", mountRow(35, "/candidate", rw, "ext4", "rw")),
-		"unbounded-candidate":   replace("/candidate", mountRow(35, "/candidate", rw, "tmpfs", "rw,mode=755")),
-		"unbounded-tmp":         replace("/tmp", mountRow(21, "/tmp", rw, "tmpfs", "rw,mode=755")),
+	writable := func(m *mount) { m.options = rw }
+	cases := map[string][]mount{
+		"credential-directory":  append(admittedMounts(), mount{point: "/home/offline/.config/ovh", options: ro, fstype: "ext4", super: "rw"}),
+		"runtime-socket":        append(admittedMounts(), mount{point: "/run/docker.sock", options: rw, fstype: "ext4", super: "rw"}),
+		"shared-cache":          append(admittedMounts(), mount{point: "/tmp/go-cache", options: rw, fstype: "ext4", super: "rw"}),
+		"writable-root":         change("/", writable),
+		"writable-tool":         change("/tcb/task", writable),
+		"writable-tool-dir":     change("/tcb", writable),
+		"writable-source":       change("/run/lz/src", writable),
+		"writable-admission":    change("/run/lz/admission.json", writable),
+		"host-backed-candidate": change("/candidate", func(m *mount) { m.fstype, m.device = "ext4", hostDisk }),
+		"host-tmpfs-bind":       change("/candidate", func(m *mount) { m.device = hostShm }),
+		"host-tmpfs-subtree":    change("/candidate", func(m *mount) { m.root = "/lz-cache" }),
+		"host-tmpfs-tmp":        change("/tmp", func(m *mount) { m.device = hostShm }),
+		"unbounded-candidate":   change("/candidate", func(m *mount) { m.super = "rw,mode=755" }),
+		"unbounded-tmp":         change("/tmp", func(m *mount) { m.super = "rw,mode=755" }),
 		"missing-admission":     remove("/run/lz/admission.json"),
 		"missing-source":        remove("/run/lz/src"),
-		"duplicate-mount":       append(admittedTopology(), mountRow(53, "/candidate", rw, "tmpfs", "rw,size=1k")),
-		"malformed-row":         append(admittedTopology(), "1 2 3"),
+		"duplicate-mount":       append(admittedMounts(), mount{point: "/candidate", options: rw, fstype: "tmpfs", super: "rw,size=1k", device: "0:70"}),
 	}
-	for name, rows := range cases {
+	for name, mounts := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := ValidateMounts(strings.Join(rows, "\n")); err == nil {
+			if err := ValidateMounts(render(mounts), hostDevices); err == nil {
 				t.Errorf("BEHAVIORAL_RED: %s admitted", name)
 			}
 		})
 	}
+	t.Run("malformed-row", func(t *testing.T) {
+		if err := ValidateMounts(render(admittedMounts())+"1 2 3\n", hostDevices); err == nil {
+			t.Error("BEHAVIORAL_RED: malformed row admitted")
+		}
+	})
+	t.Run("no-host-inventory", func(t *testing.T) {
+		if err := ValidateMounts(render(admittedMounts()), nil); err == nil {
+			t.Error("BEHAVIORAL_RED: scratch provenance admitted without a host device inventory")
+		}
+	})
+}
+
+func admittedEnvironment() []string {
+	return []string{"PATH=/tcb:/tools/go/bin:/usr/bin:/bin", "HOME=/home/offline", "TF_CLI_CONFIG_FILE=/run/lz/tofurc",
+		"GOTOOLCHAIN=local", "GOENV=off", "GOWORK=off", "GOPROXY=off", "GOSUMDB=off", "GOCACHE=/tmp/go-cache",
+		"GOPATH=/tmp/go-path", "CGO_ENABLED=0", "PWD=/candidate"}
 }
 
 func TestRuntimeEnvironment(t *testing.T) {
-	admitted := []string{"PATH=/tcb:/tools/go/bin:/usr/bin:/bin", "HOME=/home/offline", "TF_CLI_CONFIG_FILE=/run/lz/tofurc",
-		"GOTOOLCHAIN=local", "GOENV=off", "GOWORK=off", "GOPROXY=off", "GOSUMDB=off", "GOCACHE=/tmp/go-cache",
-		"GOPATH=/tmp/go-path", "CGO_ENABLED=0"}
-	if err := ValidateEnvironment(admitted); err != nil {
+	if err := ValidateEnvironment(admittedEnvironment()); err != nil {
 		t.Fatalf("admitted environment rejected: %v", err)
 	}
-	probe := append(append([]string{}, admitted...), "LZ_PROBE=1", "LZ_PROBE_BINARY=/tcb/probe", "LZ_HOST=/tmp/h", "LZ_URL=http://10.0.0.1:1")
+	probe := append(admittedEnvironment(), "LZ_PROBE=1", "LZ_PROBE_BINARY=/tcb/probe", "LZ_HOST=/tmp/h", "LZ_URL=http://10.0.0.1:1")
 	if err := ValidateEnvironment(probe); err != nil {
 		t.Fatalf("admitted probe environment rejected: %v", err)
 	}
@@ -118,14 +162,32 @@ func TestRuntimeEnvironment(t *testing.T) {
 		"ssh-agent":       "SSH_AUTH_SOCK=/run/user/1000/ssh",
 		"docker-host":     "DOCKER_HOST=unix:///run/docker.sock",
 		"tf-variable":     "TF_VAR_password=x",
-		"changed-path":    "PATH=/candidate/bin:/tcb",
-		"changed-tofurc":  "TF_CLI_CONFIG_FILE=/candidate/tofurc",
-		"proxy-on":        "GOPROXY=https://proxy.golang.org",
 		"malformed-entry": "NOEQUALS",
-		"host-pwd":        "PWD=/home/user/checkout",
+		"duplicate":       "HOME=/home/offline",
 	} {
 		t.Run(name, func(t *testing.T) {
-			env := append(append([]string{}, admitted...), extra)
+			if err := ValidateEnvironment(append(admittedEnvironment(), extra)); err == nil {
+				t.Errorf("BEHAVIORAL_RED: environment with %s admitted", name)
+			}
+		})
+	}
+	// Changed values replace the admitted entry, so each one exercises the value
+	// check rather than duplicate rejection.
+	for name, changed := range map[string]string{
+		"changed-path":   "PATH=/candidate/bin:/tcb",
+		"changed-tofurc": "TF_CLI_CONFIG_FILE=/candidate/tofurc",
+		"proxy-on":       "GOPROXY=https://proxy.golang.org",
+		"host-pwd":       "PWD=/home/user/checkout",
+		"changed-cache":  "GOCACHE=/candidate/.cache",
+	} {
+		t.Run(name, func(t *testing.T) {
+			key, _, _ := strings.Cut(changed, "=")
+			env := admittedEnvironment()
+			for i, entry := range env {
+				if strings.HasPrefix(entry, key+"=") {
+					env[i] = changed
+				}
+			}
 			if err := ValidateEnvironment(env); err == nil {
 				t.Errorf("BEHAVIORAL_RED: environment with %s admitted", name)
 			}

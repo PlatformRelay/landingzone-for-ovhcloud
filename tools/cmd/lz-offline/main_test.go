@@ -103,6 +103,37 @@ func TestSnapshotRejects(t *testing.T) {
 	}
 }
 
+// A stalled filesystem call cannot observe the context; the supervisor must
+// return at the deadline regardless.
+func TestSuperviseStopsStalledWork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	stalled := make(chan struct{})
+	defer close(stalled)
+	started := time.Now()
+	err := supervise(ctx, func() error { <-stalled; return nil })
+	if err == nil || time.Since(started) > 5*time.Second {
+		t.Errorf("BEHAVIORAL_RED: stalled work not stopped at the deadline: err=%v after %v", err, time.Since(started))
+	}
+	if err := supervise(context.Background(), func() error { return nil }); err != nil {
+		t.Errorf("completed work rejected: %v", err)
+	}
+}
+
+func TestSnapshotDeadlineDuringWork(t *testing.T) {
+	candidate, destination := candidateTree(t)
+	for i := 0; i < 2000; i++ {
+		if err := os.WriteFile(filepath.Join(candidate, "tools", "f"+strconv.Itoa(i)), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	if err := supervise(ctx, func() error { return snapshot(ctx, candidate, destination) }); err == nil {
+		t.Error("BEHAVIORAL_RED: deadline expiring during the snapshot admitted")
+	}
+}
+
 func TestSnapshotHonoursDeadline(t *testing.T) {
 	candidate, destination := candidateTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
