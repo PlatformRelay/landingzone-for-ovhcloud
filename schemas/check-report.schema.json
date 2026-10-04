@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/PlatformRelay/ovh-landing-zone-accelerator/schemas/check-report.schema.json",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/check-report.schema.json",
   "title": "Check report observation",
   "description": "One observation of a pinned `tofu test -json` run, produced by tools/internal/report. The status is pass only when no reason was found; upstream diagnostics are kept verbatim.",
   "type": "object",

@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/PlatformRelay/ovh-landing-zone-accelerator/tools/internal/checks"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 // Set by the independently reviewed build recipe, never by candidate flags.

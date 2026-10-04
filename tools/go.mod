@@ -1,4 +1,4 @@
-module github.com/PlatformRelay/ovh-landing-zone-accelerator/tools
+module github.com/PlatformRelay/landingzone-for-ovhcloud/tools
 
 go 1.27.0
 
