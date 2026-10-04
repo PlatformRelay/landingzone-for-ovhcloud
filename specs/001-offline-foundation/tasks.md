@@ -81,10 +81,10 @@ the constitution and ADRs are unchanged.
   - Verify: `task test:reports`: all V002 valid/fault cases and each-clause mutants green as a suite; preserve actual upstream diagnostics; creates target.
   - Evidence: `evidence/T005.md`; GREEN with 31/31 guard-site mutants killed; `task test:reports` through the entry.
 
-- [ ] T006 Write trace/DoD tests in tools/internal/checks/traceability_test.go, including docs exemption and stale/forged evidence
+- [x] T006 Write trace/DoD tests in tools/internal/checks/traceability_test.go, including docs exemption and stale/forged evidence
   - Requirements: FR-004, SC-003; ADRs: 0008, 0019. Depends on: T005.
   - Verify: `go -C tools test ./internal/checks -run "TestTraceability|TestDoD" -count=1`: complete focused trace and justified phase aggregate accepted; an unrelated spec-wide blanket ADR list, unmapped FR/task, missing Verify/evidence and fake/stale pass rejected; valid docs-only exemption accepted; incomplete oracle yields behavioural red.
-  - Evidence: `.local/evidence/001/t006-traceability-red.json`; initial status `not-run`.
+  - Evidence: `evidence/T006.md`; RED with 36/36 controls failing behaviourally on the compiling stub.
 
 - [ ] T007 Implement shared registry, trace and DoD evaluator in harness/checks.yaml, tools/internal/checks/traceability.go and tools/cmd/lz-check/
   - Requirements: FR-004, SC-003; ADRs: 0008, 0019. Depends on: T006.
