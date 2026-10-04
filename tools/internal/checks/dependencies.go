@@ -197,6 +197,10 @@ func remote(source string) (repository, sub string, hasSub bool) {
 // including any mention of this repository that is not a resolvable
 // "//<dir>" address.
 func resolve(dir, source string, dirs map[string]bool) (local string, external bool, ok bool) {
+	if path.IsAbs(source) || filepath.IsAbs(source) {
+		// An absolute path does not survive a checkout elsewhere.
+		return "", false, false
+	}
 	if strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../") {
 		target := path.Join(dir, source)
 		return target, false, !strings.HasPrefix(target, "../") && target != ".." && dirs[target]
@@ -354,6 +358,13 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			}
 		}
 	}
+	for _, owner := range slices.Sorted(maps.Keys(g.TestUses)) {
+		for _, to := range g.TestUses[owner] {
+			if _, classified := g.Layers[to]; classified && !slices.Contains(mayUse[LayerTest], role(to, g.Layers[to])) {
+				add("LAYER_VIOLATION", owner, "tests of %s may not run %s (%s)", owner, to, role(to, g.Layers[to]))
+			}
+		}
+	}
 	if cycle := findCycle(g.Uses); cycle != nil {
 		add("CYCLE", cycle[0], "%s", strings.Join(cycle, " → "))
 	}
@@ -446,6 +457,10 @@ func SelectChanged(g DependencyGraph, changed []string) Selection {
 			if under(p, dir) && len(dir) > len(owner) {
 				owner = dir
 			}
+		}
+		// A test file belongs to the module that runs it, as when parsing.
+		if strings.HasSuffix(p, ".tftest.hcl") && g.Layers[testOwner(p)] != "" {
+			owner = testOwner(p)
 		}
 		markdown := strings.HasSuffix(p, ".md")
 		switch {
