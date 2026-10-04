@@ -1,4 +1,4 @@
-# ovh-landing-zone-accelerator .gitignore
+# landingzone-for-ovhcloud .gitignore
 # Infrastructure-as-code: state, plans and credentials are secret-bearing and must never be committed.
 
 # ─── Harness: local-only coordination ────────────────────────────────────────

@@ -42,3 +42,10 @@ neutral brand (e.g. `<brand>-lz` with "for OVHcloud" in the tagline) · keep gen
 
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
+
+## Name decision (2026-10-04)
+The operator chose **`landingzone-for-ovhcloud`** (display title "Landing Zone for OVHcloud"), the
+nominative "for" form, and made the repository public the same day. The former name
+`ovh-landing-zone-accelerator` redirects on GitHub, and the dependency check still treats it as
+this repository. The unofficial notice heads README and NOTICE. A neutral brand remains the safer
+long-term option and was considered; the licence recommendation is unaffected.
