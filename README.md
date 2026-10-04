@@ -69,8 +69,8 @@ defines the requested terminal journey alongside those phases; its implementatio
 The [first implementation guide](docs/how-to/first-implementation.md) explains the minimum
 safety subset, local versus live qualification, evidence and stop conditions.
 The current delivery scope covers all eligible work in specs 001–004 as dependencies and
-required decisions are satisfied. Independently reviewed increments may be published as
-stacked PRs; no PRs may be merged during this goal. T001–T009 remain the minimum safety
+required decisions are satisfied. Independently reviewed increments are published as
+stacked PRs and merge once review and applicable checks pass. T001–T009 remain the minimum safety
 prerequisite for dependent implementation. Guided setup's hardened persistence/export
 remains deferred until real profile schemas exist; no qualification follows from activation.
 

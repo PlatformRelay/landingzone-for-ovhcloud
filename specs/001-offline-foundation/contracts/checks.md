@@ -57,7 +57,7 @@ The following drivers are planned deliverables, not existing executable prerequi
   the actual entry, repeats the complete suite green and proves capture refusal before
   tool invocation/publication. Candidate code cannot select, build or replace a host driver.
 
-| Control / prior T001 matrix row | Test/control creator | Required proof owner and use barrier |
+| Control / row in the [historical T001 matrix](../evidence/T001.md#historical-original-preparation-verification-matrix) | Test/control creator | Required proof owner and use barrier |
 | --- | --- | --- |
 | Exact signed/checksummed tool, module and image identities; valid preparation (1–4, 7) | T001 preparation closure/driver | T001 positive identities/provenance before T002 build |
 | Missing/wrong tool/version/module before preparation finalization | T001 preparation control driver | T001 concrete refusal and cleanup before T002 build |

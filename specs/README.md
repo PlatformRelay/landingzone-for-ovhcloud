@@ -17,8 +17,8 @@ Feature numbers identify documents, not a complete delivery schedule. The curren
 (2026-10-02, local decision D61) covers all locally implementable portions of specs 001–004
 whose dependencies and required decisions are satisfied. Publish independently reviewed
 coherent increments, including stacked PRs with parent branches and review order stated;
-continue eligible work without waiting for operator review. No PRs may be merged during
-this goal; earlier merge permission is superseded. Keep 001/T001–T009 minimum safety before
+continue eligible work without waiting for operator review. A PR merges after an
+independent review and green applicable checks. Keep 001/T001–T009 minimum safety before
 dependent implementation and retain separate live authority and qualification prerequisites.
 An unmet dependency blocks that task, not other independent eligible work.
 Local models do not prove cloud isolation or forge enforcement. Platform probes qualify only
