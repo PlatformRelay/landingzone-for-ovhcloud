@@ -3,13 +3,15 @@
 // no host owner or time, so the same bundle always yields the same digests.
 // The layer holds runtime/ (the bundle with its entry) and host/bwrap.
 //
-// The whole bundle is checked before anything is written, against what the
-// entry's admission accepts, so a layout is produced only for a bundle the
-// entry can run.
+// Before anything is written the bundle passes the entry's own admission
+// (internal/bundle) for the manifest digest the entry was built with, and the
+// entry must carry that digest, so a layout is produced only for a bundle the
+// entry admits.
 package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,6 +26,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle"
 )
 
 const source = "https://github.com/PlatformRelay/landingzone-for-ovhcloud"
@@ -43,16 +47,6 @@ type item struct {
 }
 
 func digest(h hash.Hash) string { return "sha256:" + hex.EncodeToString(h.Sum(nil)) }
-
-// regular returns the file's metadata if it is a regular file reached
-// without following a link.
-func regular(path string) (fs.FileInfo, error) {
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("PACK_INPUT: regular non-link file required: %s", path)
-	}
-	return info, nil
-}
 
 // header describes one entry without host identity or time. Hard links,
 // special files and setuid, setgid or sticky bits are refused: a tar layer
@@ -78,21 +72,6 @@ func header(name string, info fs.FileInfo) (*tar.Header, error) {
 	return h, nil
 }
 
-// linkAdmitted applies the entry's link rule: a link is allowed only inside
-// resources/rootfs and must resolve inside it, an absolute target counting
-// from the rootfs.
-func linkAdmitted(bundle, path, target string) bool {
-	rootfs := filepath.Join(bundle, "resources/rootfs")
-	if !strings.HasPrefix(path, rootfs+"/") {
-		return false
-	}
-	resolved := filepath.Clean(filepath.Join(filepath.Dir(path), target))
-	if filepath.IsAbs(target) {
-		resolved = filepath.Join(rootfs, target)
-	}
-	return resolved == rootfs || strings.HasPrefix(resolved, rootfs+"/")
-}
-
 // canonical requires an absolute path without "." or ".." components or
 // redundant separators, so that resolving it lexically and the kernel
 // following it name the same file.
@@ -103,42 +82,39 @@ func canonical(path string) error {
 	return nil
 }
 
-// outside reports an error unless out lies outside bundle, after resolving
-// links in both, so the layout cannot become part of its own input. Both
-// paths are canonical.
-func outside(bundle, out string) error {
-	realBundle, err := filepath.EvalSymlinks(bundle)
-	if err != nil {
-		return err
-	}
+// outside reports an error unless out lies outside dir after resolving links
+// in out's parent, so the layout cannot become part of its own input. Both
+// paths are canonical, and admission has required every component of dir to
+// be a real directory.
+func outside(dir, out string) error {
 	parent, err := filepath.EvalSymlinks(filepath.Dir(out))
 	if err != nil {
 		return fmt.Errorf("PACK_OUTPUT: parent directory required: %w", err)
 	}
 	target := filepath.Join(parent, filepath.Base(out))
 	// An output equal to the bundle already exists and is refused on creation.
-	if strings.HasPrefix(target, realBundle+"/") {
+	if strings.HasPrefix(target, dir+"/") {
 		return fmt.Errorf("PACK_OUTPUT: output inside the bundle")
 	}
 	return nil
 }
 
-// plan checks the bundle and launcher and returns the layer's entries in
-// order: host/, host/bwrap, then the bundle under runtime/ in walk order.
-func plan(bundle, launcher string) ([]item, error) {
-	info, err := os.Lstat(bundle)
-	if err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("PACK_INPUT: bundle must be a real directory: %s", bundle)
+// plan admits the bundle as the entry would, checks that the entry carries
+// the manifest digest, and returns the layer's entries in order: host/,
+// host/bwrap, then the bundle under runtime/ in walk order.
+func plan(dir, launcher, manifestSHA string) ([]item, error) {
+	if _, err := bundle.Admit(dir, manifestSHA, launcher); err != nil {
+		return nil, err
 	}
-	for _, name := range []string{"lz-offline", "resources.json"} {
-		if _, err := regular(filepath.Join(bundle, name)); err != nil {
-			return nil, err
-		}
+	entry, err := bundle.Regular(filepath.Join(dir, "lz-offline"))
+	if err != nil {
+		return nil, err
 	}
-	if info, err := os.Lstat(filepath.Join(bundle, "resources")); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("PACK_INPUT: resources must be a real directory")
+	if !bytes.Contains(entry, []byte(manifestSHA)) {
+		return nil, fmt.Errorf("PACK_INPUT: entry not built for manifest %s", manifestSHA)
 	}
-	launcherInfo, err := regular(launcher)
+	// Admission has read the launcher as a single-link regular file.
+	launcherInfo, err := os.Lstat(launcher)
 	if err != nil {
 		return nil, err
 	}
@@ -148,11 +124,11 @@ func plan(bundle, launcher string) ([]item, error) {
 	}
 	// Only the launcher comes from its host directory, not that directory's mode.
 	items := []item{{&tar.Header{Name: "host/", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: time.Unix(0, 0)}, ""}, {launcherHeader, launcher}}
-	err = filepath.WalkDir(bundle, func(path string, entry fs.DirEntry, incoming error) error {
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, incoming error) error {
 		if incoming != nil {
 			return incoming
 		}
-		relative, err := filepath.Rel(bundle, path)
+		relative, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
 		}
@@ -164,12 +140,14 @@ func plan(bundle, launcher string) ([]item, error) {
 		if err != nil {
 			return err
 		}
+		// Admission has checked every link under resources/; it does not look
+		// beside the manifest, where no link belongs.
 		if h.Typeflag == tar.TypeSymlink {
+			if !strings.HasPrefix(filepath.ToSlash(relative), "resources/") {
+				return fmt.Errorf("PACK_INPUT: link outside resources: %s", relative)
+			}
 			if h.Linkname, err = os.Readlink(path); err != nil {
 				return err
-			}
-			if !linkAdmitted(bundle, path, h.Linkname) {
-				return fmt.Errorf("PACK_INPUT: link the entry refuses: %s", relative)
 			}
 		}
 		items = append(items, item{h, path})
@@ -235,17 +213,17 @@ func store(out, mediaType string, value any) (descriptor, error) {
 	return d, os.WriteFile(filepath.Join(out, "blobs", "sha256", hex.EncodeToString(sum[:])), data, 0o644)
 }
 
-func pack(bundle, launcher, out string) (result packed, err error) {
-	for _, path := range []string{bundle, launcher, out} {
+func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
+	for _, path := range []string{dir, launcher, out} {
 		if err := canonical(path); err != nil {
 			return packed{}, err
 		}
 	}
-	items, err := plan(bundle, launcher)
+	items, err := plan(dir, launcher, manifestSHA)
 	if err != nil {
 		return packed{}, err
 	}
-	if err := outside(bundle, out); err != nil {
+	if err := outside(dir, out); err != nil {
 		return packed{}, err
 	}
 	if err := os.Mkdir(out, 0o755); err != nil {
@@ -304,15 +282,16 @@ func pack(bundle, launcher, out string) (result packed, err error) {
 }
 
 func main() {
-	bundle := flag.String("bundle", "", "prepared runtime bundle directory (absolute)")
+	dir := flag.String("bundle", "", "prepared runtime bundle directory (absolute)")
+	manifestSHA := flag.String("manifest-sha", "", "resources.json digest the bundle's entry was built with")
 	launcher := flag.String("bwrap", "/usr/bin/bwrap", "launcher the bundle manifest pins (absolute)")
 	out := flag.String("out", "", "new OCI image layout directory (absolute)")
 	flag.Parse()
-	if *bundle == "" || *out == "" || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: lz-pack -bundle <dir> [-bwrap <file>] -out <new-dir>")
+	if *dir == "" || *manifestSHA == "" || *out == "" || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: lz-pack -bundle <dir> -manifest-sha <hex> [-bwrap <file>] -out <new-dir>")
 		os.Exit(2)
 	}
-	result, err := pack(*bundle, *launcher, *out)
+	result, err := pack(*dir, *launcher, *manifestSHA, *out)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

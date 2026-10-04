@@ -15,58 +15,30 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle/bundletest"
 )
 
-// bundle writes a small runtime bundle and launcher with the shapes the real
-// one has: an executable entry, a private directory, a manifest and a rootfs
-// link that stays inside the bundle.
-func bundle(t *testing.T) (string, string) {
+// prepared writes a bundle the entry admits, with a name and a link target
+// past the 100-byte ustar limit that need PAX records, and a probe beside the
+// manifest as the real bundle has.
+func prepared(t *testing.T) bundletest.Bundle {
 	t.Helper()
-	root := t.TempDir()
-	dir := filepath.Join(root, "bundle")
-	for _, d := range []string{"resources/rootfs/bin", "resources/rootfs/usr/bin"} {
-		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+	long := filepath.Join("resources/rootfs", strings.Repeat("d", 60), strings.Repeat("f", 60))
+	return bundletest.Write(t, func(dir string) {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(long)), 0o755); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.Chmod(filepath.Join(dir, "resources"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]os.FileMode{"lz-offline": 0o775, "resources.json": 0o664, "resources/rootfs/bin/busybox": 0o755}
-	for name, mode := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("content of "+name), mode); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, long), []byte("long"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(filepath.Join(dir, name), mode); err != nil {
+		if err := os.Symlink("/"+strings.Repeat("d", 60)+"/"+strings.Repeat("f", 60), filepath.Join(dir, "resources/rootfs/bin/long")); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.Symlink("/bin/busybox", filepath.Join(dir, "resources/rootfs/usr/bin/sh")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("../../bin/busybox", filepath.Join(dir, "resources/rootfs/usr/bin/ls")); err != nil {
-		t.Fatal(err)
-	}
-	// A link may resolve to the rootfs itself.
-	if err := os.Symlink("..", filepath.Join(dir, "resources/rootfs/usr/top")); err != nil {
-		t.Fatal(err)
-	}
-	// Names and link targets past the 100-byte ustar limit need PAX records.
-	long := filepath.Join(dir, "resources/rootfs", strings.Repeat("d", 60), strings.Repeat("f", 60))
-	if err := os.MkdirAll(filepath.Dir(long), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(long, []byte("long"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("/"+strings.Repeat("d", 60)+"/"+strings.Repeat("f", 60), filepath.Join(dir, "resources/rootfs/bin/long")); err != nil {
-		t.Fatal(err)
-	}
-	launcher := filepath.Join(root, "bwrap")
-	if err := os.WriteFile(launcher, []byte("launcher"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return dir, launcher
+		if err := os.WriteFile(filepath.Join(dir, "probe"), []byte("probe"), 0o775); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func digestOf(t *testing.T, path string) string {
@@ -127,9 +99,10 @@ func layerEntries(t *testing.T, path string) ([]string, map[string]entry) {
 // The layer holds the bundle under runtime/ and the launcher under host/,
 // with modes, link targets and contents intact and no host identity.
 func TestPackRoundTrip(t *testing.T) {
-	dir, launcher := bundle(t)
+	b := prepared(t)
+	dir, launcher := b.Dir, b.Launcher
 	out := filepath.Join(t.TempDir(), "layout")
-	result, err := pack(dir, launcher, out)
+	result, err := pack(dir, launcher, b.ManifestSHA, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,20 +110,24 @@ func TestPackRoundTrip(t *testing.T) {
 		t.Fatalf("BEHAVIORAL_RED: blobs are not stored under their digests: %+v", result)
 	}
 	names, entries := layerEntries(t, blob(out, result.Layer))
+	manifest, err := os.ReadFile(filepath.Join(dir, "resources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	longDir := "runtime/resources/rootfs/" + strings.Repeat("d", 60) + "/"
-	want := []string{"host/", "host/bwrap", "runtime/", "runtime/lz-offline", "runtime/resources/", "runtime/resources/rootfs/",
+	want := []string{"host/", "host/bwrap", "runtime/", "runtime/lz-offline", "runtime/probe", "runtime/resources/", "runtime/resources/rootfs/",
 		"runtime/resources/rootfs/bin/", "runtime/resources/rootfs/bin/busybox", "runtime/resources/rootfs/bin/long", longDir, longDir + strings.Repeat("f", 60),
 		"runtime/resources/rootfs/usr/", "runtime/resources/rootfs/usr/bin/", "runtime/resources/rootfs/usr/bin/ls", "runtime/resources/rootfs/usr/bin/sh",
-		"runtime/resources/rootfs/usr/top", "runtime/resources.json"}
+		"runtime/resources/rootfs/usr/top", "runtime/resources/tofu", "runtime/resources.json"}
 	if strings.Join(names, " ") != strings.Join(want, " ") {
 		t.Errorf("BEHAVIORAL_RED: layer entries\n got %v\nwant %v", names, want)
 	}
 	checks := map[string]entry{
-		"runtime/lz-offline":                   {mode: 0o775, kind: tar.TypeReg, content: "content of lz-offline"},
-		"runtime/resources.json":               {mode: 0o664, kind: tar.TypeReg, content: "content of resources.json"},
+		"runtime/lz-offline":                   {mode: 0o775, kind: tar.TypeReg, content: "entry built for " + b.ManifestSHA},
+		"runtime/resources.json":               {mode: 0o664, kind: tar.TypeReg, content: string(manifest)},
 		"runtime/resources/":                   {mode: 0o700, kind: tar.TypeDir},
 		"runtime/resources/rootfs/usr/bin/sh":  {mode: 0o777, kind: tar.TypeSymlink, link: "/bin/busybox"},
-		"runtime/resources/rootfs/bin/busybox": {mode: 0o755, kind: tar.TypeReg, content: "content of resources/rootfs/bin/busybox"},
+		"runtime/resources/rootfs/bin/busybox": {mode: 0o755, kind: tar.TypeReg, content: "busybox"},
 		"host/bwrap":                           {mode: 0o755, kind: tar.TypeReg, content: "launcher"},
 		"runtime/resources/rootfs/usr/bin/ls":  {mode: 0o777, kind: tar.TypeSymlink, link: "../../bin/busybox"},
 		"runtime/resources/rootfs/bin/long":    {mode: 0o777, kind: tar.TypeSymlink, link: "/" + strings.Repeat("d", 60) + "/" + strings.Repeat("f", 60)},
@@ -172,8 +149,9 @@ func TestPackRoundTrip(t *testing.T) {
 // The same bundle packs to the same digests, whatever its timestamps, so
 // anyone holding the bundle can reproduce the published image.
 func TestPackIsReproducible(t *testing.T) {
-	dir, launcher := bundle(t)
-	first, err := pack(dir, launcher, filepath.Join(t.TempDir(), "a"))
+	b := prepared(t)
+	dir, launcher := b.Dir, b.Launcher
+	first, err := pack(dir, launcher, b.ManifestSHA, filepath.Join(t.TempDir(), "a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +164,7 @@ func TestPackIsReproducible(t *testing.T) {
 	if err := os.Chtimes(launcher, later, later); err != nil {
 		t.Fatal(err)
 	}
-	second, err := pack(dir, launcher, filepath.Join(t.TempDir(), "b"))
+	second, err := pack(dir, launcher, b.ManifestSHA, filepath.Join(t.TempDir(), "b"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,9 +178,10 @@ func TestPackIsReproducible(t *testing.T) {
 // diff_id is the uncompressed layer, and the source annotation links the
 // package to this repository.
 func TestPackLayout(t *testing.T) {
-	dir, launcher := bundle(t)
+	b := prepared(t)
+	dir, launcher := b.Dir, b.Launcher
 	out := filepath.Join(t.TempDir(), "layout")
-	result, err := pack(dir, launcher, out)
+	result, err := pack(dir, launcher, b.ManifestSHA, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,168 +267,119 @@ func TestPackLayout(t *testing.T) {
 	}
 }
 
-// Anything the entry would refuse, or that a tar layer cannot carry
-// faithfully, stops packing: hard links, special files, a launcher that is
-// not a regular file, a missing entry or manifest, and an existing output.
+// A bundle the entry would refuse, an entry built for another manifest, and
+// anything a tar layer cannot carry faithfully stop packing, as do paths that
+// are not absolute and clean and an output inside the bundle or already
+// present. A refused pack leaves no output behind.
 func TestPackRefuses(t *testing.T) {
-	for name, damage := range map[string]func(t *testing.T, dir, launcher, out string) (string, string, string){
-		"hard link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Link(filepath.Join(dir, "resources.json"), filepath.Join(dir, "resources/copy")); err != nil {
+	for name, damage := range map[string]func(t *testing.T, b *bundletest.Bundle, out *string){
+		"other manifest digest": func(t *testing.T, b *bundletest.Bundle, out *string) { b.ManifestSHA = strings.Repeat("0", 64) },
+		"changed resource": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.WriteFile(filepath.Join(b.Dir, "resources/tofu"), []byte("TOFU"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"named pipe": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := syscall.Mkfifo(filepath.Join(dir, "resources/pipe"), 0o600); err != nil {
+		"other launcher": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.WriteFile(b.Launcher, []byte("other"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"launcher is a link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			link := launcher + "-link"
-			if err := os.Symlink(launcher, link); err != nil {
+		"entry built for another manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.WriteFile(filepath.Join(b.Dir, "lz-offline"), []byte("entry built for "+strings.Repeat("0", 64)), 0o775); err != nil {
 				t.Fatal(err)
 			}
-			return dir, link, out
 		},
-		"no entry": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Remove(filepath.Join(dir, "lz-offline")); err != nil {
+		"no entry": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.Remove(filepath.Join(b.Dir, "lz-offline")); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"no manifest": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Remove(filepath.Join(dir, "resources.json")); err != nil {
+		"hard link beside the manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.Link(filepath.Join(b.Dir, "probe"), filepath.Join(filepath.Dir(b.Dir), "probe-copy")); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"bundle is a link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			link := dir + "-link"
-			if err := os.Symlink(dir, link); err != nil {
+		"named pipe beside the manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := syscall.Mkfifo(filepath.Join(b.Dir, "pipe"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			return link, launcher, out
 		},
-		"no resources directory": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.RemoveAll(filepath.Join(dir, "resources")); err != nil {
+		"link beside the manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.Symlink("resources.json", filepath.Join(b.Dir, "alias.json")); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"link outside the rootfs": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Symlink("/tmp/tool", filepath.Join(dir, "resources/tool")); err != nil {
+		"setuid file": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.Chmod(filepath.Join(b.Dir, "resources/rootfs/bin/busybox"), 0o755|fs.ModeSetuid); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"link escaping the rootfs": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Symlink("../../../../outside", filepath.Join(dir, "resources/rootfs/bin/out")); err != nil {
+		"sticky directory": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.Chmod(filepath.Join(b.Dir, "resources/rootfs/usr"), 0o755|fs.ModeSticky); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
 		},
-		"absolute link escaping the rootfs": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			// Counted from the rootfs, as the entry does, this leaves it.
-			if err := os.Symlink("/../outside", filepath.Join(dir, "resources/rootfs/usr/bin/esc")); err != nil {
+		"launcher is a link": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			alias := b.Launcher + "-link"
+			if err := os.Symlink(b.Launcher, alias); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
+			b.Launcher = alias
 		},
-		"output inside a bundle reached through a linked parent": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			link := filepath.Join(t.TempDir(), "via")
-			if err := os.Symlink(filepath.Dir(dir), link); err != nil {
+		"unreadable file beside the manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			// Admission does not read it, so this fails while writing.
+			if err := os.Chmod(filepath.Join(b.Dir, "probe"), 0o000); err != nil {
 				t.Fatal(err)
 			}
-			return filepath.Join(link, filepath.Base(dir)), launcher, filepath.Join(dir, "layout")
 		},
-		"relative bundle with output inside it": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			t.Chdir(filepath.Dir(dir))
-			return filepath.Base(dir), launcher, filepath.Join(filepath.Base(dir), "layout")
+		"relative bundle": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			t.Chdir(filepath.Dir(b.Dir))
+			b.Dir = filepath.Base(b.Dir)
 		},
-		"relative bundle with output inside its resources": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			t.Chdir(filepath.Dir(dir))
-			return filepath.Base(dir), launcher, filepath.Join(filepath.Base(dir), "resources", "layout")
+		"bundle with a current-directory reference": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			b.Dir = filepath.Dir(b.Dir) + "/./" + filepath.Base(b.Dir)
 		},
-		"output through a link and a parent reference": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+		"launcher with a current-directory reference": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			b.Launcher = filepath.Dir(b.Launcher) + "/./" + filepath.Base(b.Launcher)
+		},
+		"relative output": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			t.Chdir(filepath.Dir(*out))
+			*out = filepath.Base(*out)
+		},
+		"output with a trailing slash": func(t *testing.T, b *bundletest.Bundle, out *string) { *out += "/" },
+		"output inside the bundle":     func(t *testing.T, b *bundletest.Bundle, out *string) { *out = filepath.Join(b.Dir, "layout") },
+		"output inside the bundle through a link": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			alias := filepath.Join(t.TempDir(), "via")
+			if err := os.Symlink(b.Dir, alias); err != nil {
+				t.Fatal(err)
+			}
+			*out = filepath.Join(alias, "layout")
+		},
+		"output through a link and a parent reference": func(t *testing.T, b *bundletest.Bundle, out *string) {
 			// Cleaned lexically this names a path outside the bundle; the
 			// kernel follows the link first and lands inside resources/.
-			link := filepath.Join(t.TempDir(), "via")
-			if err := os.Symlink(filepath.Join(dir, "resources"), link); err != nil {
+			alias := filepath.Join(t.TempDir(), "via")
+			if err := os.Symlink(filepath.Join(b.Dir, "resources"), alias); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, link + "/../layout"
+			*out = alias + "/../layout"
 		},
-		"bundle with a parent reference": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			return filepath.Dir(dir) + "/./" + filepath.Base(dir), launcher, out
-		},
-		"launcher with a current-directory reference": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			return dir, filepath.Dir(launcher) + "/./" + filepath.Base(launcher), out
-		},
-		"relative bundle with an absolute output inside it": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			t.Chdir(filepath.Dir(dir))
-			return filepath.Base(dir), launcher, filepath.Join(dir, "layout")
-		},
-		"output with a trailing slash": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			return dir, launcher, out + "/"
-		},
-		"link to the rootfs parent": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Symlink("..", filepath.Join(dir, "resources/rootfs/up")); err != nil {
+		"output exists": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			if err := os.Mkdir(*out, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher, out
-		},
-		"link in the bundle root": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Symlink("resources.json", filepath.Join(dir, "alias.json")); err != nil {
-				t.Fatal(err)
-			}
-			return dir, launcher, out
-		},
-		"setuid file": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Chmod(filepath.Join(dir, "resources/rootfs/bin/busybox"), 0o755|fs.ModeSetuid); err != nil {
-				t.Fatal(err)
-			}
-			return dir, launcher, out
-		},
-		"sticky directory": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Chmod(filepath.Join(dir, "resources/rootfs/usr"), 0o777|fs.ModeSticky); err != nil {
-				t.Fatal(err)
-			}
-			return dir, launcher, out
-		},
-		"output inside the bundle": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			return dir, launcher, filepath.Join(dir, "layout")
-		},
-		"output inside the bundle through a link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			link := filepath.Join(t.TempDir(), "via")
-			if err := os.Symlink(dir, link); err != nil {
-				t.Fatal(err)
-			}
-			return dir, launcher, filepath.Join(link, "layout")
-		},
-		"unreadable file": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Chmod(filepath.Join(dir, "resources/rootfs/bin/busybox"), 0o000); err != nil {
-				t.Fatal(err)
-			}
-			return dir, launcher, out
-		},
-		"output exists": func(t *testing.T, dir, launcher, out string) (string, string, string) {
-			if err := os.Mkdir(out, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			return dir, launcher, out
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			dir, launcher := bundle(t)
+			b := prepared(t)
 			out := filepath.Join(t.TempDir(), "layout")
-			original := dir
-			dir, launcher, out = damage(t, dir, launcher, out)
-			if result, err := pack(dir, launcher, out); err == nil {
+			original := b.Dir
+			damage(t, &b, &out)
+			if result, err := pack(b.Dir, b.Launcher, b.ManifestSHA, out); err == nil {
 				t.Errorf("BEHAVIORAL_RED: %s packed: %+v", name, result)
 			}
-			// A refused pack leaves nothing behind, and never removes a
-			// directory it did not create.
+			// Nothing is left behind, and a directory the pack did not create
+			// is never removed.
 			_, err := os.Lstat(out)
 			if exists := err == nil; exists != (name == "output exists") {
 				t.Errorf("BEHAVIORAL_RED: %s left output present=%v", name, exists)
