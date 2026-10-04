@@ -86,10 +86,10 @@ the constitution and ADRs are unchanged.
   - Verify: `go -C tools test ./internal/checks -run "TestTraceability|TestDoD" -count=1`: complete focused trace and justified phase aggregate accepted; an unrelated spec-wide blanket ADR list, unmapped FR/task, missing Verify/evidence and fake/stale pass rejected; valid docs-only exemption accepted; incomplete oracle yields behavioural red.
   - Evidence: `evidence/T006.md`; RED with 36/36 controls failing behaviourally on the compiling stub.
 
-- [ ] T007 Implement shared registry, trace and DoD evaluator in harness/checks.yaml, tools/internal/checks/traceability.go and tools/cmd/lz-check/
+- [x] T007 Implement shared registry, trace and DoD evaluator in harness/checks.yaml, tools/internal/checks/traceability.go and tools/cmd/lz-check/
   - Requirements: FR-004, SC-003; ADRs: 0008, 0019. Depends on: T006.
   - Verify: `task test:traceability; task check:specs; task dod -- modules/naming`: focused trace and justified aggregate fixtures pass, blanket/unmapped/forged cases fail, unimplemented naming checks report not-run until T014/T018; no missing evidence passes. Creates all three targets.
-  - Evidence: `.local/evidence/001/t007-traceability.json`; initial status `not-run`.
+  - Evidence: `evidence/T007.md`; GREEN through the entry with 74/74 guard-site mutants killed; DoD for modules/naming is not-run until its checks exist.
 
 - [ ] T008 Write layer/changed-closure and real-tool static tests in tools/internal/checks/{dependencies,static}_test.go and tests/check/fixtures/{dependencies,static}/
   - Requirements: FR-007; ADRs: 0002, 0008, 0011. Depends on: T007.

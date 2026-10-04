@@ -1,5 +1,21 @@
 package checks
 
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
 // Task is one entry of a feature's tasks.md.
 type Task struct {
 	ID           string
@@ -96,16 +112,450 @@ type DoD struct {
 	Pass  bool
 }
 
-func ParseSpec(text string) []string { return nil }
+var (
+	specRequirement = regexp.MustCompile(`(?m)^- \*\*((?:FR|SC)-\d{3})\*\*:`)
+	taskLine        = regexp.MustCompile(`^- \[[ xX]\] (T\d{3})\b(.*)$`)
+	taskField       = regexp.MustCompile(`^  - ([A-Z][A-Za-z ]*?):\s*(.*)$`)
+	requirementID   = regexp.MustCompile(`\b(?:FR|SC)-\d{3}\b`)
+	adrID           = regexp.MustCompile(`\b\d{4}\b`)
+	rationaleEntry  = regexp.MustCompile(`^(\d{4})\b\s*(.*)$`)
+	verifyCommand   = regexp.MustCompile("`[^`]+`")
+	exemption       = regexp.MustCompile(`^exempt\s+(?:—|-{1,2})\s+docs-only\b;?\s*(.*)$`)
+	// A path is a token ending in a known file extension or in "/"; prose
+	// such as "trace/DoD" is neither.
+	pathToken = regexp.MustCompile(`^(?:[\w.{},-]+/)*[\w.{},-]*\.(?:md|go|mod|ya?ml|json|hcl|tf|py|sh|toml|rego)$|^(?:[\w.{},-]+/)+$`)
+)
 
-func ParseTasks(text string) ([]Task, error) { return nil, nil }
+// ParseSpec returns the requirement and success-criterion ids a spec defines,
+// in order; mentions in prose do not define one.
+func ParseSpec(text string) []string {
+	var ids []string
+	for _, m := range specRequirement.FindAllStringSubmatch(text, -1) {
+		ids = append(ids, m[1])
+	}
+	return ids
+}
 
-func ParseRegistry(data []byte) (Registry, error) { return Registry{}, nil }
+func titlePaths(title string) []string {
+	title, _, _ = strings.Cut(title, " — ")
+	var paths []string
+	for _, token := range strings.Fields(title) {
+		token = strings.TrimLeft(strings.TrimRight(token, ",;:)"), "(`")
+		token = strings.TrimSuffix(token, "`")
+		if !pathToken.MatchString(token) {
+			token = strings.TrimSuffix(token, ".")
+		}
+		if pathToken.MatchString(token) {
+			paths = append(paths, token)
+		}
+	}
+	return paths
+}
 
-func CheckTrace(t Trace) []Finding { return nil }
+// ParseTasks reads every `- [ ] Tnnn` entry and its fields. A field given
+// twice, or no task at all, is an error.
+func ParseTasks(text string) ([]Task, error) {
+	var tasks []Task
+	current := -1
+	seen := map[string]bool{}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if m := taskLine.FindStringSubmatch(line); m != nil {
+			tasks = append(tasks, Task{ID: m[1], Paths: titlePaths(m[2])})
+			current, seen = len(tasks)-1, map[string]bool{}
+			continue
+		}
+		if current < 0 || line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "  ") {
+			current = -1
+			continue
+		}
+		m := taskField.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		key, value := m[1], strings.TrimSpace(m[2])
+		t := &tasks[current]
+		switch key {
+		case "Requirements", "Verify", "Evidence", "Aggregate ADR rationale":
+			if seen[key] {
+				return nil, fmt.Errorf("REPEATED_FIELD: %s %s", t.ID, key)
+			}
+			seen[key] = true
+		}
+		switch key {
+		case "Requirements":
+			requirements, adrs, _ := strings.Cut(value, "ADRs:")
+			adrs, _, _ = strings.Cut(adrs, "Depends on")
+			t.Requirements = requirementID.FindAllString(requirements, -1)
+			t.ADRs = adrID.FindAllString(adrs, -1)
+		case "Verify":
+			if e := exemption.FindStringSubmatch(value); e != nil {
+				t.Exempt, t.Verify = true, strings.TrimSpace(e[1])
+			} else {
+				t.Verify = value
+			}
+		case "Evidence":
+			t.Evidence = value
+		case "Aggregate ADR rationale":
+			t.Rationale = map[string]string{}
+			for _, part := range strings.Split(value, ";") {
+				part = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(part), "."))
+				if e := rationaleEntry.FindStringSubmatch(part); e != nil {
+					t.Rationale[e[1]] = e[2]
+				} else {
+					t.Rationale[part] = ""
+				}
+			}
+		}
+	}
+	if len(tasks) == 0 {
+		return nil, errors.New("NO_TASKS: no task entries discovered")
+	}
+	return tasks, nil
+}
 
-func Digest(root string, scope []string) (string, error) { return "", nil }
+// noDuplicateKeys walks a JSON document and refuses any object that repeats a
+// key; encoding/json would silently keep the last one.
+func noDuplicateKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var walk func() error
+	walk = func() error {
+		token, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch token {
+		case json.Delim('{'):
+			keys := map[string]bool{}
+			for dec.More() {
+				key, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				if keys[key.(string)] {
+					return fmt.Errorf("DUPLICATE_KEY: %s", key)
+				}
+				keys[key.(string)] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+			return err
+		case json.Delim('['):
+			for dec.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+			return err
+		}
+		return nil
+	}
+	return walk()
+}
 
-func EvaluateDoD(reg Registry, root, path string, evidence map[string]Evidence) DoD {
-	return DoD{Pass: true}
+func cleanRelative(p string) bool {
+	return p != "" && !path.IsAbs(p) && path.Clean(p) == p && p != "." && p != ".." && !strings.HasPrefix(p, "../")
+}
+
+// DecodeStrict decodes exactly one JSON document into v, refusing duplicate
+// keys, unknown fields and trailing data.
+func DecodeStrict(data []byte, v any) error {
+	if err := noDuplicateKeys(data); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("data after the document")
+	}
+	return nil
+}
+
+// ParseRegistry decodes harness/checks.yaml. The file is YAML written in its
+// JSON-compatible flow form and is decoded strictly as JSON.
+func ParseRegistry(data []byte) (Registry, error) {
+	var file struct {
+		SchemaVersion int                    `json:"schema_version"`
+		Requirements  map[string]Requirement `json:"requirements"`
+		Checks        []CheckDefinition      `json:"checks"`
+	}
+	if err := DecodeStrict(data, &file); err != nil {
+		return Registry{}, fmt.Errorf("REGISTRY_SYNTAX: %w", err)
+	}
+	if file.SchemaVersion != 1 {
+		return Registry{}, fmt.Errorf("REGISTRY_VERSION: %d", file.SchemaVersion)
+	}
+	if len(file.Checks) == 0 {
+		return Registry{}, errors.New("REGISTRY_EMPTY: no checks")
+	}
+	ids := map[string]bool{}
+	for _, c := range file.Checks {
+		if c.ID == "" || ids[c.ID] {
+			return Registry{}, fmt.Errorf("REGISTRY_CHECK_ID: %q missing or repeated", c.ID)
+		}
+		ids[c.ID] = true
+		if c.Kind != KindBehavioral && c.Kind != KindDocs {
+			return Registry{}, fmt.Errorf("REGISTRY_KIND: %s: %q", c.ID, c.Kind)
+		}
+		if len(c.Scope) == 0 {
+			return Registry{}, fmt.Errorf("REGISTRY_SCOPE: %s has no scope", c.ID)
+		}
+		for _, s := range c.Scope {
+			if !cleanRelative(s) {
+				return Registry{}, fmt.Errorf("REGISTRY_SCOPE: %s: %q is not a clean relative path", c.ID, s)
+			}
+		}
+	}
+	return Registry{Requirements: file.Requirements, Checks: file.Checks}, nil
+}
+
+func set(items []string) map[string]bool {
+	m := map[string]bool{}
+	for _, item := range items {
+		m[item] = true
+	}
+	return m
+}
+
+// CheckTrace follows requirement → ADR → paths → check → evidence for every
+// task and requirement and reports each broken link.
+func CheckTrace(t Trace) []Finding {
+	var findings []Finding
+	add := func(rule, subject, format string, args ...any) {
+		findings = append(findings, Finding{Rule: rule, Subject: subject, Detail: fmt.Sprintf(format, args...)})
+	}
+	defined, knownADR := set(t.Requirements), set(t.ADRs)
+	specWide := map[string]bool{}
+	for _, r := range t.Requirements {
+		for _, a := range t.Registry.Requirements[r].ADRs {
+			specWide[a] = true
+		}
+	}
+
+	taskIDs, mapped := map[string]bool{}, map[string]bool{}
+	for _, task := range t.Tasks {
+		if taskIDs[task.ID] {
+			add("DUPLICATE_TASK", task.ID, "task defined more than once")
+		}
+		taskIDs[task.ID] = true
+		if len(task.Requirements) == 0 {
+			add("UNMAPPED_TASK", task.ID, "task names no requirement")
+		}
+		relevant := map[string]bool{}
+		for _, r := range task.Requirements {
+			if !defined[r] {
+				add("UNKNOWN_REQUIREMENT", task.ID, "%s is not defined by the spec", r)
+				continue
+			}
+			mapped[r] = true
+			for _, a := range t.Registry.Requirements[r].ADRs {
+				relevant[a] = true
+			}
+		}
+		listed := set(task.ADRs)
+		for _, a := range task.ADRs {
+			if !knownADR[a] {
+				add("UNKNOWN_ADR", task.ID, "ADR %s does not exist", a)
+			} else if !relevant[a] {
+				add("UNRELATED_ADR", task.ID, "ADR %s is relevant to none of %v", a, task.Requirements)
+			}
+		}
+		blanket := len(specWide) > 1
+		for a := range specWide {
+			blanket = blanket && listed[a]
+		}
+		if blanket && len(task.Rationale) == 0 {
+			add("BLANKET_ADR_LIST", task.ID, "lists every ADR of the spec without a per-ADR rationale")
+		}
+		if len(task.Rationale) > 0 {
+			complete := len(task.Rationale) == len(listed)
+			for a, why := range task.Rationale {
+				complete = complete && listed[a] && strings.TrimSpace(why) != ""
+			}
+			if !complete {
+				add("INCOMPLETE_RATIONALE", task.ID, "rationale must give a reason for exactly the listed ADRs")
+			}
+		}
+		if len(task.Paths) == 0 {
+			add("MISSING_PATHS", task.ID, "title names no path")
+		}
+		if task.Exempt {
+			docsOnly := strings.TrimSpace(task.Verify) != ""
+			for _, p := range task.Paths {
+				docsOnly = docsOnly && strings.HasSuffix(p, ".md")
+			}
+			if !docsOnly {
+				add("INVALID_EXEMPTION", task.ID, "a docs-only exemption needs a reason and Markdown paths only")
+			}
+		} else if !verifyCommand.MatchString(task.Verify) {
+			add("MISSING_VERIFY", task.ID, "Verify names no command")
+		}
+		if strings.TrimSpace(task.Evidence) == "" {
+			add("MISSING_EVIDENCE", task.ID, "no evidence path")
+		}
+	}
+
+	checked := map[string]bool{}
+	for _, c := range t.Registry.Checks {
+		for _, r := range c.Requirements {
+			if !defined[r] {
+				add("UNKNOWN_REQUIREMENT", c.ID, "%s is not defined by the spec", r)
+			}
+			checked[r] = true
+		}
+		if !taskIDs[c.Creator] {
+			add("UNKNOWN_CREATOR", c.ID, "creator %s is not a task", c.Creator)
+		}
+	}
+	for _, r := range t.Requirements {
+		if !mapped[r] {
+			add("UNMAPPED_REQUIREMENT", r, "no task implements it")
+		}
+		if _, ok := t.Registry.Requirements[r]; !ok {
+			add("UNREGISTERED_REQUIREMENT", r, "the registry records no relevant ADRs")
+		}
+		if !checked[r] {
+			add("UNCHECKED_REQUIREMENT", r, "no registered check verifies it")
+		}
+	}
+	return findings
+}
+
+var errUnreadable = errors.New("SCOPE_UNREADABLE")
+
+// noSymlinkComponents refuses a scope reached through a symlink.
+func noSymlinkComponents(root, scope string) error {
+	current := root
+	for _, part := range strings.Split(scope, "/") {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %s is a symlink", errUnreadable, current)
+		}
+	}
+	return nil
+}
+
+// Digest is the SHA-256 of the relative paths and contents of every file
+// under each scope entry. A missing scope wraps fs.ErrNotExist; a symlink or
+// special file is refused.
+func Digest(root string, scope []string) (string, error) {
+	h := sha256.New()
+	for _, s := range scope {
+		if !cleanRelative(s) {
+			return "", fmt.Errorf("%w: %q is not a clean relative path", errUnreadable, s)
+		}
+		if err := noSymlinkComponents(root, s); err != nil {
+			return "", err
+		}
+		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(s)), func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if !d.Type().IsRegular() {
+				return fmt.Errorf("%w: %s is not a regular file", errUnreadable, p)
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(data)
+			fmt.Fprintf(h, "%s %s\n", hex.EncodeToString(sum[:]), filepath.ToSlash(rel))
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func selects(scope []string, target string) bool {
+	for _, s := range scope {
+		if target == "." || target == s || strings.HasPrefix(target, s+"/") || strings.HasPrefix(s, target+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// judge decides one check's status. Only evidence that names the check, is
+// fresh for its scope and reports a self-consistent pass counts as a pass.
+func judge(c CheckDefinition, root string, evidence map[string]Evidence) Item {
+	result := func(status, reason string) Item { return Item{Check: c.ID, Status: status, Reason: reason} }
+	if c.Kind == KindDocs {
+		return result(StatusExempt, "")
+	}
+	e, ok := evidence[c.ID]
+	if !ok {
+		return result(StatusNotRun, "NO_EVIDENCE")
+	}
+	if e.Check != c.ID {
+		return result(StatusFail, "EVIDENCE_CHECK_MISMATCH")
+	}
+	current, err := Digest(root, c.Scope)
+	if errors.Is(err, fs.ErrNotExist) {
+		return result(StatusNotRun, "SCOPE_MISSING")
+	}
+	if err != nil {
+		return result(StatusFail, "SCOPE_UNREADABLE")
+	}
+	if e.InputDigest != current {
+		return result(StatusNotRun, "STALE_EVIDENCE")
+	}
+	switch e.Status {
+	case StatusPass:
+		if e.Discovered <= 0 {
+			return result(StatusFail, "ZERO_DISCOVERY")
+		}
+		if e.Failed != 0 {
+			return result(StatusFail, "INCONSISTENT_PASS")
+		}
+		if c.Review && strings.TrimSpace(e.Reviewer) == "" {
+			return result(StatusReviewRequired, "REVIEW_REQUIRED")
+		}
+		return result(StatusPass, "")
+	case StatusFail:
+		return result(StatusFail, "REPORTED_FAIL")
+	case StatusBlocked:
+		return result(StatusBlocked, "REPORTED_BLOCKED")
+	}
+	return result(StatusFail, "INVALID_STATUS")
+}
+
+// EvaluateDoD judges every registered check whose scope contains the path or
+// lies under it. The DoD passes only when at least one check applies and each
+// one passes or is a docs exemption.
+func EvaluateDoD(reg Registry, root, target string, evidence map[string]Evidence) DoD {
+	target = path.Clean(filepath.ToSlash(target))
+	var d DoD
+	for _, c := range reg.Checks {
+		if selects(c.Scope, target) {
+			d.Items = append(d.Items, judge(c, root, evidence))
+		}
+	}
+	d.Pass = len(d.Items) > 0
+	for _, item := range d.Items {
+		d.Pass = d.Pass && (item.Status == StatusPass || item.Status == StatusExempt)
+	}
+	return d
 }

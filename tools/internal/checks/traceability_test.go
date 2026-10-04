@@ -19,11 +19,11 @@ Body text mentions FR-009 and SC-009 without defining them.
 `
 
 const tasksText = "# Tasks\n\n## Setup\n\n" +
-	"- [x] T001 Write pin checks in tools/internal/pin.go and Taskfile.yml\n" +
-	"  - Requirements: FR-001; ADRs: 0011. Depends on: none.\n" +
+	"- [x] T001 Write pin checks in tools/internal/pin.go and Taskfile.yml — closed 2026-10-02, evidence: evidence/T001.md\n" +
+	"  - Requirements: FR-001; ADRs: 0011. Depends on: none, confirmed 2026-10-01.\n" +
 	"  - Verify: `task verify:pins`: a missing tool is rejected.\n" +
 	"  - Evidence: `evidence/T001.md`; GREEN.\n\n" +
-	"- [ ] T002 [P] [US1] Implement trace rules in tools/internal/{trace,dod}.go, harness/checks.yaml\n" +
+	"- [ ] T002 [P] [US1] Implement trace/DoD rules in tools/internal/{trace,dod}.go, harness/checks.yaml (1.13.0 e.g.)\n" +
 	"  - Requirements: FR-002 active clauses C002.1–C002.2/C002.4, SC-001; ADRs: 0008, 0019. Depends on: T001.\n" +
 	"  - Verify: `task test:trace`: blanket lists fail.\n" +
 	"  - Evidence: `.local/evidence/001/t002.json`; initial status `not-run`.\n\n" +
@@ -103,8 +103,9 @@ func TestTraceabilityParse(t *testing.T) {
 		t.Errorf("BEHAVIORAL_RED: parsed tasks\n got %#v\nwant %#v", tasks, want)
 	}
 	for name, text := range map[string]string{
-		"empty":         "",
-		"no task lines": "# Tasks\n\nNothing planned.\n",
+		"empty":          "",
+		"no task lines":  "# Tasks\n\nNothing planned.\n",
+		"repeated field": strings.Replace(tasksText, "  - Evidence: `evidence/T001.md`; GREEN.\n", "  - Evidence: `evidence/T001.md`; GREEN.\n  - Evidence: other.json\n", 1),
 	} {
 		if _, err := ParseTasks(text); err == nil {
 			t.Errorf("BEHAVIORAL_RED: %s: zero discovered tasks accepted", name)
@@ -158,7 +159,7 @@ var traceControls = map[string]struct {
 		task(tr, "T004").Rationale["0002"] = " "
 	}, []string{"INCOMPLETE_RATIONALE"}},
 	"rationale for an unlisted ADR": {func(tr *Trace) {
-		task(tr, "T001").Rationale = map[string]string{"0011": "pins", "0008": "evidence"}
+		task(tr, "T001").Rationale = map[string]string{"0008": "evidence"}
 	}, []string{"INCOMPLETE_RATIONALE"}},
 	"task without requirements": {func(tr *Trace) {
 		tr.Tasks = append(tr.Tasks, Task{ID: "T005", Paths: []string{"tools/x.go"}, Verify: "`task x`", Evidence: "x.json"})
@@ -275,6 +276,7 @@ func TestTraceabilityRegistryStrict(t *testing.T) {
 		"check without scope":   strings.Replace(valid, `"scope": ["tools"]`, `"scope": []`, 1),
 		"absolute scope":        strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["/etc"]`, 1),
 		"escaping scope":        strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["tools/../.."]`, 1),
+		"parent scope":          strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["../x"]`, 1),
 		"not JSON-compatible":   "checks:\n  - id: V001\n",
 	} {
 		if _, err := ParseRegistry([]byte(text)); err == nil {
@@ -361,6 +363,7 @@ func TestDoDSelection(t *testing.T) {
 		"modules/naming/main.tf": "N1",
 		"modules/naming/tests":   "N1 N2",
 		"tools/other/x.go":       "O1",
+		".":                      "N1 N2 N3 O1",
 	} {
 		d := EvaluateDoD(dodRegistry(), root, path, nil)
 		var ids []string
@@ -437,6 +440,11 @@ func TestDoDRejected(t *testing.T) {
 			n.Reviewer = ""
 			e["N2"] = n
 		}, "N2", "review-required REVIEW_REQUIRED"},
+		"symlink in scope": {func(t *testing.T, root string, e map[string]Evidence) {
+			if err := os.Symlink("/etc/passwd", filepath.Join(root, "modules/naming/tests/link.hcl")); err != nil {
+				t.Fatal(err)
+			}
+		}, "N2", "fail SCOPE_UNREADABLE"},
 		"scope not created yet": {func(t *testing.T, root string, e map[string]Evidence) {
 			if err := os.RemoveAll(filepath.Join(root, "modules/naming/tests")); err != nil {
 				t.Fatal(err)
@@ -481,6 +489,15 @@ func TestDoDDigest(t *testing.T) {
 	}
 	if _, err := Digest(root, []string{"modules/naming"}); err == nil {
 		t.Error("BEHAVIORAL_RED: a symlink inside the scope was hashed")
+	}
+	if err := os.Symlink(filepath.Join(root, "modules/naming"), filepath.Join(root, "modules/alias")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Digest(root, []string{"modules/naming/other.tf"}); err != nil {
+		t.Fatalf("control: the renamed file is not hashable: %v", err)
+	}
+	if _, err := Digest(root, []string{"modules/alias/other.tf"}); err == nil {
+		t.Error("BEHAVIORAL_RED: a scope reached through a symlink was hashed")
 	}
 	if _, err := Digest(root, []string{"modules/absent"}); err == nil {
 		t.Error("BEHAVIORAL_RED: a missing scope was hashed")
