@@ -273,8 +273,10 @@ func snapshot(ctx context.Context, candidate, destination string) error {
 		if err != nil {
 			return err
 		}
+		// Never create parents: if cleanup removed scratch while an abandoned
+		// supervised read was blocked, a late write fails instead of recreating it.
 		if info.IsDir() {
-			if err := os.MkdirAll(target, 0700); err != nil {
+			if err := os.Mkdir(target, 0700); err != nil {
 				return err
 			}
 			for {
@@ -322,8 +324,8 @@ func snapshot(ctx context.Context, candidate, destination string) error {
 		}
 		count++
 		total += int64(len(data))
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return fmt.Errorf("INPUT_DEADLINE: %w", ctx.Err())
 		}
 		mode := os.FileMode(0600)
 		if sourceMode&0111 != 0 {
