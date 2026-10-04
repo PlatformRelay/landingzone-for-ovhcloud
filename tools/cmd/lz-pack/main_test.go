@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,24 @@ func bundle(t *testing.T) (string, string) {
 		}
 	}
 	if err := os.Symlink("/bin/busybox", filepath.Join(dir, "resources/rootfs/usr/bin/sh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../bin/busybox", filepath.Join(dir, "resources/rootfs/usr/bin/ls")); err != nil {
+		t.Fatal(err)
+	}
+	// A link may resolve to the rootfs itself.
+	if err := os.Symlink("..", filepath.Join(dir, "resources/rootfs/usr/top")); err != nil {
+		t.Fatal(err)
+	}
+	// Names and link targets past the 100-byte ustar limit need PAX records.
+	long := filepath.Join(dir, "resources/rootfs", strings.Repeat("d", 60), strings.Repeat("f", 60))
+	if err := os.MkdirAll(filepath.Dir(long), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(long, []byte("long"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/"+strings.Repeat("d", 60)+"/"+strings.Repeat("f", 60), filepath.Join(dir, "resources/rootfs/bin/long")); err != nil {
 		t.Fatal(err)
 	}
 	launcher := filepath.Join(root, "bwrap")
@@ -84,6 +103,9 @@ func layerEntries(t *testing.T, path string) ([]string, map[string]entry) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !unzipped.ModTime.IsZero() || unzipped.Name != "" || unzipped.Comment != "" || unzipped.Extra != nil {
+		t.Errorf("BEHAVIORAL_RED: gzip header carries host data: %+v", unzipped.Header)
+	}
 	reader := tar.NewReader(unzipped)
 	var names []string
 	entries := map[string]entry{}
@@ -115,9 +137,11 @@ func TestPackRoundTrip(t *testing.T) {
 		t.Fatalf("BEHAVIORAL_RED: blobs are not stored under their digests: %+v", result)
 	}
 	names, entries := layerEntries(t, blob(out, result.Layer))
+	longDir := "runtime/resources/rootfs/" + strings.Repeat("d", 60) + "/"
 	want := []string{"host/", "host/bwrap", "runtime/", "runtime/lz-offline", "runtime/resources/", "runtime/resources/rootfs/",
-		"runtime/resources/rootfs/bin/", "runtime/resources/rootfs/bin/busybox", "runtime/resources/rootfs/usr/", "runtime/resources/rootfs/usr/bin/",
-		"runtime/resources/rootfs/usr/bin/sh", "runtime/resources.json"}
+		"runtime/resources/rootfs/bin/", "runtime/resources/rootfs/bin/busybox", "runtime/resources/rootfs/bin/long", longDir, longDir + strings.Repeat("f", 60),
+		"runtime/resources/rootfs/usr/", "runtime/resources/rootfs/usr/bin/", "runtime/resources/rootfs/usr/bin/ls", "runtime/resources/rootfs/usr/bin/sh",
+		"runtime/resources/rootfs/usr/top", "runtime/resources.json"}
 	if strings.Join(names, " ") != strings.Join(want, " ") {
 		t.Errorf("BEHAVIORAL_RED: layer entries\n got %v\nwant %v", names, want)
 	}
@@ -128,6 +152,9 @@ func TestPackRoundTrip(t *testing.T) {
 		"runtime/resources/rootfs/usr/bin/sh":  {mode: 0o777, kind: tar.TypeSymlink, link: "/bin/busybox"},
 		"runtime/resources/rootfs/bin/busybox": {mode: 0o755, kind: tar.TypeReg, content: "content of resources/rootfs/bin/busybox"},
 		"host/bwrap":                           {mode: 0o755, kind: tar.TypeReg, content: "launcher"},
+		"runtime/resources/rootfs/usr/bin/ls":  {mode: 0o777, kind: tar.TypeSymlink, link: "../../bin/busybox"},
+		"runtime/resources/rootfs/bin/long":    {mode: 0o777, kind: tar.TypeSymlink, link: "/" + strings.Repeat("d", 60) + "/" + strings.Repeat("f", 60)},
+		longDir + strings.Repeat("f", 60):      {mode: 0o644, kind: tar.TypeReg, content: "long"},
 	}
 	for name, w := range checks {
 		got := entries[name]
@@ -265,58 +292,136 @@ func TestPackLayout(t *testing.T) {
 // faithfully, stops packing: hard links, special files, a launcher that is
 // not a regular file, a missing entry or manifest, and an existing output.
 func TestPackRefuses(t *testing.T) {
-	for name, damage := range map[string]func(t *testing.T, dir, launcher, out string) (string, string){
-		"hard link": func(t *testing.T, dir, launcher, out string) (string, string) {
+	for name, damage := range map[string]func(t *testing.T, dir, launcher, out string) (string, string, string){
+		"hard link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := os.Link(filepath.Join(dir, "resources.json"), filepath.Join(dir, "resources/copy")); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher
+			return dir, launcher, out
 		},
-		"named pipe": func(t *testing.T, dir, launcher, out string) (string, string) {
+		"named pipe": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := syscall.Mkfifo(filepath.Join(dir, "resources/pipe"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher
+			return dir, launcher, out
 		},
-		"launcher is a link": func(t *testing.T, dir, launcher, out string) (string, string) {
+		"launcher is a link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			link := launcher + "-link"
 			if err := os.Symlink(launcher, link); err != nil {
 				t.Fatal(err)
 			}
-			return dir, link
+			return dir, link, out
 		},
-		"no entry": func(t *testing.T, dir, launcher, out string) (string, string) {
+		"no entry": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := os.Remove(filepath.Join(dir, "lz-offline")); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher
+			return dir, launcher, out
 		},
-		"no manifest": func(t *testing.T, dir, launcher, out string) (string, string) {
+		"no manifest": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := os.Remove(filepath.Join(dir, "resources.json")); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher
+			return dir, launcher, out
 		},
-		"bundle is a link": func(t *testing.T, dir, launcher, out string) (string, string) {
+		"bundle is a link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			link := dir + "-link"
 			if err := os.Symlink(dir, link); err != nil {
 				t.Fatal(err)
 			}
-			return link, launcher
+			return link, launcher, out
 		},
-		"output exists": func(t *testing.T, dir, launcher, out string) (string, string) {
+		"no resources directory": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.RemoveAll(filepath.Join(dir, "resources")); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"link outside the rootfs": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Symlink("/tmp/tool", filepath.Join(dir, "resources/tool")); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"link escaping the rootfs": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Symlink("../../../../outside", filepath.Join(dir, "resources/rootfs/bin/out")); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"absolute link escaping the rootfs": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			// Counted from the rootfs, as the entry does, this leaves it.
+			if err := os.Symlink("/../outside", filepath.Join(dir, "resources/rootfs/usr/bin/esc")); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"output inside a bundle reached through a linked parent": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			link := filepath.Join(t.TempDir(), "via")
+			if err := os.Symlink(filepath.Dir(dir), link); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(link, filepath.Base(dir)), launcher, filepath.Join(dir, "layout")
+		},
+		"link to the rootfs parent": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Symlink("..", filepath.Join(dir, "resources/rootfs/up")); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"link in the bundle root": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Symlink("resources.json", filepath.Join(dir, "alias.json")); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"setuid file": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Chmod(filepath.Join(dir, "resources/rootfs/bin/busybox"), 0o755|fs.ModeSetuid); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"sticky directory": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Chmod(filepath.Join(dir, "resources/rootfs/usr"), 0o777|fs.ModeSticky); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"output inside the bundle": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			return dir, launcher, filepath.Join(dir, "layout")
+		},
+		"output inside the bundle through a link": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			link := filepath.Join(t.TempDir(), "via")
+			if err := os.Symlink(dir, link); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, filepath.Join(link, "layout")
+		},
+		"unreadable file": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			if err := os.Chmod(filepath.Join(dir, "resources/rootfs/bin/busybox"), 0o000); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, out
+		},
+		"output exists": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := os.Mkdir(out, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			return dir, launcher
+			return dir, launcher, out
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir, launcher := bundle(t)
 			out := filepath.Join(t.TempDir(), "layout")
-			dir, launcher = damage(t, dir, launcher, out)
+			dir, launcher, out = damage(t, dir, launcher, out)
 			if result, err := pack(dir, launcher, out); err == nil {
 				t.Errorf("BEHAVIORAL_RED: %s packed: %+v", name, result)
+			}
+			// A refused pack leaves nothing behind, and never removes a
+			// directory it did not create.
+			_, err := os.Lstat(out)
+			if exists := err == nil; exists != (name == "output exists") {
+				t.Errorf("BEHAVIORAL_RED: %s left output present=%v", name, exists)
 			}
 		})
 	}

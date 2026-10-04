@@ -2,6 +2,10 @@
 // single-layer OCI image layout, reproducibly: entries are sorted and carry
 // no host owner or time, so the same bundle always yields the same digests.
 // The layer holds runtime/ (the bundle with its entry) and host/bwrap.
+//
+// The whole bundle is checked before anything is written, against what the
+// entry's admission accepts, so a layout is produced only for a bundle the
+// entry can run.
 package main
 
 import (
@@ -17,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -31,6 +36,12 @@ type descriptor struct {
 	Size      int64  `json:"size"`
 }
 
+// item is one layer entry: its name in the layer and its source on disk.
+type item struct {
+	header *tar.Header
+	path   string
+}
+
 func digest(h hash.Hash) string { return "sha256:" + hex.EncodeToString(h.Sum(nil)) }
 
 // regular returns the file's metadata if it is a regular file reached
@@ -43,8 +54,13 @@ func regular(path string) (fs.FileInfo, error) {
 	return info, nil
 }
 
-// header describes one entry without host identity or time.
+// header describes one entry without host identity or time. Hard links,
+// special files and setuid, setgid or sticky bits are refused: a tar layer
+// extracted by an unprivileged user cannot reproduce them faithfully.
 func header(name string, info fs.FileInfo) (*tar.Header, error) {
+	if info.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0 {
+		return nil, fmt.Errorf("PACK_INPUT: special permission bit: %s", name)
+	}
 	h := &tar.Header{Name: name, Mode: int64(info.Mode().Perm()), ModTime: time.Unix(0, 0)}
 	switch {
 	case info.IsDir():
@@ -62,53 +78,69 @@ func header(name string, info fs.FileInfo) (*tar.Header, error) {
 	return h, nil
 }
 
-func add(w *tar.Writer, name, path string, info fs.FileInfo) error {
-	h, err := header(name, info)
-	if err != nil {
-		return err
+// linkAdmitted applies the entry's link rule: a link is allowed only inside
+// resources/rootfs and must resolve inside it, an absolute target counting
+// from the rootfs.
+func linkAdmitted(bundle, path, target string) bool {
+	rootfs := filepath.Join(bundle, "resources/rootfs")
+	if !strings.HasPrefix(path, rootfs+"/") {
+		return false
 	}
-	if h.Typeflag == tar.TypeSymlink {
-		if h.Linkname, err = os.Readlink(path); err != nil {
-			return err
-		}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(path), target))
+	if filepath.IsAbs(target) {
+		resolved = filepath.Join(rootfs, target)
 	}
-	if err := w.WriteHeader(h); err != nil {
-		return err
-	}
-	if h.Typeflag != tar.TypeReg {
-		return nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	// tar.Writer refuses a file that grew or shrank since its header.
-	_, err = io.Copy(w, file)
-	return err
+	return resolved == rootfs || strings.HasPrefix(resolved, rootfs+"/")
 }
 
-// layer writes the gzip-compressed tar to file and returns its digest, size
-// and the digest of the uncompressed tar (the config's diff_id).
-func layer(file *os.File, bundle, launcher string) (string, int64, string, error) {
-	compressed, uncompressed := sha256.New(), sha256.New()
-	counter := &count{}
-	zipper, err := gzip.NewWriterLevel(io.MultiWriter(file, compressed, counter), gzip.BestCompression)
+// outside reports an error unless out lies outside bundle, after resolving
+// links in both, so the layout cannot become part of its own input.
+func outside(bundle, out string) error {
+	realBundle, err := filepath.EvalSymlinks(bundle)
 	if err != nil {
-		return "", 0, "", err
+		return err
 	}
-	archive := tar.NewWriter(io.MultiWriter(zipper, uncompressed))
+	absolute, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+	if err != nil {
+		return fmt.Errorf("PACK_OUTPUT: parent directory required: %w", err)
+	}
+	target := filepath.Join(parent, filepath.Base(absolute))
+	// An output equal to the bundle already exists and is refused on creation.
+	if strings.HasPrefix(target, realBundle+"/") {
+		return fmt.Errorf("PACK_OUTPUT: output inside the bundle")
+	}
+	return nil
+}
+
+// plan checks the bundle and launcher and returns the layer's entries in
+// order: host/, host/bwrap, then the bundle under runtime/ in walk order.
+func plan(bundle, launcher string) ([]item, error) {
+	info, err := os.Lstat(bundle)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("PACK_INPUT: bundle must be a real directory: %s", bundle)
+	}
+	for _, name := range []string{"lz-offline", "resources.json"} {
+		if _, err := regular(filepath.Join(bundle, name)); err != nil {
+			return nil, err
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(bundle, "resources")); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("PACK_INPUT: resources must be a real directory")
+	}
 	launcherInfo, err := regular(launcher)
 	if err != nil {
-		return "", 0, "", err
+		return nil, err
+	}
+	launcherHeader, err := header("host/bwrap", launcherInfo)
+	if err != nil {
+		return nil, err
 	}
 	// Only the launcher comes from its host directory, not that directory's mode.
-	if err := archive.WriteHeader(&tar.Header{Name: "host/", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: time.Unix(0, 0)}); err != nil {
-		return "", 0, "", err
-	}
-	if err := add(archive, "host/bwrap", launcher, launcherInfo); err != nil {
-		return "", 0, "", err
-	}
+	items := []item{{&tar.Header{Name: "host/", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: time.Unix(0, 0)}, ""}, {launcherHeader, launcher}}
 	err = filepath.WalkDir(bundle, func(path string, entry fs.DirEntry, incoming error) error {
 		if incoming != nil {
 			return incoming
@@ -121,11 +153,44 @@ func layer(file *os.File, bundle, launcher string) (string, int64, string, error
 		if err != nil {
 			return err
 		}
-		name := filepath.ToSlash(filepath.Join("runtime", relative))
-		return add(archive, name, path, info)
+		h, err := header(filepath.ToSlash(filepath.Join("runtime", relative)), info)
+		if err != nil {
+			return err
+		}
+		if h.Typeflag == tar.TypeSymlink {
+			if h.Linkname, err = os.Readlink(path); err != nil {
+				return err
+			}
+			if !linkAdmitted(bundle, path, h.Linkname) {
+				return fmt.Errorf("PACK_INPUT: link the entry refuses: %s", relative)
+			}
+		}
+		items = append(items, item{h, path})
+		return nil
 	})
+	return items, err
+}
+
+// layer writes the planned entries as a gzip-compressed tar to file and
+// returns its digest, size and the digest of the uncompressed tar (the
+// config's diff_id).
+func layer(file *os.File, items []item) (string, int64, string, error) {
+	compressed, uncompressed := sha256.New(), sha256.New()
+	counter := &count{}
+	zipper, err := gzip.NewWriterLevel(io.MultiWriter(file, compressed, counter), gzip.BestCompression)
 	if err != nil {
 		return "", 0, "", err
+	}
+	archive := tar.NewWriter(io.MultiWriter(zipper, uncompressed))
+	for _, it := range items {
+		if err := archive.WriteHeader(it.header); err != nil {
+			return "", 0, "", err
+		}
+		if it.header.Typeflag == tar.TypeReg {
+			if err := copyFile(archive, it.path); err != nil {
+				return "", 0, "", err
+			}
+		}
 	}
 	if err := archive.Close(); err != nil {
 		return "", 0, "", err
@@ -134,6 +199,18 @@ func layer(file *os.File, bundle, launcher string) (string, int64, string, error
 		return "", 0, "", err
 	}
 	return digest(compressed), counter.n, digest(uncompressed), nil
+}
+
+// copyFile streams one file; tar.Writer refuses a file that grew or shrank
+// since its header.
+func copyFile(w io.Writer, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = io.Copy(w, file)
+	return err
 }
 
 type count struct{ n int64 }
@@ -151,19 +228,23 @@ func store(out, mediaType string, value any) (descriptor, error) {
 	return d, os.WriteFile(filepath.Join(out, "blobs", "sha256", hex.EncodeToString(sum[:])), data, 0o644)
 }
 
-func pack(bundle, launcher, out string) (packed, error) {
-	info, err := os.Lstat(bundle)
-	if err != nil || !info.IsDir() {
-		return packed{}, fmt.Errorf("PACK_INPUT: bundle must be a real directory: %s", bundle)
+func pack(bundle, launcher, out string) (result packed, err error) {
+	items, err := plan(bundle, launcher)
+	if err != nil {
+		return packed{}, err
 	}
-	for _, name := range []string{"lz-offline", "resources.json"} {
-		if _, err := regular(filepath.Join(bundle, name)); err != nil {
-			return packed{}, err
-		}
+	if err := outside(bundle, out); err != nil {
+		return packed{}, err
 	}
 	if err := os.Mkdir(out, 0o755); err != nil {
 		return packed{}, fmt.Errorf("PACK_OUTPUT: new directory required: %w", err)
 	}
+	// The output was created here, so a failed pack may remove it.
+	defer func() {
+		if err != nil {
+			os.RemoveAll(out)
+		}
+	}()
 	blobs := filepath.Join(out, "blobs", "sha256")
 	if err := os.MkdirAll(blobs, 0o755); err != nil {
 		return packed{}, err
@@ -172,14 +253,14 @@ func pack(bundle, launcher, out string) (packed, error) {
 	if err != nil {
 		return packed{}, err
 	}
-	layerDigest, layerSize, diffID, err := layer(file, bundle, launcher)
+	layerDigest, layerSize, diffID, err := layer(file, items)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
 		return packed{}, err
 	}
-	if err := os.Rename(file.Name(), filepath.Join(blobs, layerDigest[len("sha256:"):])); err != nil {
+	if err := os.Rename(file.Name(), filepath.Join(blobs, strings.TrimPrefix(layerDigest, "sha256:"))); err != nil {
 		return packed{}, err
 	}
 	config, err := store(out, "application/vnd.oci.image.config.v1+json", map[string]any{
