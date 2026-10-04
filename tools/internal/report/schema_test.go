@@ -57,6 +57,7 @@ func TestSchemaMatchesObservation(t *testing.T) {
 		"observation": {schema, reflect.TypeOf(Observation{})},
 		"run":         {*schema.Properties["runs"].Items, reflect.TypeOf(Run{})},
 		"diagnostic":  {*schema.Properties["diagnostics"].Items, reflect.TypeOf(Diagnostic{})},
+		"cleanup":     {*schema.Properties["cleanup"].Items, reflect.TypeOf(CleanupFailure{})},
 	} {
 		all, required := jsonFields(pair.typ)
 		schemaRequired := append([]string{}, pair.node.Required...)

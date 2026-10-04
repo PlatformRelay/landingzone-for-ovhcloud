@@ -47,8 +47,17 @@
     },
     "cleanup": {
       "type": "array",
-      "description": "tofu's failed_resources entries from test_cleanup events, verbatim.",
-      "items": { "type": "object" }
+      "description": "Resources tofu left in state, one per failed_resources entry of a test_cleanup event.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "run", "resource"],
+        "properties": {
+          "file": { "type": "string", "description": "The event's @testfile." },
+          "run": { "type": "string", "description": "The event's @testrun." },
+          "resource": { "type": "object", "description": "The failed_resources entry, verbatim." }
+        }
+      }
     },
     "reasons": {
       "type": "array",

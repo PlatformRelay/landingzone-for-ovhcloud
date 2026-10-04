@@ -82,6 +82,33 @@ func TestWarningsOnPassingRunRendered(t *testing.T) {
 	}
 }
 
+// After XML decoding, the observation case still holds tofu's complete
+// diagnostic objects and cleanup records with their context.
+func TestRawDiagnosticsSurviveDecoding(t *testing.T) {
+	observationOut := func(parsed suites) string {
+		for _, c := range parsed.Suites[0].Cases {
+			if c.Class == "report" && c.Name == "observation" {
+				return c.SystemOut
+			}
+		}
+		return ""
+	}
+	_, parsed, _ := convert(t, "fail", 1)
+	out := observationOut(parsed)
+	for _, field := range []string{`"range"`, `"snippet"`, `"difference"`, "main.tftest.hcl/greets"} {
+		if !strings.Contains(out, field) {
+			t.Errorf("BEHAVIORAL_RED: decoded JUnit lost %s:\n%s", field, out)
+		}
+	}
+	_, parsed, _ = convert(t, "cleanup", 0)
+	out = observationOut(parsed)
+	for _, field := range []string{"terraform_data.x", "main.tftest.hcl/applies", `"address"`} {
+		if !strings.Contains(out, field) {
+			t.Errorf("BEHAVIORAL_RED: decoded JUnit lost cleanup %s:\n%s", field, out)
+		}
+	}
+}
+
 func TestMalformedInputFails(t *testing.T) {
 	var out bytes.Buffer
 	if code := run(strings.NewReader("not json\n"), &out, 0); code == 0 || !strings.Contains(out.String(), "MALFORMED_STREAM") {
