@@ -305,6 +305,12 @@ func parseGoTest(words []string) (verifyRun, bool) {
 	words = words[1:]
 	var run verifyRun
 	for len(words) > 0 && !strings.HasPrefix(words[0], "-") {
+		// Only "." and "./…" select directories of this module; anything else
+		// is an import path, which says nothing about the task's files.
+		if words[0] != "." && !strings.HasPrefix(words[0], "./") {
+			words = words[1:]
+			continue
+		}
 		if tree, ok := strings.CutSuffix(words[0], "/..."); ok {
 			run.Trees = append(run.Trees, path.Join(base, tree))
 		} else {

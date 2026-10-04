@@ -229,6 +229,16 @@ var traceControls = map[string]struct {
 		task(tr, "T004").Paths = []string{"harness/sub/checks.yaml"}
 		task(tr, "T004").Verify = "`go test ./harness -count=1`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
+	"go test of an import path, not a relative package": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test harness -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"go test of an import-path tree": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test harness/... -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"go test of the current package": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"checks.yaml"}
+		task(tr, "T004").Verify = "`go test . -count=1`"
+	}, nil},
 	"go test of a package tree": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`go test ./... -count=1`"
 	}, nil},
