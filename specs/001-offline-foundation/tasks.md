@@ -219,14 +219,15 @@ Independent test: V003, V008.
 | `task decision-map:check` | T018 |
 | `task verify:latency` | T021 |
 | `task check` | T009 (selection); T021 (complete naming aggregate) |
+| `task test:runtime-image` | T023 |
 | `task test:foundation-ci` | T023 |
 | `task ci:foundation` | T023 |
 
 ## Conditional CI bootstrap
 
-- [ ] T023 Test first, then implement minimal GitHub foundation CI in .github/workflows/foundation.yml, pipelines/github/foundation-source.json, tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
+- [ ] T023 Test first, then implement minimal GitHub foundation CI in .github/workflows/foundation.yml, pipelines/github/foundation-source.json, tools/cmd/lz-pack/ (reproducible runtime image), tools/internal/checks/foundation_ci_test.go, tools/internal/checks/foundation_ci.go and Taskfile.yml
   - Requirements: FR-010 active clauses C010.1–C010.4/C010.6, SC-005; ADRs: 0007, 0008, 0011, 0021. Depends on: T009; evidenced T001–T009 completion, independent review of exact workflow/launcher closure and actual GitHub execution available. C010.5/P4 remain DEFERRED under D60, not prerequisites for this task or current private maintainer publication/PR/merge.
-  - Verify: Planned child `task test:foundation-ci; task ci:foundation`. Write approved-source/candidate fixtures first; retain behavioral red for each active C010 clause before implementation. Reject unpinned Actions, widened authority, candidate host execution, omitted/zero/skipped checks and stale source/head.
+  - Verify: Planned child `task test:runtime-image; task test:foundation-ci; task ci:foundation`. Write approved-source/candidate fixtures first; retain behavioral red for each active C010 clause before implementation. Reject unpinned Actions, widened authority, candidate host execution, omitted/zero/skipped checks and stale source/head.
   - Deferred source admission: [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) retains the frozen-workflow/no-bypass ruleset, disposable source-admission experiment, initial-history/rebase-merge admission, edit/add/rename/delete/second-push denials and setup/cleanup/recovery qualification. These remain owed, not green; minimal T023 does not qualify pre-execution source enforcement.
   - CI proof: execute the T003/T005/T007/T009 aggregate in T003 isolation. Independently reviewed YAML uses full-SHA Actions and digest-pinned approved host launcher/image, owned-branch push triggers, ephemeral hosted runner, contents-read outer fetch and 10-minute timeout; candidate archive is data, never host checkout/build/source/execution. Tokens stay outside the child. Retain tests green, an actual failing behavioral run and valid GitHub run/check on the foundation PR head. Verify executed workflow/launcher/image/publisher identities, exact candidate SHA, counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge, not review PR creation; no cloud/deployment/protected-environment authority. Creates both child targets, source manifest and the active V009 packet; full T010–T012 qualification remains open.
   - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain pre-implementation red, green controls, independent source review, actual run/check IDs and exact head/source bindings, plus the V009 packet reference. Record C010.5/P4 as DEFERRED to KI-001, never passed or silently omitted.
