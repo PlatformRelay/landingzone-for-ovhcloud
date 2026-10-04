@@ -21,6 +21,7 @@ const registry = `{"schema_version": 1,
  "requirements": {"FR-001": {"adrs": ["0011"]}, "SC-001": {"adrs": ["0011"]}},
  "evaluators": [],
  "producers": ["test-producer"],
+ "procedures": {},
  "checks": [{"id": "pins", "requirements": ["FR-001", "SC-001"], "command": "task pins", "creator": "T001", "kind": "behavioral", "scope": ["tools"]}]}
 `
 

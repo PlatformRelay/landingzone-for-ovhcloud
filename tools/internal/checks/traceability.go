@@ -56,12 +56,14 @@ type CheckDefinition struct {
 
 // Registry is harness/checks.yaml. Evaluators are Task targets that judge
 // checks rather than being checks; Producers are the evidence producers whose
-// output DoD may accept as a pass.
+// output DoD may accept as a pass; Procedures names, with a reason, the tasks
+// verified by an approved external procedure instead of a runnable check.
 type Registry struct {
 	Requirements map[string]Requirement `json:"requirements"`
 	Checks       []CheckDefinition      `json:"checks"`
 	Evaluators   []string               `json:"evaluators"`
 	Producers    []string               `json:"producers"`
+	Procedures   map[string]string      `json:"procedures"`
 }
 
 // Trace is everything the trace rules read.
@@ -86,6 +88,7 @@ var TraceRules = []string{
 	"UNKNOWN_ADR", "UNKNOWN_CREATOR", "UNKNOWN_REQUIREMENT", "UNMAPPED_REQUIREMENT",
 	"UNMAPPED_TASK", "UNREGISTERED_REQUIREMENT", "UNRELATED_ADR",
 	"MISSING_ADR", "UNKNOWN_CHECK", "CHECK_NOT_VERIFIED",
+	"UNRELATED_CHECK", "NO_APPLICABLE_CHECK", "UNKNOWN_PROCEDURE",
 }
 
 const (
@@ -129,11 +132,14 @@ var (
 	adrID           = regexp.MustCompile(`\b\d{4}\b`)
 	rationaleEntry  = regexp.MustCompile(`^(\d{4})\b\s*(.*)$`)
 	verifyCommand   = regexp.MustCompile("`[^`]+`")
-	taskTarget      = regexp.MustCompile(`(?:^|[\s;(&|])task\s+([a-z][a-z0-9:_-]*)`)
+	targetName      = regexp.MustCompile(`^[a-z][a-z0-9:_-]*$`)
+	commandSplit    = regexp.MustCompile(`;|&&|\|\|`)
 	exemption       = regexp.MustCompile(`^exempt\s+(?:—|-{1,2})\s+docs-only\b;?\s*(.*)$`)
-	// A path is a token ending in a known file extension or in "/"; prose
-	// such as "trace/DoD" is neither.
-	pathToken = regexp.MustCompile(`^(?:[\w.{},-]+/)*[\w.{},-]*\.(?:md|go|mod|ya?ml|json|hcl|tf|py|sh|toml|rego)$|^(?:[\w.{},-]+/)+$`)
+	evidenceFile    = regexp.MustCompile("^`[\\w.{},/-]*[\\w}]\\.[A-Za-z][A-Za-z0-9]{1,7}`")
+	// A path is any token with a "/" or of the form name.ext, whatever the
+	// extension. Prose such as "trace/DoD" counts too, which only ever makes
+	// a docs-only exemption stricter.
+	pathToken = regexp.MustCompile(`^[\w.{},-]*/[\w.{},/-]*$|^[\w.{},-]*[\w}]\.[A-Za-z][A-Za-z0-9]{1,7}$`)
 )
 
 // ParseSpec returns the requirement and success-criterion ids a spec defines,
@@ -159,16 +165,101 @@ func textPaths(text string) []string {
 	return paths
 }
 
-// verifyTargets returns the Task targets named inside the command spans of a
-// Verify text.
-func verifyTargets(verify string) []string {
-	var targets []string
+// verifyRun is one command of a Verify text that runs a check: a Task target,
+// or a direct test command and the directories it exercises.
+type verifyRun struct {
+	Target string
+	Dirs   []string
+}
+
+// verifyRuns returns the commands inside a Verify text's command spans that
+// actually run something. A command counts only in a restricted grammar:
+// `task <target> [-- args]`, optionally through the offline entry
+// (`…/lz-offline --candidate <checkout> -- task …`); `go [-C dir] test <pkgs>`
+// with only -run, -count, -v, -tags or -timeout; and
+// `[mise exec --] tofu -chdir=<dir> test`. Printing (`echo task x`), dry runs,
+// pipes, listing flags and an empty -run pattern do not count.
+func verifyRuns(verify string) []verifyRun {
+	var runs []verifyRun
 	for _, span := range verifyCommand.FindAllString(verify, -1) {
-		for _, m := range taskTarget.FindAllStringSubmatch(strings.Trim(span, "`"), -1) {
-			targets = append(targets, m[1])
+		for _, segment := range commandSplit.Split(strings.Trim(span, "`"), -1) {
+			if run, ok := parseRun(strings.Fields(segment)); ok {
+				runs = append(runs, run)
+			}
 		}
 	}
-	return targets
+	return runs
+}
+
+func parseRun(words []string) (verifyRun, bool) {
+	if len(words) >= 4 && strings.HasSuffix(words[0], "/lz-offline") && words[1] == "--candidate" && words[3] == "--" {
+		words = words[4:]
+	}
+	if len(words) >= 3 && words[0] == "mise" && words[1] == "exec" && words[2] == "--" {
+		words = words[3:]
+	}
+	switch {
+	case len(words) >= 2 && words[0] == "task":
+		if !targetName.MatchString(words[1]) || len(words) > 2 && words[2] != "--" {
+			return verifyRun{}, false
+		}
+		return verifyRun{Target: words[1]}, true
+	case len(words) == 3 && words[0] == "tofu" && strings.HasPrefix(words[1], "-chdir=") && words[2] == "test":
+		return verifyRun{Dirs: []string{path.Clean(strings.TrimPrefix(words[1], "-chdir="))}}, true
+	case len(words) >= 2 && words[0] == "go":
+		return parseGoTest(words[1:])
+	}
+	return verifyRun{}, false
+}
+
+// goTestFlags lists the go test flags a verifying run may use and whether each
+// takes a value.
+var goTestFlags = map[string]bool{"-run": true, "-count": true, "-v": false, "-tags": true, "-timeout": true}
+
+func parseGoTest(words []string) (verifyRun, bool) {
+	base := "."
+	if len(words) >= 2 && words[0] == "-C" {
+		base, words = words[1], words[2:]
+	}
+	if len(words) == 0 || words[0] != "test" {
+		return verifyRun{}, false
+	}
+	words = words[1:]
+	var run verifyRun
+	for len(words) > 0 && !strings.HasPrefix(words[0], "-") {
+		run.Dirs = append(run.Dirs, path.Join(base, words[0]))
+		words = words[1:]
+	}
+	for len(words) > 0 {
+		name, value, inline := strings.Cut(words[0], "=")
+		takesValue, known := goTestFlags[name]
+		if !known {
+			return verifyRun{}, false
+		}
+		words = words[1:]
+		if takesValue && !inline {
+			if len(words) == 0 {
+				return verifyRun{}, false
+			}
+			value, words = words[0], words[1:]
+		}
+		if name == "-run" && strings.Trim(value, `"'`) == "^$" {
+			return verifyRun{}, false
+		}
+	}
+	return run, true
+}
+
+// exercises reports whether a test run covers one of the task's paths.
+func exercises(run verifyRun, paths []string) bool {
+	for _, dir := range run.Dirs {
+		for _, p := range paths {
+			if p == dir || strings.HasPrefix(p, dir+"/") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ParseTasks reads every `- [ ] Tnnn` entry and its fields. A field given
@@ -354,6 +445,7 @@ func ParseRegistry(data []byte) (Registry, error) {
 		Requirements  map[string]Requirement `json:"requirements"`
 		Evaluators    []string               `json:"evaluators"`
 		Producers     []string               `json:"producers"`
+		Procedures    map[string]string      `json:"procedures"`
 		Checks        []CheckDefinition      `json:"checks"`
 	}
 	if err := DecodeStrict(data, &file); err != nil {
@@ -386,7 +478,21 @@ func ParseRegistry(data []byte) (Registry, error) {
 			}
 		}
 	}
-	return Registry{Requirements: file.Requirements, Checks: file.Checks, Evaluators: file.Evaluators, Producers: file.Producers}, nil
+	for id, reason := range file.Procedures {
+		if strings.TrimSpace(reason) == "" {
+			return Registry{}, fmt.Errorf("REGISTRY_PROCEDURE: %s has no reason", id)
+		}
+	}
+	return Registry{Requirements: file.Requirements, Checks: file.Checks, Evaluators: file.Evaluators, Producers: file.Producers, Procedures: file.Procedures}, nil
+}
+
+func shares(a, b []string) bool {
+	for _, item := range a {
+		if set(b)[item] {
+			return true
+		}
+	}
+	return false
 }
 
 func set(items []string) map[string]bool {
@@ -406,8 +512,10 @@ func CheckTrace(t Trace) []Finding {
 	}
 	defined, knownADR := set(t.Requirements), set(t.ADRs)
 	registered, evaluators := map[string]bool{}, set(t.Registry.Evaluators)
+	checkRequirements := map[string][]string{}
 	for _, c := range t.Registry.Checks {
 		registered[c.ID] = true
+		checkRequirements[c.ID] = c.Requirements
 	}
 	specWide := map[string]bool{}
 	for _, r := range t.Requirements {
@@ -477,19 +585,34 @@ func CheckTrace(t Trace) []Finding {
 			if !docsOnly {
 				add("INVALID_EXEMPTION", task.ID, "a docs-only exemption needs a reason and Markdown paths only")
 			}
+		} else if !verifyCommand.MatchString(task.Verify) {
+			add("MISSING_VERIFY", task.ID, "Verify names no command")
 		} else {
-			if !verifyCommand.MatchString(task.Verify) {
-				add("MISSING_VERIFY", task.ID, "Verify names no command")
-			}
-			runs[task.ID] = set(verifyTargets(task.Verify))
-			for target := range runs[task.ID] {
-				if !registered[target] && !evaluators[target] {
-					add("UNKNOWN_CHECK", task.ID, "Verify runs task %s, which is neither a registered check nor an evaluator", target)
+			targets, applicable := map[string]bool{}, false
+			for _, run := range verifyRuns(task.Verify) {
+				if run.Target == "" {
+					applicable = applicable || exercises(run, task.Paths)
+					continue
+				}
+				targets[run.Target] = true
+				switch {
+				case evaluators[run.Target]:
+					applicable = true
+				case !registered[run.Target]:
+					add("UNKNOWN_CHECK", task.ID, "Verify runs task %s, which is neither a registered check nor an evaluator", run.Target)
+				case shares(checkRequirements[run.Target], task.Requirements):
+					applicable = true
+				default:
+					add("UNRELATED_CHECK", task.ID, "Verify runs task %s, which checks none of %v", run.Target, task.Requirements)
 				}
 			}
+			runs[task.ID] = targets
+			if !applicable && t.Registry.Procedures[task.ID] == "" {
+				add("NO_APPLICABLE_CHECK", task.ID, "Verify runs no check or test of the task's own requirements or paths")
+			}
 		}
-		if len(textPaths(task.Evidence)) == 0 {
-			add("MISSING_EVIDENCE", task.ID, "Evidence names no evidence path")
+		if !evidenceFile.MatchString(task.Evidence) {
+			add("MISSING_EVIDENCE", task.ID, "Evidence does not start with a quoted evidence file")
 		}
 	}
 
@@ -509,6 +632,11 @@ func CheckTrace(t Trace) []Finding {
 			add("INVALID_EXEMPTION", c.ID, "docs check created by %s, which is not a docs-only task", c.Creator)
 		case c.Kind != KindDocs && !runs[c.Creator][c.ID]:
 			add("CHECK_NOT_VERIFIED", c.ID, "creator %s's Verify never runs task %s", c.Creator, c.ID)
+		}
+	}
+	for id := range t.Registry.Procedures {
+		if _, ok := tasks[id]; !ok {
+			add("UNKNOWN_PROCEDURE", id, "procedure registered for a task that does not exist")
 		}
 	}
 	for _, r := range t.Requirements {
