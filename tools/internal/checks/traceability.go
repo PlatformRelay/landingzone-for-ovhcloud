@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -40,7 +40,9 @@ type Requirement struct {
 	ADRs []string `json:"adrs"`
 }
 
-// CheckDefinition is one entry of the check registry.
+// CheckDefinition is one entry of the check registry. Scope selects the paths
+// the check applies to; Scope and Inputs together are what its evidence must
+// be fresh for.
 type CheckDefinition struct {
 	ID           string   `json:"id"`
 	Requirements []string `json:"requirements"`
@@ -48,13 +50,18 @@ type CheckDefinition struct {
 	Creator      string   `json:"creator"`
 	Kind         string   `json:"kind"`
 	Scope        []string `json:"scope"`
+	Inputs       []string `json:"inputs,omitempty"`
 	Review       bool     `json:"review,omitempty"`
 }
 
-// Registry is harness/checks.yaml.
+// Registry is harness/checks.yaml. Evaluators are Task targets that judge
+// checks rather than being checks; Producers are the evidence producers whose
+// output DoD may accept as a pass.
 type Registry struct {
 	Requirements map[string]Requirement `json:"requirements"`
 	Checks       []CheckDefinition      `json:"checks"`
+	Evaluators   []string               `json:"evaluators"`
+	Producers    []string               `json:"producers"`
 }
 
 // Trace is everything the trace rules read.
@@ -78,6 +85,7 @@ var TraceRules = []string{
 	"MISSING_EVIDENCE", "MISSING_PATHS", "MISSING_VERIFY", "UNCHECKED_REQUIREMENT",
 	"UNKNOWN_ADR", "UNKNOWN_CREATOR", "UNKNOWN_REQUIREMENT", "UNMAPPED_REQUIREMENT",
 	"UNMAPPED_TASK", "UNREGISTERED_REQUIREMENT", "UNRELATED_ADR",
+	"MISSING_ADR", "UNKNOWN_CHECK", "CHECK_NOT_VERIFIED",
 }
 
 const (
@@ -97,6 +105,7 @@ type Evidence struct {
 	Discovered  int    `json:"discovered"`
 	Failed      int    `json:"failed"`
 	Reviewer    string `json:"reviewer,omitempty"`
+	Producer    string `json:"producer"`
 }
 
 // Item is one check's DoD status.
@@ -120,6 +129,7 @@ var (
 	adrID           = regexp.MustCompile(`\b\d{4}\b`)
 	rationaleEntry  = regexp.MustCompile(`^(\d{4})\b\s*(.*)$`)
 	verifyCommand   = regexp.MustCompile("`[^`]+`")
+	taskTarget      = regexp.MustCompile(`(?:^|[\s;(&|])task\s+([a-z][a-z0-9:_-]*)`)
 	exemption       = regexp.MustCompile(`^exempt\s+(?:—|-{1,2})\s+docs-only\b;?\s*(.*)$`)
 	// A path is a token ending in a known file extension or in "/"; prose
 	// such as "trace/DoD" is neither.
@@ -136,20 +146,29 @@ func ParseSpec(text string) []string {
 	return ids
 }
 
-func titlePaths(title string) []string {
-	title, _, _ = strings.Cut(title, " — ")
+// textPaths returns the path tokens of a title or evidence line, up to an
+// em-dash annotation such as "— closed …".
+func textPaths(text string) []string {
+	text, _, _ = strings.Cut(text, " — ")
 	var paths []string
-	for _, token := range strings.Fields(title) {
-		token = strings.TrimLeft(strings.TrimRight(token, ",;:)"), "(`")
-		token = strings.TrimSuffix(token, "`")
-		if !pathToken.MatchString(token) {
-			token = strings.TrimSuffix(token, ".")
-		}
-		if pathToken.MatchString(token) {
+	for _, token := range strings.Fields(text) {
+		if token = strings.TrimLeft(strings.TrimRight(token, ",;:).`"), "(`"); pathToken.MatchString(token) {
 			paths = append(paths, token)
 		}
 	}
 	return paths
+}
+
+// verifyTargets returns the Task targets named inside the command spans of a
+// Verify text.
+func verifyTargets(verify string) []string {
+	var targets []string
+	for _, span := range verifyCommand.FindAllString(verify, -1) {
+		for _, m := range taskTarget.FindAllStringSubmatch(strings.Trim(span, "`"), -1) {
+			targets = append(targets, m[1])
+		}
+	}
+	return targets
 }
 
 // ParseTasks reads every `- [ ] Tnnn` entry and its fields. A field given
@@ -161,7 +180,7 @@ func ParseTasks(text string) ([]Task, error) {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if m := taskLine.FindStringSubmatch(line); m != nil {
-			tasks = append(tasks, Task{ID: m[1], Paths: titlePaths(m[2])})
+			tasks = append(tasks, Task{ID: m[1], Paths: textPaths(m[2])})
 			current, seen = len(tasks)-1, map[string]bool{}
 			continue
 		}
@@ -218,7 +237,7 @@ func ParseTasks(text string) ([]Task, error) {
 }
 
 // noDuplicateKeys walks a JSON document and refuses any object that repeats a
-// key; encoding/json would silently keep the last one.
+// key; decoding into a map or struct would silently keep the last one.
 func noDuplicateKeys(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var walk func() error
@@ -259,25 +278,72 @@ func noDuplicateKeys(data []byte) error {
 	return walk()
 }
 
-func cleanRelative(p string) bool {
-	return p != "" && !path.IsAbs(p) && path.Clean(p) == p && p != "." && p != ".." && !strings.HasPrefix(p, "../")
+// conforms checks the parts of a decoded JSON document that json.Unmarshal
+// would let through: object keys must equal a field's JSON name exactly
+// (Unmarshal also accepts other letter cases), fields without omitempty must be
+// present, and no value may be null (Unmarshal reads null as the zero value).
+// Type and shape mismatches are left to Unmarshal, which rejects them.
+func conforms(value any, t reflect.Type, at string) error {
+	if value == nil {
+		return fmt.Errorf("%s: null", at)
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		object, _ := value.(map[string]any)
+		fields := map[string]reflect.Type{}
+		for i := 0; i < t.NumField(); i++ {
+			name, options, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			fields[name] = t.Field(i).Type
+			if _, present := object[name]; !present && !strings.Contains(options, "omitempty") {
+				return fmt.Errorf("%s.%s: required", at, name)
+			}
+		}
+		for key, item := range object {
+			field, known := fields[key]
+			if !known {
+				return fmt.Errorf("%s.%s: unknown field", at, key)
+			}
+			if err := conforms(item, field, at+"."+key); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		object, _ := value.(map[string]any)
+		for key, item := range object {
+			if err := conforms(item, t.Elem(), at+"."+key); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		array, _ := value.([]any)
+		for i, item := range array {
+			if err := conforms(item, t.Elem(), fmt.Sprintf("%s[%d]", at, i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-// DecodeStrict decodes exactly one JSON document into v, refusing duplicate
-// keys, unknown fields and trailing data.
+// DecodeStrict decodes exactly one JSON document into v, a pointer to a
+// struct, refusing duplicate or case-variant keys, unknown fields, missing
+// required fields, nulls, mismatched types and trailing data.
 func DecodeStrict(data []byte, v any) error {
 	if err := noDuplicateKeys(data); err != nil {
 		return err
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
 		return err
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return errors.New("data after the document")
+	if err := conforms(document, reflect.TypeOf(v).Elem(), "$"); err != nil {
+		return err
 	}
-	return nil
+	return json.Unmarshal(data, v)
+}
+
+func cleanRelative(p string) bool {
+	return p != "" && !path.IsAbs(p) && path.Clean(p) == p && p != "." && p != ".." && !strings.HasPrefix(p, "../")
 }
 
 // ParseRegistry decodes harness/checks.yaml. The file is YAML written in its
@@ -286,6 +352,8 @@ func ParseRegistry(data []byte) (Registry, error) {
 	var file struct {
 		SchemaVersion int                    `json:"schema_version"`
 		Requirements  map[string]Requirement `json:"requirements"`
+		Evaluators    []string               `json:"evaluators"`
+		Producers     []string               `json:"producers"`
 		Checks        []CheckDefinition      `json:"checks"`
 	}
 	if err := DecodeStrict(data, &file); err != nil {
@@ -306,16 +374,19 @@ func ParseRegistry(data []byte) (Registry, error) {
 		if c.Kind != KindBehavioral && c.Kind != KindDocs {
 			return Registry{}, fmt.Errorf("REGISTRY_KIND: %s: %q", c.ID, c.Kind)
 		}
+		if c.Kind == KindBehavioral && c.Command != "task "+c.ID && !strings.HasPrefix(c.Command, "task "+c.ID+" ") {
+			return Registry{}, fmt.Errorf("REGISTRY_COMMAND: %s must run task %s", c.ID, c.ID)
+		}
 		if len(c.Scope) == 0 {
 			return Registry{}, fmt.Errorf("REGISTRY_SCOPE: %s has no scope", c.ID)
 		}
-		for _, s := range c.Scope {
+		for _, s := range append(append([]string{}, c.Scope...), c.Inputs...) {
 			if !cleanRelative(s) {
 				return Registry{}, fmt.Errorf("REGISTRY_SCOPE: %s: %q is not a clean relative path", c.ID, s)
 			}
 		}
 	}
-	return Registry{Requirements: file.Requirements, Checks: file.Checks}, nil
+	return Registry{Requirements: file.Requirements, Checks: file.Checks, Evaluators: file.Evaluators, Producers: file.Producers}, nil
 }
 
 func set(items []string) map[string]bool {
@@ -334,6 +405,10 @@ func CheckTrace(t Trace) []Finding {
 		findings = append(findings, Finding{Rule: rule, Subject: subject, Detail: fmt.Sprintf(format, args...)})
 	}
 	defined, knownADR := set(t.Requirements), set(t.ADRs)
+	registered, evaluators := map[string]bool{}, set(t.Registry.Evaluators)
+	for _, c := range t.Registry.Checks {
+		registered[c.ID] = true
+	}
 	specWide := map[string]bool{}
 	for _, r := range t.Requirements {
 		for _, a := range t.Registry.Requirements[r].ADRs {
@@ -341,15 +416,17 @@ func CheckTrace(t Trace) []Finding {
 		}
 	}
 
-	taskIDs, mapped := map[string]bool{}, map[string]bool{}
+	tasks, mapped := map[string]Task{}, map[string]bool{}
+	runs := map[string]map[string]bool{}
 	for _, task := range t.Tasks {
-		if taskIDs[task.ID] {
+		if _, seen := tasks[task.ID]; seen {
 			add("DUPLICATE_TASK", task.ID, "task defined more than once")
 		}
-		taskIDs[task.ID] = true
+		tasks[task.ID] = task
 		if len(task.Requirements) == 0 {
 			add("UNMAPPED_TASK", task.ID, "task names no requirement")
 		}
+		listed := set(task.ADRs)
 		relevant := map[string]bool{}
 		for _, r := range task.Requirements {
 			if !defined[r] {
@@ -357,11 +434,15 @@ func CheckTrace(t Trace) []Finding {
 				continue
 			}
 			mapped[r] = true
+			covered := false
 			for _, a := range t.Registry.Requirements[r].ADRs {
 				relevant[a] = true
+				covered = covered || listed[a]
+			}
+			if !covered && len(t.Registry.Requirements[r].ADRs) > 0 {
+				add("MISSING_ADR", task.ID, "lists none of the ADRs relevant to %s", r)
 			}
 		}
-		listed := set(task.ADRs)
 		for _, a := range task.ADRs {
 			if !knownADR[a] {
 				add("UNKNOWN_ADR", task.ID, "ADR %s does not exist", a)
@@ -396,11 +477,19 @@ func CheckTrace(t Trace) []Finding {
 			if !docsOnly {
 				add("INVALID_EXEMPTION", task.ID, "a docs-only exemption needs a reason and Markdown paths only")
 			}
-		} else if !verifyCommand.MatchString(task.Verify) {
-			add("MISSING_VERIFY", task.ID, "Verify names no command")
+		} else {
+			if !verifyCommand.MatchString(task.Verify) {
+				add("MISSING_VERIFY", task.ID, "Verify names no command")
+			}
+			runs[task.ID] = set(verifyTargets(task.Verify))
+			for target := range runs[task.ID] {
+				if !registered[target] && !evaluators[target] {
+					add("UNKNOWN_CHECK", task.ID, "Verify runs task %s, which is neither a registered check nor an evaluator", target)
+				}
+			}
 		}
-		if strings.TrimSpace(task.Evidence) == "" {
-			add("MISSING_EVIDENCE", task.ID, "no evidence path")
+		if len(textPaths(task.Evidence)) == 0 {
+			add("MISSING_EVIDENCE", task.ID, "Evidence names no evidence path")
 		}
 	}
 
@@ -412,15 +501,21 @@ func CheckTrace(t Trace) []Finding {
 			}
 			checked[r] = true
 		}
-		if !taskIDs[c.Creator] {
+		creator, ok := tasks[c.Creator]
+		switch {
+		case !ok:
 			add("UNKNOWN_CREATOR", c.ID, "creator %s is not a task", c.Creator)
+		case c.Kind == KindDocs && !creator.Exempt:
+			add("INVALID_EXEMPTION", c.ID, "docs check created by %s, which is not a docs-only task", c.Creator)
+		case c.Kind != KindDocs && !runs[c.Creator][c.ID]:
+			add("CHECK_NOT_VERIFIED", c.ID, "creator %s's Verify never runs task %s", c.Creator, c.ID)
 		}
 	}
 	for _, r := range t.Requirements {
 		if !mapped[r] {
 			add("UNMAPPED_REQUIREMENT", r, "no task implements it")
 		}
-		if _, ok := t.Registry.Requirements[r]; !ok {
+		if len(t.Registry.Requirements[r].ADRs) == 0 {
 			add("UNREGISTERED_REQUIREMENT", r, "the registry records no relevant ADRs")
 		}
 		if !checked[r] {
@@ -448,17 +543,16 @@ func noSymlinkComponents(root, scope string) error {
 	return nil
 }
 
-// Digest is the SHA-256 of the relative paths and contents of every file
-// under each scope entry. A missing scope wraps fs.ErrNotExist; a symlink or
-// special file is refused.
-func Digest(root string, scope []string) (string, error) {
-	h := sha256.New()
+// walkScope visits every regular file under each scope entry with its path
+// relative to root. A missing scope wraps fs.ErrNotExist; a symlink or special
+// file is refused.
+func walkScope(root string, scope []string, visit func(rel, file string) error) error {
 	for _, s := range scope {
 		if !cleanRelative(s) {
-			return "", fmt.Errorf("%w: %q is not a clean relative path", errUnreadable, s)
+			return fmt.Errorf("%w: %q is not a clean relative path", errUnreadable, s)
 		}
 		if err := noSymlinkComponents(root, s); err != nil {
-			return "", err
+			return err
 		}
 		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(s)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -470,23 +564,51 @@ func Digest(root string, scope []string) (string, error) {
 			if !d.Type().IsRegular() {
 				return fmt.Errorf("%w: %s is not a regular file", errUnreadable, p)
 			}
-			data, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
 			rel, err := filepath.Rel(root, p)
 			if err != nil {
 				return err
 			}
-			sum := sha256.Sum256(data)
-			fmt.Fprintf(h, "%s %s\n", hex.EncodeToString(sum[:]), filepath.ToSlash(rel))
-			return nil
+			return visit(filepath.ToSlash(rel), p)
 		})
 		if err != nil {
-			return "", err
+			return err
 		}
 	}
+	return nil
+}
+
+// Digest is the SHA-256 of the relative paths and contents of every file
+// under each scope entry.
+func Digest(root string, scope []string) (string, error) {
+	h := sha256.New()
+	err := walkScope(root, scope, func(rel, file string) error {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		fmt.Fprintf(h, "%s %s\n", hex.EncodeToString(sum[:]), rel)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// CheckDigest binds evidence to everything that decides a check's result: its
+// registry definition, the files it applies to and its execution inputs.
+func CheckDigest(root string, c CheckDefinition) (string, error) {
+	files, err := Digest(root, append(append([]string{}, c.Scope...), c.Inputs...))
+	if err != nil {
+		return "", err
+	}
+	definition, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append(append(definition, '\n'), files...))
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func selects(scope []string, target string) bool {
@@ -498,11 +620,33 @@ func selects(scope []string, target string) bool {
 	return false
 }
 
+func scopeStatus(err error) (string, string) {
+	if errors.Is(err, fs.ErrNotExist) {
+		return StatusNotRun, "SCOPE_MISSING"
+	}
+	return StatusFail, "SCOPE_UNREADABLE"
+}
+
+var errNotDocs = errors.New("not documentation")
+
 // judge decides one check's status. Only evidence that names the check, is
-// fresh for its scope and reports a self-consistent pass counts as a pass.
-func judge(c CheckDefinition, root string, evidence map[string]Evidence) Item {
+// fresh for its definition, scope and inputs, reports a self-consistent pass
+// and comes from an admitted producer counts as a pass.
+func judge(reg Registry, c CheckDefinition, root string, evidence map[string]Evidence) Item {
 	result := func(status, reason string) Item { return Item{Check: c.ID, Status: status, Reason: reason} }
 	if c.Kind == KindDocs {
+		err := walkScope(root, c.Scope, func(rel, _ string) error {
+			if !strings.HasSuffix(rel, ".md") {
+				return fmt.Errorf("%w: %s", errNotDocs, rel)
+			}
+			return nil
+		})
+		if errors.Is(err, errNotDocs) {
+			return result(StatusFail, "INVALID_EXEMPTION")
+		}
+		if err != nil {
+			return result(scopeStatus(err))
+		}
 		return result(StatusExempt, "")
 	}
 	e, ok := evidence[c.ID]
@@ -512,12 +656,9 @@ func judge(c CheckDefinition, root string, evidence map[string]Evidence) Item {
 	if e.Check != c.ID {
 		return result(StatusFail, "EVIDENCE_CHECK_MISMATCH")
 	}
-	current, err := Digest(root, c.Scope)
-	if errors.Is(err, fs.ErrNotExist) {
-		return result(StatusNotRun, "SCOPE_MISSING")
-	}
+	current, err := CheckDigest(root, c)
 	if err != nil {
-		return result(StatusFail, "SCOPE_UNREADABLE")
+		return result(scopeStatus(err))
 	}
 	if e.InputDigest != current {
 		return result(StatusNotRun, "STALE_EVIDENCE")
@@ -529,6 +670,9 @@ func judge(c CheckDefinition, root string, evidence map[string]Evidence) Item {
 		}
 		if e.Failed != 0 {
 			return result(StatusFail, "INCONSISTENT_PASS")
+		}
+		if !set(reg.Producers)[e.Producer] {
+			return result(StatusReviewRequired, "UNATTESTED_EVIDENCE")
 		}
 		if c.Review && strings.TrimSpace(e.Reviewer) == "" {
 			return result(StatusReviewRequired, "REVIEW_REQUIRED")
@@ -550,7 +694,7 @@ func EvaluateDoD(reg Registry, root, target string, evidence map[string]Evidence
 	var d DoD
 	for _, c := range reg.Checks {
 		if selects(c.Scope, target) {
-			d.Items = append(d.Items, judge(c, root, evidence))
+			d.Items = append(d.Items, judge(reg, c, root, evidence))
 		}
 	}
 	d.Pass = len(d.Items) > 0
