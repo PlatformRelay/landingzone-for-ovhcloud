@@ -7,6 +7,11 @@ version: '3'
 silent: true
 
 tasks:
+  test:reports:
+    desc: Report adapter, schema and JUnit view against the captured tofu streams (V002)
+    cmds:
+      - go -C tools test -count=1 ./internal/report ./cmd/json2junit
+
   # One target per report fixture case; tests/fixtures/tofu/capture.sh records
   # their stdout. Each prints exactly the pinned `tofu test -json` stream.
   capture:tofu-pass:
