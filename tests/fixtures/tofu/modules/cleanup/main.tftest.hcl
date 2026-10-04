@@ -1,0 +1,3 @@
+run "applies" {
+  command = apply
+}

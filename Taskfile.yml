@@ -2,6 +2,27 @@
 #   lz-offline --candidate <absolute-checkout> -- task <target>
 # verify:toolchain and test:offline-boundary are run by the entry's own trusted
 # code; definitions for them here are never consulted, so a candidate cannot
-# turn a qualification into a no-op. Later tasks add ordinary targets below.
+# turn a qualification into a no-op.
 version: '3'
-tasks: {}
+silent: true
+
+tasks:
+  # One target per report fixture case; tests/fixtures/tofu/capture.sh records
+  # their stdout. Each prints exactly the pinned `tofu test -json` stream.
+  capture:tofu-pass:
+    cmds: [{task: capture-tofu, vars: {CASE: pass}}]
+  capture:tofu-fail:
+    cmds: [{task: capture-tofu, vars: {CASE: fail}}]
+  capture:tofu-zero:
+    cmds: [{task: capture-tofu, vars: {CASE: zero}}]
+  capture:tofu-skip:
+    cmds: [{task: capture-tofu, vars: {CASE: skip}}]
+  capture:tofu-cleanup:
+    cmds: [{task: capture-tofu, vars: {CASE: cleanup}}]
+
+  capture-tofu:
+    internal: true
+    dir: tests/fixtures/tofu/modules/{{.CASE}}
+    cmds:
+      - /tcb/tofu init -backend=false -input=false -no-color > /dev/null
+      - /tcb/tofu test -json

@@ -1,0 +1,1 @@
+{"case":"fail","command":"lz-offline --candidate <checkout> -- task capture:tofu-fail","inner_command":"tofu test -json","tool":"tofu","tool_version":"1.13.0","entry_exit":1,"stream_sha256":"d4a667aedd387db288ba274816bca54fa5db155ac0731e6a384ad2bf4ee60048","module_sha256":"0b44b883441c73e8b9878f97f7e1de7d798409b8ef74477e5f633a0ff105ebaa","captured_on":"2026-10-04"}
