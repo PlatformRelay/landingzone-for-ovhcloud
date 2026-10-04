@@ -1,3 +1,3 @@
-module "platform" {
-  source = "../../stages/platform"
+module "kube" {
+  source = "../../components/runtime/kube"
 }
