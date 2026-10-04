@@ -209,3 +209,59 @@ func TestLintWithoutTools(t *testing.T) {
 		}
 	}
 }
+
+const foundationSource = `{"runner": "ubuntu-24.04", "timeout_minutes": 10,
+ "manifest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "layer": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "entry_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+ "bwrap_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+ "targets": ["pins"], "deferred": {}}
+`
+
+// ci-workflow prints the workflow rendered from the source; ci-source accepts
+// exactly that workflow and a source that runs every check of a closed task.
+func TestFoundationCICommands(t *testing.T) {
+	root := repo(t, map[string]string{
+		"specs/001-x/tasks.md":                    strings.Replace(tasks, "- [ ] T001", "- [x] T001", 1),
+		"pipelines/github/foundation-source.json": foundationSource,
+	})
+	code, rendered := lzCheck(root, "ci-workflow")
+	if code != 0 || !strings.Contains(rendered, "LZ_TARGETS: pins\n") {
+		t.Fatalf("BEHAVIORAL_RED: ci-workflow exit %d:\n%s", code, rendered)
+	}
+	workflow := filepath.Join(root, ".github/workflows/foundation.yml")
+	if err := os.MkdirAll(filepath.Dir(workflow), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workflow, []byte(rendered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/001-x"); code != 0 || out != "FOUNDATION_CI_OK targets=1 deferred=0\n" {
+		t.Errorf("BEHAVIORAL_RED: valid CI refused: exit %d\n%s", code, out)
+	}
+	if err := os.WriteFile(workflow, []byte(strings.Replace(rendered, "permissions: {}", "permissions: write-all", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/001-x"); code != 1 || !strings.Contains(out, "WORKFLOW_DRIFT") || !strings.Contains(out, "FOUNDATION_CI_FAIL findings=1") {
+		t.Errorf("BEHAVIORAL_RED: widened workflow accepted: exit %d\n%s", code, out)
+	}
+	if err := os.Remove(workflow); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/001-x"); code != 1 || !strings.Contains(out, "WORKFLOW_DRIFT") {
+		t.Errorf("BEHAVIORAL_RED: absent workflow accepted: exit %d\n%s", code, out)
+	}
+}
+
+func TestFoundationCICommandsWithoutSource(t *testing.T) {
+	root := repo(t, nil)
+	for _, args := range [][]string{{"ci-workflow"}, {"ci-source", "specs/001-x"}} {
+		if code, out := lzCheck(root, args...); code != 2 || !strings.Contains(out, "SOURCE_MISSING") {
+			t.Errorf("BEHAVIORAL_RED: %v without a source: exit %d\n%s", args, code, out)
+		}
+	}
+	malformed := repo(t, map[string]string{"pipelines/github/foundation-source.json": "{"})
+	if code, out := lzCheck(malformed, "ci-workflow"); code != 2 || !strings.Contains(out, "SOURCE_SYNTAX") {
+		t.Errorf("BEHAVIORAL_RED: ci-workflow rendered a malformed source: exit %d\n%s", code, out)
+	}
+}

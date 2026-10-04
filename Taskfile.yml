@@ -28,6 +28,19 @@ tasks:
     cmds:
       - go -C tools test -count=1 ./cmd/lz-pack ./internal/bundle/...
 
+  test:foundation-ci:
+    desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
+    cmds:
+      - go -C tools test -count=1 -run 'TestFoundation|TestTraceabilityParse' ./internal/checks ./cmd/lz-check
+      - go -C tools run ./cmd/lz-check -root .. ci-source specs/001-offline-foundation
+
+  # Host-side: the offline entry mounts the candidate read-only. Writes the
+  # workflow rendered from pipelines/github/foundation-source.json.
+  generate:foundation-ci:
+    desc: Render .github/workflows/foundation.yml from its approved source
+    cmds:
+      - go -C tools run ./cmd/lz-check -root .. ci-workflow > .github/workflows/foundation.yml
+
   test:static:
     desc: Real pinned fmt, init, validate and TFLint clauses on valid and broken fixtures (V006)
     cmds:
