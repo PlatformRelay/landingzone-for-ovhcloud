@@ -63,6 +63,14 @@ type Diagnostic struct {
 	Raw      json.RawMessage `json:"raw"`
 }
 
+// CleanupFailure is one resource tofu left in state, with the test file and
+// run whose cleanup failed.
+type CleanupFailure struct {
+	File     string          `json:"file"`
+	Run      string          `json:"run"`
+	Resource json.RawMessage `json:"resource"`
+}
+
 // Run is one tofu test run block and its upstream status.
 type Run struct {
 	File   string `json:"file"`
@@ -72,19 +80,19 @@ type Run struct {
 
 // Observation is the result of one tofu test run.
 type Observation struct {
-	Status      Status            `json:"status"`
-	Tool        string            `json:"tool"`
-	ToolVersion string            `json:"tool_version"`
-	ExitCode    int               `json:"exit_code"`
-	Discovered  int               `json:"discovered"`
-	Passed      int               `json:"passed"`
-	Failed      int               `json:"failed"`
-	Errored     int               `json:"errored"`
-	Skipped     int               `json:"skipped"`
-	Runs        []Run             `json:"runs"`
-	Diagnostics []Diagnostic      `json:"diagnostics"`
-	Cleanup     []json.RawMessage `json:"cleanup"`
-	Reasons     []string          `json:"reasons"`
+	Status      Status           `json:"status"`
+	Tool        string           `json:"tool"`
+	ToolVersion string           `json:"tool_version"`
+	ExitCode    int              `json:"exit_code"`
+	Discovered  int              `json:"discovered"`
+	Passed      int              `json:"passed"`
+	Failed      int              `json:"failed"`
+	Errored     int              `json:"errored"`
+	Skipped     int              `json:"skipped"`
+	Runs        []Run            `json:"runs"`
+	Diagnostics []Diagnostic     `json:"diagnostics"`
+	Cleanup     []CleanupFailure `json:"cleanup"`
+	Reasons     []string         `json:"reasons"`
 }
 
 type summary struct {
@@ -97,6 +105,8 @@ type summary struct {
 
 type event struct {
 	Type       string               `json:"type"`
+	TestFile   string               `json:"@testfile"`
+	TestRun    string               `json:"@testrun"`
 	Tofu       string               `json:"tofu"`
 	Diagnostic json.RawMessage      `json:"diagnostic"`
 	Abstract   *map[string][]string `json:"test_abstract"`
@@ -124,8 +134,6 @@ type evaluation struct {
 	version  bool
 	abstract bool
 	after    bool // a known event followed the summary
-	file     string
-	run      string
 }
 
 func (e *evaluation) fail(reason string) {
@@ -142,7 +150,7 @@ func (e *evaluation) fail(reason string) {
 // could not fully account for.
 func Evaluate(stream []byte, exitCode int) Observation {
 	e := &evaluation{
-		o:        Observation{Tool: "tofu", ExitCode: exitCode, Runs: []Run{}, Diagnostics: []Diagnostic{}, Cleanup: []json.RawMessage{}, Reasons: []string{}},
+		o:        Observation{Tool: "tofu", ExitCode: exitCode, Runs: []Run{}, Diagnostics: []Diagnostic{}, Cleanup: []CleanupFailure{}, Reasons: []string{}},
 		expected: map[[2]string]bool{}, reported: map[[2]string]bool{}, files: map[string]string{},
 	}
 	if exitCode != 0 {
@@ -231,7 +239,7 @@ func (e *evaluation) apply(ev event) {
 		if _, seen := e.files[ev.File.Path]; seen {
 			e.fail(ReasonLifecycle)
 		}
-		e.files[ev.File.Path], e.file, e.run = ev.File.Status, ev.File.Path, ""
+		e.files[ev.File.Path] = ev.File.Status
 	case "test_run":
 		// A run must follow its file's test_file event, which itself must follow
 		// the abstract, so no separate abstract check is needed here.
@@ -248,7 +256,6 @@ func (e *evaluation) apply(ev event) {
 			e.fail(ReasonRunMismatch)
 		}
 		e.reported[key] = true
-		e.file, e.run = ev.Run.Path, ev.Run.Run
 		e.o.Runs = append(e.o.Runs, Run{File: ev.Run.Path, Name: ev.Run.Run, Status: ev.Run.Status})
 	case "diagnostic":
 		var d Diagnostic
@@ -256,14 +263,17 @@ func (e *evaluation) apply(ev event) {
 			e.fail(ReasonPayload)
 			return
 		}
-		d.Raw, d.File, d.Run = ev.Diagnostic, e.file, e.run
+		// Ownership comes from the event itself, never from the last run seen.
+		d.Raw, d.File, d.Run = ev.Diagnostic, ev.TestFile, ev.TestRun
 		e.o.Diagnostics = append(e.o.Diagnostics, d)
 	case "test_cleanup":
 		if ev.Cleanup == nil || ev.Cleanup.FailedResources == nil {
 			e.fail(ReasonPayload)
 			return
 		}
-		e.o.Cleanup = append(e.o.Cleanup, *ev.Cleanup.FailedResources...)
+		for _, resource := range *ev.Cleanup.FailedResources {
+			e.o.Cleanup = append(e.o.Cleanup, CleanupFailure{File: ev.TestFile, Run: ev.TestRun, Resource: resource})
+		}
 	case "test_summary":
 		e.known(ev)
 		if e.summary != nil || !e.abstract {
@@ -298,16 +308,30 @@ func (e *evaluation) reconcile() {
 		}
 	}
 	tally := map[string]int{}
-	worst := map[string]string{} // per file: "fail" if any run failed or errored
+	perFile := map[string]map[string]int{}
 	for _, r := range e.o.Runs {
 		tally[r.Status]++
-		if r.Status == "fail" || r.Status == "error" {
-			worst[r.File] = "fail"
+		if perFile[r.File] == nil {
+			perFile[r.File] = map[string]int{}
 		}
+		perFile[r.File][r.Status]++
 	}
 	e.o.Passed, e.o.Failed, e.o.Errored, e.o.Skipped = tally["pass"], tally["fail"], tally["error"], tally["skip"]
+	// A file failed if any of its runs failed or errored, was skipped if all of
+	// its runs were skipped, and passed otherwise.
 	for file, status := range e.files {
-		if (status == "fail" || status == "error") != (worst[file] == "fail") {
+		runs := perFile[file]
+		expected := "pass"
+		switch {
+		case runs["fail"]+runs["error"] > 0:
+			expected = "fail"
+		case runs["skip"] > 0 && runs["skip"] == runs["pass"]+runs["skip"]:
+			expected = "skip"
+		}
+		if status == "error" {
+			status = "fail"
+		}
+		if status != expected {
 			e.fail(ReasonRunMismatch)
 		}
 	}

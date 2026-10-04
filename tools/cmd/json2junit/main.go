@@ -75,18 +75,19 @@ func render(o report.Observation) suite {
 	}
 	// The observation itself is a test case, so faults tofu reports as success
 	// (zero tests, failed cleanup) still fail the JUnit view.
-	// Every diagnostic is rendered, warnings on passing runs included, with
-	// the run it followed; failed cleanup resources are listed verbatim.
+	// Every diagnostic is rendered, warnings on passing runs included: a
+	// readable line with its file and run, then tofu's complete object.
+	// Failed cleanup resources are listed with the run they belong to.
 	var text strings.Builder
 	for _, d := range o.Diagnostics {
 		fmt.Fprintf(&text, "%s: %s", d.Severity, d.Summary)
-		if d.Run != "" {
+		if d.File != "" {
 			fmt.Fprintf(&text, " (%s/%s)", d.File, d.Run)
 		}
-		fmt.Fprintf(&text, "\n%s\n", d.Detail)
+		fmt.Fprintf(&text, "\n%s\n%s\n", d.Detail, d.Raw)
 	}
-	for _, resource := range o.Cleanup {
-		fmt.Fprintf(&text, "cleanup failed: %s\n", resource)
+	for _, c := range o.Cleanup {
+		fmt.Fprintf(&text, "cleanup failed (%s/%s): %s\n", c.File, c.Run, c.Resource)
 	}
 	verdict := testcase{Class: "report", Name: "observation", SystemOut: text.String()}
 	if o.Status != report.Pass {

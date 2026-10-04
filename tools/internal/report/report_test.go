@@ -106,12 +106,42 @@ func TestReportPreservesDiagnostics(t *testing.T) {
 		}
 	}
 	cleanup := evaluateFixture(t, "cleanup")
-	if len(cleanup.Cleanup) != 1 || !bytes.Contains(cleanup.Cleanup[0], []byte("terraform_data.x")) {
-		t.Errorf("BEHAVIORAL_RED: cleanup failure details lost: %v", cleanup.Cleanup)
+	if len(cleanup.Cleanup) != 1 || !bytes.Contains(cleanup.Cleanup[0].Resource, []byte("terraform_data.x")) ||
+		cleanup.Cleanup[0].File != "main.tftest.hcl" || cleanup.Cleanup[0].Run != "applies" {
+		t.Errorf("BEHAVIORAL_RED: cleanup failure details or context lost: %+v", cleanup.Cleanup)
 	}
 	warning := `{"type":"diagnostic","diagnostic":{"severity":"warning","summary":"deprecated","address":"x"}}`
 	if o := Evaluate(stream(version, abstract, fileA, runPass, warning, sumPass), 0); o.Status != Pass || len(o.Diagnostics) != 1 || !bytes.Contains(o.Diagnostics[0].Raw, []byte(`"address"`)) {
 		t.Errorf("BEHAVIORAL_RED: warning on a passing run lost: %s %+v", o, o.Diagnostics)
+	}
+}
+
+// Ownership comes from each event's own @testfile/@testrun, not from the last
+// run reported, and cleanup records keep the file and run they belong to.
+func TestReportKeepsEventContext(t *testing.T) {
+	twoRuns := `{"type":"test_abstract","test_abstract":{"a.tftest.hcl":["r1","r2"]}}`
+	runTwo := `{"type":"test_run","test_run":{"path":"a.tftest.hcl","run":"r2","status":"pass"}}`
+	sumTwo := `{"type":"test_summary","test_summary":{"status":"pass","passed":2,"failed":0,"errored":0,"skipped":0}}`
+	early := `{"@testfile":"a.tftest.hcl","type":"diagnostic","diagnostic":{"severity":"warning","summary":"file-level"}}`
+	late := `{"@testfile":"a.tftest.hcl","@testrun":"r1","type":"diagnostic","diagnostic":{"severity":"warning","summary":"about r1"}}`
+	o := Evaluate(stream(version, twoRuns, early, fileA, runPass, runTwo, late, sumTwo), 0)
+	if o.Status != Pass || len(o.Diagnostics) != 2 {
+		t.Fatalf("valid stream with contextual warnings rejected: %s", o)
+	}
+	if d := o.Diagnostics[0]; d.File != "a.tftest.hcl" || d.Run != "" {
+		t.Errorf("BEHAVIORAL_RED: diagnostic before any run lost its file: %+v", d)
+	}
+	if d := o.Diagnostics[1]; d.File != "a.tftest.hcl" || d.Run != "r1" {
+		t.Errorf("BEHAVIORAL_RED: diagnostic attributed to the last run instead of its own: %+v", d)
+	}
+	twoFiles := `{"type":"test_abstract","test_abstract":{"a.tftest.hcl":["r1"],"b.tftest.hcl":["r1"]}}`
+	fileB := `{"type":"test_file","test_file":{"path":"b.tftest.hcl","status":"pass"}}`
+	runB := `{"type":"test_run","test_run":{"path":"b.tftest.hcl","run":"r1","status":"pass"}}`
+	cleanupA := `{"@testfile":"a.tftest.hcl","@testrun":"r1","type":"test_cleanup","test_cleanup":{"failed_resources":[{"instance":"terraform_data.x"}]}}`
+	cleanupB := `{"@testfile":"b.tftest.hcl","@testrun":"r1","type":"test_cleanup","test_cleanup":{"failed_resources":[{"instance":"terraform_data.x"}]}}`
+	o = Evaluate(stream(version, twoFiles, fileA, runPass, cleanupA, fileB, runB, cleanupB, sumTwo), 0)
+	if len(o.Cleanup) != 2 || o.Cleanup[0].File != "a.tftest.hcl" || o.Cleanup[1].File != "b.tftest.hcl" {
+		t.Errorf("BEHAVIORAL_RED: identical cleanup resources from two files not kept apart: %+v", o.Cleanup)
 	}
 }
 
@@ -174,6 +204,7 @@ func TestReportIsolatedGuards(t *testing.T) {
 		"summary-miscount":     {stream(version, abstract, fileA, runPass, sumMiscount), 0, []string{ReasonRunMismatch}},
 		"summary-hides-fail":   {stream(version, abstract, fileFail, runFail, sumPass), 0, []string{ReasonFailed, ReasonRunMismatch}},
 		"file-status-disagree": {stream(version, abstract, fileFail, runPass, sumPass), 0, []string{ReasonRunMismatch}},
+		"file-skip-run-pass":   {stream(version, abstract, `{"type":"test_file","test_file":{"path":"a.tftest.hcl","status":"skip"}}`, runPass, sumPass), 0, []string{ReasonRunMismatch}},
 		"crash-exit":           {pass, 11, []string{ReasonExitStatus}},
 		"zero-tests":           {stream(version, zeroAbstract, zeroSummary), 0, []string{ReasonZeroTests}},
 		"failed-run":           {stream(version, abstract, fileFail, runFail, sumFail), 0, []string{ReasonFailed}},
