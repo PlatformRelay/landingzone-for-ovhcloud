@@ -10,8 +10,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -19,13 +22,57 @@ import (
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle/bundletest"
 )
 
+var (
+	entriesMu sync.Mutex
+	entries   = map[string][]byte{}
+)
+
+// compiledEntry returns a real entry binary with manifestSHA compiled in as
+// the reviewed build recipe does, built once per digest.
+func compiledEntry(t *testing.T, manifestSHA string) []byte {
+	t.Helper()
+	entriesMu.Lock()
+	defer entriesMu.Unlock()
+	if data, ok := entries[manifestSHA]; ok {
+		return data
+	}
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "go.mod"), []byte("module entry\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n\nvar manifestSHA string\n\nfunc main() { println(manifestSHA) }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(source, "lz-offline")
+	build := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", "-X main.manifestSHA="+manifestSHA, "-o", binary, ".")
+	build.Dir = source
+	build.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off", "GOTOOLCHAIN=local", "CGO_ENABLED=0")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building a test entry: %v\n%s", err, output)
+	}
+	data, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries[manifestSHA] = data
+	return data
+}
+
+func writeEntry(t *testing.T, b bundletest.Bundle, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(b.Dir, "lz-offline"), data, 0o775); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // prepared writes a bundle the entry admits, with a name and a link target
-// past the 100-byte ustar limit that need PAX records, and a probe beside the
-// manifest as the real bundle has.
+// past the 100-byte ustar limit that need PAX records, a probe beside the
+// manifest as the real bundle has, and a real entry compiled for its
+// manifest.
 func prepared(t *testing.T) bundletest.Bundle {
 	t.Helper()
 	long := filepath.Join("resources/rootfs", strings.Repeat("d", 60), strings.Repeat("f", 60))
-	return bundletest.Write(t, func(dir string) {
+	b := bundletest.Write(t, func(dir string) {
 		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(long)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -39,6 +86,8 @@ func prepared(t *testing.T) bundletest.Bundle {
 			t.Fatal(err)
 		}
 	})
+	writeEntry(t, b, compiledEntry(t, b.ManifestSHA))
+	return b
 }
 
 func digestOf(t *testing.T, path string) string {
@@ -106,6 +155,10 @@ func TestPackRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Verification extracts the layer beside the output and removes it again.
+	if siblings, err := os.ReadDir(filepath.Dir(out)); err != nil || len(siblings) != 1 {
+		t.Errorf("BEHAVIORAL_RED: beside the output: %v %v", siblings, err)
+	}
 	if digestOf(t, blob(out, result.Layer)) != result.Layer || digestOf(t, blob(out, result.Manifest)) != result.Manifest {
 		t.Fatalf("BEHAVIORAL_RED: blobs are not stored under their digests: %+v", result)
 	}
@@ -123,7 +176,7 @@ func TestPackRoundTrip(t *testing.T) {
 		t.Errorf("BEHAVIORAL_RED: layer entries\n got %v\nwant %v", names, want)
 	}
 	checks := map[string]entry{
-		"runtime/lz-offline":                   {mode: 0o775, kind: tar.TypeReg, content: "entry built for " + b.ManifestSHA},
+		"runtime/lz-offline":                   {mode: 0o775, kind: tar.TypeReg, content: string(compiledEntry(t, b.ManifestSHA))},
 		"runtime/resources.json":               {mode: 0o664, kind: tar.TypeReg, content: string(manifest)},
 		"runtime/resources/":                   {mode: 0o700, kind: tar.TypeDir},
 		"runtime/resources/rootfs/usr/bin/sh":  {mode: 0o777, kind: tar.TypeSymlink, link: "/bin/busybox"},
@@ -267,6 +320,13 @@ func TestPackLayout(t *testing.T) {
 	}
 }
 
+// setBeforeWrite installs a change to run between planning and writing.
+func setBeforeWrite(t *testing.T, change func()) {
+	t.Helper()
+	beforeWrite = change
+	t.Cleanup(func() { beforeWrite = func() {} })
+}
+
 // A bundle the entry would refuse, an entry built for another manifest, and
 // anything a tar layer cannot carry faithfully stop packing, as do paths that
 // are not absolute and clean and an output inside the bundle or already
@@ -284,10 +344,43 @@ func TestPackRefuses(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
-		"entry built for another manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
-			if err := os.WriteFile(filepath.Join(b.Dir, "lz-offline"), []byte("entry built for "+strings.Repeat("0", 64)), 0o775); err != nil {
+		"entry compiled for another manifest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			writeEntry(t, *b, compiledEntry(t, strings.Repeat("0", 64)))
+		},
+		"entry compiled for another manifest with ours appended": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			// The digest appears in the file but is not the compiled value.
+			writeEntry(t, *b, append(slices.Clone(compiledEntry(t, strings.Repeat("0", 64))), b.ManifestSHA...))
+		},
+		"entry compiled without a digest": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			writeEntry(t, *b, compiledEntry(t, ""))
+		},
+		"output inside a bundle reached through a linked parent": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			alias := filepath.Join(t.TempDir(), "via")
+			if err := os.Symlink(filepath.Dir(b.Dir), alias); err != nil {
 				t.Fatal(err)
 			}
+			*out = filepath.Join(b.Dir, "layout")
+			b.Dir = filepath.Join(alias, filepath.Base(b.Dir))
+		},
+		"entry that is not a program": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			writeEntry(t, *b, []byte("entry built for "+b.ManifestSHA))
+		},
+		"resource changed between planning and writing": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			// Same length, so only the archived bytes can tell.
+			path := filepath.Join(b.Dir, "resources/tofu")
+			setBeforeWrite(t, func() {
+				if err := os.WriteFile(path, []byte("TOFU"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			})
+		},
+		"launcher changed between planning and writing": func(t *testing.T, b *bundletest.Bundle, out *string) {
+			launcher := b.Launcher
+			setBeforeWrite(t, func() {
+				if err := os.WriteFile(launcher, []byte("LAUNCHER"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			})
 		},
 		"no entry": func(t *testing.T, b *bundletest.Bundle, out *string) {
 			if err := os.Remove(filepath.Join(b.Dir, "lz-offline")); err != nil {
