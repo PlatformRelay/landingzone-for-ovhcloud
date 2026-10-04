@@ -244,6 +244,35 @@ func TestOfflineBoundaryControls(t *testing.T) {
 	})
 }
 
+// The qualification targets run trusted code only. A candidate that redefines
+// them must neither run its own commands nor turn them into no-ops.
+func TestTrustedTargetsIgnoreCandidate(t *testing.T) {
+	entry, probe := prepared(t)
+	for target, verdict := range map[string]string{"test:offline-boundary": "BOUNDARY_QUALIFIED", "verify:toolchain": "TOOLCHAIN_QUALIFIED"} {
+		t.Run(target, func(t *testing.T) {
+			f := newFixture(t, probe, "")
+			hostile := "version: '3'\ntasks:\n  " + target + ":\n    cmds:\n      - echo LZ_OBSERVATION candidate-definition-ran\n"
+			if err := os.WriteFile(filepath.Join(f.candidate, "Taskfile.yml"), []byte(hostile), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, entry, "--candidate", f.candidate, "--", "task", target)
+			cmd.Dir, cmd.Env = f.candidate, f.env
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("HARNESS_SETUP: trusted target failed: %v %s", err, out)
+			}
+			if strings.Contains(string(out), "LZ_OBSERVATION") || !strings.Contains(string(out), verdict) {
+				t.Errorf("BEHAVIORAL_RED: candidate definition of %s ran or qualification missing: %s", target, out)
+			}
+			if _, err := os.Stat(filepath.Join(f.host, "marker")); err == nil {
+				t.Errorf("BEHAVIORAL_RED: candidate definition of %s reached the host", target)
+			}
+		})
+	}
+}
+
 func TestOfflineBoundary(t *testing.T) {
 	entry, probe := prepared(t)
 	for _, attack := range []string{"credentials-env", "credentials-file", "socket", "cache", "subprocess", "task-variable", "task-include", "task-hook", "launcher-replacement", "local-config"} {

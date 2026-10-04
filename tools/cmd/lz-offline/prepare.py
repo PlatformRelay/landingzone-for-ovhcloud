@@ -33,7 +33,21 @@ def required_path(name):
 ROOT = required_path('LZ_PREP_ROOT')            # private preparation root
 OLD = required_path('LZ_TOOLCHAIN_ROOT')        # qualified T001 toolchain root
 CRANE = required_path('LZ_CRANE')               # crane binary for image export
-TASK = required_path('LZ_TASK')                 # Task binary placed at /tcb/task
+TASK = required_path('LZ_TASK')                 # official Task release archive
+# https://github.com/go-task/task/releases/download/v3.53.1/task_linux_amd64.tar.gz,
+# digest as published in that release's task_checksums.txt.
+TASK_SHA = 'a54a408f6861ff921f6e87774180db31bacd8c1e7c944ca696db9fea49a82fc7'
+
+def extract_task(destination):
+    if digest(TASK) != TASK_SHA:
+        raise RuntimeError('Task archive checksum differs')
+    with tarfile.open(TASK, 'r:gz') as archive:
+        member = archive.getmember('task')
+        if not member.isreg() or member.size > 64 * 1024 * 1024:
+            raise RuntimeError('Task archive member must be a bounded regular file')
+        source = archive.extractfile(member)
+        with open(destination, 'xb') as target:
+            shutil.copyfileobj(source, target)
 
 def digest(path):
     info = path.lstat()
@@ -218,7 +232,7 @@ def prepare():
         copy_go(resources / 'go')
         shutil.copyfile(OLD / 'tools/tofu/tofu', resources / 'tofu')
         shutil.copyfile(OLD / 'tools/terramate/terramate', resources / 'terramate')
-        shutil.copyfile(TASK, resources / 'task')
+        extract_task(resources / 'task')
         for name in ('task', 'tofu', 'terramate'):
             (resources / name).chmod(0o700)
         private = stage / 'transport'
@@ -239,7 +253,9 @@ def prepare():
         if digest(package) != PROVIDER_SHA:
             raise RuntimeError('provider package checksum differs')
         (resources / 'tofurc').write_text('provider_installation {\n  filesystem_mirror {\n    path = "/mirror"\n    include = ["registry.opentofu.org/ovh/ovh"]\n  }\n}\n')
-        prepared = {'Versions': {'go':'1.27.1','tofu':'1.13.0','terramate':'0.17.3'}, 'Artifacts':dict(zip(('go','tofu','terramate'),ARCHIVES.values())), 'Image':IMAGE, 'IsolationProof':'runtime-qualified'}
+        artifacts = dict(zip(('go','tofu','terramate'),ARCHIVES.values()))
+        artifacts['task'] = TASK_SHA
+        prepared = {'Versions': {'go':'1.27.1','tofu':'1.13.0','terramate':'0.17.3','task':'3.53.1'}, 'Artifacts':artifacts, 'Image':IMAGE}
         manifest = {'prepared':prepared, 'files':inventory(stage), 'bwrap':'/usr/bin/bwrap','bwrap_sha256':digest(Path('/usr/bin/bwrap'))}
         (stage / 'resources.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
         receipt = {'image':IMAGE,'image_export_sha256':digest(private / 'image.tar'),'image_projection':'rooted filesystem without image /dev; runtime supplies private bwrap /dev; privileged mode bits stripped; owner read added to regular files and owner read/traverse added to directories for resource admission','provider_sha256':digest(package),'resources_sha256':digest(stage / 'resources.json')}

@@ -1,11 +1,7 @@
+# Run every target through the installed entry:
+#   lz-offline --candidate <absolute-checkout> -- task <target>
+# verify:toolchain and test:offline-boundary are run by the entry's own trusted
+# code; definitions for them here are never consulted, so a candidate cannot
+# turn a qualification into a no-op. Later tasks add ordinary targets below.
 version: '3'
-tasks:
-  verify:toolchain:
-    desc: Verify prepared tool identities after entering the offline boundary
-    cmds:
-      - /tcb/lz-offline --verify
-      - /tcb/tofu -chdir=tools/cmd/lz-offline/fixtures/provider init -backend=false -lockfile=readonly
-  test:offline-boundary:
-    desc: Verify process and subprocess denial in the admitted boundary
-    cmds:
-      - /tcb/lz-offline --boundary
+tasks: {}
