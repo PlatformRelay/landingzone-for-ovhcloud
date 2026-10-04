@@ -11,8 +11,22 @@ import (
 // RuntimeGate is placed read-only by the external launcher. It is never loaded
 // from candidate data or environment. Its namespace differs from the host.
 type RuntimeGate struct {
-	HostNetwork string   `json:"host_network"`
+	HostNetwork string `json:"host_network"`
+	// HostDevices lists the device ids of every host mount, so the gate can
+	// tell a fresh private tmpfs from a bind of existing host storage.
+	HostDevices []string `json:"host_devices"`
 	Prepared    Prepared `json:"prepared"`
+}
+
+// MountDevices returns the device id of every row in a mountinfo listing.
+func MountDevices(mountinfo string) []string {
+	var devices []string
+	for _, line := range strings.Split(mountinfo, "\n") {
+		if fields := strings.Fields(line); len(fields) > 2 {
+			devices = append(devices, fields[2])
+		}
+	}
+	return devices
 }
 
 // Mount points lz-offline creates. Anything else, a writable trusted mount or a
@@ -28,7 +42,12 @@ var (
 )
 
 // ValidateMounts checks /proc/self/mountinfo against the admitted topology.
-func ValidateMounts(mountinfo string) error {
+// Writable scratch must be a whole, fresh tmpfs: mounted at its root and on a
+// device the host did not already have.
+func ValidateMounts(mountinfo string, hostDevices map[string]bool) error {
+	if len(hostDevices) == 0 {
+		return fmt.Errorf("ISOLATION_MOUNT: host device inventory required")
+	}
 	seen := map[string]bool{}
 	for _, line := range strings.Split(mountinfo, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -53,6 +72,9 @@ func ValidateMounts(mountinfo string) error {
 		case boundedScratchMounts[point]:
 			if fstype != "tmpfs" || !strings.Contains(","+super[2]+",", ",size=") {
 				return fmt.Errorf("ISOLATION_MOUNT: %s must be a size-bounded tmpfs", point)
+			}
+			if mount[3] != "/" || hostDevices[mount[2]] {
+				return fmt.Errorf("ISOLATION_MOUNT: %s must be a private tmpfs, not host storage", point)
 			}
 		case kernelMounts[point] != "":
 			if fstype != kernelMounts[point] {
@@ -134,7 +156,11 @@ func RuntimePrepared() (Prepared, Isolation, error) {
 	if err != nil {
 		return Prepared{}, Isolation{}, fmt.Errorf("ISOLATION_GATE: %w", err)
 	}
-	if err := ValidateMounts(string(mounts)); err != nil {
+	hostDevices := map[string]bool{}
+	for _, device := range gate.HostDevices {
+		hostDevices[device] = true
+	}
+	if err := ValidateMounts(string(mounts), hostDevices); err != nil {
 		return Prepared{}, Isolation{}, err
 	}
 	if err := ValidateEnvironment(os.Environ()); err != nil {

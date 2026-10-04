@@ -375,6 +375,20 @@ var trustedTargets = map[string]bool{"verify:toolchain": true, "test:offline-bou
 //go:embed fixtures/provider/main.tf fixtures/provider/.terraform.lock.hcl
 var providerFixture embed.FS
 
+// supervise returns work's result, or a deadline error as soon as ctx expires.
+// Blocking filesystem calls on a stalled mount cannot observe ctx, so the work
+// runs in a goroutine that is abandoned on expiry; the process exits soon after.
+func supervise(ctx context.Context, work func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- work() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("INPUT_DEADLINE: %w", ctx.Err())
+	}
+}
+
 func boundary() error {
 	if _, _, err := checks.RuntimePrepared(); err != nil {
 		return err
@@ -520,8 +534,8 @@ func run() (result error) {
 	if root == candidate || strings.HasPrefix(root, candidate+"/") {
 		return fmt.Errorf("ENTRY_LOCATION: external install required")
 	}
-	r, err := admitBundle(root)
-	if err != nil {
+	var r resources
+	if err := supervise(ctx, func() (err error) { r, err = admitBundle(root); return err }); err != nil {
 		return err
 	}
 	// The candidate is copied into private host scratch that the sandbox sees
@@ -543,7 +557,7 @@ func run() (result error) {
 		return err
 	}
 	if !trustedTargets[os.Args[5]] {
-		if err := snapshot(ctx, candidate, copyRoot); err != nil {
+		if err := supervise(ctx, func() error { return snapshot(ctx, candidate, copyRoot) }); err != nil {
 			return err
 		}
 	}
@@ -551,7 +565,11 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
-	gate, err := json.Marshal(checks.RuntimeGate{HostNetwork: namespace, Prepared: r.Prepared})
+	hostMounts, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return err
+	}
+	gate, err := json.Marshal(checks.RuntimeGate{HostNetwork: namespace, HostDevices: checks.MountDevices(string(hostMounts)), Prepared: r.Prepared})
 	if err != nil {
 		return err
 	}
