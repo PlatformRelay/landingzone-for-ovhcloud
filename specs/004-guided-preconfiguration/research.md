@@ -10,7 +10,7 @@ revisions, carries only allowed non-secret answers and is revalidated. Review/ex
 from deployment or automatic repository mutation. Friendly explanations are checked for coverage
 by controller/terminal tests and reviewed by a human for tone and usefulness.
 
-The naming interface is pending joint decision; collect organisation convention data without
+ADR-0003 selects a scalar naming interface with shared context, and its final field names await concrete-consumer diagnosis; collect organisation convention data without
 silently inventing the module input contract. Real profile/configuration exports require real
 schema/catalogue creators. Synthetic fixture walkthroughs remain useful without that qualification.
 

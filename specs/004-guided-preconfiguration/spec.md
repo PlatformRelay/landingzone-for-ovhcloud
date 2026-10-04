@@ -21,7 +21,7 @@ for the in-memory prototype to save or export. The early journey produces prose 
 ## Decisions and proposals
 The terminal journey, friendly explanations, helper checks and resumability are approved direction.
 Huh versus Gum is a bounded renderer comparison; exact version/platform qualification is owed.
-Naming convention input is independent of the pending phase-001 module-interface decision.
+Naming convention input is independent of the naming module final field names; ADR-0003 selects a scalar interface with shared context.
 
 ## User Scenarios & Testing
 ### User Story 1 — Understand and choose (Priority: P1)

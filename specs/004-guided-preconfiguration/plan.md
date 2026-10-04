@@ -24,7 +24,7 @@ I: renderer/filesystem premises observed by bounded controls before claims. II�
 maps to V001–V005 and every non-doc task has tests, expected outcomes and evidence. IV–V: setup
 has no apply authority; sessions are untrusted data; persistence/export are guarded. VI: one helper,
 no portal or broad CLI. VII: consequences and next actions tested, with a human tone review.
-VIII: renderer comparison and pending naming interface are explicit gates, not assumed decisions.
+VIII: renderer comparison and the naming module final field names are explicit gates, not assumed decisions.
 
 ## Alternatives and decisions
 Gum is quick for prompt prototypes; Go/Huh fits the controller/state language. Compare real cancel,
@@ -75,7 +75,7 @@ automation never supplies that review. Documentation-only guide authoring is exe
 Within-feature DAG is in tasks.md. Phase 001 supplies pinned tools, reporting and strict schema
 integration; real profile/catalogue data is another creator gate. Only the authorized in-memory
 choice fixtures can precede that gate; synthetic persistence/export stays deferred. No applying the draft bundle,
-cloud credential collection or deployment. Pending joint naming choice remains respected.
+cloud credential collection or deployment. The selected scalar naming interface is respected; its final field names await diagnosis.
 
 ## Complexity tracking
 Count one controller, session format, renderer and export format. Reuse existing validation/report
