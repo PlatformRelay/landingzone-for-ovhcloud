@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **A private open-source project — not provided by OVHcloud.** This repository is developed
-> privately and independently by PlatformRelay and published as open source. It is **not** an
+> privately and independently by PlatformRelay and licensed as open source. It is **not** an
 > official OVHcloud product or offering, and it is **not** provided, endorsed, sponsored, reviewed
 > or supported by OVHcloud. OVHcloud will not help you with it, and nothing here speaks for
 > OVHcloud. "OVHcloud" and related names are trademarks of their owner and are used only to say
