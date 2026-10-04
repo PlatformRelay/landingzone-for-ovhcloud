@@ -27,7 +27,7 @@ func candidateTree(t *testing.T) (string, string) {
 func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 	candidate, destination := candidateTree(t)
 	files := map[string]string{"tools/a.go": "package a\n", "tools/.env": "SECRET=x\n", "secrets.txt": "x\n",
-		"specs/001-x/spec.md": "# spec\n", "docs/adr/0001-x.md": "# ADR\n"}
+		"specs/001-x/spec.md": "# spec\n", "docs/adr/0001-x.md": "# ADR\n", ".tflint.hcl": "config {}\n"}
 	for name, body := range files {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(candidate, name)), 0700); err != nil {
 			t.Fatal(err)
@@ -40,7 +40,7 @@ func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 		t.Fatalf("valid candidate rejected: %v", err)
 	}
 	// Specs and ADRs are data the trace check reads.
-	for _, name := range []string{"tools/a.go", "specs/001-x/spec.md", "docs/adr/0001-x.md"} {
+	for _, name := range []string{"tools/a.go", "specs/001-x/spec.md", "docs/adr/0001-x.md", ".tflint.hcl"} {
 		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
 			t.Errorf("allowlisted file missing: %v", err)
 		}

@@ -331,7 +331,7 @@ func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := realDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
