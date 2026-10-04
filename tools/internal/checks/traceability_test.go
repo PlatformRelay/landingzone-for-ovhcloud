@@ -21,12 +21,12 @@ Body text mentions FR-009 and SC-009 without defining them.
 const tasksText = "# Tasks\n\n## Setup\n\n" +
 	"- [x] T001 Write pin checks in tools/internal/pin.go and Taskfile.yml — closed 2026-10-02, evidence: evidence/T001.md\n" +
 	"  - Requirements: FR-001; ADRs: 0011. Depends on: none, confirmed 2026-10-01.\n" +
-	"  - Verify: `task verify:pins`: a missing tool is rejected.\n" +
+	"  - Verify: `task verify:pins`: a missing tool is rejected and the task fails closed.\n" +
 	"  - Evidence: `evidence/T001.md`; GREEN.\n\n" +
 	"- [ ] T002 [P] [US1] Implement trace/DoD rules in tools/internal/{trace,dod}.go, harness/checks.yaml (1.13.0 e.g.)\n" +
 	"  - Requirements: FR-002 active clauses C002.1–C002.2/C002.4, SC-001; ADRs: 0008, 0019. Depends on: T001.\n" +
 	"  - Verify: `task test:trace`: blanket lists fail.\n" +
-	"  - Evidence: `.local/evidence/001/t002.json`; initial status `not-run`.\n\n" +
+	"  - Evidence: `.local/evidence/001/t002.json`.\n\n" +
 	"- [ ] T003 [US3] Write the router in AGENTS.md and harness/guides/{checks,naming}.md\n" +
 	"  - Requirements: FR-003; ADRs: 0019. Depends on: T002.\n" +
 	"  - Verify: exempt — docs-only; content review confirms the commands.\n" +
@@ -42,9 +42,9 @@ const tasksText = "# Tasks\n\n## Setup\n\n" +
 func validTasks() []Task {
 	return []Task{
 		{ID: "T001", Paths: []string{"tools/internal/pin.go", "Taskfile.yml"}, Requirements: []string{"FR-001"}, ADRs: []string{"0011"},
-			Verify: "`task verify:pins`: a missing tool is rejected.", Evidence: "`evidence/T001.md`; GREEN."},
+			Verify: "`task verify:pins`: a missing tool is rejected and the task fails closed.", Evidence: "`evidence/T001.md`; GREEN."},
 		{ID: "T002", Paths: []string{"tools/internal/{trace,dod}.go", "harness/checks.yaml"}, Requirements: []string{"FR-002", "SC-001"}, ADRs: []string{"0008", "0019"},
-			Verify: "`task test:trace`: blanket lists fail.", Evidence: "`.local/evidence/001/t002.json`; initial status `not-run`."},
+			Verify: "`task test:trace`: blanket lists fail.", Evidence: "`.local/evidence/001/t002.json`."},
 		{ID: "T003", Paths: []string{"AGENTS.md", "harness/guides/{checks,naming}.md"}, Requirements: []string{"FR-003"}, ADRs: []string{"0019"},
 			Exempt: true, Verify: "content review confirms the commands.", Evidence: "`.local/evidence/001/t003-docs-review.json`; initial status `not-run`."},
 		{ID: "T004", Paths: []string{"harness/checks.yaml"}, Requirements: []string{"FR-001", "FR-002", "FR-003", "SC-001"}, ADRs: []string{"0002", "0008", "0011", "0019"},
@@ -62,10 +62,11 @@ func validRegistry() Registry {
 			"SC-001": {ADRs: []string{"0002", "0008"}},
 		},
 		Checks: []CheckDefinition{
-			{ID: "V001", Requirements: []string{"FR-001"}, Command: "task verify:pins", Creator: "T001", Kind: KindBehavioral, Scope: []string{"tools/internal"}},
-			{ID: "V002", Requirements: []string{"FR-002", "SC-001"}, Command: "task test:trace", Creator: "T002", Kind: KindBehavioral, Scope: []string{"tools/internal"}},
-			{ID: "V003", Requirements: []string{"FR-003"}, Command: "content review", Creator: "T003", Kind: KindDocs, Scope: []string{"AGENTS.md"}},
+			{ID: "verify:pins", Requirements: []string{"FR-001"}, Command: "task verify:pins", Creator: "T001", Kind: KindBehavioral, Scope: []string{"tools/internal"}},
+			{ID: "test:trace", Requirements: []string{"FR-002", "SC-001"}, Command: "task test:trace", Creator: "T002", Kind: KindBehavioral, Scope: []string{"tools/internal"}},
+			{ID: "review:guides", Requirements: []string{"FR-003"}, Command: "content review", Creator: "T003", Kind: KindDocs, Scope: []string{"AGENTS.md"}},
 		},
+		Evaluators: []string{"check"},
 	}
 }
 
@@ -152,6 +153,12 @@ var traceControls = map[string]struct {
 	"unknown ADR": {func(tr *Trace) {
 		task(tr, "T001").ADRs = []string{"0011", "0099"}
 	}, []string{"UNKNOWN_ADR"}},
+	"task without ADRs": {func(tr *Trace) {
+		task(tr, "T001").ADRs = nil
+	}, []string{"MISSING_ADR"}},
+	"ADRs cover only some requirements": {func(tr *Trace) {
+		task(tr, "T002").ADRs = []string{"0019"}
+	}, []string{"MISSING_ADR"}},
 	"rationale misses a listed ADR": {func(tr *Trace) {
 		delete(task(tr, "T004").Rationale, "0002")
 	}, []string{"INCOMPLETE_RATIONALE"}},
@@ -162,7 +169,7 @@ var traceControls = map[string]struct {
 		task(tr, "T001").Rationale = map[string]string{"0008": "evidence"}
 	}, []string{"INCOMPLETE_RATIONALE"}},
 	"task without requirements": {func(tr *Trace) {
-		tr.Tasks = append(tr.Tasks, Task{ID: "T005", Paths: []string{"tools/x.go"}, Verify: "`task x`", Evidence: "x.json"})
+		tr.Tasks = append(tr.Tasks, Task{ID: "T005", Paths: []string{"tools/x.go"}, Verify: "`go test ./x`", Evidence: "x.json"})
 	}, []string{"UNMAPPED_TASK"}},
 	"task names an undefined requirement": {func(tr *Trace) {
 		task(tr, "T001").Requirements = []string{"FR-001", "FR-009"}
@@ -180,6 +187,9 @@ var traceControls = map[string]struct {
 		task(tr, "T002").Requirements = append(task(tr, "T002").Requirements, "FR-004")
 		tr.Registry.Checks[1].Requirements = append(tr.Registry.Checks[1].Requirements, "FR-004")
 	}, []string{"UNREGISTERED_REQUIREMENT"}},
+	"requirement registered with no ADRs": {func(tr *Trace) {
+		tr.Registry.Requirements["FR-003"] = Requirement{ADRs: []string{}}
+	}, []string{"UNREGISTERED_REQUIREMENT", "UNRELATED_ADR"}},
 	"requirement without a check": {func(tr *Trace) {
 		addRequirement(tr)
 		tr.Registry.Requirements["FR-004"] = Requirement{ADRs: []string{"0008"}}
@@ -188,17 +198,29 @@ var traceControls = map[string]struct {
 	"check created by no task": {func(tr *Trace) {
 		tr.Registry.Checks[0].Creator = "T009"
 	}, []string{"UNKNOWN_CREATOR"}},
+	"verify runs an unregistered target": {func(tr *Trace) {
+		task(tr, "T001").Verify = "`task verify:pins; task nonexistent`: a missing tool is rejected."
+	}, []string{"UNKNOWN_CHECK"}},
+	"creator never runs its check": {func(tr *Trace) {
+		task(tr, "T001").Verify = "`go -C tools test ./...`: a missing tool is rejected."
+	}, []string{"CHECK_NOT_VERIFIED"}},
+	"docs check created by a behavioural task": {func(tr *Trace) {
+		tr.Registry.Checks[2].Creator = "T002"
+	}, []string{"INVALID_EXEMPTION"}},
 	"task without paths": {func(tr *Trace) {
 		task(tr, "T001").Paths = nil
 	}, []string{"MISSING_PATHS"}},
 	"verify without a command": {func(tr *Trace) {
-		task(tr, "T001").Verify = "run the pin checks"
-	}, []string{"MISSING_VERIFY"}},
+		task(tr, "T002").Verify = "run the trace checks"
+	}, []string{"CHECK_NOT_VERIFIED", "MISSING_VERIFY"}},
 	"empty verify": {func(tr *Trace) {
-		task(tr, "T002").Verify = ""
+		task(tr, "T004").Verify = ""
 	}, []string{"MISSING_VERIFY"}},
 	"missing evidence": {func(tr *Trace) {
 		task(tr, "T001").Evidence = ""
+	}, []string{"MISSING_EVIDENCE"}},
+	"evidence names no path": {func(tr *Trace) {
+		task(tr, "T002").Evidence = "none"
 	}, []string{"MISSING_EVIDENCE"}},
 	"docs exemption still needs evidence": {func(tr *Trace) {
 		task(tr, "T003").Evidence = ""
@@ -249,8 +271,10 @@ func TestTraceabilityRulesIsolated(t *testing.T) {
 func TestTraceabilityRegistryStrict(t *testing.T) {
 	valid := `{"schema_version": 1,
   "requirements": {"FR-001": {"adrs": ["0011"]}},
-  "checks": [{"id": "V001", "requirements": ["FR-001"], "command": "task verify:pins", "creator": "T001",
-              "kind": "behavioral", "scope": ["tools"], "review": true}]}
+  "evaluators": ["check"],
+  "producers": [],
+  "checks": [{"id": "verify:pins", "requirements": ["FR-001"], "command": "task verify:pins -- tools", "creator": "T001",
+              "kind": "behavioral", "scope": ["tools"], "inputs": ["Taskfile.yml"], "review": true}]}
 `
 	reg, err := ParseRegistry([]byte(valid))
 	if err != nil {
@@ -258,29 +282,64 @@ func TestTraceabilityRegistryStrict(t *testing.T) {
 	}
 	want := Registry{
 		Requirements: map[string]Requirement{"FR-001": {ADRs: []string{"0011"}}},
-		Checks: []CheckDefinition{{ID: "V001", Requirements: []string{"FR-001"}, Command: "task verify:pins", Creator: "T001",
-			Kind: KindBehavioral, Scope: []string{"tools"}, Review: true}},
+		Checks: []CheckDefinition{{ID: "verify:pins", Requirements: []string{"FR-001"}, Command: "task verify:pins -- tools", Creator: "T001",
+			Kind: KindBehavioral, Scope: []string{"tools"}, Inputs: []string{"Taskfile.yml"}, Review: true}},
+		Evaluators: []string{"check"},
+		Producers:  []string{},
 	}
 	if !reflect.DeepEqual(reg, want) {
 		t.Errorf("BEHAVIORAL_RED: registry\n got %#v\nwant %#v", reg, want)
 	}
 	for name, text := range map[string]string{
-		"unknown field":         strings.Replace(valid, `"review": true`, `"review": true, "owner": "x"`, 1),
-		"duplicate key":         strings.Replace(valid, `"kind": "behavioral"`, `"kind": "behavioral", "kind": "docs"`, 1),
-		"duplicate requirement": strings.Replace(valid, `{"FR-001": {"adrs": ["0011"]}}`, `{"FR-001": {"adrs": ["0011"]}, "FR-001": {"adrs": []}}`, 1),
-		"duplicate check id":    strings.Replace(valid, `"review": true}]`, `"review": true}, {"id": "V001", "requirements": ["FR-001"], "command": "c", "creator": "T001", "kind": "docs", "scope": ["AGENTS.md"]}]`, 1),
-		"unknown kind":          strings.Replace(valid, `"behavioral"`, `"manual"`, 1),
-		"wrong schema version":  strings.Replace(valid, `"schema_version": 1`, `"schema_version": 2`, 1),
-		"trailing document":     valid + "{}\n",
-		"no checks":             `{"schema_version": 1, "requirements": {}, "checks": []}`,
-		"check without scope":   strings.Replace(valid, `"scope": ["tools"]`, `"scope": []`, 1),
-		"absolute scope":        strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["/etc"]`, 1),
-		"escaping scope":        strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["tools/../.."]`, 1),
-		"parent scope":          strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["../x"]`, 1),
-		"not JSON-compatible":   "checks:\n  - id: V001\n",
+		"unknown field":          strings.Replace(valid, `"review": true`, `"review": true, "owner": "x"`, 1),
+		"duplicate key":          strings.Replace(valid, `"kind": "behavioral"`, `"kind": "behavioral", "kind": "docs"`, 1),
+		"case-variant duplicate": strings.Replace(valid, `"kind": "behavioral"`, `"kind": "behavioral", "KIND": "docs"`, 1),
+		"case-variant field":     strings.Replace(valid, `"kind": "behavioral"`, `"Kind": "behavioral"`, 1),
+		"null field":             strings.Replace(valid, `"review": true`, `"review": null`, 1),
+		"missing required field": strings.Replace(valid, `"creator": "T001",`, ``, 1),
+		"missing evaluators":     strings.Replace(valid, `"evaluators": ["check"],`, ``, 1),
+		"wrong value type":       strings.Replace(valid, `"schema_version": 1`, `"schema_version": "1"`, 1),
+		"duplicate requirement":  strings.Replace(valid, `{"FR-001": {"adrs": ["0011"]}}`, `{"FR-001": {"adrs": ["0011"]}, "FR-001": {"adrs": []}}`, 1),
+		"duplicate check id":     strings.Replace(valid, `"review": true}]`, `"review": true}, {"id": "verify:pins", "requirements": ["FR-001"], "command": "c", "creator": "T001", "kind": "docs", "scope": ["AGENTS.md"]}]`, 1),
+		"command runs another":   strings.Replace(valid, `"command": "task verify:pins -- tools"`, `"command": "task verify:other"`, 1),
+		"command extends the id": strings.Replace(valid, `"command": "task verify:pins -- tools"`, `"command": "task verify:pinsx"`, 1),
+		"unknown kind":           strings.Replace(valid, `"behavioral"`, `"manual"`, 1),
+		"wrong schema version":   strings.Replace(valid, `"schema_version": 1`, `"schema_version": 2`, 1),
+		"trailing document":      valid + "{}\n",
+		"no checks":              `{"schema_version": 1, "requirements": {}, "evaluators": [], "producers": [], "checks": []}`,
+		"check without scope":    strings.Replace(valid, `"scope": ["tools"]`, `"scope": []`, 1),
+		"absolute scope":         strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["/etc"]`, 1),
+		"escaping scope":         strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["tools/../.."]`, 1),
+		"parent scope":           strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["../x"]`, 1),
+		"parent input":           strings.Replace(valid, `"inputs": ["Taskfile.yml"]`, `"inputs": ["../Taskfile.yml"]`, 1),
+		"not JSON-compatible":    "checks:\n  - id: V001\n",
 	} {
 		if _, err := ParseRegistry([]byte(text)); err == nil {
 			t.Errorf("BEHAVIORAL_RED: %s accepted", name)
+		}
+	}
+}
+
+// Evidence decoding refuses anything a missing, null or case-variant field
+// could turn into a pass.
+func TestDoDEvidenceStrict(t *testing.T) {
+	valid := `{"check": "N1", "status": "pass", "input_digest": "sha256:x", "discovered": 1, "failed": 0, "producer": "lz-offline"}`
+	var e Evidence
+	if err := DecodeStrict([]byte(valid), &e); err != nil || e.Discovered != 1 || e.Producer != "lz-offline" {
+		t.Fatalf("BEHAVIORAL_RED: valid evidence refused: %v %+v", err, e)
+	}
+	for name, text := range map[string]string{
+		"missing failed":       strings.Replace(valid, `, "failed": 0`, ``, 1),
+		"null failed":          strings.Replace(valid, `"failed": 0`, `"failed": null`, 1),
+		"case-variant failed":  strings.Replace(valid, `"failed": 0`, `"failed": 1, "FAILED": 0`, 1),
+		"fractional count":     strings.Replace(valid, `"discovered": 1`, `"discovered": 1.5`, 1),
+		"missing producer":     strings.Replace(valid, `, "producer": "lz-offline"`, ``, 1),
+		"null reviewer":        strings.Replace(valid, `"producer"`, `"reviewer": null, "producer"`, 1),
+		"array instead of obj": `[` + valid + `]`,
+	} {
+		var e Evidence
+		if err := DecodeStrict([]byte(text), &e); err == nil {
+			t.Errorf("BEHAVIORAL_RED: %s accepted: %+v", name, e)
 		}
 	}
 }
@@ -303,6 +362,7 @@ func writeTree(t *testing.T, files map[string]string) string {
 
 func dodTree(t *testing.T) string {
 	return writeTree(t, map[string]string{
+		"Taskfile.yml":                          "version: '3'\n",
 		"modules/naming/main.tf":                "locals {}\n",
 		"modules/naming/tests/names.tftest.hcl": "run \"x\" {}\n",
 		"modules/naming/README.md":              "# naming\n",
@@ -311,12 +371,15 @@ func dodTree(t *testing.T) string {
 }
 
 func dodRegistry() Registry {
-	return Registry{Checks: []CheckDefinition{
-		{ID: "N1", Requirements: []string{"FR-001"}, Command: "task test:naming", Creator: "T001", Kind: KindBehavioral, Scope: []string{"modules/naming"}},
-		{ID: "N2", Requirements: []string{"FR-001"}, Command: "task snap:check", Creator: "T001", Kind: KindBehavioral, Scope: []string{"modules/naming/tests"}, Review: true},
-		{ID: "N3", Requirements: []string{"FR-003"}, Command: "content review", Creator: "T003", Kind: KindDocs, Scope: []string{"modules/naming/README.md"}},
-		{ID: "O1", Requirements: []string{"FR-002"}, Command: "task test:other", Creator: "T002", Kind: KindBehavioral, Scope: []string{"tools/other"}},
-	}}
+	return Registry{
+		Checks: []CheckDefinition{
+			{ID: "N1", Requirements: []string{"FR-001"}, Command: "task test:naming", Creator: "T001", Kind: KindBehavioral, Scope: []string{"modules/naming"}, Inputs: []string{"Taskfile.yml"}},
+			{ID: "N2", Requirements: []string{"FR-001"}, Command: "task snap:check", Creator: "T001", Kind: KindBehavioral, Scope: []string{"modules/naming/tests"}, Review: true},
+			{ID: "N3", Requirements: []string{"FR-003"}, Command: "content review", Creator: "T003", Kind: KindDocs, Scope: []string{"modules/naming/README.md"}},
+			{ID: "O1", Requirements: []string{"FR-002"}, Command: "task test:other", Creator: "T002", Kind: KindBehavioral, Scope: []string{"tools/other"}},
+		},
+		Producers: []string{"lz-offline"},
+	}
 }
 
 func digest(t *testing.T, root string, scope ...string) string {
@@ -331,10 +394,23 @@ func digest(t *testing.T, root string, scope ...string) string {
 	return d
 }
 
+func checkDigest(t *testing.T, root string, c CheckDefinition) string {
+	t.Helper()
+	d, err := CheckDigest(root, c)
+	if err != nil {
+		t.Fatalf("BEHAVIORAL_RED: check digest of %s: %v", c.ID, err)
+	}
+	if !strings.HasPrefix(d, "sha256:") || len(d) != len("sha256:")+64 {
+		t.Fatalf("BEHAVIORAL_RED: check digest %q is not a sha256", d)
+	}
+	return d
+}
+
 func freshEvidence(t *testing.T, root string) map[string]Evidence {
+	checks := dodRegistry().Checks
 	return map[string]Evidence{
-		"N1": {Check: "N1", Status: StatusPass, InputDigest: digest(t, root, "modules/naming"), Discovered: 3},
-		"N2": {Check: "N2", Status: StatusPass, InputDigest: digest(t, root, "modules/naming/tests"), Discovered: 1, Reviewer: "independent"},
+		"N1": {Check: "N1", Status: StatusPass, InputDigest: checkDigest(t, root, checks[0]), Discovered: 3, Producer: "lz-offline"},
+		"N2": {Check: "N2", Status: StatusPass, InputDigest: checkDigest(t, root, checks[1]), Discovered: 1, Producer: "lz-offline", Reviewer: "independent"},
 	}
 }
 
@@ -364,6 +440,7 @@ func TestDoDSelection(t *testing.T) {
 		"modules/naming/tests":   "N1 N2",
 		"tools/other/x.go":       "O1",
 		".":                      "N1 N2 N3 O1",
+		"Taskfile.yml":           "",
 	} {
 		d := EvaluateDoD(dodRegistry(), root, path, nil)
 		var ids []string
@@ -379,7 +456,8 @@ func TestDoDSelection(t *testing.T) {
 	}
 }
 
-// Each control changes one fact; only an observed, fresh, consistent pass counts.
+// Each control changes one fact; only an observed, fresh, consistent and
+// attested pass counts.
 func TestDoDRejected(t *testing.T) {
 	for name, c := range map[string]struct {
 		mutate func(t *testing.T, root string, e map[string]Evidence)
@@ -397,6 +475,11 @@ func TestDoDRejected(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "N2", "not-run STALE_EVIDENCE"},
+		"stale after an execution input changes": {func(t *testing.T, root string, e map[string]Evidence) {
+			if err := os.WriteFile(filepath.Join(root, "Taskfile.yml"), []byte("version: '3'\ntasks: {}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, "N1", "not-run STALE_EVIDENCE"},
 		"forged digest": {func(t *testing.T, root string, e map[string]Evidence) {
 			n := e["N1"]
 			n.InputDigest = "sha256:" + strings.Repeat("0", 64)
@@ -415,6 +498,11 @@ func TestDoDRejected(t *testing.T) {
 			n.Failed = 1
 			e["N1"] = n
 		}, "N1", "fail INCONSISTENT_PASS"},
+		"unattested producer": {func(t *testing.T, root string, e map[string]Evidence) {
+			n := e["N1"]
+			n.Producer = "written-by-hand"
+			e["N1"] = n
+		}, "N1", "review-required UNATTESTED_EVIDENCE"},
 		"reported failure": {func(t *testing.T, root string, e map[string]Evidence) {
 			n := e["N1"]
 			n.Status, n.Failed = StatusFail, 1
@@ -463,6 +551,24 @@ func TestDoDRejected(t *testing.T) {
 	}
 }
 
+// A docs exemption holds only while every file in its scope is Markdown.
+func TestDoDDocsExemption(t *testing.T) {
+	root := dodTree(t)
+	reg := Registry{Checks: []CheckDefinition{
+		{ID: "D1", Command: "review", Creator: "T003", Kind: KindDocs, Scope: []string{"modules/naming/README.md"}},
+		{ID: "D2", Command: "review", Creator: "T003", Kind: KindDocs, Scope: []string{"modules/naming"}},
+		{ID: "D3", Command: "review", Creator: "T003", Kind: KindDocs, Scope: []string{"docs/absent"}},
+	}}
+	if err := os.Symlink("/etc/passwd", filepath.Join(root, "Taskfile.md")); err != nil {
+		t.Fatal(err)
+	}
+	reg.Checks = append(reg.Checks, CheckDefinition{ID: "D4", Command: "review", Creator: "T003", Kind: KindDocs, Scope: []string{"Taskfile.md"}})
+	want := map[string]string{"D1": "exempt ", "D2": "fail INVALID_EXEMPTION", "D3": "not-run SCOPE_MISSING", "D4": "fail SCOPE_UNREADABLE"}
+	if got := statuses(EvaluateDoD(reg, root, ".", nil)); !reflect.DeepEqual(got, want) {
+		t.Errorf("BEHAVIORAL_RED: docs exemptions %v, want %v", got, want)
+	}
+}
+
 func TestDoDDigest(t *testing.T) {
 	root := dodTree(t)
 	base := digest(t, root, "modules/naming")
@@ -474,6 +580,13 @@ func TestDoDDigest(t *testing.T) {
 	}
 	if digest(t, root, "modules/naming") != base {
 		t.Error("BEHAVIORAL_RED: a change outside the scope changed the digest")
+	}
+	n1 := dodRegistry().Checks[0]
+	before := checkDigest(t, root, n1)
+	changed := n1
+	changed.Command = "task test:naming -- other"
+	if checkDigest(t, root, changed) == before {
+		t.Error("BEHAVIORAL_RED: a changed check definition kept its digest")
 	}
 	if err := os.Rename(filepath.Join(root, "modules/naming/main.tf"), filepath.Join(root, "modules/naming/other.tf")); err != nil {
 		t.Fatal(err)

@@ -19,6 +19,8 @@ const tasks = "- [ ] T001 Write pins in tools/pin.go\n" +
 
 const registry = `{"schema_version": 1,
  "requirements": {"FR-001": {"adrs": ["0011"]}, "SC-001": {"adrs": ["0011"]}},
+ "evaluators": [],
+ "producers": ["test-producer"],
  "checks": [{"id": "pins", "requirements": ["FR-001", "SC-001"], "command": "task pins", "creator": "T001", "kind": "behavioral", "scope": ["tools"]}]}
 `
 
@@ -75,6 +77,7 @@ func TestSpecsRejected(t *testing.T) {
 		"no tasks":           {map[string]string{"specs/001-x/tasks.md": "# Tasks\n"}, 2, "NO_TASKS"},
 		"no requirements":    {map[string]string{"specs/001-x/spec.md": "# Spec\n"}, 2, "NO_REQUIREMENTS"},
 		"malformed registry": {map[string]string{"harness/checks.yaml": "checks: []\n"}, 2, "REGISTRY_SYNTAX"},
+		"creator never runs": {map[string]string{"specs/001-x/tasks.md": strings.Replace(tasks, "`task pins`", "`go test ./...`", 1)}, 1, "CHECK_NOT_VERIFIED pins"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := lzCheck(repo(t, c.files), "specs", "specs/001-x")
@@ -85,13 +88,17 @@ func TestSpecsRejected(t *testing.T) {
 	}
 }
 
-func writeEvidence(t *testing.T, root, status string, discovered int) {
+func writeEvidence(t *testing.T, root, producer string) {
 	t.Helper()
-	d, err := checks.Digest(root, []string{"tools"})
+	reg, err := checks.ParseRegistry([]byte(registry))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := `{"check": "pins", "status": "` + status + `", "input_digest": "` + d + `", "discovered": ` + string(rune('0'+discovered)) + `, "failed": 0}`
+	d, err := checks.CheckDigest(root, reg.Checks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := `{"check": "pins", "status": "pass", "input_digest": "` + d + `", "discovered": 2, "failed": 0, "producer": "` + producer + `"}`
 	if err := os.WriteFile(filepath.Join(root, ".local/evidence/checks/pins.json"), []byte(e), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +109,11 @@ func TestDoD(t *testing.T) {
 	if code, out := lzCheck(root, "dod", "tools"); code != 1 || !strings.Contains(out, "not-run pins NO_EVIDENCE") || !strings.Contains(out, "DOD_FAIL tools") {
 		t.Errorf("BEHAVIORAL_RED: missing evidence not reported as not-run: code=%d\n%s", code, out)
 	}
-	writeEvidence(t, root, "pass", 2)
+	writeEvidence(t, root, "written-by-hand")
+	if code, out := lzCheck(root, "dod", "tools"); code != 1 || !strings.Contains(out, "review-required pins UNATTESTED_EVIDENCE") {
+		t.Errorf("BEHAVIORAL_RED: unattested evidence passed: code=%d\n%s", code, out)
+	}
+	writeEvidence(t, root, "test-producer")
 	if code, out := lzCheck(root, "dod", "tools"); code != 0 || !strings.Contains(out, "pass pins") || !strings.Contains(out, "DOD_PASS tools") {
 		t.Errorf("BEHAVIORAL_RED: fresh pass refused: code=%d\n%s", code, out)
 	}
@@ -119,10 +130,13 @@ func TestDoD(t *testing.T) {
 
 func TestDoDRefusesMalformedEvidence(t *testing.T) {
 	for name, content := range map[string]string{
-		"not JSON":      "pass\n",
-		"unknown field": `{"check": "pins", "status": "pass", "verdict": "ok"}`,
-		"duplicate key": `{"check": "pins", "status": "fail", "status": "pass"}`,
-		"trailing data": `{"check": "pins", "status": "pass"} {}`,
+		"not JSON":       "pass\n",
+		"unknown field":  `{"check": "pins", "status": "pass", "verdict": "ok"}`,
+		"missing failed": `{"check": "pins", "status": "pass", "input_digest": "x", "discovered": 1, "producer": "test-producer"}`,
+		"null failed":    `{"check": "pins", "status": "pass", "input_digest": "x", "discovered": 1, "failed": null, "producer": "test-producer"}`,
+		"case variant":   `{"check": "pins", "status": "pass", "input_digest": "x", "discovered": 1, "failed": 1, "FAILED": 0, "producer": "test-producer"}`,
+		"duplicate key":  `{"check": "pins", "status": "fail", "status": "pass"}`,
+		"trailing data":  `{"check": "pins", "status": "pass"} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := repo(t, map[string]string{".local/evidence/checks/pins.json": content})
