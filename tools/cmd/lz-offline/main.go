@@ -187,6 +187,47 @@ func admitTarget(name string) error {
 	return nil
 }
 
+// admitArgument accepts one clean relative path, so an operator-supplied
+// argument cannot become a Task flag, an absolute path or a parent reference.
+func admitArgument(value string) error {
+	if len(value) == 0 || len(value) > 256 || !(value[0] >= 'a' && value[0] <= 'z' || value[0] >= 'A' && value[0] <= 'Z' || value[0] >= '0' && value[0] <= '9' || value[0] == '_') {
+		return fmt.Errorf("COMMAND_ADMISSION: relative path argument required")
+	}
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '/' || c == '-') {
+			return fmt.Errorf("COMMAND_ADMISSION: relative path argument required")
+		}
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return fmt.Errorf("COMMAND_ADMISSION: parent reference in argument")
+		}
+	}
+	return nil
+}
+
+// parseCommand admits `--candidate <checkout> -- task <target> [-- <path>]`.
+// Trusted targets take no argument.
+func parseCommand(args []string) (string, []string, error) {
+	if len(args) < 5 || args[0] != "--candidate" || args[2] != "--" || args[3] != "task" {
+		return "", nil, fmt.Errorf("USAGE: lz-offline --candidate <absolute-checkout> -- task <target> [-- <path>]")
+	}
+	target := args[4]
+	if err := admitTarget(target); err != nil {
+		return "", nil, err
+	}
+	switch {
+	case len(args) == 5:
+		return target, nil, nil
+	case len(args) == 7 && args[5] == "--" && !trustedTargets[target]:
+		if err := admitArgument(args[6]); err != nil {
+			return "", nil, err
+		}
+		return target, []string{args[6]}, nil
+	}
+	return "", nil, fmt.Errorf("COMMAND_ADMISSION: one Task target and at most one path argument")
+}
+
 func admitBundle(root string) (resources, error) {
 	var r resources
 	data, err := regular(filepath.Join(root, "resources.json"))
@@ -283,13 +324,14 @@ const (
 
 // Snapshot an explicit input allowlist, never the repository root. Every copied
 // file is regular/single-link and bounded; secrets/cache/config are excluded.
+// specs and docs are data for the trace check.
 // The probe.sh, included.yml, bin and lz-offline names admit the boundary
 // suite's hostile fixtures, so the suite can show they have no effect.
 func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := realDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", "tools", "tests", "harness", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := []string{"Taskfile.yml", "mise.toml", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
@@ -516,7 +558,7 @@ func copyTree(source, destination string) error {
 
 // inside runs in the sandbox. The gate is checked before any candidate file is
 // interpreted; trusted targets never reach the candidate's Taskfile.
-func inside(target string) error {
+func inside(target string, extra []string) error {
 	if err := checks.VerifyRuntime(); err != nil {
 		return err
 	}
@@ -530,7 +572,11 @@ func inside(target string) error {
 		return err
 	}
 	// Absolute trusted Task ignores candidate bin/launcher replacements.
-	command := exec.Command("/tcb/task", "--taskfile", "/candidate/Taskfile.yml", target)
+	taskArgs := []string{"--taskfile", "/candidate/Taskfile.yml", target}
+	if len(extra) > 0 {
+		taskArgs = append(append(taskArgs, "--"), extra...)
+	}
+	command := exec.Command("/tcb/task", taskArgs...)
 	command.Env = os.Environ()
 	command.Dir = "/candidate"
 	command.Stdin, command.Stdout, command.Stderr = nil, os.Stdout, os.Stderr
@@ -547,13 +593,8 @@ func run() (result error) {
 			return networkDenied()
 		}
 	}
-	if len(os.Args) < 6 || os.Args[1] != "--candidate" || os.Args[3] != "--" || os.Args[4] != "task" {
-		return fmt.Errorf("USAGE: lz-offline --candidate <absolute-checkout> -- task <target>")
-	}
-	if len(os.Args) != 6 {
-		return fmt.Errorf("COMMAND_ADMISSION: exactly one Task target required")
-	}
-	if err := admitTarget(os.Args[5]); err != nil {
+	target, extra, err := parseCommand(os.Args[1:])
+	if err != nil {
 		return err
 	}
 	// One deadline covers admission, snapshot and the sandboxed child.
@@ -596,7 +637,7 @@ func run() (result error) {
 	if err := os.Mkdir(copyRoot, 0700); err != nil {
 		return err
 	}
-	if !trustedTargets[os.Args[5]] {
+	if !trustedTargets[target] {
 		if err := supervise(ctx, func() error { return snapshot(ctx, candidate, copyRoot) }); err != nil {
 			return err
 		}
@@ -632,7 +673,7 @@ func run() (result error) {
 		"--setenv", "GOPROXY", "off", "--setenv", "GOSUMDB", "off", "--setenv", "GOCACHE", "/tmp/go-cache", "--setenv", "GOPATH", "/tmp/go-path", "--setenv", "CGO_ENABLED", "0"}
 	// The external boundary suite supplies only synthetic metadata. These values
 	// cannot select mounts, helpers, config or launch arguments.
-	if os.Args[5] == "probe" {
+	if target == "probe" {
 		for _, name := range []string{"LZ_HOST", "LZ_URL"} {
 			value := os.Getenv(name)
 			if value != "" {
@@ -651,7 +692,8 @@ func run() (result error) {
 		args = append(args, "--ro-bind", probe, "/tcb/probe", "--setenv", "LZ_PROBE", "1", "--setenv", "LZ_PROBE_BINARY", "/tcb/probe")
 	}
 	// Tool mount points live on private tmpfs; seal them before the child starts.
-	args = append(args, "--remount-ro", "/tcb", "--remount-ro", "/tools", "--chdir", "/candidate", "/tcb/lz-offline", "--inside", os.Args[5])
+	args = append(args, "--remount-ro", "/tcb", "--remount-ro", "/tools", "--chdir", "/candidate", "/tcb/lz-offline", "--inside", target)
+	args = append(args, extra...)
 	stdout, stderr := newChildOutput(cancel)
 	command := exec.CommandContext(ctx, r.Bwrap, args...)
 	command.Env = []string{}
@@ -676,7 +718,7 @@ func run() (result error) {
 	if childErr != nil {
 		return fmt.Errorf("CHILD_FAILED: %w", childErr)
 	}
-	switch os.Args[5] {
+	switch target {
 	case "verify:toolchain":
 		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 provider=ovh/ovh@2.21.0 network=none")
 	case "test:offline-boundary":
@@ -686,8 +728,8 @@ func run() (result error) {
 }
 
 func main() {
-	if len(os.Args) == 3 && os.Args[1] == "--inside" {
-		if err := inside(os.Args[2]); err != nil {
+	if (len(os.Args) == 3 || len(os.Args) == 4) && os.Args[1] == "--inside" {
+		if err := inside(os.Args[2], os.Args[3:]); err != nil {
 			fail(err)
 		}
 		return
