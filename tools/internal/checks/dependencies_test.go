@@ -215,6 +215,9 @@ func TestDependenciesRejected(t *testing.T) {
 		"own repository under its current name in an unrecognised form": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "s3::https://bucket/LandingZone-for-OVHcloud/modules/naming.zip" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository as a .git path in an unrecognised form": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "s3::https://bucket/landingzone-for-ovhcloud.git/modules/naming" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
 		"own repository under its current name in scp form to a missing module": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "git::git@github.com:PlatformRelay/landingzone-for-ovhcloud.git//modules/gone" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
@@ -252,6 +255,24 @@ func TestDependenciesRejected(t *testing.T) {
 			_, findings := ScanDependencies(writeModules(t, c.files))
 			if got := ruleNames(findings); !reflect.DeepEqual(got, c.want) {
 				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
+			}
+		})
+	}
+}
+
+// A repository whose name only contains this repository's name, under either
+// the current or the former name, is external, not a mention of this one.
+func TestDependenciesNameCollisionsAreExternal(t *testing.T) {
+	for _, source := range []string{
+		"git::https://github.com/example/my-landingzone-for-ovhcloud.git//modules/x?ref=v1",
+		"git::https://github.com/example/landingzone-for-ovhcloud-fork.git//modules/x?ref=v1",
+		"git::ssh://git@github.com/example/ovh-landing-zone-accelerator2.git//modules/x?ref=v1",
+		"s3::https://bucket/old-ovh-landing-zone-accelerator/modules/naming.zip",
+	} {
+		t.Run(source, func(t *testing.T) {
+			graph, findings := ScanDependencies(writeModules(t, map[string]string{"modules/a/main.tf": `module "m" { source = "` + source + `" }`}))
+			if len(findings) != 0 || !reflect.DeepEqual(graph.External["modules/a"], []string{source}) {
+				t.Errorf("BEHAVIORAL_RED: collision not external: %+v %v", findings, graph.External)
 			}
 		})
 	}
