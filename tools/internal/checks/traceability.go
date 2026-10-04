@@ -19,7 +19,9 @@ import (
 
 // Task is one entry of a feature's tasks.md.
 type Task struct {
-	ID           string
+	ID string
+	// Done is a ticked checkbox.
+	Done         bool
 	Paths        []string
 	Requirements []string
 	ADRs         []string
@@ -127,7 +129,7 @@ type DoD struct {
 
 var (
 	specRequirement = regexp.MustCompile(`(?m)^- \*\*((?:FR|SC)-\d{3})\*\*:`)
-	taskLine        = regexp.MustCompile(`^- \[[ xX]\] (T\d{3})\b(.*)$`)
+	taskLine        = regexp.MustCompile(`^- \[([ xX])\] (T\d{3})\b(.*)$`)
 	taskField       = regexp.MustCompile(`^  - ([A-Z][A-Za-z ]*?):\s*(.*)$`)
 	requirementID   = regexp.MustCompile(`\b(?:FR|SC)-\d{3}\b`)
 	adrID           = regexp.MustCompile(`\b\d{4}\b`)
@@ -383,7 +385,7 @@ func ParseTasks(text string) ([]Task, error) {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if m := taskLine.FindStringSubmatch(line); m != nil {
-			tasks = append(tasks, Task{ID: m[1], Paths: textPaths(m[2])})
+			tasks = append(tasks, Task{ID: m[2], Paths: textPaths(m[3]), Done: m[1] != " "})
 			current, seen = len(tasks)-1, map[string]bool{}
 			continue
 		}
