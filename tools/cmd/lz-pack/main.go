@@ -93,27 +93,29 @@ func linkAdmitted(bundle, path, target string) bool {
 	return resolved == rootfs || strings.HasPrefix(resolved, rootfs+"/")
 }
 
+// canonical requires an absolute path without "." or ".." components or
+// redundant separators, so that resolving it lexically and the kernel
+// following it name the same file.
+func canonical(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return fmt.Errorf("PACK_PATH: absolute clean path required: %s", path)
+	}
+	return nil
+}
+
 // outside reports an error unless out lies outside bundle, after resolving
-// links in both, so the layout cannot become part of its own input.
+// links in both, so the layout cannot become part of its own input. Both
+// paths are canonical.
 func outside(bundle, out string) error {
-	// Both sides are made absolute first: EvalSymlinks keeps a relative path relative.
-	absoluteBundle, err := filepath.Abs(bundle)
+	realBundle, err := filepath.EvalSymlinks(bundle)
 	if err != nil {
 		return err
 	}
-	realBundle, err := filepath.EvalSymlinks(absoluteBundle)
-	if err != nil {
-		return err
-	}
-	absolute, err := filepath.Abs(out)
-	if err != nil {
-		return err
-	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+	parent, err := filepath.EvalSymlinks(filepath.Dir(out))
 	if err != nil {
 		return fmt.Errorf("PACK_OUTPUT: parent directory required: %w", err)
 	}
-	target := filepath.Join(parent, filepath.Base(absolute))
+	target := filepath.Join(parent, filepath.Base(out))
 	// An output equal to the bundle already exists and is refused on creation.
 	if strings.HasPrefix(target, realBundle+"/") {
 		return fmt.Errorf("PACK_OUTPUT: output inside the bundle")
@@ -234,6 +236,11 @@ func store(out, mediaType string, value any) (descriptor, error) {
 }
 
 func pack(bundle, launcher, out string) (result packed, err error) {
+	for _, path := range []string{bundle, launcher, out} {
+		if err := canonical(path); err != nil {
+			return packed{}, err
+		}
+	}
 	items, err := plan(bundle, launcher)
 	if err != nil {
 		return packed{}, err
@@ -297,9 +304,9 @@ func pack(bundle, launcher, out string) (result packed, err error) {
 }
 
 func main() {
-	bundle := flag.String("bundle", "", "prepared runtime bundle directory")
-	launcher := flag.String("bwrap", "/usr/bin/bwrap", "launcher the bundle manifest pins")
-	out := flag.String("out", "", "new OCI image layout directory")
+	bundle := flag.String("bundle", "", "prepared runtime bundle directory (absolute)")
+	launcher := flag.String("bwrap", "/usr/bin/bwrap", "launcher the bundle manifest pins (absolute)")
+	out := flag.String("out", "", "new OCI image layout directory (absolute)")
 	flag.Parse()
 	if *bundle == "" || *out == "" || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: lz-pack -bundle <dir> [-bwrap <file>] -out <new-dir>")

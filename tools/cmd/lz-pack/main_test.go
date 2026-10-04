@@ -371,6 +371,28 @@ func TestPackRefuses(t *testing.T) {
 			t.Chdir(filepath.Dir(dir))
 			return filepath.Base(dir), launcher, filepath.Join(filepath.Base(dir), "resources", "layout")
 		},
+		"output through a link and a parent reference": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			// Cleaned lexically this names a path outside the bundle; the
+			// kernel follows the link first and lands inside resources/.
+			link := filepath.Join(t.TempDir(), "via")
+			if err := os.Symlink(filepath.Join(dir, "resources"), link); err != nil {
+				t.Fatal(err)
+			}
+			return dir, launcher, link + "/../layout"
+		},
+		"bundle with a parent reference": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			return filepath.Dir(dir) + "/./" + filepath.Base(dir), launcher, out
+		},
+		"launcher with a current-directory reference": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			return dir, filepath.Dir(launcher) + "/./" + filepath.Base(launcher), out
+		},
+		"relative bundle with an absolute output inside it": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			t.Chdir(filepath.Dir(dir))
+			return filepath.Base(dir), launcher, filepath.Join(dir, "layout")
+		},
+		"output with a trailing slash": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			return dir, launcher, out + "/"
+		},
 		"link to the rootfs parent": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := os.Symlink("..", filepath.Join(dir, "resources/rootfs/up")); err != nil {
 				t.Fatal(err)
@@ -421,6 +443,7 @@ func TestPackRefuses(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir, launcher := bundle(t)
 			out := filepath.Join(t.TempDir(), "layout")
+			original := dir
 			dir, launcher, out = damage(t, dir, launcher, out)
 			if result, err := pack(dir, launcher, out); err == nil {
 				t.Errorf("BEHAVIORAL_RED: %s packed: %+v", name, result)
@@ -430,6 +453,11 @@ func TestPackRefuses(t *testing.T) {
 			_, err := os.Lstat(out)
 			if exists := err == nil; exists != (name == "output exists") {
 				t.Errorf("BEHAVIORAL_RED: %s left output present=%v", name, exists)
+			}
+			for _, inside := range []string{"layout", "resources/layout"} {
+				if _, err := os.Lstat(filepath.Join(original, inside)); err == nil {
+					t.Errorf("BEHAVIORAL_RED: %s left %s inside the bundle", name, inside)
+				}
 			}
 		})
 	}
