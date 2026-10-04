@@ -260,9 +260,8 @@ admission leaves cleanup usable and cannot hide unresolved inventory or costs.
 
 Current private-development CI source-admission hardening is deferred under D60 (KI-001),
 not a prerequisite introduced by this draft and not qualified protection. Candidate
-configuration must still not execute before local isolation. D61 permits reviewed commits
-and stacked PRs but no merge in this run; neither D50 nor repository workflow authority
-grants cloud authority. No cloud or credential operation was performed to draft this ADR.
+configuration must still not execute before local isolation. Neither repository workflow
+authority nor this ADR grants cloud authority. No cloud or credential operation was performed to draft this ADR.
 
 ## Review log
 
