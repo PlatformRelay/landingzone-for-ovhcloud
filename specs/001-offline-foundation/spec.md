@@ -11,8 +11,8 @@ The current goal (2026-10-02, local decision D61) authorizes all locally impleme
 portions of specs 001–004 whose dependencies and required decisions are satisfied, with
 tests first, predefined evidence and independent reviews. Publish coherent increments,
 including stacked PRs with explicit parent branches and review order; continue eligible
-work without waiting for operator review. No PRs may be merged during this goal; earlier
-merge permission is superseded. T001–T009 remain minimum safety before dependent work;
+work without waiting for operator review. A PR merges after an independent review and
+green applicable checks. T001–T009 remain minimum safety before dependent work;
 conditional T023 adds only minimal GitHub CI after those tasks have evidenced completion.
 D29's hardened persistence/export deferral until real profile schemas exist remains in force.
 The 2026-10-02 operator priority exception (local decision D60) accepts C2 as

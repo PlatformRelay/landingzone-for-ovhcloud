@@ -4,14 +4,15 @@
 - Observation: check id, subject/location, source/input/policy digests, tool versions,
   fixture or environment, observed/expected, status, evidence reference, upstream message.
   Only fresh matching evidence can pass; non-applicable and docs exemptions are explicit.
-- TrustedSourceAdmission (T003 local entry / T023 CI): independent approval reference,
-  source closure and binary/image digests, external installation identity; for CI also
-  Actions-disabled observation, frozen workflow tree, active ruleset/empty bypass identity,
-  valid candidate/history admission and actual denied-push controls. Unqualified admission
-  blocks execution. Source manifests are data compared to external approval, never authority.
+- TrustedSourceAdmission (T003 local entry / T023 CI): review reference, source closure and
+  binary/image digests, external installation identity. Unqualified local admission blocks
+  execution. Source manifests are data compared to external approval, never authority.
+  Deferred to KI-001 (C010.5/P4), not required by T023: Actions-disabled observation, frozen
+  workflow tree, active ruleset/empty bypass identity, candidate/history admission and
+  denied-push controls.
 - FoundationCIObservation (T023): executed workflow/Action/launcher/image/publisher identities,
-  exact examined candidate SHA, run/check ids, per-check discovery/status and admission packet.
-  Both pre-execution source proof and fresh matching run evidence are required.
+  exact examined candidate SHA, run/check ids, per-check discovery/status. Fresh matching run
+  evidence is required; enforced pre-execution source proof is deferred to KI-001.
 - NamingCatalogue: kind, limits, allowed separators/charset, source URL/date, applicability
   (tags/labels/metadata/inventory), evidence status; an unknown kind refuses qualification.
 - OrganisationTemplate: ordered segments, separator/case, abbreviations, per-kind override,

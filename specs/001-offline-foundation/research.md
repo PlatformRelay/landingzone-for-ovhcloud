@@ -9,8 +9,8 @@ of specs 001–004 whose dependencies and required decisions are satisfied. T001
 minimum safety before dependent implementation; minimal CI T023 follows their evidenced
 completion. Publish independently reviewed coherent increments, including stacked PRs
 with explicit parent branches and review order. Continue eligible independent work when
-a task is blocked. No PRs may be merged during this goal; earlier merge permission is
-superseded. D29 still defers hardened persistence/export until real profile schemas exist.
+a task is blocked. A PR merges after an independent review and green applicable
+checks. D29 still defers hardened persistence/export until real profile schemas exist.
 Activation does not close tasks, waive execution/capture prerequisites or qualify cloud,
 forge, CI or full-feature behavior.
 ## Decision: a prepared offline boundary

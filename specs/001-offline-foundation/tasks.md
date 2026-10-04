@@ -25,8 +25,8 @@ The current goal (2026-10-02, local decision D61) authorizes all locally impleme
 portions of specs 001–004 whose dependencies and required decisions are satisfied, with
 TDD, predefined evidence and independent reviews. Publish coherent increments as scoped
 PRs, including stacks with explicit parent branches and review order; continue eligible
-work without waiting for operator review. No PRs may be merged during this goal; earlier
-merge permission is superseded. Missing CI is not a green gate, and publication does not
+work without waiting for operator review. A PR merges after an independent review and green
+applicable checks. Missing CI is not a green gate, and publication does not
 establish merge readiness. T001–T009 remain minimum safety before dependent work, with
 conditional T023 after their evidenced completion. D29 still defers hardened persistence/
 export until real profile schemas exist.
@@ -233,7 +233,7 @@ prerequisites exist; defining it does not close its acceptance check.
 Minimum safety: T001–T009 supplies offline/report/traceability and fixture-based
 dependency/static checks without cloud resources. Review the foundation, then run T023
 only if those tasks have evidenced completion; C2 source admission remains deferred to
-KI-001. Review PR creation may precede merge readiness; no merges occur during this goal.
+KI-001. Review PR creation may precede merge readiness.
 Naming, forge adapters, AgentEx and later checks are eligible when their own prerequisites
 are satisfied. T022 still requires real forge evidence, whole-suite latency and the
 deferred guarantees identified in its verification contract. Dependent IAM/state
