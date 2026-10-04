@@ -12,6 +12,21 @@ tasks:
     cmds:
       - go -C tools test -count=1 ./internal/report ./cmd/json2junit
 
+  test:traceability:
+    desc: Trace rules, check registry and DoD evaluator (V003)
+    cmds:
+      - go -C tools test -count=1 ./internal/checks ./cmd/lz-check
+
+  check:specs:
+    desc: Trace every spec 001 requirement and task through harness/checks.yaml (V003)
+    cmds:
+      - go -C tools run ./cmd/lz-check -root .. specs specs/001-offline-foundation
+
+  dod:
+    desc: 'Definition of done for a path, e.g. task dod -- modules/naming (V003)'
+    cmds:
+      - go -C tools run ./cmd/lz-check -root .. dod {{.CLI_ARGS}}
+
   # One target per report fixture case; tests/fixtures/tofu/capture.sh records
   # their stdout. Each prints exactly the pinned `tofu test -json` stream.
   capture:tofu-pass:
