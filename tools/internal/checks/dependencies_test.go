@@ -224,6 +224,18 @@ func TestDependenciesRejected(t *testing.T) {
 		"own repository under its current name, encoded twice": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?source=github.com%252FPlatformRelay%252Flandingzone-for-ovhcloud" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository encoded twice beside an escape that decodes to a malformed one": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?source=github.com%252FPlatformRelay%252Flandingzone-for-ovhcloud&label=100%25" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository encoded beside a malformed escape": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?label=100%&source=github.com%2Fplatformrelay%2Fovh-landing-zone-accelerator" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository with its last character escaped": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?source=platformrelay%2Flandingzone-for-ovhclou%64" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"own repository with an escape that decodes to upper case": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/module?source=platformrelay%2F%4Candingzone-for-ovhcloud" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
 		"own repository after another separator": {map[string]string{
 			"components/runtime/kube/main.tf": `module "m" { source = "https://mirror.example/x#landingzone-for-ovhcloud,ref" }`,
 		}, []string{"UNRESOLVED_REFERENCE"}},
