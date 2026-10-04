@@ -363,6 +363,14 @@ func TestPackRefuses(t *testing.T) {
 			}
 			return filepath.Join(link, filepath.Base(dir)), launcher, filepath.Join(dir, "layout")
 		},
+		"relative bundle with output inside it": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			t.Chdir(filepath.Dir(dir))
+			return filepath.Base(dir), launcher, filepath.Join(filepath.Base(dir), "layout")
+		},
+		"relative bundle with output inside its resources": func(t *testing.T, dir, launcher, out string) (string, string, string) {
+			t.Chdir(filepath.Dir(dir))
+			return filepath.Base(dir), launcher, filepath.Join(filepath.Base(dir), "resources", "layout")
+		},
 		"link to the rootfs parent": func(t *testing.T, dir, launcher, out string) (string, string, string) {
 			if err := os.Symlink("..", filepath.Join(dir, "resources/rootfs/up")); err != nil {
 				t.Fatal(err)

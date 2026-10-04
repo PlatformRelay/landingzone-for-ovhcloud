@@ -96,7 +96,12 @@ func linkAdmitted(bundle, path, target string) bool {
 // outside reports an error unless out lies outside bundle, after resolving
 // links in both, so the layout cannot become part of its own input.
 func outside(bundle, out string) error {
-	realBundle, err := filepath.EvalSymlinks(bundle)
+	// Both sides are made absolute first: EvalSymlinks keeps a relative path relative.
+	absoluteBundle, err := filepath.Abs(bundle)
+	if err != nil {
+		return err
+	}
+	realBundle, err := filepath.EvalSymlinks(absoluteBundle)
 	if err != nil {
 		return err
 	}
