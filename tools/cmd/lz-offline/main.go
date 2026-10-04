@@ -131,25 +131,60 @@ func readCandidate(file *os.File, limit int64) ([]byte, os.FileMode, error) {
 	return data, info.Mode(), nil
 }
 
-type childOutput struct {
+const maxChildOutput = 8 << 20
+
+// outputBudget is shared by the child's stdout and stderr buffers.
+type outputBudget struct {
 	mu       sync.Mutex
-	buffer   bytes.Buffer
+	used     int
 	overflow bool
-	cancel   context.CancelFunc
+	cancel   func()
+}
+
+// childOutput buffers one child channel until cleanup has finished.
+type childOutput struct {
+	budget *outputBudget
+	buffer bytes.Buffer
+}
+
+func newChildOutput(cancel func()) (*childOutput, *childOutput) {
+	budget := &outputBudget{cancel: cancel}
+	return &childOutput{budget: budget}, &childOutput{budget: budget}
 }
 
 func (output *childOutput) Write(data []byte) (int, error) {
-	output.mu.Lock()
-	defer output.mu.Unlock()
-	if output.overflow {
+	budget := output.budget
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	if budget.overflow || len(data) > maxChildOutput-budget.used {
+		budget.overflow = true
+		budget.cancel()
 		return 0, fmt.Errorf("CHILD_OUTPUT_LIMIT")
 	}
-	if len(data) > (8<<20)-output.buffer.Len() {
-		output.overflow = true
-		output.cancel()
-		return 0, fmt.Errorf("CHILD_OUTPUT_LIMIT")
-	}
+	budget.used += len(data)
 	return output.buffer.Write(data)
+}
+
+func (output *childOutput) String() string { return output.buffer.String() }
+
+func (output *childOutput) overflowed() bool {
+	output.budget.mu.Lock()
+	defer output.budget.mu.Unlock()
+	return output.budget.overflow
+}
+
+// admitTarget accepts plain Task target names only, so no candidate-supplied
+// value can become a Task flag or path.
+func admitTarget(name string) error {
+	if len(name) == 0 || len(name) > 64 || name[0] < 'a' || name[0] > 'z' {
+		return fmt.Errorf("COMMAND_ADMISSION: plain Task target required")
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ':' || c == '-' || c == '_') {
+			return fmt.Errorf("COMMAND_ADMISSION: plain Task target required")
+		}
+	}
+	return nil
 }
 
 func admitBundle(root string) (resources, error) {
@@ -254,7 +289,7 @@ func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := realDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", "tools", "harness", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := []string{"Taskfile.yml", "mise.toml", "tools", "tests", "harness", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
@@ -515,8 +550,11 @@ func run() (result error) {
 	if len(os.Args) < 6 || os.Args[1] != "--candidate" || os.Args[3] != "--" || os.Args[4] != "task" {
 		return fmt.Errorf("USAGE: lz-offline --candidate <absolute-checkout> -- task <target>")
 	}
-	if len(os.Args) != 6 || !(trustedTargets[os.Args[5]] || os.Args[5] == "probe") {
-		return fmt.Errorf("COMMAND_ADMISSION: explicit child target required")
+	if len(os.Args) != 6 {
+		return fmt.Errorf("COMMAND_ADMISSION: exactly one Task target required")
+	}
+	if err := admitTarget(os.Args[5]); err != nil {
+		return err
 	}
 	// One deadline covers admission, snapshot and the sandboxed child.
 	ctx, cancel := context.WithTimeout(context.Background(), childDeadline)
@@ -614,21 +652,25 @@ func run() (result error) {
 	}
 	// Tool mount points live on private tmpfs; seal them before the child starts.
 	args = append(args, "--remount-ro", "/tcb", "--remount-ro", "/tools", "--chdir", "/candidate", "/tcb/lz-offline", "--inside", os.Args[5])
-	output := &childOutput{cancel: cancel}
+	stdout, stderr := newChildOutput(cancel)
 	command := exec.CommandContext(ctx, r.Bwrap, args...)
 	command.Env = []string{}
 	command.Dir = "/"
 	command.WaitDelay = 5 * time.Second
-	command.Stdout, command.Stderr = output, output
+	command.Stdout, command.Stderr = stdout, stderr
 	childErr := command.Run()
 	if err := os.RemoveAll(scratch); err != nil {
 		return fmt.Errorf("CLEANUP_FAILED: %w", err)
 	}
 	cleaned = true
-	if output.overflow {
+	if stdout.overflowed() {
 		return fmt.Errorf("CHILD_OUTPUT_LIMIT")
 	}
-	if _, err := os.Stdout.Write(output.buffer.Bytes()); err != nil {
+	// Channels are relayed separately so a captured tool stream stays exact.
+	if _, err := os.Stderr.Write(stderr.buffer.Bytes()); err != nil {
+		return err
+	}
+	if _, err := os.Stdout.Write(stdout.buffer.Bytes()); err != nil {
 		return err
 	}
 	if childErr != nil {

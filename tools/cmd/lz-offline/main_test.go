@@ -153,6 +153,42 @@ func TestSnapshotDoesNotRecreateRemovedDestination(t *testing.T) {
 	}
 }
 
+func TestTargetAdmission(t *testing.T) {
+	for _, name := range []string{"verify:toolchain", "test:offline-boundary", "probe", "capture:tofu-pass", "test:reports"} {
+		if err := admitTarget(name); err != nil {
+			t.Errorf("target %q rejected: %v", name, err)
+		}
+	}
+	for _, name := range []string{"", "-x", "--taskfile", "a b", "../x", "x/y", "Upper", "x;y", strings.Repeat("a", 65)} {
+		if err := admitTarget(name); err == nil {
+			t.Errorf("BEHAVIORAL_RED: target %q admitted", name)
+		}
+	}
+}
+
+// Stdout and stderr are relayed separately but share one budget, so a captured
+// stream stays clean and neither channel can exceed the cap.
+func TestChildOutputSharedBudget(t *testing.T) {
+	cancelled := false
+	stdout, stderr := newChildOutput(func() { cancelled = true })
+	if _, err := stdout.Write([]byte("{\"type\":\"version\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stderr.Write([]byte("task: [x] tofu test\n")); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "{\"type\":\"version\"}\n" || stderr.String() != "task: [x] tofu test\n" {
+		t.Fatalf("channels mixed: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	half := make([]byte, maxChildOutput/2)
+	if _, err := stdout.Write(half); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stderr.Write(half); err == nil || !cancelled || !stdout.overflowed() {
+		t.Errorf("BEHAVIORAL_RED: shared budget exceeded without overflow: err=%v cancelled=%v", err, cancelled)
+	}
+}
+
 func TestSnapshotHonoursDeadline(t *testing.T) {
 	candidate, destination := candidateTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
