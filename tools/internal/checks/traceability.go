@@ -195,14 +195,12 @@ func shellSegments(span string) [][]string {
 			inWord = false
 		}
 	}
-	// Every command between separators must have words; only a trailing ";"
-	// may end the span without one.
+	// An empty command between separators is kept as an empty segment, which
+	// is not a run and so voids the span; only a trailing ";" may end the
+	// span without one.
 	afterSemicolon := false
 	endSegment := func(semicolon bool) {
 		endWord()
-		if len(words) == 0 {
-			bad = true
-		}
 		segments = append(segments, words)
 		words, afterSemicolon = nil, semicolon
 	}
@@ -256,10 +254,18 @@ func shellSegments(span string) [][]string {
 func verifyRuns(verify string) []verifyRun {
 	var runs []verifyRun
 	for _, span := range verifyCommand.FindAllString(verify, -1) {
-		for _, words := range shellSegments(strings.Trim(span, "`")) {
+		// Every command of a span must itself be a run: any other command
+		// (cd, export, true, …) may change the directory, environment or
+		// control flow the runs depend on, so such a span counts for nothing.
+		var spanRuns []verifyRun
+		segments := shellSegments(strings.Trim(span, "`"))
+		for _, words := range segments {
 			if run, ok := parseRun(words); ok {
-				runs = append(runs, run)
+				spanRuns = append(spanRuns, run)
 			}
+		}
+		if len(spanRuns) == len(segments) {
+			runs = append(runs, spanRuns...)
 		}
 	}
 	return runs

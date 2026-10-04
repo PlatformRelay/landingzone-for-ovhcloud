@@ -257,6 +257,9 @@ var traceControls = map[string]struct {
 	"expansion inside double quotes": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`go test ./harness -run \"$PATTERN\"`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
+	"comment after an argument hides a run": {func(tr *Trace) {
+		task(tr, "T001").Verify = "`task check -- tools/internal # ; task verify:pins`"
+	}, []string{"CHECK_NOT_VERIFIED", "NO_APPLICABLE_CHECK"}},
 	"comment hides the following commands": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`echo ignored # ; task check`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
@@ -298,11 +301,21 @@ var traceControls = map[string]struct {
 		task(tr, "T004").Paths = []string{"harness/sub/"}
 		task(tr, "T004").Verify = "`go test ./harness/sub -count=1`"
 	}, nil},
-	"command after &&": {func(tr *Trace) {
-		task(tr, "T004").Verify = "`true && task check`"
+	"run after another recognised run": {func(tr *Trace) {
+		task(tr, "T001").Verify = "`task verify:pins && task check`"
 	}, nil},
-	"command after ||": {func(tr *Trace) {
+	"run after an unrecognised command": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`true && task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"run in a fallback branch": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`false || task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"directory change before a test": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`cd tools && go test ./... -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"directory given to go itself": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"tools/internal/pin.go"}
+		task(tr, "T004").Verify = "`go -C tools test ./... -count=1`"
 	}, nil},
 	"substitution": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`task check -- $(pwd)`"
