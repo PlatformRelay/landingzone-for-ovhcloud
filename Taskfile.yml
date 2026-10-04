@@ -56,6 +56,32 @@ tasks:
   capture:tofu-cleanup:
     cmds: [{task: capture-tofu, vars: {CASE: cleanup}}]
 
+  # Report captures of the static clauses: stdout is exactly the pinned tool's
+  # JSON report; stderr ends with the tool's exit status.
+  capture:validate-valid:
+    cmds: [{task: capture-validate, vars: {CASE: valid}}]
+  capture:validate-malformed:
+    cmds: [{task: capture-validate, vars: {CASE: malformed}}]
+  capture:tflint-valid:
+    cmds: [{task: capture-tflint, vars: {CASE: valid}}]
+  capture:tflint-lint:
+    cmds: [{task: capture-tflint, vars: {CASE: lint}}]
+  capture:tflint-malformed:
+    cmds: [{task: capture-tflint, vars: {CASE: malformed}}]
+
+  capture-validate:
+    internal: true
+    dir: tests/check/fixtures/static/{{.CASE}}
+    cmds:
+      - /tcb/tofu init -backend=false -lockfile=readonly -input=false -no-color > /dev/null 2>&1 || true
+      - status=0; /tcb/tofu validate -json -no-color || status=$?; echo "LZ_EXIT=$status" >&2
+
+  capture-tflint:
+    internal: true
+    dir: tests/check/fixtures/static/{{.CASE}}
+    cmds:
+      - status=0; /tcb/tflint --config=/candidate/.tflint.hcl --format=json --no-color || status=$?; echo "LZ_EXIT=$status" >&2
+
   capture-tofu:
     internal: true
     dir: tests/fixtures/tofu/modules/{{.CASE}}

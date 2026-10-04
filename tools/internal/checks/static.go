@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,31 +45,39 @@ func regularFile(p string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// discover lists the *.tf files the clauses must cover, relative to dir. Tool
-// state directories such as .terraform are not configuration.
+// discover lists the module directory's own *.tf files. init, validate and
+// TFLint read only those, so configuration in subdirectories (or tool state
+// under .terraform) does not count.
 func discover(dir string) []string {
-	var files []string
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && p != dir && strings.HasPrefix(d.Name(), ".") {
-			return fs.SkipDir
-		}
-		if !d.IsDir() && strings.HasSuffix(p, ".tf") {
-			rel, err := filepath.Rel(dir, p)
-			if err != nil {
-				return err
-			}
-			files = append(files, filepath.ToSlash(rel))
-		}
-		return nil
-	})
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
+	var files []string
+	for _, e := range entries {
+		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".tf") {
+			files = append(files, e.Name())
+		}
+	}
 	slices.Sort(files)
 	return files
+}
+
+// located formats a diagnostic with its source location.
+func located(file string, line, column int, text string) string {
+	if file == "" {
+		return text
+	}
+	return fmt.Sprintf("%s:%d:%d: %s", file, line, column, text)
+}
+
+// sourceRange is the location shape both tools report.
+type sourceRange struct {
+	Filename string `json:"filename"`
+	Start    struct {
+		Line   int `json:"line"`
+		Column int `json:"column"`
+	} `json:"start"`
 }
 
 // runTool runs a pinned tool in dir and returns its streams and exit code; a
@@ -127,67 +134,89 @@ func checkInit(tofu, dir string) StaticResult {
 }
 
 func checkValidate(tofu, dir string) StaticResult {
+	return validateResult(runTool(dir, tofu, "validate", "-json", "-no-color"))
+}
+
+func validateResult(stdout, stderr string, code int) StaticResult {
 	r := StaticResult{Clause: "validate"}
-	stdout, stderr, code := runTool(dir, tofu, "validate", "-json", "-no-color")
-	// The exit status decides; the JSON report supplies the diagnostics, or the
-	// raw output is kept when it cannot be read.
 	var report struct {
-		Diagnostics []struct {
-			Severity string `json:"severity"`
-			Summary  string `json:"summary"`
-			Detail   string `json:"detail"`
+		Valid       *bool `json:"valid"`
+		ErrorCount  *int  `json:"error_count"`
+		Diagnostics *[]struct {
+			Severity string       `json:"severity"`
+			Summary  string       `json:"summary"`
+			Detail   string       `json:"detail"`
+			Range    *sourceRange `json:"range"`
 		} `json:"diagnostics"`
 	}
-	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
-		r.Messages = append(lines(stdout), lines(stderr)...)
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil || report.Valid == nil || report.ErrorCount == nil || report.Diagnostics == nil {
+		r.Status, r.Reason, r.Messages = StatusFail, "MALFORMED_OUTPUT", append(lines(stdout), lines(stderr)...)
+		return r
 	}
-	for _, d := range report.Diagnostics {
-		r.Messages = append(r.Messages, fmt.Sprintf("%s: %s: %s", d.Severity, d.Summary, d.Detail))
+	for _, d := range *report.Diagnostics {
+		var where sourceRange
+		if d.Range != nil {
+			where = *d.Range
+		}
+		r.Messages = append(r.Messages, located(where.Filename, where.Start.Line, where.Start.Column, fmt.Sprintf("%s: %s: %s", d.Severity, d.Summary, d.Detail)))
 	}
-	r.Status = StatusPass
-	if code != 0 {
+	r.Messages = append(r.Messages, lines(stderr)...)
+	// The exit status and the report must agree.
+	clean := *report.Valid && *report.ErrorCount == 0
+	switch {
+	case code == 0 && clean:
+		r.Status = StatusPass
+	case code == 1 && !*report.Valid:
 		r.Status, r.Reason = StatusFail, "INVALID"
+	default:
+		r.Status, r.Reason = StatusFail, "INCONSISTENT_OUTPUT"
 	}
 	return r
 }
 
 func checkLint(tflint, config, dir string) StaticResult {
+	return lintResult(runTool(dir, tflint, "--config="+config, "--format=json", "--no-color"))
+}
+
+func lintResult(stdout, stderr string, code int) StaticResult {
 	r := StaticResult{Clause: "tflint"}
-	stdout, stderr, code := runTool(dir, tflint, "--config="+config, "--format=json", "--no-color")
-	// The exit status decides (0 clean, 2 issues, 1 errors); the JSON report
-	// supplies rule names, messages and files, or the raw output is kept.
 	var report struct {
-		Issues []struct {
+		Issues *[]struct {
 			Rule struct {
 				Name string `json:"name"`
 			} `json:"rule"`
-			Message string `json:"message"`
-			Range   struct {
-				Filename string `json:"filename"`
-			} `json:"range"`
+			Message string      `json:"message"`
+			Range   sourceRange `json:"range"`
 		} `json:"issues"`
-		Errors []struct {
-			Summary string `json:"summary"`
-			Message string `json:"message"`
+		Errors *[]struct {
+			Summary string      `json:"summary"`
+			Message string      `json:"message"`
+			Range   sourceRange `json:"range"`
 		} `json:"errors"`
 	}
-	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
-		r.Messages = append(lines(stdout), lines(stderr)...)
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil || report.Issues == nil || report.Errors == nil {
+		r.Status, r.Reason, r.Messages = StatusFail, "MALFORMED_OUTPUT", append(lines(stdout), lines(stderr)...)
+		return r
 	}
-	for _, e := range report.Errors {
-		r.Messages = append(r.Messages, e.Summary+": "+e.Message)
+	for _, e := range *report.Errors {
+		r.Messages = append(r.Messages, located(e.Range.Filename, e.Range.Start.Line, e.Range.Start.Column, e.Summary+": "+e.Message))
 	}
-	for _, issue := range report.Issues {
-		r.Messages = append(r.Messages, issue.Rule.Name+": "+issue.Message)
+	for _, issue := range *report.Issues {
+		r.Messages = append(r.Messages, located(issue.Range.Filename, issue.Range.Start.Line, issue.Range.Start.Column, issue.Rule.Name+": "+issue.Message))
 		r.Files = append(r.Files, issue.Range.Filename)
 	}
-	switch code {
-	case 0:
+	r.Messages = append(r.Messages, lines(stderr)...)
+	// The exit status (0 clean, 2 issues, 1 errors) and the report must agree.
+	issues, errs := len(*report.Issues), len(*report.Errors)
+	switch {
+	case code == 0 && issues == 0 && errs == 0:
 		r.Status = StatusPass
-	case 2:
+	case code == 2 && issues > 0 && errs == 0:
 		r.Status, r.Reason = StatusFail, "LINT_ISSUES"
-	default:
+	case code == 1 && errs > 0:
 		r.Status, r.Reason = StatusFail, "LINT_ERROR"
+	default:
+		r.Status, r.Reason = StatusFail, "INCONSISTENT_OUTPUT"
 	}
 	return r
 }
