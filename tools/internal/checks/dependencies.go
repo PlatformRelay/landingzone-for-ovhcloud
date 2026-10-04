@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
@@ -221,18 +221,14 @@ func resolve(dir, source string, dirs map[string]bool) (local string, external b
 }
 
 // mentionsSelf reports whether source names this repository: after decoding
-// percent-escapes until nothing changes, some maximal run of repository-name
+// valid percent-escapes until nothing changes, some maximal run of repository-name
 // characters, without a ".git" suffix, is exactly one of its names. Any other
 // character separates, so no separator list has to be complete, and a
 // repository whose name only contains one of the names is unrelated.
 func mentionsSelf(source string) bool {
 	decoded := strings.ToLower(source)
-	// Each successful decode shortens the text, so the loop ends.
-	for {
-		next, err := url.PathUnescape(decoded)
-		if err != nil || next == decoded {
-			break
-		}
+	// Each pass that decodes something shortens the text, so the loop ends.
+	for next := unescapeValid(decoded); next != decoded; next = unescapeValid(decoded) {
 		decoded = strings.ToLower(next)
 	}
 	runs := strings.FieldsFunc(decoded, func(r rune) bool {
@@ -247,6 +243,25 @@ func mentionsSelf(source string) bool {
 	}
 	return false
 }
+
+// unescapeValid decodes every valid %HH escape and keeps any other '%' as it
+// is, so one malformed escape does not stop the others from decoding.
+func unescapeValid(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			value, _ := strconv.ParseUint(s[i+1:i+3], 16, 8)
+			out.WriteByte(byte(value))
+			i += 2
+			continue
+		}
+		out.WriteByte(s[i])
+	}
+	return out.String()
+}
+
+// isHex accepts lower-case digits only: mentionsSelf lower-cases before each pass.
+func isHex(c byte) bool { return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' }
 
 // testOwner is the module directory whose tests a test file belongs to: the
 // parent of a tests/ directory, or the file's own directory.
