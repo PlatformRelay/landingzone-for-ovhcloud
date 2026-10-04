@@ -195,10 +195,16 @@ func shellSegments(span string) [][]string {
 			inWord = false
 		}
 	}
-	endSegment := func() {
+	// Every command between separators must have words; only a trailing ";"
+	// may end the span without one.
+	afterSemicolon := false
+	endSegment := func(semicolon bool) {
 		endWord()
+		if len(words) == 0 {
+			bad = true
+		}
 		segments = append(segments, words)
-		words = nil
+		words, afterSemicolon = nil, semicolon
 	}
 	for i := 0; i < len(span); i++ {
 		c := span[i]
@@ -218,9 +224,9 @@ func shellSegments(span string) [][]string {
 		case c == ' ' || c == '\t':
 			endWord()
 		case c == ';':
-			endSegment()
+			endSegment(true)
 		case (c == '&' || c == '|') && i+1 < len(span) && span[i+1] == c:
-			endSegment()
+			endSegment(false)
 			i++
 		case strings.IndexByte("&|<>$`()*?[]{}\\!#~", c) >= 0:
 			bad = true
@@ -229,7 +235,10 @@ func shellSegments(span string) [][]string {
 			inWord = true
 		}
 	}
-	endSegment()
+	endWord()
+	if len(words) > 0 || !afterSemicolon {
+		endSegment(false)
+	}
 	if bad {
 		return nil
 	}
@@ -334,10 +343,11 @@ func parseGoTest(words []string) (verifyRun, bool) {
 // in a selected package's own directory, or anything under a selected tree.
 func exercises(run verifyRun, paths []string) bool {
 	for _, p := range paths {
-		p = strings.TrimSuffix(p, "/")
 		// Only a file lies in its parent package; a directory is a package of
-		// its own and must be selected itself.
-		file := strings.Contains(path.Base(p), ".")
+		// its own and must be selected itself. A trailing "/" marks a
+		// directory; otherwise a dotted base name is taken as a file.
+		file := !strings.HasSuffix(p, "/") && strings.Contains(path.Base(p), ".")
+		p = strings.TrimSuffix(p, "/")
 		for _, dir := range run.Packages {
 			if p == dir || file && path.Dir(p) == dir {
 				return true
