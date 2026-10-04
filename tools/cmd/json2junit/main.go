@@ -2,7 +2,11 @@
 // the report observation, not a separate oracle: the verdict, counts and
 // diagnostics all come from report.Evaluate, and a failing observation exits 1.
 //
-//	tofu test -json | json2junit -exit $? > report.xml
+// Capture the stream first, then pass the exit status of that tofu process;
+// in a pipeline `$?` would be the status of an earlier command.
+//
+//	tofu test -json > stream.jsonl; status=$?
+//	json2junit -exit "$status" < stream.jsonl > report.xml
 package main
 
 import (
@@ -39,11 +43,12 @@ type property struct {
 }
 
 type testcase struct {
-	Class   string   `xml:"classname,attr"`
-	Name    string   `xml:"name,attr"`
-	Failure *message `xml:"failure"`
-	Error   *message `xml:"error"`
-	Skipped *message `xml:"skipped"`
+	Class     string   `xml:"classname,attr"`
+	Name      string   `xml:"name,attr"`
+	Failure   *message `xml:"failure"`
+	Error     *message `xml:"error"`
+	Skipped   *message `xml:"skipped"`
+	SystemOut string   `xml:"system-out,omitempty"`
 }
 
 type message struct {
@@ -70,12 +75,21 @@ func render(o report.Observation) suite {
 	}
 	// The observation itself is a test case, so faults tofu reports as success
 	// (zero tests, failed cleanup) still fail the JUnit view.
-	verdict := testcase{Class: "report", Name: "observation"}
-	if o.Status != report.Pass {
-		var text strings.Builder
-		for _, d := range o.Diagnostics {
-			fmt.Fprintf(&text, "%s: %s\n%s\n", d.Severity, d.Summary, d.Detail)
+	// Every diagnostic is rendered, warnings on passing runs included, with
+	// the run it followed; failed cleanup resources are listed verbatim.
+	var text strings.Builder
+	for _, d := range o.Diagnostics {
+		fmt.Fprintf(&text, "%s: %s", d.Severity, d.Summary)
+		if d.Run != "" {
+			fmt.Fprintf(&text, " (%s/%s)", d.File, d.Run)
 		}
+		fmt.Fprintf(&text, "\n%s\n", d.Detail)
+	}
+	for _, resource := range o.Cleanup {
+		fmt.Fprintf(&text, "cleanup failed: %s\n", resource)
+	}
+	verdict := testcase{Class: "report", Name: "observation", SystemOut: text.String()}
+	if o.Status != report.Pass {
 		verdict.Failure = &message{Message: strings.Join(o.Reasons, " "), Text: text.String()}
 		s.Failures++
 	}
@@ -109,7 +123,7 @@ func main() {
 	exit := flag.Int("exit", -1, "exit status of the tofu test process (required)")
 	flag.Parse()
 	if *exit < 0 || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "USAGE: tofu test -json | json2junit -exit <status>")
+		fmt.Fprintln(os.Stderr, "USAGE: json2junit -exit <tofu exit status> < stream.jsonl")
 		os.Exit(2)
 	}
 	os.Exit(run(os.Stdin, os.Stdout, *exit))

@@ -5,7 +5,7 @@
   "description": "One observation of a pinned `tofu test -json` run, produced by tools/internal/report. The status is pass only when no reason was found; upstream diagnostics are kept verbatim.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "tool", "tool_version", "exit_code", "discovered", "passed", "failed", "errored", "skipped", "runs", "diagnostics", "reasons"],
+  "required": ["status", "tool", "tool_version", "exit_code", "discovered", "passed", "failed", "errored", "skipped", "runs", "diagnostics", "cleanup", "reasons"],
   "properties": {
     "status": { "enum": ["pass", "fail"] },
     "tool": { "const": "tofu" },
@@ -34,18 +34,26 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["severity", "summary"],
+        "required": ["severity", "summary", "raw"],
         "properties": {
           "severity": { "type": "string" },
           "summary": { "type": "string" },
-          "detail": { "type": "string" }
+          "detail": { "type": "string" },
+          "file": { "type": "string", "description": "Test file of the run the diagnostic followed." },
+          "run": { "type": "string", "description": "Run block the diagnostic followed." },
+          "raw": { "type": "object", "description": "tofu's complete diagnostic object, including range, snippet, difference or address." }
         }
       }
+    },
+    "cleanup": {
+      "type": "array",
+      "description": "tofu's failed_resources entries from test_cleanup events, verbatim.",
+      "items": { "type": "object" }
     },
     "reasons": {
       "type": "array",
       "items": {
-        "enum": ["EMPTY_STREAM", "TRUNCATED_STREAM", "MALFORMED_STREAM", "MISSING_VERSION", "MISSING_SUMMARY", "NONZERO_EXIT", "ZERO_TESTS", "SKIPPED_RUN", "TESTS_FAILED", "COUNT_MISMATCH", "ERROR_DIAGNOSTIC", "CLEANUP_FAILED"]
+        "enum": ["EMPTY_STREAM", "TRUNCATED_STREAM", "MALFORMED_STREAM", "INVALID_PAYLOAD", "LIFECYCLE_ORDER", "MISSING_VERSION", "MISSING_SUMMARY", "RUN_MISMATCH", "NONZERO_EXIT", "ZERO_TESTS", "SKIPPED_RUN", "TESTS_FAILED", "ERROR_DIAGNOSTIC", "CLEANUP_FAILED"]
       }
     }
   }

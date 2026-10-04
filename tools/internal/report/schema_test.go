@@ -65,8 +65,7 @@ func TestSchemaMatchesObservation(t *testing.T) {
 			t.Errorf("%s schema drifted: properties %v required %v; struct %v required %v", name, keys(pair.node.Properties), schemaRequired, all, required)
 		}
 	}
-	reasons := []string{ReasonEmpty, ReasonTruncated, ReasonMalformed, ReasonMissingVersion, ReasonMissingSummary,
-		ReasonExitStatus, ReasonZeroTests, ReasonSkipped, ReasonFailed, ReasonCountMismatch, ReasonErrorDiagnostic, ReasonCleanupFailed}
+	reasons := append([]string{}, Reasons...)
 	enum := append([]string{}, schema.Properties["reasons"].Items.Enum...)
 	sort.Strings(reasons)
 	sort.Strings(enum)
@@ -87,7 +86,7 @@ func TestObservationSerialisesRequiredFields(t *testing.T) {
 		if err := json.Unmarshal(data, &decoded); err != nil {
 			t.Fatal(err)
 		}
-		for _, field := range []string{"runs", "diagnostics", "reasons"} {
+		for _, field := range []string{"runs", "diagnostics", "cleanup", "reasons"} {
 			if string(decoded[field]) == "null" {
 				t.Errorf("%s: %s serialises as null, schema requires an array", name, field)
 			}

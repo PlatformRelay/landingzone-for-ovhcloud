@@ -79,7 +79,7 @@ the constitution and ADRs are unchanged.
 - [x] T005 Implement observation schema and JSON/JUnit adapters in schemas/check-report.schema.json, tools/internal/report/ and tools/cmd/json2junit/ — closed 2026-10-04, evidence: evidence/T005.md
   - Requirements: FR-003, SC-002; ADRs: 0008, 0019. Depends on: T004.
   - Verify: `task test:reports`: all V002 valid/fault cases and each-clause mutants green as a suite; preserve actual upstream diagnostics; creates target.
-  - Evidence: `evidence/T005.md`; GREEN with 12/12 clause mutants killed; `task test:reports` through the entry.
+  - Evidence: `evidence/T005.md`; GREEN with 31/31 guard-site mutants killed; `task test:reports` through the entry.
 
 - [ ] T006 Write trace/DoD tests in tools/internal/checks/traceability_test.go, including docs exemption and stale/forged evidence
   - Requirements: FR-004, SC-003; ADRs: 0008, 0019. Depends on: T005.

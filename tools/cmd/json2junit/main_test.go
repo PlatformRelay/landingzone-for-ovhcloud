@@ -66,6 +66,22 @@ func TestFaultsRenderAsFailures(t *testing.T) {
 	}
 }
 
+// Warnings on a passing run are part of the report, not only of failures.
+func TestWarningsOnPassingRunRendered(t *testing.T) {
+	pass, err := os.ReadFile(streams + "pass.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.SplitAfter(pass, []byte("\n"))
+	warning := []byte(`{"type":"diagnostic","diagnostic":{"severity":"warning","summary":"Deprecated attribute","detail":"use x instead"}}` + "\n")
+	stream := bytes.Join([][]byte{lines[0], lines[1], lines[2], lines[3], warning, lines[4]}, nil)
+	var out bytes.Buffer
+	code := run(bytes.NewReader(stream), &out, 0)
+	if code != 0 || !strings.Contains(out.String(), "Deprecated attribute") || !strings.Contains(out.String(), "use x instead") {
+		t.Errorf("BEHAVIORAL_RED: warning on a passing run not rendered: code=%d\n%s", code, out.String())
+	}
+}
+
 func TestMalformedInputFails(t *testing.T) {
 	var out bytes.Buffer
 	if code := run(strings.NewReader("not json\n"), &out, 0); code == 0 || !strings.Contains(out.String(), "MALFORMED_STREAM") {
