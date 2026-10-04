@@ -1,12 +1,16 @@
 # OVHcloud Landing Zone Accelerator
 
-> **Unofficial.** This is an independent, community project by PlatformRelay. It is **not** an
-> OVHcloud product, is **not** endorsed, sponsored or supported by OVHcloud, and OVHcloud will not
-> help you with it. "OVHcloud" and related names are trademarks of their owner and are used here
-> only to say which platform the code targets.
+> [!IMPORTANT]
+> **A private open-source project — not provided by OVHcloud.** This repository is developed
+> privately and independently by PlatformRelay and published as open source. It is **not** an
+> official OVHcloud product or offering, and it is **not** provided, endorsed, sponsored, reviewed
+> or supported by OVHcloud. OVHcloud will not help you with it, and nothing here speaks for
+> OVHcloud. "OVHcloud" and related names are trademarks of their owner and are used only to say
+> which platform the code targets.
 
-**Status: design phase.** No modules exist yet. The design documents come first and are reviewed
-in separate sessions; implementation must produce its own verification evidence.
+**Status: early foundation.** The offline check tooling (pinned toolchain, sandboxed runner,
+report, traceability, dependency and static checks) exists; no landing-zone modules exist yet.
+Each piece is merged only with its own verification evidence.
 
 ## Purpose and differentiators
 
