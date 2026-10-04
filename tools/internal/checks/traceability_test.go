@@ -261,6 +261,29 @@ var traceControls = map[string]struct {
 		task(tr, "T004").Paths = []string{"harness/sub"}
 		task(tr, "T004").Verify = "`go test ./harness -count=1`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
+	"dotted directory is not in its parent package": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"harness/sub.v1/"}
+		task(tr, "T004").Verify = "`go test ./harness -count=1`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"dotted directory selected exactly": {func(tr *Trace) {
+		task(tr, "T004").Paths = []string{"harness/sub.v1/"}
+		task(tr, "T004").Verify = "`go test ./harness/sub.v1 -count=1`"
+	}, nil},
+	"double semicolon": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`echo ignored ;; task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"leading operator": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`&& task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"leading semicolon": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`; task check`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"dangling operator": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`task check &&`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"trailing semicolon is valid": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`task check;`"
+	}, nil},
 	"directory path selected exactly": {func(tr *Trace) {
 		task(tr, "T004").Paths = []string{"harness/sub/"}
 		task(tr, "T004").Verify = "`go test ./harness/sub -count=1`"
