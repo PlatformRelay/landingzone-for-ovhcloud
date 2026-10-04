@@ -20,8 +20,8 @@ directories with their first real artifact. T001–T009 remain the minimum safet
 after they pass, conditional T023 supplies minimal GitHub CI. Naming, forge adapters,
 latency and full exit retain their own prerequisites and evidence requirements.
 Publish independently reviewed coherent increments, including stacked PRs, and continue
-eligible work without waiting for operator review or merge. No PRs may be merged during this goal;
-earlier merge permission is superseded. Missing CI is not a green gate, and publication
+eligible work without waiting for operator review or merge. A PR merges after an independent
+review and green applicable checks. Missing CI is not a green gate, and publication
 does not establish merge readiness. Material implementation choices are logged for validation.
 
 The 2026-10-02 operator priority exception (local decision D60) accepts C2 (C010.5/P4)
@@ -87,7 +87,7 @@ real profile exports and the installation-doc renderer are future consumer work.
    Update the task state and keep a resumable local progress record.
 7. Publish the independently reviewed increment as a scoped PR. Dependent PRs target their
    parent branch and document the dependency and parent-first review order. Continue the
-   next eligible task without waiting for operator review; do not merge during this goal.
+   next eligible task without waiting for operator review.
 
 Commit subjects use `:gitmoji: type(scope): summary`. Preserve linear history. Never
 add authoring/review attribution to product files or commit/PR text. A change accepting
@@ -115,5 +115,5 @@ At the selected task limit, report closed tasks, open owner gates, actual checks
 evidence paths, review findings and commit IDs. Re-run cross-artifact consistency and
 dependency checks after any task/spec change. Deliver scoped, independently reviewed PRs
 and record precise blockers for remaining work. Continue other eligible work when one
-task is blocked. Publishing and stacks are authorized; merges are prohibited during this
-goal, and live actions retain their separate authority requirements.
+task is blocked. Publishing and stacks are authorized; a PR merges after independent
+review, and live actions retain their separate authority requirements.
