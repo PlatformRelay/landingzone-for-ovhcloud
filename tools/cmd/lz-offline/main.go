@@ -196,14 +196,15 @@ const (
 
 // Snapshot an explicit input allowlist, never the repository root. Every copied
 // file is regular/single-link and bounded; secrets/cache/config are excluded.
-// specs and docs are data for the trace check.
+// specs and docs are data for the trace check; .github and pipelines are data
+// for the foundation CI check.
 // The probe.sh, included.yml, bin and lz-offline names admit the boundary
 // suite's hostile fixtures, so the suite can show they have no effect.
 func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := bundle.RealDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
