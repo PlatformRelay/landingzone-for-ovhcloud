@@ -1,0 +1,5 @@
+{"@level":"info","@message":"OpenTofu 1.13.0","@module":"tofu.ui","@timestamp":"2026-10-04T15:05:47.608617Z","tofu":"1.13.0","type":"version","ui":"1.2"}
+{"@level":"info","@message":"Found 1 file and 1 run block","@module":"tofu.ui","@timestamp":"2026-10-04T15:05:47.610152Z","test_abstract":{"main.tftest.hcl":["greets"]},"type":"test_abstract"}
+{"@level":"info","@message":"main.tftest.hcl... pass","@module":"tofu.ui","@testfile":"main.tftest.hcl","@timestamp":"2026-10-04T15:05:47.619834Z","test_file":{"path":"main.tftest.hcl","status":"pass"},"type":"test_file"}
+{"@level":"info","@message":"  \"greets\"... pass","@module":"tofu.ui","@testfile":"main.tftest.hcl","@testrun":"greets","@timestamp":"2026-10-04T15:05:47.623546Z","test_run":{"path":"main.tftest.hcl","run":"greets","status":"pass"},"type":"test_run"}
+{"@level":"info","@message":"Success! 1 passed, 0 failed.","@module":"tofu.ui","@timestamp":"2026-10-04T15:05:47.623865Z","test_summary":{"status":"pass","passed":1,"failed":0,"errored":0,"skipped":0},"type":"test_summary"}

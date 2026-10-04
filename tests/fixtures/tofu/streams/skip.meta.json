@@ -1,0 +1,1 @@
+{"case":"skip","command":"lz-offline --candidate <checkout> -- task capture:tofu-skip","inner_command":"tofu test -json","tool":"tofu","tool_version":"1.13.0","entry_exit":1,"stream_sha256":"9096f76d91a0d1248dcf9d51aa60fc794c8fd900b0772c3140741c97af984239","module_sha256":"5969259b54154b524ded028c80546981ba4e915c124e06bce99c522dedbb2a56","captured_on":"2026-10-04"}

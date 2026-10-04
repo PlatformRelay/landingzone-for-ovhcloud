@@ -1,0 +1,1 @@
+{"case":"cleanup","command":"lz-offline --candidate <checkout> -- task capture:tofu-cleanup","inner_command":"tofu test -json","tool":"tofu","tool_version":"1.13.0","entry_exit":0,"stream_sha256":"cc541fe3f030290a83d423e7b4092b1b6ee23060763261aedd0ab8c767ba13ba","module_sha256":"592fee0467f8f19aea3989c17bd1768aef91e094e175926b5a951dbbfc3fbe5e","captured_on":"2026-10-04"}
