@@ -82,6 +82,8 @@ func TestFoundationWorkflowShape(t *testing.T) {
 		"\n      LZ_BWRAP_SHA256: " + strings.Repeat("d", 64) + "\n",
 		"\n      LZ_TARGETS: test:a test:ci\n",
 		`test "$(git -C "$LZ_CANDIDATE" rev-parse HEAD)" = "$LZ_HEAD"`,
+		`echo "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"`,
+		`echo "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"`,
 		`echo "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -`,
 		`echo "$LZ_ENTRY_SHA256  $LZ_RUNTIME/runtime/lz-offline" | sha256sum -c -`,
 		`echo "$LZ_BWRAP_SHA256  $LZ_RUNTIME/host/bwrap" | sha256sum -c -`,
@@ -96,7 +98,9 @@ func TestFoundationWorkflowShape(t *testing.T) {
 			t.Errorf("BEHAVIORAL_RED: rendered workflow contains %q", banned)
 		}
 	}
-	allowed := []string{"${{ github.event.pull_request.head.sha || github.sha }}", "${{ runner.temp }}"}
+	// Job-level env may not use the runner context, so the head is the only
+	// expression; the work directories come from $RUNNER_TEMP at run time.
+	allowed := []string{"${{ github.event.pull_request.head.sha || github.sha }}"}
 	for _, expression := range regexp.MustCompile(`\$\{\{[^}]*\}\}`).FindAllString(workflow, -1) {
 		if !slices.Contains(allowed, expression) {
 			t.Errorf("BEHAVIORAL_RED: unexpected expression %s", expression)
@@ -107,7 +111,7 @@ func TestFoundationWorkflowShape(t *testing.T) {
 	for _, line := range strings.Split(workflow, "\n") {
 		if strings.Contains(line, "$LZ_CANDIDATE") && !strings.Contains(line, `git -C "$LZ_CANDIDATE"`) &&
 			!strings.Contains(line, `git init -q "$LZ_CANDIDATE"`) && !strings.Contains(line, `--candidate "$LZ_CANDIDATE"`) &&
-			!strings.Contains(line, `-C "$LZ_CANDIDATE" checkout`) {
+			!strings.Contains(line, `-C "$LZ_CANDIDATE" checkout`) && !strings.Contains(line, `echo "LZ_CANDIDATE=`) {
 			t.Errorf("BEHAVIORAL_RED: candidate used on the host: %s", line)
 		}
 	}

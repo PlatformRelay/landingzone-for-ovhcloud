@@ -83,14 +83,16 @@ func RenderFoundationWorkflow(s FoundationSource) string {
 	line("    timeout-minutes: %d", s.TimeoutMinutes)
 	line("    env:")
 	line("      LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}")
-	line("      LZ_CANDIDATE: ${{ runner.temp }}/candidate")
-	line("      LZ_RUNTIME: ${{ runner.temp }}/runtime")
 	line("      LZ_IMAGE: %s", RuntimeImage)
 	line("      LZ_LAYER: %s", s.Layer)
 	line("      LZ_ENTRY_SHA256: %s", s.EntrySHA256)
 	line("      LZ_BWRAP_SHA256: %s", s.BwrapSHA256)
 	line("      LZ_TARGETS: %s", strings.Join(s.Targets, " "))
 	line("    steps:")
+	// The runner context is not available to job-level env.
+	script("Locate the work directories",
+		`echo "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"`,
+		`echo "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"`)
 	script("Fetch the exact head as data",
 		`git init -q "$LZ_CANDIDATE"`,
 		`git -C "$LZ_CANDIDATE" fetch -q --depth=1 --no-tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$LZ_HEAD"`,
