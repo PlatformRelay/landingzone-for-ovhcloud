@@ -1,0 +1,62 @@
+# Rendered by `lz-check ci-workflow` from pipelines/github/foundation-source.json; do not edit.
+# Runtime image: ghcr.io/platformrelay/landingzone-for-ovhcloud/runtime@sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+name: foundation
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  foundation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+      LZ_MANIFEST: sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+      LZ_LAYER: sha256:6e134d3ba40fcfdf2fbc7b67b21a8e29d6a6170bd77199e0c8277535ff58d2c9
+      LZ_ENTRY_SHA256: bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac
+      LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+      LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci
+    steps:
+      - name: Locate the work directories
+        run: |
+          set -euo pipefail
+          echo "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"
+          echo "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"
+      - name: Fetch the exact head as data
+        run: |
+          set -euo pipefail
+          git init -q "$LZ_CANDIDATE"
+          git -C "$LZ_CANDIDATE" fetch -q --depth=1 --no-tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$LZ_HEAD"
+          git -c core.hooksPath=/dev/null -c filter.lfs.process= -c filter.lfs.smudge= -c filter.lfs.required=false -C "$LZ_CANDIDATE" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$LZ_CANDIDATE" rev-parse HEAD)" = "$LZ_HEAD"
+          echo "LZ_CANDIDATE_HEAD $LZ_HEAD"
+      - name: Fetch the runtime layer by digest
+        run: |
+          set -euo pipefail
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:$LZ_IMAGE:pull" | jq -r .token)
+          curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.manifest.v1+json" -o "$RUNNER_TEMP/manifest.json" "https://ghcr.io/v2/$LZ_IMAGE/manifests/$LZ_MANIFEST"
+          echo "${LZ_MANIFEST#sha256:}  $RUNNER_TEMP/manifest.json" | sha256sum -c -
+          test "$(jq -r '.layers | length' "$RUNNER_TEMP/manifest.json")" = 1
+          test "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/manifest.json")" = "$LZ_LAYER"
+          curl -fsSL -H "Authorization: Bearer $token" -o "$RUNNER_TEMP/layer.tgz" "https://ghcr.io/v2/$LZ_IMAGE/blobs/$LZ_LAYER"
+          echo "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -
+          mkdir "$LZ_RUNTIME"
+          tar -xzpf "$RUNNER_TEMP/layer.tgz" -C "$LZ_RUNTIME"
+          echo "$LZ_ENTRY_SHA256  $LZ_RUNTIME/runtime/lz-offline" | sha256sum -c -
+          echo "$LZ_BWRAP_SHA256  $LZ_RUNTIME/host/bwrap" | sha256sum -c -
+      - name: Install the pinned launcher
+        run: |
+          set -euo pipefail
+          sudo install -m 0755 "$LZ_RUNTIME/host/bwrap" /usr/bin/bwrap
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+      - name: Run the foundation checks inside the offline entry
+        run: |
+          set -euo pipefail
+          for target in $LZ_TARGETS; do
+            "$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task "$target"
+            echo "LZ_TARGET_OK $target"
+          done
+          echo "LZ_TARGETS_DONE $(wc -w <<<"$LZ_TARGETS")"
