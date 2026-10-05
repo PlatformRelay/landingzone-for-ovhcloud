@@ -236,6 +236,14 @@ func ciWorkflow(out io.Writer, root string) int {
 		fmt.Fprintln(out, err)
 		return 2
 	}
+	// A source that fails validation is never rendered: a malformed name
+	// could otherwise write itself into the workflow.
+	if findings := checks.ValidateFoundationSource(source); len(findings) > 0 {
+		for _, f := range findings {
+			fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
+		}
+		return 2
+	}
 	fmt.Fprint(out, checks.RenderFoundationWorkflow(source))
 	return 0
 }

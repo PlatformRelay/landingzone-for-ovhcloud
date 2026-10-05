@@ -260,6 +260,10 @@ func TestFoundationCICommandsWithoutSource(t *testing.T) {
 			t.Errorf("BEHAVIORAL_RED: %v without a source: exit %d\n%s", args, code, out)
 		}
 	}
+	injected := repo(t, map[string]string{"pipelines/github/foundation-source.json": strings.Replace(foundationSource, `["pins"]`, `["pins\n      BASH_ENV: x"]`, 1)})
+	if code, out := lzCheck(injected, "ci-workflow"); code != 2 || !strings.Contains(out, "CHECK_NAME") || strings.Contains(out, "BASH_ENV: x\n") {
+		t.Errorf("BEHAVIORAL_RED: ci-workflow rendered an injected target: exit %d\n%s", code, out)
+	}
 	malformed := repo(t, map[string]string{"pipelines/github/foundation-source.json": "{"})
 	if code, out := lzCheck(malformed, "ci-workflow"); code != 2 || !strings.Contains(out, "SOURCE_SYNTAX") {
 		t.Errorf("BEHAVIORAL_RED: ci-workflow rendered a malformed source: exit %d\n%s", code, out)

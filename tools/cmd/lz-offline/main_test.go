@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
+
 	"context"
 	"os"
 	"path/filepath"
@@ -167,12 +169,12 @@ func TestSnapshotDoesNotRecreateRemovedDestination(t *testing.T) {
 
 func TestTargetAdmission(t *testing.T) {
 	for _, name := range []string{"verify:toolchain", "test:offline-boundary", "probe", "capture:tofu-pass", "test:reports"} {
-		if err := admitTarget(name); err != nil {
+		if err := checks.AdmitTarget(name); err != nil {
 			t.Errorf("target %q rejected: %v", name, err)
 		}
 	}
 	for _, name := range []string{"", "-x", "--taskfile", "a b", "../x", "x/y", "Upper", "x;y", strings.Repeat("a", 65)} {
-		if err := admitTarget(name); err == nil {
+		if err := checks.AdmitTarget(name); err == nil {
 			t.Errorf("BEHAVIORAL_RED: target %q admitted", name)
 		}
 	}
