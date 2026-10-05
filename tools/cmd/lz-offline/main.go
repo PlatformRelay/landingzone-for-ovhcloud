@@ -131,20 +131,6 @@ func (output *childOutput) overflowed() bool {
 	return output.budget.overflow
 }
 
-// admitTarget accepts plain Task target names only, so no candidate-supplied
-// value can become a Task flag or path.
-func admitTarget(name string) error {
-	if len(name) == 0 || len(name) > 64 || name[0] < 'a' || name[0] > 'z' {
-		return fmt.Errorf("COMMAND_ADMISSION: plain Task target required")
-	}
-	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ':' || c == '-' || c == '_') {
-			return fmt.Errorf("COMMAND_ADMISSION: plain Task target required")
-		}
-	}
-	return nil
-}
-
 // admitArgument accepts one clean relative path, so an operator-supplied
 // argument cannot become a Task flag, an absolute path or a parent reference.
 func admitArgument(value string) error {
@@ -171,7 +157,7 @@ func parseCommand(args []string) (string, []string, error) {
 		return "", nil, fmt.Errorf("USAGE: lz-offline --candidate <absolute-checkout> -- task <target> [-- <path>]")
 	}
 	target := args[4]
-	if err := admitTarget(target); err != nil {
+	if err := checks.AdmitTarget(target); err != nil {
 		return "", nil, err
 	}
 	switch {

@@ -20,7 +20,7 @@ func foundationRegistry() (Registry, []Task) {
 	return Registry{Checks: []CheckDefinition{
 		check("test:a", "T001", "task test:a"),
 		check("test:ci", "T023", "task test:ci"),
-		check("ci:run", "T023", "task ci:run"),
+		check("ci:foundation", "T023", "task ci:foundation"),
 		check("lint", "T001", "task lint -- modules/x"),
 		check("test:later", "T050", "task test:later"),
 	}}, []Task{
@@ -37,7 +37,7 @@ func foundationSource() map[string]any {
 		"entry_sha256":    strings.Repeat("c", 64),
 		"bwrap_sha256":    strings.Repeat("d", 64),
 		"targets":         []any{"test:a", "test:ci"},
-		"deferred":        map[string]any{"ci:run": "judges this workflow's own run after it completes"},
+		"deferred":        map[string]any{"ci:foundation": "judges this workflow's own run after it completes"},
 	}
 }
 
@@ -85,6 +85,10 @@ func TestFoundationWorkflowShape(t *testing.T) {
 		`echo "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"`,
 		`echo "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"`,
 		`echo "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -`,
+		"\n      LZ_MANIFEST: sha256:" + strings.Repeat("a", 64) + "\n",
+		`echo "${LZ_MANIFEST#sha256:}  $RUNNER_TEMP/manifest.json" | sha256sum -c -`,
+		`test "$(jq -r '.layers | length' "$RUNNER_TEMP/manifest.json")" = 1`,
+		`test "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/manifest.json")" = "$LZ_LAYER"`,
 		`echo "$LZ_ENTRY_SHA256  $LZ_RUNTIME/runtime/lz-offline" | sha256sum -c -`,
 		`echo "$LZ_BWRAP_SHA256  $LZ_RUNTIME/host/bwrap" | sha256sum -c -`,
 		`"$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task "$target"`,
@@ -159,6 +163,13 @@ func TestFoundationSourceRejected(t *testing.T) {
 		change func(map[string]any)
 		want   []string
 	}{
+		"deferral of an implemented check": {func(s map[string]any) {
+			s["targets"] = []any{"test:ci"}
+			s["deferred"] = map[string]any{"ci:foundation": "afterwards", "test:a": "later"}
+		}, []string{"CHECK_DEFERRED"}},
+		"target name that is not a plain Task target": {func(s map[string]any) {
+			s["targets"] = []any{"test:a", "test:ci", "Test A"}
+		}, []string{"CHECK_NAME", "CHECK_UNKNOWN"}},
 		"self-hosted runner":        {func(s map[string]any) { s["runner"] = "self-hosted" }, []string{"SOURCE_PIN"}},
 		"timeout above budget":      {func(s map[string]any) { s["timeout_minutes"] = 11 }, []string{"SOURCE_PIN"}},
 		"no timeout":                {func(s map[string]any) { s["timeout_minutes"] = 0 }, []string{"SOURCE_PIN"}},
@@ -172,12 +183,12 @@ func TestFoundationSourceRejected(t *testing.T) {
 		"check with an argument":    {func(s map[string]any) { s["targets"] = []any{"test:a", "test:ci", "lint"} }, []string{"CHECK_NOT_RUNNABLE"}},
 		"unknown check":             {func(s map[string]any) { s["targets"] = []any{"test:a", "test:ci", "test:ghost"} }, []string{"CHECK_UNKNOWN"}},
 		"repeated check":            {func(s map[string]any) { s["targets"] = []any{"test:a", "test:ci", "test:a"} }, []string{"CHECK_DUPLICATE"}},
-		"deferral without a reason": {func(s map[string]any) { s["deferred"] = map[string]any{"ci:run": " "} }, []string{"CHECK_DEFERRED"}},
+		"deferral without a reason": {func(s map[string]any) { s["deferred"] = map[string]any{"ci:foundation": " "} }, []string{"CHECK_DEFERRED"}},
 		"deferred and run": {func(s map[string]any) {
-			s["targets"] = []any{"test:a", "test:ci", "ci:run"}
+			s["targets"] = []any{"test:a", "test:ci", "ci:foundation"}
 		}, []string{"CHECK_DEFERRED"}},
 		"unknown deferral": {func(s map[string]any) {
-			s["deferred"] = map[string]any{"ci:run": "afterwards", "test:ghost": "absent"}
+			s["deferred"] = map[string]any{"ci:foundation": "afterwards", "test:ghost": "absent"}
 		}, []string{"CHECK_UNKNOWN"}},
 		"unknown field":   {func(s map[string]any) { s["permissions"] = "write-all" }, []string{"SOURCE_SYNTAX"}},
 		"missing field":   {func(s map[string]any) { delete(s, "layer") }, []string{"SOURCE_SYNTAX"}},
@@ -208,5 +219,34 @@ func TestFoundationSourceDuplicateKey(t *testing.T) {
 	duplicated := []byte(strings.Replace(string(source), `"runner":"ubuntu-24.04"`, `"runner":"ubuntu-24.04","runner":"self-hosted"`, 1))
 	if got := ruleSet(CheckFoundationCI(duplicated, renderSource(t, source), registry, tasks)); !reflect.DeepEqual(got, []string{"SOURCE_SYNTAX"}) {
 		t.Errorf("BEHAVIORAL_RED: duplicate key gave %v", got)
+	}
+}
+
+// A registered check whose ID would inject YAML or an expression into the
+// rendered workflow is refused by name before it reaches the workflow, even
+// though the registry knows it and its creator is closed.
+func TestFoundationSourceRefusesInjectedNames(t *testing.T) {
+	for name, id := range map[string]string{
+		"newline":    "test:x\n      BASH_ENV: /home/runner/work/_temp/candidate/probe.sh",
+		"expression": "test:${{ secrets.GITHUB_TOKEN }}",
+		"space":      "test:x --dry",
+	} {
+		t.Run(name, func(t *testing.T) {
+			registry, tasks := foundationRegistry()
+			registry.Checks = append(registry.Checks, CheckDefinition{ID: id, Creator: "T001", Command: "task " + id, Kind: KindBehavioral})
+			value := foundationSource()
+			value["targets"] = []any{"test:a", "test:ci", id}
+			source := encode(t, value)
+			parsed, err := ParseFoundationSource(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ruleSet(CheckFoundationCI(source, []byte(RenderFoundationWorkflow(parsed)), registry, tasks)); !reflect.DeepEqual(got, []string{"CHECK_NAME"}) {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v", name, got)
+			}
+			if findings := ValidateFoundationSource(parsed); len(findings) == 0 {
+				t.Errorf("BEHAVIORAL_RED: %s validates for rendering", name)
+			}
+		})
 	}
 }

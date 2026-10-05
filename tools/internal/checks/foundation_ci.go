@@ -2,6 +2,7 @@ package checks
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,6 +37,26 @@ const (
 // hostedRunners are the GitHub-hosted, ephemeral runner labels the workflow
 // may use.
 var hostedRunners = []string{"ubuntu-24.04"}
+
+// deferrable are the only checks the source may defer, each with why it
+// cannot run inside the workflow it judges.
+var deferrable = map[string]string{"ci:foundation": "judges this workflow's run evidence after the run completes"}
+
+// AdmitTarget accepts a plain Task target name: a lower-case letter, then
+// letters, digits, ':', '-' or '_', at most 64 bytes. The offline entry
+// admits targets with it, and the foundation workflow renders only such
+// names, so a name can carry no YAML, expression or shell syntax.
+func AdmitTarget(name string) error {
+	if len(name) == 0 || len(name) > 64 || name[0] < 'a' || name[0] > 'z' {
+		return fmt.Errorf("COMMAND_ADMISSION: plain Task target required")
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ':' || c == '-' || c == '_') {
+			return fmt.Errorf("COMMAND_ADMISSION: plain Task target required")
+		}
+	}
+	return nil
+}
 
 var (
 	imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -84,6 +105,7 @@ func RenderFoundationWorkflow(s FoundationSource) string {
 	line("    env:")
 	line("      LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}")
 	line("      LZ_IMAGE: %s", RuntimeImage)
+	line("      LZ_MANIFEST: %s", s.Manifest)
 	line("      LZ_LAYER: %s", s.Layer)
 	line("      LZ_ENTRY_SHA256: %s", s.EntrySHA256)
 	line("      LZ_BWRAP_SHA256: %s", s.BwrapSHA256)
@@ -101,6 +123,10 @@ func RenderFoundationWorkflow(s FoundationSource) string {
 		`echo "LZ_CANDIDATE_HEAD $LZ_HEAD"`)
 	script("Fetch the runtime layer by digest",
 		`token=$(curl -fsS "https://ghcr.io/token?scope=repository:$LZ_IMAGE:pull" | jq -r .token)`,
+		`curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.manifest.v1+json" -o "$RUNNER_TEMP/manifest.json" "https://ghcr.io/v2/$LZ_IMAGE/manifests/$LZ_MANIFEST"`,
+		`echo "${LZ_MANIFEST#sha256:}  $RUNNER_TEMP/manifest.json" | sha256sum -c -`,
+		`test "$(jq -r '.layers | length' "$RUNNER_TEMP/manifest.json")" = 1`,
+		`test "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/manifest.json")" = "$LZ_LAYER"`,
 		`curl -fsSL -H "Authorization: Bearer $token" -o "$RUNNER_TEMP/layer.tgz" "https://ghcr.io/v2/$LZ_IMAGE/blobs/$LZ_LAYER"`,
 		`echo "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -`,
 		`mkdir "$LZ_RUNTIME"`,
@@ -119,20 +145,15 @@ func RenderFoundationWorkflow(s FoundationSource) string {
 	return b.String()
 }
 
-// CheckFoundationCI judges the approved source and the committed workflow.
-// The source must pin a hosted runner, a bounded timeout and well-formed
-// digests, and account for every argument-free check of a closed task or of
-// T023 itself: each runs, or is deferred with a reason. The workflow must be
-// exactly the rendered one.
-func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task) []Finding {
+// ValidateFoundationSource checks what can be judged from the source alone:
+// a hosted runner, a bounded timeout, well-formed digests, and plain target
+// names. ci-workflow renders only a source without findings, so no name can
+// inject into the workflow. Deferred names are not rendered, and only the
+// deferrable ones are accepted.
+func ValidateFoundationSource(s FoundationSource) []Finding {
 	var findings []Finding
 	add := func(rule, subject, format string, args ...any) {
 		findings = append(findings, Finding{Rule: rule, Subject: subject, Detail: fmt.Sprintf(format, args...)})
-	}
-	s, err := ParseFoundationSource(source)
-	if err != nil {
-		add("SOURCE_SYNTAX", FoundationSourcePath, "%v", err)
-		return findings
 	}
 	if !slices.Contains(hostedRunners, s.Runner) {
 		add("SOURCE_PIN", "runner", "%q is not a hosted runner of %v", s.Runner, hostedRunners)
@@ -150,6 +171,30 @@ func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task)
 			add("SOURCE_PIN", field, "%q is not a hex SHA-256", value)
 		}
 	}
+	for _, id := range s.Targets {
+		if AdmitTarget(id) != nil {
+			add("CHECK_NAME", id, "not a plain Task target")
+		}
+	}
+	return findings
+}
+
+// CheckFoundationCI judges the approved source and the committed workflow.
+// The source must pin a hosted runner, a bounded timeout and well-formed
+// digests, and account for every argument-free check of a closed task or of
+// T023 itself: each runs, or is deferred with a reason. The workflow must be
+// exactly the rendered one.
+func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task) []Finding {
+	var findings []Finding
+	add := func(rule, subject, format string, args ...any) {
+		findings = append(findings, Finding{Rule: rule, Subject: subject, Detail: fmt.Sprintf(format, args...)})
+	}
+	s, err := ParseFoundationSource(source)
+	if err != nil {
+		add("SOURCE_SYNTAX", FoundationSourcePath, "%v", err)
+		return findings
+	}
+	findings = append(findings, ValidateFoundationSource(s)...)
 
 	done := map[string]bool{}
 	for _, t := range tasks {
@@ -184,6 +229,8 @@ func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task)
 			add("CHECK_UNKNOWN", id, "deferred but not in the check registry")
 		case seen[id]:
 			add("CHECK_DEFERRED", id, "both run and deferred")
+		case deferrable[id] == "":
+			add("CHECK_DEFERRED", id, "not deferrable; only %s may be", strings.Join(slices.Sorted(maps.Keys(deferrable)), ", "))
 		case strings.TrimSpace(reason) == "":
 			add("CHECK_DEFERRED", id, "deferred without a reason")
 		}
