@@ -83,4 +83,6 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 - Coordinator: run `task.sh next` before every dispatch — T055 was dispatched while its dependency T063/T064 was open (caught, redirected, nothing committed).
 - Write mutants per task-text clause, not per implementation line; a "per run" guard needs two runs in the control; fakes for stateful CLIs trap signals and log how they were stopped (T054).
 - An address guard needs a prefix-sibling row and a keyed-instance row at every level (resource, module, module key); judge plan changes by `actions`, never `action_reason`; bind a digest sidecar to its file name; capture scripts never `rm -rf` a caller-supplied path (T063).
+- `tofu test` with `mock_provider "ovh"` crashes (exit 11) on an import into a mocked-provider resource (T007, P6). Coordinator decision for T037/T038: test the adopt-mode `project` root offline on a scratch copy without `_lz_import.tf` and pin the import's `to`/`id` statically; the real import plan is T009's live `--plan-only` (option A, 2026-10-06).
+- Terramate outside git takes a directory as project root only if the root config sets `required_version` (T007).
 - Coordinator validations after T002 (2026-10-06): e91c86e (form-only spec-set edits) accepted; `verify:toolchain` stays mapped to 005/FR-011 so T047's "toolchain unchanged" gate keeps tracing.
