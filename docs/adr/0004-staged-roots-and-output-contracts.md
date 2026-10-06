@@ -1,5 +1,5 @@
 # ADR-0004: Stacks, one state each, and outputs passed as files
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-06
 - Related: ADR-0003, ADR-0005, ADR-0007, ADR-0009, ADR-0016, ADR-0021
 
