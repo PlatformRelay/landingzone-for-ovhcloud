@@ -132,6 +132,11 @@ func TestSpecsScoped(t *testing.T) {
 	if code, out := lzCheck(root, "specs", "specs/005-y/"); code != 0 || !strings.Contains(out, "TRACE_OK specs/005-y") || !strings.Contains(out, " requirements=3 tasks=1 checks=1") {
 		t.Errorf("BEHAVIORAL_RED: spec 005 refused beside spec 001: code=%d\n%s", code, out)
 	}
+	// A directory without a spec number selects no keys; it is refused, not
+	// traced as spec 001.
+	if code, out := lzCheck(twoSpecRepo(t, map[string]string{"specs/y/spec.md": spec005, "specs/y/tasks.md": tasks005}), "specs", "specs/y"); code != 2 || !strings.Contains(out, "SPEC_NUMBER") {
+		t.Errorf("BEHAVIORAL_RED: unnumbered spec directory: code=%d\n%s", code, out)
+	}
 }
 
 func TestSpecsScopedRejected(t *testing.T) {

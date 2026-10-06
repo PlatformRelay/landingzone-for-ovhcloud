@@ -75,8 +75,8 @@ type Trace struct {
 	// name ("005" for specs/005-…). It selects the registry's keys of that
 	// spec — requirements, check requirements and creators, procedures — as
 	// "005/FR-001", "005/T001"; unprefixed keys are spec 001's, and an empty
-	// Spec traces spec 001. Not yet read
-	// (T002).
+	// Spec traces spec 001. Another spec's entries are neither findings nor
+	// coverage.
 	Spec         string
 	Requirements []string
 	Tasks        []Task
@@ -135,7 +135,9 @@ type DoD struct {
 }
 
 var (
-	specRequirement = regexp.MustCompile(`(?m)^- \*\*((?:FR|SC)-\d{3})\*\*:`)
+	// A definition is "- **FR-001**: …" (spec 001) or "- **FR-001 Name** — …"
+	// (spec 005).
+	specRequirement = regexp.MustCompile(`(?m)^- \*\*((?:FR|SC)-\d{3})(?:\*\*:| [^*\n]+\*\* —)`)
 	taskLine        = regexp.MustCompile(`^- \[([ xX])\] (T\d{3})\b(.*)$`)
 	taskField       = regexp.MustCompile(`^  - ([A-Z][A-Za-z ]*?):\s*(.*)$`)
 	requirementID   = regexp.MustCompile(`\b(?:FR|SC)-\d{3}\b`)
@@ -319,6 +321,11 @@ func parseGoTest(words []string) (verifyRun, bool) {
 	}
 	words = words[1:]
 	var run verifyRun
+	// go test reads flags, then packages, then flags again.
+	words, ok := goTestFlagList(words, true)
+	if !ok {
+		return verifyRun{}, false
+	}
 	for len(words) > 0 && !strings.HasPrefix(words[0], "-") {
 		// Only "." and "./…" select directories of this module; anything else
 		// is an import path, which says nothing about the task's files.
@@ -333,31 +340,46 @@ func parseGoTest(words []string) (verifyRun, bool) {
 		}
 		words = words[1:]
 	}
+	if _, ok := goTestFlagList(words, false); !ok {
+		return verifyRun{}, false
+	}
+	return run, true
+}
+
+// goTestFlagList reads verifying go test flags from the front of words and
+// returns the rest. With leading set it stops at the first non-flag word (the
+// packages); otherwise every word must be a flag or a flag's value. A flag
+// outside goTestFlags, a missing value, an empty or "^$" -run pattern or a
+// -count below one refuses the run.
+func goTestFlagList(words []string, leading bool) ([]string, bool) {
 	for len(words) > 0 {
+		if leading && !strings.HasPrefix(words[0], "-") {
+			return words, true
+		}
 		name, value, inline := strings.Cut(words[0], "=")
 		takesValue, known := goTestFlags[name]
 		if !known {
-			return verifyRun{}, false
+			return nil, false
 		}
 		words = words[1:]
 		if takesValue && !inline {
 			if len(words) == 0 {
-				return run, false
+				return nil, false
 			}
 			value, words = words[0], words[1:]
 		}
 		switch name {
 		case "-run":
 			if value == "" || value == "^$" {
-				return verifyRun{}, false
+				return nil, false
 			}
 		case "-count":
 			if n, _ := strconv.Atoi(value); n < 1 {
-				return verifyRun{}, false
+				return nil, false
 			}
 		}
 	}
-	return run, true
+	return words, true
 }
 
 // exercises reports whether a test run covers one of the task's paths: a file
@@ -604,7 +626,110 @@ func ParseRegistry(data []byte) (Registry, error) {
 			return Registry{}, fmt.Errorf("REGISTRY_PROCEDURE: %s has no reason", id)
 		}
 	}
+	if err := registryKeys(file.Requirements, file.Checks, file.Procedures); err != nil {
+		return Registry{}, err
+	}
 	return Registry{Requirements: file.Requirements, Checks: file.Checks, Evaluators: file.Evaluators, Producers: file.Producers, Procedures: file.Procedures}, nil
+}
+
+var (
+	requirementKey = regexp.MustCompile(`^(?:\d{3}/)?(?:FR|SC)-\d{3}$`)
+	taskKey        = regexp.MustCompile(`^(?:\d{3}/)?T\d{3}$`)
+)
+
+// registryKeys refuses a requirement, creator or procedure key that no spec
+// owns: a malformed id, or a "001/" prefix (spec 001's keys are unprefixed).
+// Such a key would be neither a finding nor coverage in any trace.
+func registryKeys(requirements map[string]Requirement, checks []CheckDefinition, procedures map[string]string) error {
+	bad := func(key string, form *regexp.Regexp) bool {
+		return !form.MatchString(key) || strings.HasPrefix(key, "001/")
+	}
+	for key := range requirements {
+		if bad(key, requirementKey) {
+			return fmt.Errorf("REGISTRY_KEY: requirement %q", key)
+		}
+	}
+	for _, c := range checks {
+		for _, r := range c.Requirements {
+			if bad(r, requirementKey) {
+				return fmt.Errorf("REGISTRY_KEY: %s requirement %q", c.ID, r)
+			}
+		}
+		if bad(c.Creator, taskKey) {
+			return fmt.Errorf("REGISTRY_KEY: %s creator %q", c.ID, c.Creator)
+		}
+	}
+	for key := range procedures {
+		if bad(key, taskKey) {
+			return fmt.Errorf("REGISTRY_KEY: procedure %q", key)
+		}
+	}
+	return nil
+}
+
+// ownKey returns a registry key's bare id when the key belongs to spec: spec
+// 001 (or an empty spec) owns the unprefixed keys, any other spec the keys
+// prefixed with its number and "/".
+func ownKey(spec, key string) (string, bool) {
+	if spec == "" || spec == "001" {
+		return key, !strings.Contains(key, "/")
+	}
+	return strings.CutPrefix(key, spec+"/")
+}
+
+// scopedCheck is a registry check as one spec sees it: only that spec's
+// requirements, by bare id, and its creator's bare id when the spec creates it
+// (own).
+type scopedCheck struct {
+	CheckDefinition
+	own bool
+}
+
+// scope returns the registry as spec sees it: its own requirements and
+// procedures under bare keys, and every check with only its own requirements.
+// Another spec's check stays registered, so running it is UNRELATED_CHECK
+// rather than UNKNOWN_CHECK.
+func scope(spec string, reg Registry) (Registry, []scopedCheck) {
+	scoped := Registry{Requirements: map[string]Requirement{}, Procedures: map[string]string{}, Evaluators: reg.Evaluators, Producers: reg.Producers}
+	for key, r := range reg.Requirements {
+		if id, ok := ownKey(spec, key); ok {
+			scoped.Requirements[id] = r
+		}
+	}
+	for key, reason := range reg.Procedures {
+		if id, ok := ownKey(spec, key); ok {
+			scoped.Procedures[id] = reason
+		}
+	}
+	var checks []scopedCheck
+	for _, c := range reg.Checks {
+		s := scopedCheck{CheckDefinition: c}
+		s.Requirements = nil
+		for _, r := range c.Requirements {
+			if id, ok := ownKey(spec, r); ok {
+				s.Requirements = append(s.Requirements, id)
+			}
+		}
+		if s.Creator, s.own = ownKey(spec, c.Creator); !s.own {
+			s.Creator = ""
+		}
+		scoped.Checks = append(scoped.Checks, s.CheckDefinition)
+		checks = append(checks, s)
+	}
+	return scoped, checks
+}
+
+// SpecChecks counts the checks that belong to spec: those it creates or that
+// check one of its requirements.
+func SpecChecks(spec string, reg Registry) int {
+	_, checks := scope(spec, reg)
+	n := 0
+	for _, c := range checks {
+		if c.own || len(c.Requirements) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // evaluates reports whether an evaluator run over args (every check when there
@@ -637,8 +762,13 @@ func set(items []string) map[string]bool {
 }
 
 // CheckTrace follows requirement → ADR → paths → check → evidence for every
-// task and requirement and reports each broken link.
+// task and requirement of the traced spec and reports each broken link. The
+// registry is read through the spec's keys (Trace.Spec): another spec's
+// requirements, check requirements, creators and procedures are neither
+// findings nor coverage.
 func CheckTrace(t Trace) []Finding {
+	var scopedChecks []scopedCheck
+	t.Registry, scopedChecks = scope(t.Spec, t.Registry)
 	var findings []Finding
 	add := func(rule, subject, format string, args ...any) {
 		findings = append(findings, Finding{Rule: rule, Subject: subject, Detail: fmt.Sprintf(format, args...)})
@@ -750,12 +880,15 @@ func CheckTrace(t Trace) []Finding {
 	}
 
 	checked := map[string]bool{}
-	for _, c := range t.Registry.Checks {
+	for _, c := range scopedChecks {
 		for _, r := range c.Requirements {
 			if !defined[r] {
 				add("UNKNOWN_REQUIREMENT", c.ID, "%s is not defined by the spec", r)
 			}
 			checked[r] = true
+		}
+		if !c.own {
+			continue
 		}
 		creator, ok := tasks[c.Creator]
 		switch {

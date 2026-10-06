@@ -366,6 +366,19 @@ var traceControls = map[string]struct {
 	"go test that runs nothing": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`go test ./harness -run '^$'`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
+	// go test takes flags before the packages too (spec 005's T003 form).
+	"go test flags before the package": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test -tags offlinetools ./harness -run TestA -count=1`"
+	}, nil},
+	"go test zero repetitions before the package": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test -count=0 ./harness`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"go test listing before the package": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test -list . ./harness`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
+	"go test package after the trailing flags": {func(tr *Trace) {
+		task(tr, "T004").Verify = "`go test -count=1 ./other -run TestA ./harness`"
+	}, []string{"NO_APPLICABLE_CHECK"}},
 	"go list is not a test": {func(tr *Trace) {
 		task(tr, "T004").Verify = "`go list ./harness`"
 	}, []string{"NO_APPLICABLE_CHECK"}},
@@ -622,6 +635,11 @@ func TestTraceabilityRegistryStrict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BEHAVIORAL_RED: valid registry refused: %v", err)
 	}
+	prefixed := strings.NewReplacer(`{"FR-001": {"adrs"`, `{"005/FR-001": {"adrs"`, `"creator": "T001"`, `"creator": "005/T001"`,
+		`"procedures": {}`, `"procedures": {"005/T002": "approved"}`).Replace(valid)
+	if _, err := ParseRegistry([]byte(prefixed)); err != nil {
+		t.Errorf("BEHAVIORAL_RED: spec 005 keys refused: %v", err)
+	}
 	want := Registry{
 		Requirements: map[string]Requirement{"FR-001": {ADRs: []string{"0011"}}},
 		Checks: []CheckDefinition{{ID: "verify:pins", Requirements: []string{"FR-001"}, Command: "task verify:pins -- tools", Creator: "T001",
@@ -657,6 +675,14 @@ func TestTraceabilityRegistryStrict(t *testing.T) {
 		"parent scope":             strings.Replace(valid, `"scope": ["tools"]`, `"scope": ["../x"]`, 1),
 		"parent input":             strings.Replace(valid, `"inputs": ["Taskfile.yml"]`, `"inputs": ["../Taskfile.yml"]`, 1),
 		"not JSON-compatible":      "checks:\n  - id: V001\n",
+		// Spec-scoped keys: a key no spec can own would be silently ignored.
+		"spec 001 prefix":             strings.Replace(valid, `{"FR-001": {"adrs"`, `{"001/FR-001": {"adrs"`, 1),
+		"short prefix":                strings.Replace(valid, `{"FR-001": {"adrs"`, `{"5/FR-001": {"adrs"`, 1),
+		"malformed requirement key":   strings.Replace(valid, `{"FR-001": {"adrs"`, `{"FR-1": {"adrs"`, 1),
+		"malformed check requirement": strings.Replace(valid, `"requirements": ["FR-001"], "command"`, `"requirements": ["005/fr-001"], "command"`, 1),
+		"malformed creator":           strings.Replace(valid, `"creator": "T001"`, `"creator": "005/T1"`, 1),
+		"prefixed spec 001 creator":   strings.Replace(valid, `"creator": "T001"`, `"creator": "001/T001"`, 1),
+		"malformed procedure key":     strings.Replace(valid, `"procedures": {}`, `"procedures": {"005-T001": "approved"}`, 1),
 	} {
 		if _, err := ParseRegistry([]byte(text)); err == nil {
 			t.Errorf("BEHAVIORAL_RED: %s accepted", name)
