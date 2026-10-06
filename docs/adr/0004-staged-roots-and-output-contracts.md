@@ -23,7 +23,10 @@ applies has to follow real dependencies.
 ## Decision
 
 ### Stage modules are reusable code
-`stages/` holds the stage modules: `bootstrap`, `account-governance`, `account-fabric` (shared vRack
+`stages/` holds the stage modules: `account-admin` (the re-runnable bootstrap authority of ADR-0009
+"bootstrap / order": the admin service account and its IAM policy that `bootstrap` runs as to create
+and own the state buckets; applied with short-lived root credentials on a fresh account, or imported),
+`bootstrap`, `account-governance`, `account-fabric` (shared vRack
 and audit facilities), `project` (adoption or vending, quotas, budget alert, machine identities,
 resource group), `project-network`, `runtime`, `observability`. A stage module is an ordinary child
 module. It takes typed inputs and returns typed outputs. It has **no backend and no provider
@@ -39,9 +42,13 @@ backend block, a generated provider block and a single `module` call into one st
 - A `for_each` over tenants inside one stack is never used to separate tenants.
 
 ### `deployments.yaml` lists the stacks
-The tenant repository holds `deployments.yaml`, one row per stack: an immutable `instance_id`, the
-stage module and its version, tenant, environment and region, the OVHcloud project, the backend
-bucket and key, which credential may plan and apply it, and which other stacks' outputs it reads.
+The tenant repository holds `deployments.yaml`, one row per stack. It lists or derives: an immutable
+`instance_id`, the stage module and its version, tenant, environment and region, the OVHcloud
+project, the backend bucket and key, which credential may plan and apply it, and which other stacks'
+outputs it reads. Rows list the identity dimensions; the backend key, the authority and the
+dependency edges are derived from a fixed stage table, so they cannot disagree between rows.
+OVHcloud account and project ids stay out of the public repository and come from local
+configuration.
 The reconcile task (ADR-0007) creates and generates the stack directories from it; nobody writes a
 backend block by hand. Tenants cannot change `deployments.yaml` through the routine self-service
 lane (ADR-0005, ADR-0021).
@@ -54,9 +61,9 @@ stack's values reads **only** that file; no stack reads another stack's state. C
 schema follow the contract versioning rules (ADR-0010).
 
 ### Order follows real dependencies
-bootstrap → account-governance → account-fabric → project → project-network → runtime →
-observability. Each arrow exists because the later stack reads the earlier stack's outputs, not
-because of a stage number. Audit sinks the account needs before any project exists belong to
+account-admin → bootstrap → account-governance → account-fabric → project → project-network → runtime →
+observability. Each arrow exists because the later stack reads the earlier stack's outputs (or runs
+as a principal the earlier stack creates), not because of a stage number. Audit sinks the account needs before any project exists belong to
 `account-fabric`. A runtime never waits on observability, and unrelated tenants never wait on each
 other.
 
