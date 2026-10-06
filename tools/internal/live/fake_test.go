@@ -57,6 +57,13 @@ type gitScenario struct {
 	// ShowUntracked models status.showUntrackedFiles from the user's git config ("no" hides
 	// untracked files unless the command passes -u/--untracked-files).
 	ShowUntracked string `json:"show_untracked_config"`
+	// Index is what ls-files -v prints (default "H README.md"): a lowercase tag is
+	// assume-unchanged, "S" skip-worktree; status hides changes to either.
+	Index []string `json:"index"`
+	// TopLevel is the work tree (core.worktree); empty means the directory git runs in.
+	TopLevel string `json:"toplevel"`
+	// Fail lists subcommands that exit 128 (a git failure in one call only).
+	Fail []string `json:"fail"`
 }
 
 // fakeGit reads scenario.json next to its own path, appends the call to git.log there, and
@@ -81,7 +88,13 @@ func fakeGit(args []string) int {
 		}
 	}
 parsed:
-	logLine, _ := json.Marshal(map[string]any{"args": args, "cwd": cwd})
+	var gitEnv []string // the caller-controlled git environment, for TestGuardGitEnvironment
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "GIT_") {
+			gitEnv = append(gitEnv, kv)
+		}
+	}
+	logLine, _ := json.Marshal(map[string]any{"args": args, "cwd": cwd, "argv": os.Args[1:], "env": gitEnv})
 	if f, err := os.OpenFile(filepath.Join(dir, "git.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintln(f, string(logLine))
 		f.Close()
@@ -103,11 +116,17 @@ parsed:
 	if len(args) == 0 {
 		return unsupported()
 	}
+	if slices.Contains(s.Fail, args[0]) {
+		fmt.Fprintf(os.Stderr, "fatal: %s failed (scenario)\n", args[0])
+		return 128
+	}
 	switch args[0] {
 	case "rev-parse":
 		return s.revParse(args[1:], cwd, unsupported)
 	case "status":
 		return s.status(args[1:], unsupported)
+	case "ls-files":
+		return s.lsFiles(args[1:], unsupported)
 	case "merge-base":
 		if len(args) != 4 || args[1] != "--is-ancestor" {
 			return unsupported()
@@ -151,6 +170,12 @@ func (s gitScenario) revParse(args []string, cwd string, unsupported func() int)
 			out = append(out, s.GitDir)
 		case "--git-common-dir":
 			out = append(out, show(s.CommonDir))
+		case "--show-toplevel":
+			top := s.TopLevel
+			if top == "" {
+				top = canonical(cwd)
+			}
+			out = append(out, top)
 		case "HEAD", "HEAD^{commit}":
 			out = append(out, s.Head)
 		default:
@@ -179,6 +204,7 @@ func (s gitScenario) status(args []string, unsupported func() int) int {
 			untracked = true
 		case "-z":
 			nul = true
+		case "--ignore-submodules=none":
 		default:
 			return unsupported()
 		}
@@ -198,6 +224,35 @@ func (s gitScenario) status(args []string, unsupported func() int) int {
 		sep = "\x00"
 	}
 	for _, l := range lines {
+		fmt.Print(l, sep)
+	}
+	return 0
+}
+
+func (s gitScenario) lsFiles(args []string, unsupported func() int) int {
+	verbose, nul := false, false
+	for _, a := range args {
+		switch a {
+		case "-v":
+			verbose = true
+		case "-z":
+			nul = true
+		default:
+			return unsupported()
+		}
+	}
+	lines := s.Index
+	if len(lines) == 0 {
+		lines = []string{"H README.md"}
+	}
+	sep := "\n"
+	if nul {
+		sep = "\x00"
+	}
+	for _, l := range lines {
+		if !verbose {
+			l = l[2:]
+		}
 		fmt.Print(l, sep)
 	}
 	return 0

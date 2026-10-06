@@ -1,0 +1,24 @@
+{
+  "git_dir": "@MAIN@/.git",
+  "common_dir": "@MAIN@/.git",
+  "head": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
+  "modified": [],
+  "untracked": [],
+  "ignored": [
+    "!! .terraform/",
+    "!! .local/"
+  ],
+  "origin_main": [
+    "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"
+  ],
+  "known": [
+    "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"
+  ],
+  "show_untracked_config": "normal",
+  "index": [
+    "H README.md",
+    "S b.tf"
+  ]
+}

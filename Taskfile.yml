@@ -74,6 +74,14 @@ tasks:
       - go -C tools test -count=1 -tags offlinetools -run 'TestUnit' ./internal/checks ./cmd/lz-check
       - go -C tools run ./cmd/lz-check -root .. slice
 
+  # The live lane's offline controls: fakes only, no credential, no API call.
+  # T053 runs the host guard, child environment, account binding and
+  # credential files; the run core (T055) and later verbs extend it.
+  test:live-lane:
+    desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
+    cmds:
+      - go -C tools test -count=1 ./internal/live ./cmd/lz-live
+
   check:specs:
     desc: 'Trace a spec''s requirements and tasks through its keys in harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'
     vars:
