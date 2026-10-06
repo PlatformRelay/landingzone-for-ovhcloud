@@ -195,6 +195,21 @@ func TestProtect(t *testing.T) {
 		{name: "refuse-unparseable-null-planned-values", raw: `{"format_version":"1.2","planned_values":null,"resource_changes":[]}`, retained: both, refused: []string{}},
 		{name: "refuse-unparseable-planned-values-only", raw: `{"planned_values":{},"resource_changes":[]}`, retained: both, refused: []string{}},
 		{name: "admit-minimal-plan", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[]}`, retained: both},
+		// T055 (T064 gap): a deposed object of a covered address (left by a failed
+		// create_before_destroy replacement) is refused whatever its actions; on any other address
+		// it is judged as usual. Synthetic: no capture of a deposed object yet.
+		{name: "refuse-deposed-delete", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.state_bucket","deposed":"0a1b2c3d","change":{"actions":["delete"]}}]}`,
+			retained: both, refused: []string{"terraform_data.state_bucket", "deposed"}},
+		{name: "refuse-deposed-no-op", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.state_bucket","deposed":"0a1b2c3d","change":{"actions":["no-op"]}}]}`,
+			retained: both, refused: []string{"terraform_data.state_bucket", "deposed"}},
+		{name: "admit-deposed-unretained", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.project_scratch","deposed":"0a1b2c3d","change":{"actions":["delete"]}}]}`,
+			retained: both},
+		// T055 (T064 gap): only the JSON format major version 1 (the captured 1.2) is read; another
+		// major version may move fields the guard relies on. Synthetic.
+		{name: "refuse-format-version-2", raw: `{"format_version":"2.0","planned_values":{},"resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "refuse-format-version-10", raw: `{"format_version":"10.1","planned_values":{},"resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "refuse-format-version-bare", raw: `{"format_version":"1","planned_values":{},"resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "admit-format-version-1-minor", raw: `{"format_version":"1.0","planned_values":{},"resource_changes":[]}`, retained: both},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -299,5 +314,45 @@ func TestProtectFixtures(t *testing.T) {
 		if meta.Tool != "tofu" || meta.ToolVersion != pinnedTofu || json.Unmarshal(plan, &p) != nil || p.Version != pinnedTofu {
 			t.Errorf("%s: tool %q %q, plan version %q, want tofu %s", meta.Case, meta.Tool, meta.ToolVersion, p.Version, pinnedTofu)
 		}
+	}
+}
+
+// TestProtectOnlyPlanReader: protect.go is the one reader of a plan's resource changes (T064
+// row 9, coordinator decision for T055): no other non-test Go file of the tools module names
+// `resource_changes`, so no verb can judge a plan with a second, weaker reading of its own. The
+// scan must see protect.go itself, or it scans nothing.
+func TestProtectOnlyPlanReader(t *testing.T) {
+	root := filepath.Join("..", "..")
+	own := filepath.Join(root, "internal", "live", "protect.go")
+	sawOwn := false
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "testdata" || d.Name() == "vendor") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || filepath.Ext(p) != ".go" || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(raw), "resource_changes") {
+			return nil
+		}
+		if p == own {
+			sawOwn = true
+			return nil
+		}
+		t.Errorf("%s reads `resource_changes`: plans are judged by live.Protect (protect.go) only", p)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawOwn {
+		t.Errorf("the scan never saw %s reading `resource_changes`", own)
 	}
 }

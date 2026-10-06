@@ -75,12 +75,25 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. slice
 
   # The live lane's offline controls: fakes only, no credential, no API call.
-  # T053 runs the host guard, child environment, account binding and
-  # credential files; the run core (T055) and later verbs extend it.
+  # The host guard, child environment, account binding and credential files
+  # (T053), the run core, redaction, leftover check and `lz-live probe`
+  # (T055); later verbs (T059, T047, T062) extend it.
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
       - go -C tools test -count=1 ./internal/live ./cmd/lz-live
+
+  # Host target: the owner on the maintainer host only, never inside lz-offline
+  # and never run by an agent (it loads ~/.config/ovh-lz/ credentials and calls
+  # the OVHcloud API). lz-live is built from this checkout and runs from its
+  # root, where the host guard expects it, e.g.
+  #   task live:probe -- --reviewed-sha <sha> tests/live/probes/<probe> [--plan-only]
+  #   task live:probe -- --reviewed-sha <sha> --cleanup <run-id>
+  live:probe:
+    desc: Run one probe root through the live run core, or resume its cleanup (host, owner; 005 R12)
+    cmds:
+      - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
+      - .local/bin/lz-live probe {{.CLI_ARGS}}
 
   check:specs:
     desc: 'Trace a spec''s requirements and tasks through its keys in harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'

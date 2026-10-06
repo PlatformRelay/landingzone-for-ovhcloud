@@ -15,6 +15,15 @@ const (
 	seedOther  = "second-secret-value-0420"
 )
 
+// TestRedactLongestFirst: a secret that holds another one is replaced whole, not leaving its
+// tail behind after the shorter secret's replacement.
+func TestRedactLongestFirst(t *testing.T) {
+	r := NewRedactor("abc123", "abc123-tail-secret")
+	if got := r.Redact("x abc123-tail-secret y"); strings.Contains(got, "tail-secret") {
+		t.Errorf("Redact = %q: the longer secret's tail leaked", got)
+	}
+}
+
 func TestRedactString(t *testing.T) {
 	r := NewRedactor(seedSecret, seedOther, "")
 	for name, in := range map[string]string{

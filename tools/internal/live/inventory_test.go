@@ -31,6 +31,49 @@ type applyEvent struct {
 	} `json:"hook"`
 }
 
+// TestInventoryDrainsAfterFailedAppend: when an append fails, ConsumeApply keeps reading the
+// stream (tofu must never block on a full pipe), still prints every message, and returns the
+// error at the end.
+func TestInventoryDrainsAfterFailedAppend(t *testing.T) {
+	dir := tempPrivate(t)
+	inv, err := OpenInventory(dir, NewRedactor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "inventory.jsonl"), 0o700); err != nil { // appends fail
+		t.Fatal(err)
+	}
+	lines := streamLines(t, "apply-ok.jsonl")
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		for _, l := range lines {
+			if _, err := io.WriteString(pw, l+"\n"); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- pw.Close()
+	}()
+	var out bytes.Buffer
+	if cerr := ConsumeApply(pr, "a", inv, &out); cerr == nil {
+		t.Error("ConsumeApply hid the failed append")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("stream writer: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		_ = pr.Close()
+		t.Fatal("the stream writer blocked: ConsumeApply stopped reading after the failed append")
+	}
+	last := parseEvent(t, lines[len(lines)-1]).Message
+	if !strings.Contains(out.String(), last) {
+		t.Errorf("the last event %q never reached the terminal:\n%s", last, out.String())
+	}
+}
+
 func streamLines(t *testing.T, name string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "tofu", name))

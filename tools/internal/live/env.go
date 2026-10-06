@@ -25,17 +25,23 @@ const (
 // credential selection's job (T058), which builds creds from that authority's files only.
 func Command(a Authority, creds map[string]string, name string, arg ...string) *exec.Cmd {
 	cmd := exec.Command(name, arg...)
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
-	keys := make([]string, 0, len(creds))
-	for k := range creds {
+	cmd.Env = childEnviron(os.Getenv("HOME"), creds)
+	return cmd
+}
+
+// childEnviron is the allowlisted child environment: the caller's PATH, the given HOME (the run
+// core passes a per-run scratch HOME) and the plain-named entries of vars, sorted.
+func childEnviron(home string, vars map[string]string) []string {
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
 		if envKey.MatchString(k) && k != "PATH" && k != "HOME" {
 			keys = append(keys, k)
 		}
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		env = append(env, k+"="+creds[k])
+		env = append(env, k+"="+vars[k])
 	}
-	cmd.Env = env
-	return cmd
+	return env
 }

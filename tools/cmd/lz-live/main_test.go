@@ -16,10 +16,16 @@ import (
 const fakeHead = "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"
 
 // TestMain doubles the test binary as a fake git for a clean main checkout whose HEAD is
-// fakeHead on origin/main; it logs each call next to itself.
+// fakeHead on origin/main (it logs each call next to itself), and as the fake tofu and ovhcloud of
+// probe_test.go.
 func TestMain(m *testing.M) {
-	if filepath.Base(os.Args[0]) == "git" {
+	switch filepath.Base(os.Args[0]) {
+	case "git":
 		os.Exit(fakeGit(os.Args[1:]))
+	case "tofu":
+		os.Exit(fakeTofu(os.Args[1:]))
+	case "ovhcloud":
+		os.Exit(fakeOvhcloud(os.Args[1:]))
 	}
 	os.Exit(m.Run())
 }
@@ -138,6 +144,17 @@ func TestUsage(t *testing.T) {
 	for _, args := range [][]string{
 		nil, {"help"}, {"reconcile", "--reviewed-sha", fakeHead}, {"Plan", "--reviewed-sha", fakeHead},
 		{"plan"}, {"plan", "--reviewed-sha"}, {"plan", "--unknown", "x"},
+		// probe (T055): a root, or --cleanup <run-id>; never both, never neither.
+		{"probe", "--reviewed-sha", fakeHead},
+		{"probe", "--reviewed-sha", fakeHead, "tests/live/probes/a", "tests/live/probes/b"},
+		{"probe", "--reviewed-sha", fakeHead, "--cleanup", "../x"},
+		{"probe", "--reviewed-sha", fakeHead, "--cleanup", "20261006T120000Z-a1b2", "tests/live/probes/a"},
+		{"probe", "--reviewed-sha", fakeHead, "--cleanup", "20261006T120000Z-a1b2", "--plan-only"},
+		{"probe", "--reviewed-sha", fakeHead, "tests/live/probes/a", "--deadline", "soon"},
+		{"probe", "--reviewed-sha", fakeHead, "tests/live/probes/a", "--deadline", "-5m"},
+		{"probe", "--reviewed-sha", fakeHead, "tests/live/probes/a", "--deadline", "0s"},
+		{"plan", "--reviewed-sha", fakeHead, "--plan-only", "x"},
+		{"chain", "--reviewed-sha", fakeHead, "--cleanup", "20261006T120000Z-a1b2"},
 	} {
 		code, stderr := w.run(args...)
 		if code != 2 || !strings.Contains(stderr, "usage") {
@@ -164,7 +181,11 @@ func TestEntryGuardsEveryVerb(t *testing.T) {
 				if name == "head-mismatch" {
 					sha = strings.Repeat("0a", 20)
 				}
-				code, stderr := w.run(verb, "--reviewed-sha", sha)
+				args := []string{verb, "--reviewed-sha", sha}
+				if verb == "probe" {
+					args = append(args, "tests/live/probes/x")
+				}
+				code, stderr := w.run(args...)
 				want := map[string]string{"offline-marker": "offline", "offline-env": "offline", "head-mismatch": "head"}[name]
 				if code != 3 || !strings.Contains(stderr, "("+want+")") {
 					t.Fatalf("exit %d, stderr %q; want 3 naming %s", code, stderr, want)

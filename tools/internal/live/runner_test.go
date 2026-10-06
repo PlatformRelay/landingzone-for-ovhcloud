@@ -13,8 +13,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,12 +34,21 @@ import (
 
 // tofuStack is what the fake tofu does for one stack (the base name of its -chdir directory).
 type tofuStack struct {
-	ApplyStream string   `json:"apply_stream"` // file whose lines `apply -json` prints
-	ApplyExit   int      `json:"apply_exit"`
-	HangAfter   int      `json:"hang_after"` // >0: after that many stream lines, hang until killed
-	PlanExit    int      `json:"plan_exit"`
-	DestroyExit int      `json:"destroy_exit"`
-	StateList   []string `json:"state_list"`
+	ApplyStream string `json:"apply_stream"` // file whose lines `apply -json` prints
+	ApplyExit   int    `json:"apply_exit"`
+	HangAfter   int    `json:"hang_after"` // >0: after that many stream lines, hang until stopped
+	// IgnoreInterrupt: while hanging, log SIGINT/SIGTERM but keep running (only a kill stops it).
+	IgnoreInterrupt bool         `json:"ignore_interrupt"`
+	Changes         []planChange `json:"changes"` // resource_changes of `show -json`
+	PlanExit        int          `json:"plan_exit"`
+	DestroyExit     int          `json:"destroy_exit"`
+	StateList       []string     `json:"state_list"`
+}
+
+// planChange is one resource change the fake plan holds.
+type planChange struct {
+	Address string   `json:"address"`
+	Actions []string `json:"actions"`
 }
 
 type tofuScenario struct {
@@ -46,7 +57,7 @@ type tofuScenario struct {
 
 // tofuCall is one logged invocation of a fake child (tofu, ovhcloud) or of the Protect hook.
 type tofuCall struct {
-	Cmd      string   `json:"cmd"` // init plan show-json show apply destroy state-list protect ovhcloud other
+	Cmd      string   `json:"cmd"` // init plan show-json show apply destroy state-list protect ovhcloud signal hang-timeout other
 	Stack    string   `json:"stack"`
 	Args     []string `json:"args"`
 	Plan     string   `json:"plan"`  // plan file written (plan) or applied (apply, destroy)
@@ -57,6 +68,7 @@ type tofuCall struct {
 	AWSCreds bool     `json:"aws_creds"` // $HOME/.aws/credentials visible
 	Env      []string `json:"env"`
 	PassOK   *bool    `json:"pass_ok,omitempty"` // destroy: the state's passphrase matched
+	Pgrp     int      `json:"pgrp"`              // the child's process group
 }
 
 func logCall(dir, name string, c tofuCall) {
@@ -71,6 +83,7 @@ func logCall(dir, name string, c tofuCall) {
 		_, err = os.Stat(filepath.Join(c.Home, ".aws", "credentials"))
 		c.AWSCreds = c.Home != "" && err == nil
 		c.Env = os.Environ()
+		c.Pgrp = syscall.Getpgrp()
 	}
 	line, _ := json.Marshal(c)
 	if f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
@@ -98,6 +111,11 @@ func passSHA(p string) string {
 
 func fakeTofu(args []string) int {
 	bin := filepath.Dir(os.Args[0])
+	if len(args) == 1 && args[0] == "plugin-hang" {
+		// A provider plugin of the hanging apply: it ignores nothing and stops only when killed.
+		time.Sleep(60 * time.Second)
+		return 9
+	}
 	cwd, _ := os.Getwd()
 	dir := cwd
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
@@ -186,7 +204,12 @@ func fakeTofu(args []string) int {
 				fmt.Fprintln(os.Stderr, "Error: no plan file")
 				return 1
 			}
-			raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.0", "stack": pf.Stack, "nonce": pf.Nonce, "resource_changes": []any{}})
+			changes := []any{}
+			for _, c := range st.Changes {
+				changes = append(changes, map[string]any{"address": c.Address, "change": map[string]any{"actions": c.Actions}})
+			}
+			raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.0", "stack": pf.Stack, "nonce": pf.Nonce,
+				"planned_values": map[string]any{}, "resource_changes": changes})
 			fmt.Println(string(raw))
 			return 0
 		}
@@ -233,13 +256,18 @@ func fakeTofu(args []string) int {
 			raw, _ := json.Marshal(fakeState{PassSHA: passSHA(os.Getenv("TF_VAR_state_passphrase")), Resources: 1})
 			_ = os.WriteFile(statePath, raw, 0o600)
 		}
+		var sigs chan os.Signal
+		if st.HangAfter > 0 {
+			// Trapped before the first line, so a signal sent once the stream is seen is logged.
+			sigs = make(chan os.Signal, 8)
+			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		}
 		if st.ApplyStream != "" {
 			raw, _ := os.ReadFile(st.ApplyStream)
 			for i, l := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
 				fmt.Println(l)
 				if st.HangAfter > 0 && i+1 == st.HangAfter {
-					time.Sleep(60 * time.Second)
-					return 9
+					return hang(bin, call.Stack, sigs, st.IgnoreInterrupt)
 				}
 			}
 		}
@@ -258,6 +286,44 @@ func fakeTofu(args []string) int {
 	call.Cmd = "other"
 	logCall(bin, "tofu.log", call)
 	return 0
+}
+
+// hang models a tofu apply that is still running: it logs every SIGINT/SIGTERM it receives as a
+// "signal" call (args: the signal) and stops on the first, as tofu stops gracefully on an interrupt;
+// with ignore it keeps running, so only a kill stops it (no further log line). After 60 s it logs
+// "hang-timeout": nobody stopped it.
+func hang(bin, stack string, sigs chan os.Signal, ignore bool) int {
+	if ignore {
+		// Like tofu's provider plugins: a child in tofu's process group, not on its streams.
+		plugin := exec.Command(os.Args[0], "plugin-hang")
+		if plugin.Start() == nil {
+			_ = os.WriteFile(filepath.Join(bin, "plugin-"+stack+".pid"), []byte(strconv.Itoa(plugin.Process.Pid)), 0o600)
+		}
+	}
+	timeout := time.After(60 * time.Second)
+	for {
+		select {
+		case sig := <-sigs:
+			logCall(bin, "tofu.log", tofuCall{Cmd: "signal", Stack: stack, Args: []string{sig.String()}})
+			if !ignore {
+				return 130
+			}
+		case <-timeout:
+			logCall(bin, "tofu.log", tofuCall{Cmd: "hang-timeout", Stack: stack})
+			return 9
+		}
+	}
+}
+
+// signals returns the signals the hanging apply of stack received, in order.
+func signals(calls []tofuCall, stack string) []string {
+	var out []string
+	for _, c := range calls {
+		if c.Cmd == "signal" && c.Stack == stack {
+			out = append(out, c.Args...)
+		}
+	}
+	return out
 }
 
 // fakeOvhcloud logs its environment and answers every listing with an empty array.
@@ -523,6 +589,17 @@ func TestRunnerAppliesInOrderDestroysEphemeralInReverse(t *testing.T) {
 	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"b", "a"}) {
 		t.Errorf("destroys %v, want [b a] (reverse, ephemeral only)", got)
 	}
+	// T055 review: init never writes the dependency lock file into the reviewed checkout (a
+	// changed .terraform.lock.hcl makes the tree dirty and the guard refuses the next run and the
+	// cleanup); the saved plan files (they hold root variable values) do not outlive the run.
+	for _, c := range calls {
+		if c.Cmd == "init" && !slices.Contains(c.Args, "-lockfile=readonly") {
+			t.Errorf("tofu init %v without -lockfile=readonly", c.Args)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(w.runDir, "*.tfplan")); len(left) != 0 {
+		t.Errorf("saved plan files left in the run record: %v", left)
+	}
 	inv := readInventory(t, w.runDir)
 	if len(inv) != 6 {
 		t.Errorf("inventory holds %d entries, want 6 (two per stack)", len(inv))
@@ -626,12 +703,17 @@ func TestRunnerDeadline(t *testing.T) {
 	if s := w.summary(t); s["outcome"] != "fail" {
 		t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
 	}
+	// Coordinator decision (T055): the deadline interrupts the running tofu (it may write its
+	// state), once, rather than killing it.
+	if got := signals(w.calls(t, "tofu.log"), "b"); !slices.Equal(got, []string{"interrupt"}) {
+		t.Errorf("the hanging apply of b received %v at the deadline, want [interrupt]", got)
+	}
 }
 
 // TestRunnerSignals: G8 — SIGINT and SIGTERM to a fresh lz-live process (no injected channel)
 // stop the hanging apply and fire the destroy in reverse order; the process exits non-zero.
 func TestRunnerSignals(t *testing.T) {
-	for name, sig := range map[string]syscall.Signal{"SIGINT": syscall.SIGINT, "SIGTERM": syscall.SIGTERM} {
+	for name, sig := range map[string]syscall.Signal{"SIGINT": syscall.SIGINT, "SIGTERM": syscall.SIGTERM, "SIGHUP": syscall.SIGHUP} {
 		t.Run(name, func(t *testing.T) {
 			w := newRunWorld(t)
 			w.stack(t, "a", true, tofuStack{})
@@ -679,7 +761,170 @@ func TestRunnerSignals(t *testing.T) {
 			if got := sequence(w.calls(t, "tofu.log"), "destroy"); !slices.Equal(got, []string{"b", "a"}) {
 				t.Errorf("destroys after %s: %v, want [b a]", name, got)
 			}
+			// Coordinator decision (T055): the signal is forwarded to the running tofu, which
+			// stops by itself; it is not killed.
+			// A closed terminal (SIGHUP) stops tofu like an interrupt: tofu has no graceful
+			// SIGHUP (believed).
+			want := []string{sig.String()}
+			if sig == syscall.SIGHUP {
+				want = []string{syscall.SIGINT.String()}
+			}
+			if got := signals(w.calls(t, "tofu.log"), "b"); !slices.Equal(got, want) {
+				t.Errorf("the hanging apply of b received %v after %s, want %v (forwarded once)", got, name, want)
+			}
 		})
+	}
+}
+
+// TestRunnerInterruptGrace: coordinator decision (T055) — a tofu that does not stop after the
+// forwarded interrupt is killed once the grace period has passed, and the destroy still runs. A
+// Ctrl-C at the terminal signals lz-live's whole process group: tofu runs in a group of its own,
+// so it receives the interrupt once (from lz-live), not twice (a second interrupt makes tofu exit
+// at once, without writing its state; believed, OpenTofu docs not checked).
+func TestRunnerInterruptGrace(t *testing.T) {
+	t.Run("deadline", func(t *testing.T) {
+		w := newRunWorld(t)
+		s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{HangAfter: 3, IgnoreInterrupt: true})}
+		r := w.runner(t, s...)
+		r.Deadline, r.Grace = 3*time.Second, 2*time.Second
+		err, took := execute(t, r)
+		if ExitCode(err) == 0 {
+			t.Error("a run past its deadline exited 0")
+		}
+		if took > 25*time.Second {
+			t.Errorf("Execute took %v: the tofu ignoring the interrupt was not killed after the grace period", took)
+		}
+		calls := w.calls(t, "tofu.log")
+		if got := signals(calls, "b"); !slices.Equal(got, []string{"interrupt"}) {
+			t.Errorf("the hanging apply of b received %v, want [interrupt] before the kill", got)
+		}
+		// T055 review: the kill reaches tofu's whole process group, so its plugins do not outlive it.
+		raw, err := os.ReadFile(filepath.Join(w.bin, "plugin-b.pid"))
+		pid, _ := strconv.Atoi(string(raw))
+		if err != nil || pid <= 0 {
+			t.Fatalf("the hanging apply started no plugin: %v", err)
+		}
+		if !waitFor(5*time.Second, func() bool { return syscall.Kill(pid, 0) != nil }) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Error("the plugin of the killed tofu is still running: the kill did not reach tofu's process group")
+		}
+		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+			t.Errorf("destroys %v, want [b a]", got)
+		}
+	})
+	t.Run("terminal-ctrl-c", func(t *testing.T) {
+		w := newRunWorld(t)
+		w.stack(t, "a", true, tofuStack{})
+		w.stack(t, "b", true, tofuStack{HangAfter: 3, IgnoreInterrupt: true})
+		cmd := w.subprocess(t, fakeRunConfig{Mode: "execute", Stacks: []fakeRunStack{{"a", true}, {"b", true}}, DeadlineMS: 60000, GraceMS: 2000})
+		out := &syncBuffer{}
+		cmd.Stdout, cmd.Stderr = out, out
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		pgid := cmd.Process.Pid
+		t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+		if !waitFor(20*time.Second, func() bool {
+			entries, _ := ReadInventory(w.runDir)
+			return slices.ContainsFunc(entries, func(e InventoryEntry) bool { return e.Stack == "b" })
+		}) {
+			_ = cmd.Process.Kill()
+			t.Fatalf("apply of b never streamed:\n%s", out)
+		}
+		start := time.Now()
+		if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil { // the terminal's Ctrl-C
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Error("lz-live exited 0 after Ctrl-C")
+			}
+		case <-time.After(30 * time.Second):
+			_ = cmd.Process.Kill()
+			t.Fatalf("lz-live did not stop within 30 s of Ctrl-C:\n%s", out)
+		}
+		if took := time.Since(start); took < 2*time.Second {
+			t.Errorf("lz-live stopped %v after Ctrl-C: the tofu ignoring it was killed before the grace period", took)
+		}
+		calls := w.calls(t, "tofu.log")
+		if got := signals(calls, "b"); !slices.Equal(got, []string{"interrupt"}) {
+			t.Errorf("the hanging apply of b received %v after one Ctrl-C, want exactly [interrupt]", got)
+		}
+		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+			t.Errorf("destroys after Ctrl-C: %v, want [b a]", got)
+		}
+		// lz-live was started as the leader of its own group (pgid): a child in that group gets
+		// the terminal's Ctrl-C directly as well as the forwarded one.
+		for _, c := range calls {
+			if c.Cmd != "protect" && c.Cmd != "signal" && c.Pgrp == pgid {
+				t.Errorf("tofu %s runs in lz-live's process group %d: a Ctrl-C reaches it twice", c.Cmd, pgid)
+			}
+		}
+		if len(sequence(calls, "hang-timeout")) != 0 {
+			t.Error("the hanging apply was never stopped")
+		}
+	})
+}
+
+// TestRunnerDefaultProtect: coordinator decision (T055) — without an injected hook the run core
+// judges every saved plan with live.Protect (protect.go, T064) against the run's retained set: a
+// plan deleting a retained address is refused (exit 3) and never applied; the same plan with an
+// empty retained set is applied.
+func TestRunnerDefaultProtect(t *testing.T) {
+	del := tofuStack{Changes: []planChange{{"ovh_cloud_project_storage.state", []string{"delete"}}}}
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, del))
+	r.Protect = nil
+	r.Retained = []Retained{{Instance: "account-bootstrap", Addresses: []string{"ovh_cloud_project_storage.state"}}}
+	err, _ := execute(t, r)
+	if ExitCode(err) != RefusalExit || err == nil || !strings.Contains(err.Error(), "ovh_cloud_project_storage.state") {
+		t.Errorf("Execute: %v (exit %d), want a retained refusal naming the address, exit %d", err, ExitCode(err), RefusalExit)
+	}
+	if got := sequence(w.calls(t, "tofu.log"), "apply"); len(got) != 0 {
+		t.Errorf("applies %v after the default guard refused the plan", got)
+	}
+
+	w = newRunWorld(t)
+	r = w.runner(t, w.stack(t, "a", true, del))
+	r.Protect = nil
+	if err, _ := execute(t, r); err != nil {
+		t.Fatalf("Execute with no retained resource: %v", err)
+	}
+	if got := sequence(w.calls(t, "tofu.log"), "apply"); !slices.Equal(got, []string{"a"}) {
+		t.Errorf("applies %v, want [a]", got)
+	}
+}
+
+// TestRunnerPlanOnly: `lz-live probe --plan-only` — every stack is planned and its saved plan
+// judged by the guard, nothing is applied or destroyed, the leftover check still lists (read
+// only) and the run record says pass.
+func TestRunnerPlanOnly(t *testing.T) {
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{}))
+	r.PlanOnly = true
+	if err, _ := execute(t, r); err != nil {
+		t.Fatalf("Execute: %v\n%s", err, w.term.String())
+	}
+	calls := w.calls(t, "tofu.log")
+	if got := sequence(calls, "protect"); !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("guard saw %v, want [a b]", got)
+	}
+	if got := append(sequence(calls, "apply"), sequence(calls, "destroy")...); len(got) != 0 {
+		t.Errorf("a plan-only run applied or destroyed %v", got)
+	}
+	if len(r.Leftovers.Lister.(*fakeLister).Asked()) == 0 {
+		t.Error("a plan-only run skipped the leftover listings")
+	}
+	if s := w.summary(t); s["outcome"] != "pass" {
+		t.Errorf("summary.json outcome = %v, want pass", s["outcome"])
+	}
+	if _, err := os.Stat(filepath.Join(w.runDir, "plan-a.txt")); err != nil {
+		t.Errorf("no rendered plan for a: %v", err)
 	}
 }
 
@@ -751,6 +996,73 @@ func TestRunnerProtectRefusalStops(t *testing.T) {
 	}
 	if !strings.Contains(w.term.String(), "LZ-LIVE summary 20261006T120000Z-a1b2 fail") {
 		t.Errorf("terminal lacks the fail summary:\n%s", w.term.String())
+	}
+	// T055 review r2: the refused plan file goes too.
+	if left, _ := filepath.Glob(filepath.Join(w.runDir, "*.tfplan")); len(left) != 0 {
+		t.Errorf("saved plan files left after the refusal: %v", left)
+	}
+}
+
+// deadTerminal fails every write after the first n bytes, like a terminal that was hung up.
+type deadTerminal struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (d *deadTerminal) Write(p []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.n <= 0 {
+		return 0, syscall.EIO
+	}
+	d.n -= len(p)
+	return len(p), nil
+}
+
+// TestRunnerDeadTerminal: T055 review r2 — once the terminal fails (SIGHUP: hung up, EIO), the
+// children's output is dropped, not their pipes closed: a child writing to a closed pipe dies of
+// SIGPIPE, which would kill the destroy-on-exit.
+func TestRunnerDeadTerminal(t *testing.T) {
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{}))
+	r.Terminal = &deadTerminal{n: 64}
+	if err, _ := execute(t, r); err != nil {
+		t.Errorf("Execute with a dead terminal: %v", err)
+	}
+	calls := w.calls(t, "tofu.log")
+	if got := sequence(calls, "apply"); !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("applies %v, want [a b]", got)
+	}
+	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+		t.Errorf("destroys %v with a dead terminal, want [b a]", got)
+	}
+}
+
+// TestRunnerErrorRedacted: G2 — the error Execute returns (lz-live prints it on stderr) holds no
+// secret, also when a failure's detail carries one, and keeps its exit code.
+func TestRunnerErrorRedacted(t *testing.T) {
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}))
+	r.Protect = func(Stack, []byte) error {
+		return &Refusal{Condition: CondRetained, Detail: "plan echoes " + seedSecret}
+	}
+	// A listed leftover whose name carries the secret: it lands in leftovers.json.
+	l := r.Leftovers.Lister.(*fakeLister)
+	l.responses["/cloud/project/p1/network/private"] = []json.RawMessage{json.RawMessage(`[{"id":"pn-leak","name":"` + r.Leftovers.Prefix + `leak-` + seedSecret + `","status":"ACTIVE","type":"private","vlanId":0,"regions":[]}]`)}
+	l.responses["/cloud/project/p1/network/private/pn-leak/subnet"] = []json.RawMessage{json.RawMessage(`[]`)}
+	err, _ := execute(t, r)
+	if err == nil || strings.Contains(err.Error(), seedSecret) || !strings.Contains(err.Error(), "plan echoes") {
+		t.Errorf("Execute error %q: want the detail without the secret", err)
+	}
+	// T055 review: summary.json carries the error text, leftovers.json the leftover's name.
+	for file, marker := range map[string]string{"summary.json": "plan echoes", "leftovers.json": "pn-leak"} {
+		raw, rerr := os.ReadFile(filepath.Join(w.runDir, file))
+		if rerr != nil || bytes.Contains(raw, []byte(seedSecret)) || !bytes.Contains(raw, []byte(marker)) {
+			t.Errorf("%s (%v) holds the secret or lacks %q:\n%s", file, rerr, marker, raw)
+		}
+	}
+	if ExitCode(err) != RefusalExit {
+		t.Errorf("exit %d, want %d: redaction must keep the refusal", ExitCode(err), RefusalExit)
 	}
 }
 
@@ -1172,6 +1484,45 @@ func TestProbeState(t *testing.T) {
 	})
 }
 
+// TestProbeNoStateNoFiles: T055 review r2 — a probe that failed before writing any state (here
+// its plan failed) has nothing to destroy: its passphrase and probe record are removed whatever the
+// outcome, since no cleanup could use them.
+func TestProbeNoStateNoFiles(t *testing.T) {
+	root := tempPrivate(t)
+	w := newRunWorld(t)
+	p := w.probe(t, root, tofuStack{PlanExit: 1})
+	if err := p.Start(context.Background()); ExitCode(err) == 0 {
+		t.Fatal("a probe whose plan failed exited 0")
+	}
+	dir, _, _ := probeFiles(t, root)
+	if exists(dir) {
+		left, _ := os.ReadDir(dir)
+		t.Errorf("a probe that wrote no state kept %v", left)
+	}
+}
+
+// TestProbeCleanupShortPassphrase: a retained passphrase shorter than 16 characters is not the
+// one Start wrote; cleanup refuses it and destroys nothing.
+func TestProbeCleanupShortPassphrase(t *testing.T) {
+	root := tempPrivate(t)
+	w := newRunWorld(t)
+	p := w.probe(t, root, tofuStack{DestroyExit: 1})
+	_ = p.Start(context.Background())
+	_, _, pass := probeFiles(t, root)
+	if err := os.WriteFile(pass, []byte("TF_VAR_state_passphrase=short\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := len(sequence(w.calls(t, "tofu.log"), "destroy"))
+	w.scenario.Stacks["p"] = tofuStack{ApplyStream: w.scenario.Stacks["p"].ApplyStream}
+	w.save(t)
+	if err := p.Cleanup(context.Background()); err == nil {
+		t.Error("cleanup with a 5-character passphrase succeeded")
+	}
+	if after := len(sequence(w.calls(t, "tofu.log"), "destroy")); after != before {
+		t.Errorf("cleanup with a short passphrase ran %d destroys", after-before)
+	}
+}
+
 // ---------------------------------------------------------------- fresh process
 
 type fakeRunStack struct {
@@ -1187,6 +1538,7 @@ type fakeRunConfig struct {
 	StacksDir  string
 	RunDir     string
 	DeadlineMS int
+	GraceMS    int
 	ConfigRoot string
 	Seed       string
 	ListerLog  string
@@ -1231,7 +1583,8 @@ func fakeRun(cfgPath string) (code int) {
 	lister.log = c.ListerLog
 	r := Runner{
 		ID: "20261006T120000Z-a1b2", Dir: c.RunDir, Tofu: filepath.Join(c.Bin, "tofu"), Authority: AuthorityTenant,
-		Creds: runCreds, Deadline: time.Duration(c.DeadlineMS) * time.Millisecond, Leftovers: check, Terminal: os.Stdout,
+		Creds: runCreds, Deadline: time.Duration(c.DeadlineMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond,
+		Leftovers: check, Terminal: os.Stdout,
 		Protect: func(Stack, []byte) error { return nil },
 	}
 	if r.Deadline == 0 {
