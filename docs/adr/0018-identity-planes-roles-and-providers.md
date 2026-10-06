@@ -1,6 +1,6 @@
 # ADR-0018: Identity model — three planes, a role catalogue, pluggable providers
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0005, ADR-0006, ADR-0009, ADR-0016, ADR-0017
 
 ## Context

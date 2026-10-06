@@ -1,6 +1,6 @@
 # ADR-0016: Golden paths as profiles over one composition graph
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0001, ADR-0002, ADR-0004, ADR-0005, ADR-0017, ADR-0018
 
 ## Context

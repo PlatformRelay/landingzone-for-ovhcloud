@@ -1,6 +1,6 @@
 # ADR-0017: Runtime families and the output-only contract (multiple base tech stacks)
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0003, ADR-0004, ADR-0016, ADR-0018
 
 ## Context

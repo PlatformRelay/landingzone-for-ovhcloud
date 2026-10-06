@@ -1,6 +1,6 @@
 # ADR-0011: Provider strategy and OpenTofu-first
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0003, ADR-0009
 
 ## Context

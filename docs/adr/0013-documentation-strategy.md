@@ -1,6 +1,6 @@
 # ADR-0013: Documentation strategy
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0002, ADR-0008, ADR-0012
 
 ## Context
@@ -35,11 +35,17 @@ executed examples.
 - **Writing rules**: first page states "unofficial" and "what OVHcloud can't do", then "Which golden
   path am I?" (a decision tree) and the **negative paths** page (ADR-0016); every page carries
   front-matter `verified_against: { tofu, ovh }` compared with `mise.toml` — pages more than two
-  minor versions behind fail CI; a glossary; factual positioning of benefits with implementation
+  minor versions behind fail CI; every page also carries `references:` (each repository file it
+  describes, as `path` plus that file's full git blob id) and `last_verified:` (the commit the reviewer
+  checked against, informational only), or `references: []` when it describes no file; a glossary; factual positioning of benefits with implementation
   and verification status; the writing-quality lint (Vale or
   similar) runs in CI.
 - **Anti-rot gates** (all in CI): generated reference must be current (`terraform-docs --output-check`);
-  every code block is pulled by include-marker from a tested example; external links re-resolved
+  every code block is pulled by include-marker from a tested example; a page is stale when any
+  `references` blob id differs from that path's blob at HEAD (`git rev-parse HEAD:<path>`) or the path
+  is gone, and a stale page fails CI until its text is re-checked and its ids and `last_verified` are
+  updated in the same change — blob ids, not commit ids, are compared because rebase-merge rewrites
+  commit ids, and a pull request can therefore re-verify its own pages; external links re-resolved
   weekly (OVH moved its docs site in 2026, so this is not theoretical); every how-to ends in a `task`
   target that the nightly runs in dry-run or mock mode; an ADR referenced from code that is
   `Superseded` fails lint; the **honesty page** and the enforcement matrix are generated from
@@ -55,6 +61,8 @@ executed examples.
 ## Consequences
 - Docs build is part of CI; a broken link or stale generated file blocks a PR.
 - Writing the explanation pages is real work, scheduled as deliverables, not an afterthought.
+- Changing a referenced file makes every page that cites it fail until someone re-reads it; a page
+  that cites too many files becomes noisy, so `references` lists the files the page actually explains.
 
 ## Counterpoints
 - Strict generated docs can read mechanically; the tutorial and explanation sections carry the prose.

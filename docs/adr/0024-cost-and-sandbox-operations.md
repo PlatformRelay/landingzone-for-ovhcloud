@@ -1,6 +1,6 @@
 # ADR-0024: Cost and sandbox operations
-- Status: Proposed
-- Date: 2026-10-02
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0008, ADR-0009, ADR-0021, ADR-0022; spec 003 FR-001–FR-003
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR-0023: Friendly, resumable repository preconfiguration
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0001, ADR-0003, ADR-0005, ADR-0007, ADR-0008, ADR-0013, ADR-0019
 
 ## Context
