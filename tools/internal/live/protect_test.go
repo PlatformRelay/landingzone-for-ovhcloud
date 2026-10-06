@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,7 +15,8 @@ import (
 
 // Retained-resource guard G7, plan part (FR-004, FR-011, research R12). The plans in
 // tests/fixtures/tofu-probes/protect/ are `tofu show -json` of saved plans, captured by its
-// capture.sh with the pinned OpenTofu on provider-free roots: terraform_data stands in for the
+// capture.sh through the offline entry's capture admission (`task capture:protect-<case>`, which
+// runs roots.sh) with the pinned OpenTofu on provider-free roots: terraform_data stands in for the
 // state bucket, the platform S3 user (create_before_destroy), the tenant buckets (for_each over
 // the tenants), the adopted project, a governance module and one non-retained resource
 // (project_scratch). truncated.json is org-change.json cut in half. The moved-* plans (T064) move
@@ -266,9 +268,95 @@ func TestProtectNamesInstance(t *testing.T) {
 	}
 }
 
-// TestProtectFixtures: every plan was captured by the pinned OpenTofu and is unedited since (the
-// sidecar's digest), and truncated.json is a cut of org-change.json. The plan a sidecar vouches
-// for is named by the sidecar's own file name; its `case` field must agree.
+// protectInput is the inner capture script every captured plan's sidecar names as its input: it
+// holds the case table and the provider-free root, so its digest binds what was captured.
+const protectInput = "tests/fixtures/tofu-probes/protect/roots.sh"
+
+// protectSidecarFaults judges one sidecar of tests/fixtures/tofu-probes/protect/ (T070): the
+// fixture <name>.json was produced by `task capture:protect-<name>` through the offline entry's
+// capture admission with the pinned OpenTofu, and is unedited since. A captured plan's sidecar
+// must name the entry command for its own target, entry exit 0, the entry's qualification line
+// (pinned tofu, network none), the fixture's file and digest, and the input script and its
+// digest; Taskfile.yml must define the target. A derived fixture (truncated.json) names the
+// captured plan it is cut from and is no plan itself. A sidecar of a host capture (T063's shape:
+// a bare `tofu …` command, no entry, no toolchain line) has faults.
+func protectSidecarFaults(name string, raw, plan, src []byte, taskfile, inputSHA string) []string {
+	var meta struct {
+		Case        string `json:"case"`
+		File        string `json:"file"`
+		Command     string `json:"command"`
+		Toolchain   string `json:"toolchain"`
+		Tool        string `json:"tool"`
+		ToolVersion string `json:"tool_version"`
+		EntryExit   *int   `json:"entry_exit"`
+		SHA         string `json:"sha256"`
+		Input       string `json:"input"`
+		InputSHA    string `json:"input_sha256"`
+		Inner       string `json:"inner_command"`
+		DerivedFrom string `json:"derived_from"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return []string{"sidecar does not parse: " + err.Error()}
+	}
+	var faults []string
+	if meta.Case != name || meta.File != name+".json" {
+		faults = append(faults, fmt.Sprintf("case %q, file %q: the sidecar names another fixture", meta.Case, meta.File))
+	}
+	sum := sha256.Sum256(plan)
+	if hex.EncodeToString(sum[:]) != meta.SHA {
+		faults = append(faults, "digest differs from the fixture: edited after capture")
+	}
+	if meta.DerivedFrom != "" {
+		if meta.Command != "" || !strings.HasPrefix(string(src), string(plan)) || len(plan) >= len(src) || json.Valid(plan) {
+			faults = append(faults, fmt.Sprintf("not a cut of %s (derived fixtures are no plan and no capture)", meta.DerivedFrom))
+		}
+		return faults
+	}
+	if want := "lz-offline --candidate <checkout> -- task capture:protect-" + name; meta.Command != want {
+		faults = append(faults, fmt.Sprintf("command %q, want %q: not captured through the offline entry", meta.Command, want))
+	}
+	if !strings.Contains(taskfile, "\n  capture:protect-"+name+":\n    cmds: [{task: capture-protect, vars: {CASE: "+name+"}}]\n") {
+		faults = append(faults, "Taskfile.yml defines no target capture:protect-"+name+" running case "+name)
+	}
+	if meta.Inner != "sh roots.sh /tcb/tofu "+name {
+		faults = append(faults, fmt.Sprintf("inner command %q does not run case %s with the entry's tofu", meta.Inner, name))
+	}
+	if meta.EntryExit == nil || *meta.EntryExit != 0 {
+		faults = append(faults, "entry exit missing or not 0")
+	}
+	if !strings.HasPrefix(meta.Toolchain, "TOOLCHAIN_QUALIFIED ") || !strings.Contains(meta.Toolchain, " tofu="+pinnedTofu+" ") || !strings.HasSuffix(meta.Toolchain, " network=none") {
+		faults = append(faults, fmt.Sprintf("toolchain %q, want the entry's qualification line with tofu %s and network=none", meta.Toolchain, pinnedTofu))
+	}
+	var p struct {
+		Version string `json:"terraform_version"`
+	}
+	if meta.Tool != "tofu" || meta.ToolVersion != pinnedTofu || json.Unmarshal(plan, &p) != nil || p.Version != pinnedTofu {
+		faults = append(faults, fmt.Sprintf("tool %q %q, plan version %q, want tofu %s", meta.Tool, meta.ToolVersion, p.Version, pinnedTofu))
+	}
+	if meta.Input != protectInput || meta.InputSHA != inputSHA {
+		faults = append(faults, fmt.Sprintf("input %q: not the committed %s", meta.Input, protectInput))
+	}
+	return faults
+}
+
+// protectFixtureInputs returns Taskfile.yml and the digest of the committed inner capture script.
+func protectFixtureInputs(t *testing.T) (string, string) {
+	t.Helper()
+	taskfile, err := os.ReadFile(filepath.Join("..", "..", "..", "Taskfile.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(filepath.Join("..", "..", "..", protectInput))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(script)
+	return string(taskfile), hex.EncodeToString(sum[:])
+}
+
+// TestProtectFixtures: every plan was captured through the offline entry's capture admission by
+// the pinned OpenTofu and is unedited since, and truncated.json is a cut of org-change.json. The
+// plan a sidecar vouches for is named by the sidecar's own file name.
 func TestProtectFixtures(t *testing.T) {
 	metas, err := filepath.Glob(filepath.Join(protectDir, "*.meta.json"))
 	if err != nil || len(metas) != 19 {
@@ -278,42 +366,126 @@ func TestProtectFixtures(t *testing.T) {
 	if len(all) != 2*len(metas) {
 		t.Errorf("%d json files for %d sidecars: a plan without a sidecar", len(all), len(metas))
 	}
+	taskfile, inputSHA := protectFixtureInputs(t)
+	derived := 0
 	for _, m := range metas {
 		name := strings.TrimSuffix(filepath.Base(m), ".meta.json")
 		raw, err := os.ReadFile(m)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var meta struct {
-			Case        string `json:"case"`
-			Tool        string `json:"tool"`
-			ToolVersion string `json:"tool_version"`
+		var d struct {
 			DerivedFrom string `json:"derived_from"`
-			SHA         string `json:"json_sha256"`
 		}
-		if err := json.Unmarshal(raw, &meta); err != nil {
-			t.Fatalf("%s: %v", m, err)
+		_ = json.Unmarshal(raw, &d)
+		var src []byte
+		if d.DerivedFrom != "" {
+			derived++
+			src = readPlan(t, strings.TrimSuffix(d.DerivedFrom, ".json"))
 		}
-		if meta.Case != name {
-			t.Errorf("%s: case %q differs from the file name", m, meta.Case)
+		for _, f := range protectSidecarFaults(name, raw, readPlan(t, name), src, taskfile, inputSHA) {
+			t.Errorf("%s: %s", name, f)
 		}
-		plan := readPlan(t, name)
-		sum := sha256.Sum256(plan)
-		if hex.EncodeToString(sum[:]) != meta.SHA {
-			t.Errorf("%s.json digest differs from its sidecar: edited after capture", meta.Case)
+	}
+	if derived != 1 {
+		t.Errorf("%d derived fixtures, want 1 (truncated.json)", derived)
+	}
+}
+
+// TestProtectFixturesRefuseHostCapture: a sidecar that names a host capture, or that the entry
+// did not qualify, is red; the committed create.meta.json is the positive control.
+func TestProtectFixturesRefuseHostCapture(t *testing.T) {
+	taskfile, inputSHA := protectFixtureInputs(t)
+	plan := readPlan(t, "create")
+	raw, err := os.ReadFile(filepath.Join(protectDir, "create.meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := protectSidecarFaults("create", raw, plan, nil, taskfile, inputSHA); len(f) != 0 {
+		t.Fatalf("committed create sidecar has faults %v, want none", f)
+	}
+	sum := sha256.Sum256(plan)
+	digest := hex.EncodeToString(sum[:])
+	edit := func(change map[string]any, drop ...string) []byte {
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
 		}
-		if meta.DerivedFrom != "" {
-			if src := readPlan(t, strings.TrimSuffix(meta.DerivedFrom, ".json")); !strings.HasPrefix(string(src), string(plan)) || len(plan) >= len(src) {
-				t.Errorf("%s.json is not a cut of %s", meta.Case, meta.DerivedFrom)
-			}
-			continue
+		for k, v := range change {
+			m[k] = v
 		}
-		var p struct {
-			Version string `json:"terraform_version"`
+		for _, k := range drop {
+			delete(m, k)
 		}
-		if meta.Tool != "tofu" || meta.ToolVersion != pinnedTofu || json.Unmarshal(plan, &p) != nil || p.Version != pinnedTofu {
-			t.Errorf("%s: tool %q %q, plan version %q, want tofu %s", meta.Case, meta.Tool, meta.ToolVersion, p.Version, pinnedTofu)
+		b, _ := json.Marshal(m)
+		return b
+	}
+	cases := map[string][]byte{
+		// The sidecar T063 wrote on the host, digest current.
+		"t063-host-sidecar":     []byte(`{"case":"create","variant":"base","applied_base_first":"no","plan_args":"","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"` + pinnedTofu + `","json_sha256":"` + digest + `","captured_on":"2026-10-06"}`),
+		"host-command":          edit(map[string]any{"command": "tofu plan -out=plan.bin; tofu show -json plan.bin"}),
+		"host-capture-script":   edit(map[string]any{"command": "tests/fixtures/tofu-probes/protect/capture.sh /usr/bin/tofu /tmp/x"}),
+		"other-target":          edit(map[string]any{"command": "lz-offline --candidate <checkout> -- task capture:protect-noop"}),
+		"no-toolchain":          edit(nil, "toolchain"),
+		"toolchain-network":     edit(map[string]any{"toolchain": "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=" + pinnedTofu + " terramate=0.17.3 task=3.53.1 tflint=0.64.0 provider=ovh/ovh@2.21.0 network=host"}),
+		"toolchain-unqualified": edit(map[string]any{"toolchain": "go=1.27.1 tofu=" + pinnedTofu + " terramate=0.17.3 network=none"}),
+		"toolchain-other-tofu":  edit(map[string]any{"toolchain": "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.12.0 terramate=0.17.3 task=3.53.1 tflint=0.64.0 provider=ovh/ovh@2.21.0 network=none"}),
+		"entry-failed":          edit(map[string]any{"entry_exit": 1}),
+		"no-entry-exit":         edit(nil, "entry_exit"),
+		"other-input":           edit(map[string]any{"input": "tests/fixtures/tofu-probes/protect/capture.sh"}),
+		"stale-input":           edit(map[string]any{"input_sha256": strings.Repeat("0", 64)}),
+		"other-file":            edit(map[string]any{"file": "noop.json"}),
+		"stale-digest":          edit(map[string]any{"sha256": strings.Repeat("0", 64)}),
+		"other-tool":            edit(map[string]any{"tool": "terraform"}),
+		"other-tool-version":    edit(map[string]any{"tool_version": "1.12.0"}),
+		"other-inner-case":      edit(map[string]any{"inner_command": "sh roots.sh /tcb/tofu noop"}),
+		"host-inner-tofu":       edit(map[string]any{"inner_command": "sh roots.sh /usr/bin/tofu create"}),
+	}
+	for name, sidecar := range cases {
+		if f := protectSidecarFaults("create", sidecar, plan, nil, taskfile, inputSHA); len(f) == 0 {
+			t.Errorf("%s: sidecar admitted, want it red", name)
 		}
+	}
+	if f := protectSidecarFaults("create", raw, plan, nil, strings.ReplaceAll(taskfile, "capture:protect-create:", "capture:protect-created:"), inputSHA); len(f) == 0 {
+		t.Error("no-target: sidecar admitted without a capture:protect-create target, want it red")
+	}
+	swapped := strings.Replace(taskfile, "capture-protect, vars: {CASE: create}", "capture-protect, vars: {CASE: noop}", 1)
+	if f := protectSidecarFaults("create", raw, plan, nil, swapped, inputSHA); len(f) == 0 {
+		t.Error("target-runs-other-case: capture:protect-create running case noop admitted, want it red")
+	}
+	// A plan written by another OpenTofu, its sidecar digest current.
+	other := []byte(strings.Replace(string(plan), `"terraform_version":"`+pinnedTofu+`"`, `"terraform_version":"1.12.0"`, 1))
+	osum := sha256.Sum256(other)
+	if f := protectSidecarFaults("create", edit(map[string]any{"sha256": hex.EncodeToString(osum[:])}), other, nil, taskfile, inputSHA); len(f) == 0 {
+		t.Error("plan-version: a plan of tofu 1.12.0 admitted, want it red")
+	}
+
+	// Derived fixtures: the committed truncated sidecar is the positive control; a derived fixture
+	// that is a whole plan, carries a capture command, or is no cut of its source is red. Each
+	// negative differs from a passing derived sidecar in one clause only.
+	cut, src := readPlan(t, "truncated"), readPlan(t, "org-change")
+	tRaw, err := os.ReadFile(filepath.Join(protectDir, "truncated.meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := protectSidecarFaults("truncated", tRaw, cut, src, taskfile, inputSHA); len(f) != 0 {
+		t.Fatalf("committed truncated sidecar has faults %v, want none", f)
+	}
+	whole := []byte(`{"case":"create","file":"create.json","derived_from":"padded.json","sha256":"` + digest + `"}`)
+	if f := protectSidecarFaults("create", whole, plan, append(append([]byte{}, plan...), '\n'), taskfile, inputSHA); len(f) == 0 {
+		t.Error("derived-whole-plan: a plan smuggled in as derived admitted, want it red")
+	}
+	var tm map[string]any
+	if err := json.Unmarshal(tRaw, &tm); err != nil {
+		t.Fatal(err)
+	}
+	tm["command"] = "lz-offline --candidate <checkout> -- task capture:protect-truncated"
+	withCommand, _ := json.Marshal(tm)
+	if f := protectSidecarFaults("truncated", withCommand, cut, src, taskfile, inputSHA); len(f) == 0 {
+		t.Error("derived-with-command: derived sidecar naming a capture admitted, want it red")
+	}
+	if f := protectSidecarFaults("truncated", tRaw, cut, readPlan(t, "noop"), taskfile, inputSHA); len(f) == 0 {
+		t.Error("derived-not-a-cut: derived fixture that is no cut of its source admitted, want it red")
 	}
 }
 

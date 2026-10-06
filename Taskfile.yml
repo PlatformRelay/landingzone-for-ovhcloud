@@ -240,6 +240,46 @@ tasks:
         echo '### terramate list --run-order'
         status=0; /tcb/terramate -C /tmp/lz-p17 list --run-order 2>&1 || status=$?; echo "LZ_EXIT=$status"
 
+  # Retained-resource guard plans (005 T063/T064, T070); tests/fixtures/tofu-probes/protect/
+  # capture.sh records their stdout. Each prints exactly the pinned `tofu show -json` document of
+  # one case of roots.sh; state and scratch roots stay in /tmp.
+  capture:protect-create:
+    cmds: [{task: capture-protect, vars: {CASE: create}}]
+  capture:protect-noop:
+    cmds: [{task: capture-protect, vars: {CASE: noop}}]
+  capture:protect-update:
+    cmds: [{task: capture-protect, vars: {CASE: update}}]
+  capture:protect-unretained-replace:
+    cmds: [{task: capture-protect, vars: {CASE: unretained-replace}}]
+  capture:protect-removed-block:
+    cmds: [{task: capture-protect, vars: {CASE: removed-block}}]
+  capture:protect-org-change:
+    cmds: [{task: capture-protect, vars: {CASE: org-change}}]
+  capture:protect-create-before-destroy:
+    cmds: [{task: capture-protect, vars: {CASE: create-before-destroy}}]
+  capture:protect-tenant-removed:
+    cmds: [{task: capture-protect, vars: {CASE: tenant-removed}}]
+  capture:protect-project-replaced:
+    cmds: [{task: capture-protect, vars: {CASE: project-replaced}}]
+  capture:protect-forget:
+    cmds: [{task: capture-protect, vars: {CASE: forget}}]
+  capture:protect-module-removed:
+    cmds: [{task: capture-protect, vars: {CASE: module-removed}}]
+  capture:protect-two-replacements:
+    cmds: [{task: capture-protect, vars: {CASE: two-replacements}}]
+  capture:protect-region-removed:
+    cmds: [{task: capture-protect, vars: {CASE: region-removed}}]
+  capture:protect-replace-requested:
+    cmds: [{task: capture-protect, vars: {CASE: replace-requested}}]
+  capture:protect-moved-replace:
+    cmds: [{task: capture-protect, vars: {CASE: moved-replace}}]
+  capture:protect-moved-out:
+    cmds: [{task: capture-protect, vars: {CASE: moved-out}}]
+  capture:protect-moved-only:
+    cmds: [{task: capture-protect, vars: {CASE: moved-only}}]
+  capture:protect-state-not-plan:
+    cmds: [{task: capture-protect, vars: {CASE: state-not-plan}}]
+
   capture-validate:
     internal: true
     dir: tests/check/fixtures/static/{{.CASE}}
@@ -252,6 +292,12 @@ tasks:
     dir: tests/check/fixtures/static/{{.CASE}}
     cmds:
       - status=0; /tcb/tflint --config=/candidate/.tflint.hcl --format=json --no-color || status=$?; echo "LZ_EXIT=$status" >&2
+
+  capture-protect:
+    internal: true
+    dir: tests/fixtures/tofu-probes/protect
+    cmds:
+      - sh roots.sh /tcb/tofu {{.CASE}}
 
   capture-tofu:
     internal: true
