@@ -27,7 +27,41 @@ const (
 )
 
 // DependencyRules lists every rule ScanDependencies can report.
-var DependencyRules = []string{"CYCLE", "LAYER_VIOLATION", "PARSE_ERROR", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+
+// purity holds the FR-003 facts of configuration: whether it declares a state
+// backend (a backend or cloud block), configures a provider, or reads another
+// configuration's state.
+type purity struct{ backend, provider, remoteState bool }
+
+func (p purity) or(q purity) purity {
+	return purity{p.backend || q.backend, p.provider || q.provider, p.remoteState || q.remoteState}
+}
+
+// purityOf reads the FR-003 facts of one parsed configuration file. A check
+// block may hold a scoped data source, so it is searched for remote state.
+func purityOf(body *hclsyntax.Body) purity {
+	var p purity
+	for _, block := range body.Blocks {
+		switch block.Type {
+		case "terraform":
+			for _, inner := range block.Body.Blocks {
+				if inner.Type == "backend" || inner.Type == "cloud" {
+					p.backend = true
+				}
+			}
+		case "provider":
+			p.provider = true
+		case "data":
+			if len(block.Labels) > 0 && block.Labels[0] == "terraform_remote_state" {
+				p.remoteState = true
+			}
+		case "check":
+			p.remoteState = p.remoteState || purityOf(block.Body).remoteState
+		}
+	}
+	return p
+}
 
 // DependencyGraph is the classified module graph of a repository. Keys are
 // directories relative to the repository root. Uses holds local module
@@ -278,8 +312,11 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // ScanDependencies parses every *.tf and *.tftest.hcl file under root with the
 // HCL parser, classifies each directory holding configuration into its layer,
 // resolves module sources and reports layer violations, cycles, unresolved and
-// computed references, unclassified directories, unsupported JSON
-// configuration, parse errors and symlinks.
+// computed references, unclassified directories, unsupported JSON and .tofu
+// configuration, parse errors and symlinks. It also enforces FR-003: no
+// backend or provider configuration in a library or stage, no
+// terraform_remote_state in any configuration, and only generated *.tf files
+// under stacks/ (test files are outside these rules).
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	g := DependencyGraph{Layers: map[string]string{}, Uses: map[string][]string{}, TestUses: map[string][]string{}, External: map[string][]string{}, Configs: map[string][]string{}}
 	var findings []Finding
@@ -310,8 +347,12 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			return fs.SkipDir
 		case d.IsDir():
 			return nil
-		case strings.HasSuffix(rel, ".tf.json"), strings.HasSuffix(rel, ".tftest.json"):
+		case strings.HasSuffix(rel, ".tf.json"), strings.HasSuffix(rel, ".tftest.json"), strings.HasSuffix(rel, ".tofu.json"):
 			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: JSON configuration is not supported", rel)
+		case strings.HasSuffix(rel, ".tofu"):
+			// OpenTofu loads *.tofu beside *.tf and lets it replace a
+			// same-named *.tf file; refusing it keeps one file set to judge.
+			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: .tofu configuration is not supported, use .tf", rel)
 		case strings.HasSuffix(rel, ".tm.hcl"):
 			configs = append(configs, rel)
 		case strings.HasSuffix(rel, ".tftest.hcl"):
@@ -330,18 +371,20 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		dirs[dir] = true
 	}
 
-	// parse reads one configuration file and returns its module sources
-	// resolved against base.
-	parse := func(subject, file, base string, uses, external map[string]bool) (generated bool) {
+	// parse reads one configuration file, records its module sources resolved
+	// against base, and returns whether Terramate generated it and its purity
+	// facts.
+	parse := func(subject, file, base string, uses, external map[string]bool) (generated bool, facts purity) {
 		src, err := os.ReadFile(file)
 		if err != nil {
 			add("UNREADABLE", subject, "%v", err)
-			return false
+			return false, purity{}
 		}
+		generated = bytes.HasPrefix(src, []byte(generatedHeader))
 		parsed, diags := hclsyntax.ParseConfig(src, file, hcl.InitialPos)
 		if diags.HasErrors() {
 			add("PARSE_ERROR", subject, "%s", diags.Error())
-			return false
+			return generated, purity{}
 		}
 		sources, computed := moduleSources(parsed.Body.(*hclsyntax.Body))
 		if computed {
@@ -358,16 +401,37 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 				uses[local] = true
 			}
 		}
-		return bytes.HasPrefix(src, []byte(generatedHeader))
+		return generated, purityOf(parsed.Body.(*hclsyntax.Body))
 	}
 
 	for _, dir := range slices.Sorted(maps.Keys(files)) {
-		generated := false
+		generated, handwritten := false, false
+		var facts purity
 		uses, external := map[string]bool{}, map[string]bool{}
 		for _, file := range files[dir] {
-			generated = parse(dir, file, dir, uses, external) || generated
+			fileGenerated, fileFacts := parse(dir, file, dir, uses, external)
+			generated, handwritten = generated || fileGenerated, handwritten || !fileGenerated
+			facts = facts.or(fileFacts)
+		}
+		// FR-003: no configuration reads another's state, and stacks hold
+		// only generated files, whatever layer the directory would get.
+		if facts.remoteState {
+			add("REMOTE_STATE", dir, "terraform_remote_state is not allowed")
+		}
+		if under(dir, "stacks") && handwritten {
+			add("HANDWRITTEN_INSTANCE", dir, "a file under stacks/ lacks the Terramate generated header")
 		}
 		layer := classify(dir, generated)
+		// FR-003: libraries and stages leave backend and provider to the
+		// generated stack.
+		if layer == LayerLibrary || layer == LayerStage {
+			if facts.backend {
+				add("LIBRARY_BACKEND", dir, "a %s declares a state backend", role(dir, layer))
+			}
+			if facts.provider {
+				add("LIBRARY_PROVIDER_CONFIG", dir, "a %s configures a provider", role(dir, layer))
+			}
+		}
 		if layer == "" {
 			add("UNCLASSIFIED", dir, "directory belongs to no layer of ADR-0002")
 			continue

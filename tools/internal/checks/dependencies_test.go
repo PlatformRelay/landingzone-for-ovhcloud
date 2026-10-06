@@ -501,6 +501,9 @@ func TestDependenciesPurityRejected(t *testing.T) {
 		"stage reads remote state inside a check block": {map[string]string{
 			"stages/platform/main.tf": "check \"upstream\" {\n" + remoteState + "  assert {\n    condition     = true\n    error_message = \"x\"\n  }\n}\n",
 		}, "stages/platform", []string{"REMOTE_STATE"}},
+		"stage reads remote state before a check block": {map[string]string{
+			"stages/platform/main.tf": remoteState + "check \"later\" {\n  assert {\n    condition     = true\n    error_message = \"x\"\n  }\n}\n",
+		}, "stages/platform", []string{"REMOTE_STATE"}},
 		"generated stack reads remote state": {map[string]string{
 			"stages/platform/main.tf": none, "stacks/account/platform/main.tf": stack, "stacks/account/platform/upstream.tf": generated + remoteState,
 		}, "stacks/account/platform", []string{"REMOTE_STATE"}},
@@ -614,6 +617,19 @@ func TestDependenciesTofuFiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A generated stack file that does not parse is a parse error, not also a
+// hand-written file: the header decides, whether or not the rest parses.
+func TestDependenciesGeneratedParseError(t *testing.T) {
+	_, findings := ScanDependencies(writeModules(t, map[string]string{
+		"stages/platform/main.tf":         `variable "x" {}`,
+		"stacks/account/platform/main.tf": generated + "module \"stage\" {\n  source = \"../../../stages/platform\"\n}\n",
+		"stacks/account/platform/bad.tf":  generated + "provider \"ovh\" {\n",
+	}))
+	if got := ruleNames(findings); !reflect.DeepEqual(got, []string{"PARSE_ERROR"}) {
+		t.Errorf("BEHAVIORAL_RED: rules %v, want [PARSE_ERROR] (%+v)", got, findings)
 	}
 }
 

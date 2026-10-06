@@ -50,7 +50,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
   - Verify: `go -C tools test ./internal/checks -run TestDependencies -count=1`: a generated stack with backend+provider calling a stage, a stage calling a component, a component calling a module and naming are accepted; a `backend` block or `provider` configuration block in a module/component/stage, `terraform_remote_state` in any directory, and a non-generated `.tf` under `stacks/` are behavioural red (currently unreported). Existing `mayUse` controls stay unchanged.
   - Evidence: `evidence/T005.md`; PR; initial status `not-run`.
 
-- [ ] T006 Implement purity rules in tools/internal/checks/dependencies.go
+- [x] T006 Implement purity rules in tools/internal/checks/dependencies.go — closed 2026-10-06, evidence: evidence/T006.md
   - Requirements: FR-003; ADRs: 0002, 0004. Depends on: T005.
   - Verify: `task test:dependencies`: T005 controls green with new rule ids (`LIBRARY_BACKEND`, `LIBRARY_PROVIDER_CONFIG`, `REMOTE_STATE`, `HANDWRITTEN_INSTANCE`) added to `DependencyRules`; `mayUse` diff is empty; the repository's own graph is green.
   - Evidence: `evidence/T006.md`; PR; initial status `not-run`.
