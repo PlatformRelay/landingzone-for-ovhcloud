@@ -2,6 +2,7 @@ package checks
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -121,13 +122,24 @@ func role(dir, layer string) string {
 
 // classify places a directory holding *.tf files in its ADR-0002 layer. The
 // layout decides; a Terramate-generated file only marks a directory that has
-// no other place as a generated deployment instance.
+// no other place as a generated deployment instance. A tests or examples
+// segment makes test or example configuration only below a package root
+// (D91): a package named tests or examples is library or stage code. The root
+// tests/ and examples/ trees are roots of their own; outside these and the
+// package trees a tests or examples segment does not count.
 func classify(dir string, generated bool) string {
 	parts := strings.Split(dir, "/")
+	var below []string
+	switch depth := packageDepth(parts); {
+	case depth > 0:
+		below = parts[depth:]
+	case parts[0] == "tests" || parts[0] == "examples":
+		below = parts[1:]
+	}
 	switch {
-	case parts[0] == "tests" || slices.Contains(parts, "tests"):
+	case parts[0] == "tests" || slices.Contains(below, "tests"):
 		return LayerTest
-	case parts[0] == "examples" || slices.Contains(parts, "examples"):
+	case parts[0] == "examples" || slices.Contains(below, "examples"):
 		return LayerExample
 	case parts[0] == "modules" && len(parts) >= 2:
 		return LayerLibrary
@@ -142,13 +154,28 @@ func classify(dir string, generated bool) string {
 	return ""
 }
 
+// packageDepth is the number of leading segments naming the package root a
+// path lies in: modules/<m>, stages/<s>, components/<singleton> or
+// components/<family>/<c>, cut short when the path is; 0 outside these trees.
+func packageDepth(parts []string) int {
+	switch {
+	case parts[0] == "components" && len(parts) >= 2 && !slices.Contains(singletonComponents, parts[1]):
+		return min(3, len(parts))
+	case parts[0] == "modules" || parts[0] == "components" || parts[0] == "stages":
+		return min(2, len(parts))
+	}
+	return 0
+}
+
 // pkg is the package root a library or stage directory belongs to.
 func pkg(dir string) string {
 	parts := strings.Split(dir, "/")
-	if parts[0] == "components" && !slices.Contains(singletonComponents, parts[1]) && len(parts) >= 3 {
-		return strings.Join(parts[:3], "/")
-	}
-	return strings.Join(parts[:min(2, len(parts))], "/")
+	return strings.Join(parts[:packageDepth(parts)], "/")
+}
+
+// hidden reports whether a path lies in a hidden directory.
+func hidden(p string) bool {
+	return slices.ContainsFunc(strings.Split(p, "/"), func(s string) bool { return strings.HasPrefix(s, ".") })
 }
 
 // mayUse is the ADR-0002 edge matrix: modules use modules/naming, components
@@ -312,11 +339,13 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // ScanDependencies parses every *.tf and *.tftest.hcl file under root with the
 // HCL parser, classifies each directory holding configuration into its layer,
 // resolves module sources and reports layer violations, cycles, unresolved and
-// computed references, unclassified directories, unsupported JSON and .tofu
-// configuration, parse errors and symlinks. It also enforces FR-003: no
-// backend or provider configuration in a library or stage, no
+// computed references, unclassified directories, unsupported JSON, .tofu and
+// .tofutest configuration, parse errors and symlinks. It also enforces FR-003:
+// no backend or provider configuration in a library or stage, no
 // terraform_remote_state in any configuration, and only generated *.tf files
-// under stacks/ (test files are outside these rules).
+// under stacks/ (test files are outside these rules). Hidden directories are
+// skipped unless a module call names one; fixture trees are skipped only under
+// tests/ and tools/.
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	g := DependencyGraph{Layers: map[string]string{}, Uses: map[string][]string{}, TestUses: map[string][]string{}, External: map[string][]string{}, Configs: map[string][]string{}}
 	var findings []Finding
@@ -329,6 +358,21 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	}
 	files, tests := map[string][]string{}, map[string][]string{}
 	var configs []string
+	// route sorts a file OpenTofu loads as module configuration: *.tf is
+	// kept for its directory, the other formats are refused, anything else
+	// is ignored.
+	route := func(rel, p string) {
+		switch {
+		case strings.HasSuffix(rel, ".tf.json"), strings.HasSuffix(rel, ".tofu.json"):
+			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: JSON configuration is not supported", rel)
+		case strings.HasSuffix(rel, ".tofu"):
+			// OpenTofu loads *.tofu beside *.tf and lets it replace a
+			// same-named *.tf file; refusing it keeps one file set to judge.
+			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: .tofu configuration is not supported, use .tf", rel)
+		case strings.HasSuffix(rel, ".tf"):
+			files[path.Dir(rel)] = append(files[path.Dir(rel)], p)
+		}
+	}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -341,24 +385,24 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		switch {
 		case d.Type()&fs.ModeSymlink != 0:
 			return fmt.Errorf("%s is a symlink", rel)
-		case d.IsDir() && rel != "." && (strings.HasPrefix(d.Name(), ".") || d.Name() == "fixtures"):
-			// Hidden directories hold tool state; fixture trees are checker
-			// input data, not configuration of this repository.
+		case d.IsDir() && rel != "." && (strings.HasPrefix(d.Name(), ".") || d.Name() == "fixtures" && (under(rel, "tests") || under(rel, "tools"))):
+			// Hidden directories hold tool state such as .terraform and are
+			// loaded only when a module call names one (load below); fixture
+			// trees under tests/ and tools/ are checker input data (D91).
 			return fs.SkipDir
 		case d.IsDir():
 			return nil
-		case strings.HasSuffix(rel, ".tf.json"), strings.HasSuffix(rel, ".tftest.json"), strings.HasSuffix(rel, ".tofu.json"):
+		case strings.HasSuffix(rel, ".tftest.json"):
 			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: JSON configuration is not supported", rel)
-		case strings.HasSuffix(rel, ".tofu"):
-			// OpenTofu loads *.tofu beside *.tf and lets it replace a
-			// same-named *.tf file; refusing it keeps one file set to judge.
-			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: .tofu configuration is not supported, use .tf", rel)
+		case strings.HasSuffix(rel, ".tofutest.hcl"), strings.HasSuffix(rel, ".tofutest.json"):
+			// OpenTofu runs these as test files too; refused like *.tofu.
+			add("UNSUPPORTED_CONFIG", path.Dir(rel), "%s: .tofutest configuration is not supported, use .tftest.hcl", rel)
 		case strings.HasSuffix(rel, ".tm.hcl"):
 			configs = append(configs, rel)
 		case strings.HasSuffix(rel, ".tftest.hcl"):
 			tests[testOwner(rel)] = append(tests[testOwner(rel)], p)
-		case strings.HasSuffix(rel, ".tf"):
-			files[path.Dir(rel)] = append(files[path.Dir(rel)], p)
+		default:
+			route(rel, p)
 		}
 		return nil
 	})
@@ -369,6 +413,51 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	dirs := map[string]bool{}
 	for dir := range files {
 		dirs[dir] = true
+	}
+
+	// load reads a hidden directory a module call names, which the walk
+	// skipped: OpenTofu loads it like any other module directory, so its
+	// configuration files are routed as the walk routes them, and it is then
+	// judged like a walked directory. Only that directory is read; a hidden
+	// directory below it is loaded when a call names it in turn. A symlink on
+	// the way to it or inside it is refused, as the walk refuses one.
+	loaded := map[string]bool{}
+	load := func(dir string) {
+		if !cleanRelative(dir) || !hidden(dir) || loaded[dir] {
+			return
+		}
+		loaded[dir] = true
+		parts := strings.Split(dir, "/")
+		for i := range parts {
+			info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(strings.Join(parts[:i+1], "/"))))
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				return
+			case err != nil:
+				add("UNREADABLE", dir, "%v", err)
+				return
+			case info.Mode()&fs.ModeSymlink != 0:
+				add("UNREADABLE", dir, "%s is a symlink", strings.Join(parts[:i+1], "/"))
+				return
+			case !info.IsDir():
+				return
+			}
+		}
+		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(dir)))
+		if err != nil {
+			add("UNREADABLE", dir, "%v", err)
+			return
+		}
+		for _, entry := range entries {
+			rel := dir + "/" + entry.Name()
+			switch {
+			case entry.Type()&fs.ModeSymlink != 0:
+				add("UNREADABLE", dir, "%s is a symlink", rel)
+			case !entry.IsDir():
+				route(rel, filepath.Join(root, filepath.FromSlash(rel)))
+			}
+		}
+		dirs[dir] = len(files[dir]) > 0
 	}
 
 	// parse reads one configuration file, records its module sources resolved
@@ -392,6 +481,10 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		}
 		for _, source := range sources {
 			local, isExternal, ok := resolve(base, source, dirs)
+			if !ok && !isExternal {
+				load(local)
+				local, isExternal, ok = resolve(base, source, dirs)
+			}
 			switch {
 			case !ok:
 				add("UNRESOLVED_REFERENCE", subject, "module source %q resolves to no configuration in this repository", source)
@@ -404,7 +497,9 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		return generated, purityOf(parsed.Body.(*hclsyntax.Body))
 	}
 
-	for _, dir := range slices.Sorted(maps.Keys(files)) {
+	// judge parses one configuration directory, applies the FR-003 rules and
+	// records its layer and edges.
+	judge := func(dir string) {
 		generated, handwritten := false, false
 		var facts purity
 		uses, external := map[string]bool{}, map[string]bool{}
@@ -434,7 +529,7 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		}
 		if layer == "" {
 			add("UNCLASSIFIED", dir, "directory belongs to no layer of ADR-0002")
-			continue
+			return
 		}
 		g.Layers[dir] = layer
 		if len(uses) > 0 {
@@ -452,6 +547,22 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			slices.Sort(g.Configs[dir])
 		}
 	}
+	// judgeAll judges every directory not judged yet, until a pass loads no
+	// further hidden directory.
+	judged := map[string]bool{}
+	judgeAll := func() {
+		for {
+			pending := slices.DeleteFunc(slices.Sorted(maps.Keys(files)), func(dir string) bool { return judged[dir] })
+			if len(pending) == 0 {
+				return
+			}
+			for _, dir := range pending {
+				judged[dir] = true
+				judge(dir)
+			}
+		}
+	}
+	judgeAll()
 	for _, owner := range slices.Sorted(maps.Keys(tests)) {
 		uses := map[string]bool{}
 		for _, file := range tests[owner] {
@@ -461,6 +572,8 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			g.TestUses[owner] = sortedSet(uses)
 		}
 	}
+	// A test may run a hidden directory nothing else calls.
+	judgeAll()
 
 	for _, from := range slices.Sorted(maps.Keys(g.Uses)) {
 		for _, to := range g.Uses[from] {

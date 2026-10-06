@@ -741,6 +741,16 @@ func TestDependenciesEscapeRoutesRejected(t *testing.T) {
 		"stage named examples uses a module directly": {map[string]string{
 			"stages/examples/main.tf": `module "n" { source = "../../modules/naming" }`, "modules/naming/main.tf": none,
 		}, "stages/examples", []string{"LAYER_VIOLATION"}},
+		"tests directory outside any package root declares a backend (T067 review)": {map[string]string{
+			"ops/tests/main.tf": backend,
+		}, "ops/tests", []string{"UNCLASSIFIED"}},
+		"examples directory outside any package root configures a provider (T067 review)": {map[string]string{
+			"misc/examples/x/main.tf": provider,
+		}, "misc/examples/x", []string{"UNCLASSIFIED"}},
+		"generated stack directory with a tests segment uses a component (T067 review)": {map[string]string{
+			"components/runtime/kube/main.tf": none,
+			"stacks/a/p/tests/probe/main.tf":  generated + "module \"k\" {\n  source = \"../../../../../components/runtime/kube\"\n}\n",
+		}, "stacks/a/p/tests/probe", []string{"LAYER_VIOLATION"}},
 		// OpenTofu test files
 		".tofutest.hcl file runs a stage": {map[string]string{
 			"modules/a/main.tf": none, "stages/platform/main.tf": none,
@@ -752,6 +762,36 @@ func TestDependenciesEscapeRoutesRejected(t *testing.T) {
 		".tofutest.json file": {map[string]string{
 			"modules/a/main.tf": none, "modules/a/tests/unit.tofutest.json": `{"run": {"x": {}}}`,
 		}, "modules/a/tests", []string{"UNSUPPORTED_CONFIG"}},
+		// route 4 (T067): a called hidden directory is loaded and judged
+		"module calls a hidden directory that declares a backend": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "./.impl" }`, "modules/a/.impl/main.tf": backend,
+		}, "modules/a/.impl", []string{"LIBRARY_BACKEND"}},
+		"stage calls a hidden directory that uses a module directly": {map[string]string{
+			"stages/platform/main.tf": `module "x" { source = "./.x" }`, "modules/naming/main.tf": none,
+			"stages/platform/.x/main.tf": `module "n" { source = "../../../modules/naming" }`,
+		}, "stages/platform/.x", []string{"LAYER_VIOLATION"}},
+		"hidden directory called from a hidden directory reads remote state": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "./.impl" }`, "modules/a/.impl/main.tf": `module "d" { source = "./.deeper" }`,
+			"modules/a/.impl/.deeper/main.tf": remoteState,
+		}, "modules/a/.impl/.deeper", []string{"REMOTE_STATE"}},
+		"released address of a hidden directory configures a provider": {map[string]string{
+			"components/runtime/kube/main.tf": `module "m" { source = "git::https://github.com/PlatformRelay/landingzone-for-ovhcloud.git//modules/a/.impl?ref=v1" }`,
+			"modules/a/main.tf":               none, "modules/a/.impl/main.tf": provider,
+		}, "modules/a/.impl", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"hidden directory at the repository root is unclassified": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "../../.shared/x" }`, ".shared/x/main.tf": none,
+		}, ".shared/x", []string{"UNCLASSIFIED"}},
+		".tofu file in a called hidden directory": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "./.impl" }`, "modules/a/.impl/main.tf": none, "modules/a/.impl/override.tofu": none,
+		}, "modules/a/.impl", []string{"UNSUPPORTED_CONFIG"}},
+		"test runs a stage in a hidden directory": {map[string]string{
+			"modules/a/main.tf": none, "stages/platform/.x/main.tf": none,
+			"modules/a/tests/unit.tftest.hcl": "run \"x\" {\n  module {\n    source = \"../../stages/platform/.x\"\n  }\n}\n",
+		}, "modules/a", []string{"LAYER_VIOLATION"}},
+		"stack calls a hand-written hidden directory": {map[string]string{
+			"stacks/account/platform/main.tf":        generated + "module \"x\" {\n  source = \"./.extra\"\n}\n",
+			"stacks/account/platform/.extra/main.tf": provider,
+		}, "stacks/account/platform/.extra", []string{"HANDWRITTEN_INSTANCE", "UNCLASSIFIED"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, findings := ScanDependencies(writeModules(t, c.files))
@@ -764,6 +804,93 @@ func TestDependenciesEscapeRoutesRejected(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// T067 route 4: a hidden directory nobody calls stays skipped (tool state such
+// as .terraform holds downloaded modules with provider configuration), while a
+// called one is loaded like any module directory: classified, its edges kept,
+// and a symlink on the way to it or inside it refused.
+func TestDependenciesHiddenDirectories(t *testing.T) {
+	none := `variable "x" {}`
+	backend := "terraform {\n  backend \"s3\" {\n    key = \"x.tfstate\"\n  }\n}\n"
+	provider := "provider \"ovh\" {\n  endpoint = \"ovh-eu\"\n}\n"
+	g, findings := ScanDependencies(writeModules(t, map[string]string{
+		"modules/a/main.tf": none, "modules/a/.scratch/main.tf": backend,
+		".terraform/modules/x/main.tf": provider, "modules/a/.terraform/modules/y/main.tf": backend,
+		"modules/b/main.tf": `module "s" { source = "./.impl" }`, "modules/b/.impl/main.tf": none,
+	}))
+	if len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: hidden directories rejected: %+v", findings)
+	}
+	wantLayers := map[string]string{"modules/a": LayerLibrary, "modules/b": LayerLibrary, "modules/b/.impl": LayerLibrary}
+	if !reflect.DeepEqual(g.Layers, wantLayers) {
+		t.Errorf("BEHAVIORAL_RED: layers\n got %v\nwant %v", g.Layers, wantLayers)
+	}
+	if want := map[string][]string{"modules/b": {"modules/b/.impl"}}; !reflect.DeepEqual(g.Uses, want) {
+		t.Errorf("BEHAVIORAL_RED: uses\n got %v\nwant %v", g.Uses, want)
+	}
+
+	// Each link points outside the repository at configuration with a
+	// backend: following it would report LIBRARY_BACKEND instead.
+	outside := writeModules(t, map[string]string{"main.tf": backend, "impl/main.tf": backend})
+	for name, c := range map[string]struct {
+		source, existing, link, target string
+		want                           []string
+	}{
+		"called directory below a hidden directory is a symlink": {"./.x/impl", "modules/a/.x/other.txt", "modules/a/.x/impl", "impl", []string{"UNREADABLE", "UNRESOLVED_REFERENCE"}},
+		"hidden directory on the way is a symlink":               {"./.x/.y/impl", "modules/a/.x/other.txt", "modules/a/.x/.y", "", []string{"UNREADABLE", "UNRESOLVED_REFERENCE"}},
+		"file in a called hidden directory is a symlink":         {"./.impl", "modules/a/.impl/other.tf", "modules/a/.impl/main.tf", "main.tf", []string{"UNREADABLE"}},
+	} {
+		root := writeModules(t, map[string]string{"modules/a/main.tf": "module \"s\" { source = \"" + c.source + "\" }", c.existing: none})
+		if err := os.Symlink(filepath.Join(outside, c.target), filepath.Join(root, c.link)); err != nil {
+			t.Fatal(err)
+		}
+		if _, findings := ScanDependencies(root); !reflect.DeepEqual(ruleNames(findings), c.want) {
+			t.Errorf("BEHAVIORAL_RED: %s: rules %v, want %v (%+v)", name, ruleNames(findings), c.want, findings)
+		}
+	}
+
+	// A called hidden directory without *.tf, or one that does not exist, is
+	// no module, and a call into a (non-hidden) skipped fixture tree is not
+	// loaded: each stays unresolved.
+	for name, c := range map[string]struct {
+		files map[string]string
+		want  []string
+	}{
+		"called hidden directory holds only .tofu": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "./.impl" }`, "modules/a/.impl/main.tofu": none,
+		}, []string{"UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}},
+		"called hidden directory does not exist": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "./.missing" }`,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+		"call into a skipped fixture tree": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "../../tests/fixtures/x" }`, "tests/fixtures/x/main.tf": backend,
+		}, []string{"UNRESOLVED_REFERENCE"}},
+	} {
+		if _, findings := ScanDependencies(writeModules(t, c.files)); !reflect.DeepEqual(ruleNames(findings), c.want) {
+			t.Errorf("BEHAVIORAL_RED: %s: rules %v, want %v (%+v)", name, ruleNames(findings), c.want, findings)
+		}
+	}
+}
+
+// The root tests/ and examples/ trees are roots of their own (T066): a test
+// helper below an example, or an example below a test tree, keeps the inner
+// role, as a helper below a module's tests/ does (T067 review round 2).
+func TestDependenciesRootTreeHelpers(t *testing.T) {
+	provider := "provider \"ovh\" {\n  endpoint = \"ovh-eu\"\n}\n"
+	g, findings := ScanDependencies(writeModules(t, map[string]string{
+		"examples/solo/main.tf":                  `variable "x" {}`,
+		"examples/solo/tests/setup/main.tf":      provider,
+		"examples/solo/tests/unit.tftest.hcl":    "run \"setup\" {\n  module {\n    source = \"./tests/setup\"\n  }\n}\n",
+		"tests/contracts/examples/basic/main.tf": provider,
+	}))
+	if len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: root-tree helpers rejected: %+v", findings)
+	}
+	want := map[string]string{"examples/solo": LayerExample, "examples/solo/tests/setup": LayerTest, "tests/contracts/examples/basic": LayerTest}
+	if !reflect.DeepEqual(g.Layers, want) {
+		t.Errorf("BEHAVIORAL_RED: layers\n got %v\nwant %v", g.Layers, want)
 	}
 }
 
