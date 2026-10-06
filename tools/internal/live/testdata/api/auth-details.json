@@ -1,0 +1,9 @@
+{
+  "account": "@ACCOUNT@",
+  "allowedRoutes": null,
+  "description": "fake OAuth2 client @CLIENT@",
+  "identities": [],
+  "method": "oauth2_client_credentials",
+  "roles": null,
+  "user": null
+}
