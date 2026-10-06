@@ -294,6 +294,77 @@ func TestLintWithoutTools(t *testing.T) {
 	}
 }
 
+// Without the pinned tofu, unit is blocked and a directory that does not exist
+// yet is not run; both exit non-zero. The real tool runs are covered by
+// TestUnitCommandsWithTools inside the offline entry (task test:slice).
+func TestUnitCommandWithoutTools(t *testing.T) {
+	root := repo(t, map[string]string{"modules/a/main.tf": `variable "x" {}`})
+	absent := []string{"-tofu", filepath.Join(root, "no-tofu")}
+	if code, out := lzCheck(root, append(absent, "unit", "modules/a")...); code != 1 || !strings.Contains(out, "UNIT_BLOCKED modules/a TOOL_ABSENT") || strings.Contains(out, "UNIT_PASS") {
+		t.Errorf("BEHAVIORAL_RED: absent tofu not blocked: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, append(absent, "unit", "modules/naming")...); code != 1 || !strings.Contains(out, "UNIT_NOT_RUN modules/naming") {
+		t.Errorf("BEHAVIORAL_RED: missing directory not reported as not run: code=%d\n%s", code, out)
+	}
+	for _, args := range [][]string{{"unit"}, {"unit", "a", "b"}, {"unit", "../outside"}, {"unit", "/etc"}, {"slice", "x"}} {
+		if code, _ := lzCheck(root, append(absent, args...)...); code != 2 {
+			t.Errorf("BEHAVIORAL_RED: %v accepted (code %d)", args, code)
+		}
+	}
+}
+
+// slice discovers exactly the library and stage directories of the dependency
+// graph, in order, and runs every one; zero directories and a broken graph
+// fail before any tool runs.
+func TestUnitSliceDiscovery(t *testing.T) {
+	absent := func(root string) []string {
+		return []string{"-tofu", filepath.Join(root, "no-tofu"), "-tflint", filepath.Join(root, "no-tflint")}
+	}
+	for name, files := range map[string]map[string]string{
+		"no directories": nil,
+		"only tests and examples": {
+			"tests/check/fixtures/x/main.tf": `variable "x" {}`,
+			"examples/basic/main.tf":         `variable "x" {}`,
+		},
+	} {
+		root := repo(t, files)
+		if code, out := lzCheck(root, append(absent(root), "slice")...); code != 1 || !strings.Contains(out, "SLICE_FAIL NO_DISCOVERY dirs=0") {
+			t.Errorf("BEHAVIORAL_RED: %s: zero discovery accepted: code=%d\n%s", name, code, out)
+		}
+	}
+	root := repo(t, map[string]string{
+		"modules/naming/main.tf":                 `variable "name" {}`,
+		"components/runtime/kube/main.tf":        `module "n" { source = "../../../modules/naming" }`,
+		"stages/runtime/main.tf":                 `module "k" { source = "../../components/runtime/kube" }`,
+		"examples/basic/main.tf":                 `variable "z" {}`,
+		"modules/naming/tests/setup/main.tf":     `variable "x" {}`,
+		"modules/naming/tests/unit.tftest.hcl":   "",
+		"components/runtime/kube/variables.tf":   `variable "y" {}`,
+		"stages/runtime/README.md":               "# runtime\n",
+		"components/runtime/README.md":           "# family\n",
+		"components/runtime/kube/docs/README.md": "# kube\n",
+	})
+	code, out := lzCheck(root, append(absent(root), "slice")...)
+	var dirs []string
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && (f[0] == "pass" || f[0] == "fail" || f[0] == "blocked") {
+			dirs = append(dirs, f[1])
+			// Missing tools block every directory; nothing failed.
+			if f[0] != "blocked" || !strings.Contains(line, "lint=blocked") {
+				t.Errorf("BEHAVIORAL_RED: directory with absent tools not blocked: %q", line)
+			}
+		}
+	}
+	want := []string{"components/runtime/kube", "modules/naming", "stages/runtime"}
+	if code != 1 || strings.Join(dirs, " ") != strings.Join(want, " ") || !strings.Contains(out, "SLICE_FAIL dirs=3") {
+		t.Errorf("BEHAVIORAL_RED: discovery %v, want %v (blocked tools fail the slice): code=%d\n%s", dirs, want, code, out)
+	}
+	broken := repo(t, map[string]string{"modules/naming/main.tf": `module "k" { source = "../../components/runtime/kube" }`, "components/runtime/kube/main.tf": `variable "x" {}`})
+	if code, out := lzCheck(broken, append(absent(broken), "slice")...); code != 1 || !strings.Contains(out, "LAYER_VIOLATION modules/naming") || !strings.Contains(out, "SLICE_FAIL") || strings.Contains(out, "blocked") {
+		t.Errorf("BEHAVIORAL_RED: slice on a broken graph ran or passed: code=%d\n%s", code, out)
+	}
+}
+
 const foundationSource = `{"runner": "ubuntu-24.04", "timeout_minutes": 10,
  "manifest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
  "layer": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

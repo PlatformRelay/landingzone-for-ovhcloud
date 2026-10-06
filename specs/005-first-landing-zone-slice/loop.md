@@ -32,6 +32,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 | T001 | CLOSED | codex leg not run (usage limit) → general-purpose subagent APPROVE; Sonnet CONCERNS; Opus CONCERNS (codex-no-verdict trigger); 1 round; review fixes added 4 controls | none; T002 must also edit tools/cmd/lz-check/main.go (not in its file list) |
 | T002 | CLOSED | codex not run (limit) → subagent APPROVE; Opus CONCERNS (codex-unavailable); 1 round; lint/SC-001 dropped, ITEM quoted, spec-set edits split into e91c86e | owner validates tasks.md form edits (e91c86e) and `verify:toolchain`→`005/FR-011`; astra owed |
 | T003 | CLOSED | codex not run (limit) → subagent REQUEST_CHANGES (lint-ignoring slice mutant survived); Opus CONCERNS (codex-unavailable); 1 round, coverage fixes, mutant killed | T004 must put `TestUnit*` in a Task target; astra owed |
+| T004 | CLOSED-WITH-GAPS | codex not run (limit) → subagent APPROVE (P2: per-directory `blocked` unpinned, fixed); Opus CLEAN (code diff, codex-unavailable); 1 round | `test:slice` red by design (NO_DISCOVERY) until T012; tagged controls not in CI until then + CI source extension (owner); `ci:foundation` stale since T001 (re-record after push); astra owed |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |
