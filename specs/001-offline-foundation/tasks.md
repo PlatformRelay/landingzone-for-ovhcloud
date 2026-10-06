@@ -106,17 +106,17 @@ the constitution and ADRs are unchanged.
 
 Independent test: V001–V003, V006–V007.
 
-- [ ] T010 [US1] Write candidate-host-escape, protected-publisher and fork-cache tests in tools/internal/probes/forge/offline_test.go
+- [ ] T010 [US1] Owner gate: postponed (D85) until GitLab or a protected publisher is needed; GitHub CI is T023. Write candidate-host-escape, protected-publisher and fork-cache tests in tools/internal/probes/forge/offline_test.go
   - Requirements: FR-002, FR-008; ADRs: 0007, 0021. Depends on: T009.
   - Verify: `go -C tools test ./internal/probes/forge -run TestOfflineForge -count=1`: candidate Taskfile/workflow/include attacks cannot execute before isolation; missing protected result, changed launcher or foreign publisher rejects; non-isolating stub yields behavioural red.
   - Evidence: `.local/evidence/001/t010-forge-red.json`; initial status `not-run`.
 
-- [ ] T011 [US1] Implement base-revision dispatch verification launcher and forge adapters in pipelines/github/offline.yml, pipelines/gitlab/offline.yml and tools/internal/checks/launcher.go
+- [ ] T011 [US1] Owner gate: postponed (D85) until GitLab or a protected publisher is needed. Implement base-revision dispatch verification launcher and forge adapters in pipelines/github/offline.yml, pipelines/gitlab/offline.yml and tools/internal/checks/launcher.go
   - Requirements: FR-002, FR-008; ADRs: 0007, 0021. Depends on: T010.
   - Verify: `task test:offline-boundary; task verify:forge-offline`: local wrapper controls pass; archive as data only, no candidate code on host, token outside child; real forge absence reports blocked. Creates forge qualification target; required publisher origin setup gate remains external.
   - Evidence: `.local/evidence/001/t011-forge-adapters.json`; initial status `not-run`.
 
-- [ ] T012 [US1] Qualify trusted offline adapters on both disposable forges using tools/internal/probes/forge/offline_test.go
+- [ ] T012 [US1] Owner gate: postponed (D85) until GitLab is in scope. Qualify trusted offline adapters on both disposable forges using tools/internal/probes/forge/offline_test.go
   - Requirements: FR-008; ADRs: 0007, 0021. Depends on: T011; external disposable repos, protected base workflow, scoped result publisher and runner setup.
   - Verify: `task verify:forge-offline`: valid candidate green, broken behaviour red; malicious Taskfile/workflow/include cannot change launch; parent fork sees no secrets/socket/cache writes; missing publisher-origin enforcement blocks rather than accepting ordinary candidate CI.
   - Evidence: `.local/evidence/001/t012-forge-offline.json`; initial status `not-run`.
@@ -125,22 +125,22 @@ Independent test: V001–V003, V006–V007.
 
 Independent test: V004–V005.
 
-- [ ] T013 [US2] Author two independent organisation vectors and provider-free module tests in modules/naming/tests/unit.tftest.hcl, modules/naming/tests/contract.tftest.hcl and tests/fixtures/naming/
-  - Requirements: FR-005, SC-004; ADRs: 0003, 0008. Depends on: T007, T009; concrete-consumer diagnosis of module splitting for the selected scalar/shared-context interface. Eligible under D61 when these prerequisites are satisfied.
+- [ ] T013 [US2] SUPERSEDED by 005/T011 (D85: default template plus one reordered test template; recipe-upgrade vectors postponed). Author two independent organisation vectors and provider-free module tests in modules/naming/tests/unit.tftest.hcl, modules/naming/tests/contract.tftest.hcl and tests/fixtures/naming/
+  - Requirements: FR-005, SC-004; ADRs: 0003, 0008. Depends on: T007, T009; concrete-consumer diagnosis satisfied by spec 005's stages (D85: one scalar call per logical resource, template as data, single module). Eligible under D61 when these prerequisites are satisfied.
   - Verify: `mise exec -- tofu -chdir=modules/naming test`: compiling pure module stub produces behavioural red for concrete expected names/labels; valid unusual template, collision/truncation/import/upgrade cases and expect_failures for validations; record actual CLI output.
   - Evidence: `.local/evidence/001/t013-naming-red.json`; initial status `not-run`.
 
-- [ ] T014 [US2] Implement pure naming module and documented algorithm version/override in modules/naming/{main,variables,outputs}.tf, modules/naming/README.md and names.yaml
+- [ ] T014 [US2] SUPERSEDED by 005/T012 (D85: limits in modules/naming/kinds.yaml; names.yaml and snapshot target postponed). Implement pure naming module and documented algorithm version/override in modules/naming/{main,variables,outputs}.tf, modules/naming/README.md and names.yaml
   - Requirements: FR-005, SC-004; ADRs: 0003, 0011. Depends on: T013.
   - Verify: `task test:naming; task snap:check -- modules/naming`: two templates and independent vectors pass; impossible/unknown cloud kind fails, import override stable; label/profile changes never rename; omission mutants fail. Creates naming/snapshot targets and baseline from actual pure plan.
   - Evidence: `.local/evidence/001/t014-naming.json`; initial status `not-run`.
 
-- [ ] T015 [US2] Write naming/label projection differential tests in tools/internal/namingdata/projections_test.go, policies/plan/naming_test.rego and policies/assent/naming.test.yaml
+- [ ] T015 [US2] Owner gate: postponed (D85) until assent or a plan policy plane exists; labels are checked by 005 module tests. Write naming/label projection differential tests in tools/internal/namingdata/projections_test.go, policies/plan/naming_test.rego and policies/assent/naming.test.yaml
   - Requirements: FR-006; ADRs: 0003, 0008, 0021. Depends on: T014.
   - Verify: `go -C tools test ./internal/namingdata -run TestProjections -count=1` plus pinned Conftest/assent tests: missing each required label, unknown key and tenant auth-key edits reject in applicable planes; wrong projection stub is behavioural red.
   - Evidence: `.local/evidence/001/t015-naming-policy-red.json`; initial status `not-run`.
 
-- [ ] T016 [US2] Implement strict catalogue/org schemas and handwritten independent projections in schemas/{naming,labels}.schema.json, tools/internal/namingdata/ and policies/{plan,assent}/
+- [ ] T016 [US2] Owner gate: postponed (D85) until assent or a plan policy plane exists. Implement strict catalogue/org schemas and handwritten independent projections in schemas/{naming,labels}.schema.json, tools/internal/namingdata/ and policies/{plan,assent}/
   - Requirements: FR-006; ADRs: 0003, 0011, 0021. Depends on: T015.
   - Verify: `task test:naming-policy; task generate:check; task schema:check; task policy`: handwritten evaluators and applicable policy projections agree with shared cases whose expected results are independently specified; deliberately wrong projections, duplicate YAML, unknown key, missing required label and stale generated documentation fail. Generate documentation initially; no shared evaluator/test generator. Creates test:naming-policy, generate:check, schema:check and the policy aggregate. `task schema:check` validates names.yaml and both org naming/label fixture sets against the actual strict schemas and rejects malformed/duplicate/unknown fields and zero discovery; no invented cloud fields or unaudited limits.
   - Evidence: `.local/evidence/001/t016-naming-policy.json`; initial status `not-run`.
@@ -158,29 +158,29 @@ are eligible under D61 after their dependencies; no naming qualification is clai
 
 Independent test: V003, V008.
 
-- [ ] T017 [US3] Write diagnostic/evidence/decision-map tests in tools/internal/checks/agentex_test.go
+- [ ] T017 [US3] Owner gate: postponed (D87) with the full AgentEx scope until the second vertical slice or agents repeatedly misread check output. Write diagnostic/evidence/decision-map tests in tools/internal/checks/agentex_test.go
   - Requirements: FR-009; ADRs: 0008, 0019. Depends on: T007, T014, T016.
   - Verify: `go -C tools test ./internal/checks -run TestAgentEx -count=1`: seeded defect needs stable rule id/location/observed/expected/fix; absent observation stays not-run, expert duty review-required; stale ADR mapping and a blanket mapping without decision rationale fail, incomplete implementation is behavioural red.
   - Evidence: `.local/evidence/001/t017-agentex-red.json`; initial status `not-run`.
 
-- [ ] T018 [US3] Implement structured diagnostics and decision-map rendering in tools/internal/checks/agentex.go and docs/reference/decision-map.md
+- [ ] T018 [US3] Owner gate: postponed (D87) with the full AgentEx scope until the second vertical slice or agents repeatedly misread check output. Implement structured diagnostics and decision-map rendering in tools/internal/checks/agentex.go and docs/reference/decision-map.md
   - Requirements: FR-009; ADRs: 0019. Depends on: T017.
   - Verify: `task test:agentex; task decision-map:check`: V008 controls and unknown/stale ADR references pass/fail correctly; remove any required diagnostic/evidence clause and its mutant fails. Creates both targets.
   - Evidence: `.local/evidence/001/t018-agentex.json`; initial status `not-run`.
 
-- [ ] T019 [US3] Write progressive router and implemented-kind guides in AGENTS.md and harness/guides/{checks,naming}.md
+- [ ] T019 [US3] Owner gate: postponed (D87) with the full AgentEx scope until the second vertical slice or agents repeatedly misread check output. Write progressive router and implemented-kind guides in AGENTS.md and harness/guides/{checks,naming}.md
   - Requirements: FR-009; ADRs: 0019. Depends on: T018.
   - Verify: exempt — docs-only; content review confirms commands, trusted boundaries and deferred generators are accurately described.
   - Evidence: `.local/evidence/001/t019-docs-review.json`; initial status `not-run` (docs content review only).
 
 ## Polish and exit
 
-- [ ] T020 Write full-suite latency/discovery tests in tools/internal/checks/latency_test.go
+- [ ] T020 Owner gate: postponed (D87); no exclusive self-hosted runner. Write full-suite latency/discovery tests in tools/internal/checks/latency_test.go
   - Requirements: FR-001, FR-002, SC-001; ADRs: 0008, 0019. Depends on: T009, T012, T016, T018.
   - Verify: `go -C tools test ./internal/checks -run TestLatency -count=1`: complete applicable naming suite on the declared exclusive runner accepted; unknown/overlapping runner blocks, 120s overrun or omitted layer/count rejects; disabling deadline/discovery clause yields behavioural red.
   - Evidence: `.local/evidence/001/t020-latency-red.json`; initial status `not-run`.
 
-- [ ] T021 Implement dedicated-runner latency gate in tools/internal/checks/latency.go and Taskfile.yml
+- [ ] T021 Owner gate: postponed (D87); no exclusive self-hosted runner. Implement dedicated-runner latency gate in tools/internal/checks/latency.go and Taskfile.yml
   - Requirements: SC-001; ADRs: 0008, 0019. Depends on: T020.
   - Verify: `task verify:latency`: entire applicable naming check suite <=120s after preparation on an exclusive self-hosted runner with fixed CPU/memory, digest-pinned OS/image, cache preparation and no overlapping jobs recorded; versions, counts and each layer are recorded, including actual T009 L0 and T016 schema results; >120s/missing layer fails; unknown runner allocation or overlapping jobs blocks measurement. Creates target; no filtering to meet budget.
   - Evidence: `.local/evidence/001/t021-latency.json`; initial status `not-run`.
