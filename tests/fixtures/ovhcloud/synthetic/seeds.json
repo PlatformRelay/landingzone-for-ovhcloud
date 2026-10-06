@@ -343,6 +343,53 @@
     }
    ]
   },
+  "s3-policy-inventory": {
+   "inventory": [
+    {
+     "stack": "probe",
+     "address": "ovh_cloud_project_user_s3_policy.probe",
+     "type": "ovh_cloud_project_user_s3_policy",
+     "id": "900"
+    }
+   ],
+   "expect": [
+    {
+     "type": "ovh_cloud_project_user_s3_policy",
+     "id": "900"
+    }
+   ]
+  },
+  "second-project": {
+   "replace": {
+    "/cloud/project/p2/network/private": [
+     [
+      {
+       "id": "pn-222_1",
+       "name": "lz-demo-dev-gra11-pn",
+       "status": "ACTIVE",
+       "type": "private",
+       "vlanId": 1,
+       "regions": [
+        {
+         "region": "GRA11",
+         "status": "ACTIVE",
+         "openstackId": "os-pn-222_1"
+        }
+       ]
+      }
+     ]
+    ],
+    "/cloud/project/p2/network/private/pn-222_1/subnet": [
+     []
+    ]
+   },
+   "expect": [
+    {
+     "type": "ovh_cloud_project_network_private",
+     "id": "pn-222_1"
+    }
+   ]
+  },
   "oauth2-client": {
    "replace": {
     "/me/api/oauth2/client": [

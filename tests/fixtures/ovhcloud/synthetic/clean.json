@@ -4,6 +4,10 @@
   {
    "id": "p1",
    "urn": "urn:v1:eu:resource:publicCloudProject:p1"
+  },
+  {
+   "id": "p2",
+   "urn": "urn:v1:eu:resource:publicCloudProject:p2"
   }
  ],
  "prefix": "lz-",
@@ -416,6 +420,34 @@
     "creation": "2026-10-01T09:00:00Z",
     "lastUpdate": "2026-10-01T09:00:00Z",
     "urn": "urn:v1:eu:identity:group:ab12345-ovh/admins"
+   }
+  ],
+  "/cloud/project/p2/region": [
+   [
+    "GRA11"
+   ]
+  ],
+  "/cloud/project/p2/region/GRA11/storage": [
+   []
+  ],
+  "/cloud/project/p2/network/private": [
+   []
+  ],
+  "/cloud/project/p2/user": [
+   []
+  ],
+  "/cloud/project/p2/alerting": [
+   []
+  ],
+  "/iam/resource/urn:v1:eu:resource:publicCloudProject:p2": [
+   {
+    "id": "3f0c1a2b-0000-4000-8000-00000000p1p1",
+    "urn": "urn:v1:eu:resource:publicCloudProject:p2",
+    "name": "p2",
+    "displayName": "sandbox",
+    "type": "publicCloudProject",
+    "owner": "ab12345-ovh",
+    "tags": {}
    }
   ],
   "/cloud/project/p1/user/101/s3Credentials": [

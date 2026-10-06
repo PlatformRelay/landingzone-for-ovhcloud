@@ -141,6 +141,9 @@ func fakeTofu(args []string) int {
 	}
 	secret := os.Getenv("OVH_CLIENT_SECRET")
 	statePath := os.Getenv("TF_VAR_state_path")
+	// Every subcommand prints the credential and the probe passphrase on stderr: the runner must
+	// redact every child stream, not only apply's.
+	fmt.Fprintf(os.Stderr, "fake-tofu-%s-stderr token=%s passphrase=%s\n", sub, secret, os.Getenv("TF_VAR_state_passphrase"))
 	switch {
 	case sub == "init":
 		call.Cmd = "init"
@@ -491,6 +494,17 @@ func TestRunnerDefaultDeadline(t *testing.T) {
 	if DefaultDeadline != 45*time.Minute {
 		t.Errorf("DefaultDeadline = %v, want 45m (FR-011)", DefaultDeadline)
 	}
+	// A run without --deadline (0) runs under the default, which summary.json records.
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}))
+	r.Deadline = 0
+	if err, _ := execute(t, r); err != nil {
+		t.Fatalf("Execute with Deadline 0: %v", err)
+	}
+	d, err := time.ParseDuration(fmt.Sprint(w.summary(t)["deadline"]))
+	if err != nil || d != DefaultDeadline {
+		t.Errorf("summary.json deadline = %v (%v), want %v", w.summary(t)["deadline"], err, DefaultDeadline)
+	}
 }
 
 // TestRunnerAppliesInOrderDestroysEphemeralInReverse: a run that succeeds still destroys its
@@ -560,6 +574,9 @@ func TestRunnerDestroyOnExit(t *testing.T) {
 		if got := sequence(w.calls(t, "tofu.log"), "destroy"); !slices.Equal(got, []string{"c", "b", "a"}) {
 			t.Errorf("destroys %v, want [c b a] (a still destroyed after b failed)", got)
 		}
+		if term := w.term.String(); strings.Contains(term, seedSecret) || !strings.Contains(term, "fake-tofu-destroy-stderr") {
+			t.Errorf("the destroy children's stderr is missing from the terminal or carries the secret:\n%s", term)
+		}
 		if s := w.summary(t); s["outcome"] != "fail" {
 			t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
 		}
@@ -622,14 +639,27 @@ func TestRunnerSignals(t *testing.T) {
 			cmd := w.subprocess(t, fakeRunConfig{Mode: "execute", Stacks: []fakeRunStack{{"a", true}, {"b", true}}, DeadlineMS: 60000})
 			out := &syncBuffer{}
 			cmd.Stdout, cmd.Stderr = out, out
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
+			pgid := cmd.Process.Pid
+			t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
 			if !waitFor(20*time.Second, func() bool { return slices.Contains(sequence(w.calls(t, "tofu.log"), "apply"), "b") }) {
 				_ = cmd.Process.Kill()
 				t.Fatalf("apply of b never started:\n%s", out)
 			}
-			time.Sleep(200 * time.Millisecond)
+			// While b hangs, the resource it created is already in the inventory (not parsed later).
+			if !waitFor(10*time.Second, func() bool {
+				for _, e := range readInventory(t, w.runDir) {
+					if e.Stack == "b" && e.ID == "pn-b-1" {
+						return true
+					}
+				}
+				return false
+			}) {
+				t.Error("the resource b created before the hang is not in inventory.jsonl while b still runs")
+			}
 			if err := cmd.Process.Signal(sig); err != nil {
 				t.Fatal(err)
 			}
@@ -718,22 +748,31 @@ func TestRunnerProtectRefusalStops(t *testing.T) {
 
 // TestRunnerStateListFallback: with P24 refuted, `tofu state list` after each stack fills the
 // inventory.
+// A failed apply is the case the fallback exists for: the captured failing apply leaves the
+// errored resource in the state but not in the stream.
 func TestRunnerStateListFallback(t *testing.T) {
-	w := newRunWorld(t)
-	noEvents := w.stream(t, "a-none")
-	a := w.stack(t, "a", true, tofuStack{ApplyStream: noEvents, StateList: []string{"ovh_cloud_project_network_private.a", "module.m.ovh_cloud_project_network_private_subnet.s"}})
-	r := w.runner(t, a)
-	r.StateListFallback = true
-	if err, _ := execute(t, r); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	var got []string
-	for _, e := range readInventory(t, w.runDir) {
-		got = append(got, e.Stack+" "+e.Address+" "+e.Type)
-	}
-	want := []string{"a ovh_cloud_project_network_private.a ovh_cloud_project_network_private", "a module.m.ovh_cloud_project_network_private_subnet.s ovh_cloud_project_network_private_subnet"}
-	if !slices.Equal(got, want) {
-		t.Errorf("inventory %v, want %v", got, want)
+	for _, failing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "apply-failure"}[failing], func(t *testing.T) {
+			w := newRunWorld(t)
+			noEvents := w.stream(t, "a-none")
+			st := tofuStack{ApplyStream: noEvents, StateList: []string{"ovh_cloud_project_network_private.a", "module.m.ovh_cloud_project_network_private_subnet.s"}}
+			if failing {
+				st.ApplyExit = 1
+			}
+			r := w.runner(t, w.stack(t, "a", true, st))
+			r.StateListFallback = true
+			if err, _ := execute(t, r); failing == (err == nil) {
+				t.Fatalf("Execute: %v", err)
+			}
+			var got []string
+			for _, e := range readInventory(t, w.runDir) {
+				got = append(got, e.Stack+" "+e.Address+" "+e.Type)
+			}
+			want := []string{"a ovh_cloud_project_network_private.a ovh_cloud_project_network_private", "a module.m.ovh_cloud_project_network_private_subnet.s ovh_cloud_project_network_private_subnet"}
+			if !slices.Equal(got, want) {
+				t.Errorf("inventory %v, want %v", got, want)
+			}
+		})
 	}
 }
 
@@ -761,8 +800,10 @@ func TestRunnerRedactsEveryOutput(t *testing.T) {
 			if strings.Contains(term, seedSecret) {
 				t.Errorf("terminal holds the seeded secret:\n%s", term)
 			}
-			if !strings.Contains(term, "fake-tofu-stderr-marker") {
-				t.Errorf("the child's stderr never reached the terminal:\n%s", term)
+			for _, marker := range []string{"fake-tofu-stderr-marker", "fake-tofu-plan-stderr", "fake-tofu-destroy-stderr", "Creation complete"} {
+				if !strings.Contains(term, marker) {
+					t.Errorf("terminal lacks %q (a child stream never reached it):\n%s", marker, term)
+				}
 			}
 			for rel, marker := range map[string]string{
 				"inventory.jsonl": "ovh_cloud_project_network_private.leak",
@@ -832,6 +873,9 @@ func TestRunnerChildHome(t *testing.T) {
 		if c.HomeMode != 0o700 {
 			t.Errorf("%s: HOME mode %#o, want 0700", c.Cmd, c.HomeMode)
 		}
+		if strings.Contains(strings.Join(c.Args, " "), seedSecret) {
+			t.Errorf("%s argv holds the seeded secret", c.Cmd)
+		}
 		if c.OvhConf || c.AWSCreds {
 			t.Errorf("%s sees the caller's ~/.ovh.conf (%v) or ~/.aws/credentials (%v)", c.Cmd, c.OvhConf, c.AWSCreds)
 		}
@@ -861,6 +905,14 @@ func TestRunnerChildHome(t *testing.T) {
 	for h := range homes {
 		if _, err := os.Stat(h); h != "" && !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("scratch HOME %s still exists after the run (%v)", h, err)
+		}
+	}
+	// Per run: a second run gets its own HOME.
+	w2 := newRunWorld(t)
+	_, _ = execute(t, w2.runner(t, w2.stack(t, "a", true, tofuStack{})))
+	for _, c := range w2.calls(t, "tofu.log") {
+		if c.Cmd != "protect" && homes[c.Home] {
+			t.Errorf("a second run reused the scratch HOME %s", c.Home)
 		}
 	}
 }
@@ -902,6 +954,9 @@ func TestProbeState(t *testing.T) {
 			if _, err := ProbeDir(root, probeAccount, bad); err == nil {
 				t.Errorf("ProbeDir accepted run id %q", bad)
 			}
+		}
+		if _, err := ProbeDir(root, "..", "20261006T120000Z-a1b2"); err == nil {
+			t.Error(`ProbeDir accepted account ".."`)
 		}
 	})
 
@@ -945,9 +1000,6 @@ func TestProbeState(t *testing.T) {
 			if env["TF_VAR_state_passphrase"] != phrase || env["TF_VAR_state_path"] != state {
 				t.Errorf("apply ran with state %q and another passphrase than passphrase.env (want state %q)", env["TF_VAR_state_path"], state)
 			}
-			if strings.Contains(strings.Join(c.Args, " "), phrase) {
-				t.Error("the passphrase is in tofu's argv")
-			}
 		}
 		if !applied {
 			t.Fatal("the probe never applied")
@@ -977,6 +1029,7 @@ func TestProbeState(t *testing.T) {
 			return n
 		}
 		before := passing()
+		applies := len(sequence(w.calls(t, "tofu.log"), "plan")) + len(sequence(w.calls(t, "tofu.log"), "apply"))
 		lister := filepath.Join(w.bin, "lister.log")
 		out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}, ListerLog: lister}).CombinedOutput()
 		if err != nil {
@@ -984,6 +1037,14 @@ func TestProbeState(t *testing.T) {
 		}
 		if passing() == before {
 			t.Error("the cleanup process never destroyed the probe with the retained passphrase")
+		}
+		if n := len(sequence(w.calls(t, "tofu.log"), "plan")) + len(sequence(w.calls(t, "tofu.log"), "apply")); n != applies {
+			t.Errorf("the cleanup process planned or applied %d times: it must only destroy", n-applies)
+		}
+		for _, c := range w.calls(t, "tofu.log") {
+			if strings.Contains(strings.Join(c.Args, " "), phrase) {
+				t.Errorf("the passphrase is in the argv of tofu %s", c.Cmd)
+			}
 		}
 		if raw, _ := os.ReadFile(lister); !strings.Contains(string(raw), "/iam/policy#1") {
 			t.Error("the cleanup process never ran the leftover check")
