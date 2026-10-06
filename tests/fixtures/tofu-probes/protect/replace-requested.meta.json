@@ -1,0 +1,1 @@
+{"case":"replace-requested","variant":"base","applied_base_first":"yes","plan_args":"-replace=terraform_data.state_bucket","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"be9334cb10e4384abfdc5e3eab7a4335e7b4a2be148a5df59cb75b8c5480ea45","captured_on":"2026-10-06"}

@@ -1,0 +1,1 @@
+{"case":"project-replaced","variant":"base","applied_base_first":"yes","plan_args":"-var=project_id=p-2222","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"ffe4dc170c02b8621d3eda39a78faaf3f7c0680cc4e19c032f6451dc4f1a61ce","captured_on":"2026-10-06"}

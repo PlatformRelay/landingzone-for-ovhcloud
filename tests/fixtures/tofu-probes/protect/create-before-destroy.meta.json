@@ -1,0 +1,1 @@
+{"case":"create-before-destroy","variant":"base","applied_base_first":"yes","plan_args":"-var=user_rotation=r2","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"7841e8345640a4a5e090f0c2b570b28628917498582ed6ff5f466c6d7d60abea","captured_on":"2026-10-06"}

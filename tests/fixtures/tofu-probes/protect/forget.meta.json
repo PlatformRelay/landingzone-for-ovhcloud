@@ -1,0 +1,1 @@
+{"case":"forget","variant":"forget","applied_base_first":"yes","plan_args":"","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"e1b4ec5f812f317cb9b97a5892087cde0dffa6ecf8bee9550bd6bb8f79377988","captured_on":"2026-10-06"}

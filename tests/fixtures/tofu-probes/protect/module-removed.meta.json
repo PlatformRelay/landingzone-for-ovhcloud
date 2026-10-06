@@ -1,0 +1,1 @@
+{"case":"module-removed","variant":"module-removed","applied_base_first":"yes","plan_args":"","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"f9e16baafdaf3b4153a17a4a7f7f8c5ee81c4ab60d955631232b34891d7ce4c6","captured_on":"2026-10-06"}
