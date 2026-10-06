@@ -56,4 +56,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 - A check's creator is the task that creates it if its Verify runs it, else the first task whose Verify runs it (T002).
 - `mutate.py` counts occurrences from 0: all-NOT_FOUND means an off-by-one, not a pass (T002).
 - The fanout Opus leg runs with Bash denied: put sensor results in the review brief (T002).
+- A test task proves its red can be satisfied with a throw-away implementation in a scratch copy (not committed); reviewers mutate it, and the implementation task may start from it (T003: `~/.local/share/ovh-lz/review/t003-impl-unit.go`).
+- An aggregate's control needs a member that fails exactly one aggregated clause, or an implementation ignoring that clause passes (T003).
+- Every new Go test must run under some Task target, or CI never enforces it; the implementation task wires it (T003→T004 `test:unit`).
 - Coordinator validations after T002 (2026-10-06): e91c86e (form-only spec-set edits) accepted; `verify:toolchain` stays mapped to 005/FR-011 so T047's "toolchain unchanged" gate keeps tracing.
