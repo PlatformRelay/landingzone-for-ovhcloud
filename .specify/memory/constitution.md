@@ -1,4 +1,21 @@
-<!-- Sync impact: constitution 1.2.1 -> 1.2.2, 2026-10-04.
+<!-- Sync impact: constitution 1.2.2 -> 1.3.0, 2026-10-06.
+Reason: operator decision on the spec 005 open questions (cost gates amended to hygiene;
+AgentEx deferred explicitly).
+V: cloud-work prerequisites are a dedicated sandbox, scoped cleanup authority, an inventory
+of created resource ids outside state, a bounded runtime, a tested destroy-on-exit and a
+leftover check; leases, the reaper, the known maximum exposure and the price/budget/credit
+admission blocks are removed; cost guards on the trial credit are hygiene; record the
+approximate cost of every live run.
+Justification (weakening a gate): the operator accepts credit exhaustion as recoverable;
+the scripted, re-runnable bootstrap onto a fresh account (spec 005) is the recovery path.
+The destroy-on-exit and leftover check become load-bearing and are tested before the
+first live chain.
+VI: the full ADR-0019 AgentEx scope is explicitly deferred from the first vertical slice
+(spec 005); trigger: the second vertical slice, or agents repeatedly misreading check output.
+Principles I-IV, VII and VIII unchanged; no sections added or removed.
+Synchronized: plan template override (exposure ceiling -> approximate cost); ADR-0008
+"Sandbox safety", ADR-0024 and specs 001-005 are aligned in follow-up commits.
+Previous: 1.2.1 -> 1.2.2, 2026-10-04.
 Reason: operator-requested project rename to landingzone-for-ovhcloud (title only).
 Principles I-VIII unchanged; README, NOTICE and ADR-0015 synchronized.
 Previous: 1.2.0 -> 1.2.1, 2026-10-01.
@@ -8,7 +25,7 @@ README and ADR-0001 synchronized. Templates/commands read the constitution at ru
 and contain no matching disclosure, so no template or command edits are needed.
 Ratification, test/evidence, safety and authority requirements remain unchanged. -->
 # Landing Zone for OVHcloud constitution
-Version: 1.2.2 · Ratified: 2026-10-01 · Last amended: 2026-10-04
+Version: 1.3.0 · Ratified: 2026-10-01 · Last amended: 2026-10-06
 
 ## Purpose
 Build an inspectable reference baseline for an OVHcloud landing zone through useful
@@ -68,11 +85,11 @@ No missing observation, stale approval, unknown critical value, pending publicat
 cleanup error or skipped check may be reported as pass. Reports distinguish `pass`,
 `fail`, `blocked`, `not-run`, `review-required` and docs exemption. Saved plans, state,
 credentials, raw plan JSON and raw live logs are private; commit only sanitised evidence.
-Cloud work requires a dedicated sandbox, scoped cleanup authority, external resource-id
-inventory, bounded leases and runtime, tested reaper and known maximum exposure.
-Unknown prices, stale budget data or unhealthy cleanup block admission, not cleanup.
-Current funding is a one-off EUR 200 trial credit; the total exposure ceiling never
-resets monthly and is not a provider hard cap. Unknown credit/billing headroom blocks admission.
+Cloud work requires a dedicated sandbox, scoped cleanup authority, an inventory of created
+resource ids recorded outside state, a bounded runtime, a tested destroy-on-exit and a
+leftover check. Current funding is a one-off EUR 200 trial credit; cost guards on it are
+hygiene, not admission gates: exhausting it moves work to a fresh account through the
+scripted bootstrap. Record the approximate cost of every live run.
 No project purchase or destructive live probe is authorized merely by writing a task.
 Key-loss recovery requires a separately decryptable backup and an independent escrow
 package. Replication alone is not recovery; promotion must fence the old writer.
@@ -81,7 +98,9 @@ package. Replication alone is not recovery; promotion must fence the old writer.
 Prove the cheapest useful slice first. Do not build every profile, TACO or sensor before
 its consumer exists. Five golden paths remain the product direction; a rehearsal does
 not qualify a supported tuple. Generators follow two real examples of their artefact
-kind. Full ADR-0019 AgentEx scope is due with the first vertical slice, not silently cut.
+kind. Full ADR-0019 AgentEx scope is explicitly deferred from the first vertical slice
+(spec 005; decided 2026-10-06); it is due with the second vertical slice, or earlier once
+agents repeatedly misread check output.
 OpenTofu >=1.13 is supported; Terraform claims require a passing version-specific job.
 Tool and provider pins are exact, reviewed and recorded with evidence. Local installed
 versions are observations, not permission to lower the minimum. No telemetry.

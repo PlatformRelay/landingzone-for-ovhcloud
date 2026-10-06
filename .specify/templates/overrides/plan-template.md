@@ -18,7 +18,7 @@ approved decisions, pending joint choices and the cheapest discriminating experi
 positive/negative controls, clause mutation, evidence, doc exemption]
 ## Dependencies and live change ordering
 [Graph independently reconstructed; minimum safety prerequisites rather than full
-phase exits; explicit operator/adapter gates; per-spike timebox, exposure ceiling,
+phase exits; explicit operator/adapter gates; per-spike timebox, approximate cost,
 cleanup authority and named downstream claim withdrawn on refutation]
 ## Complexity tracking
 [Why each new tool is needed; authority, state, dependencies and recovery burden;
