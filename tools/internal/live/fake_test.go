@@ -9,7 +9,9 @@ package live
 //     otherwise; status prints ignored files only with --ignored, and hides untracked files
 //     when the scenario's git config says status.showUntrackedFiles=no and no -u flag is given;
 //     merge-base --is-ancestor exits 1 for a known non-ancestor, 128 for an unknown commit);
-//   - invoked as "<binary> lz-fake-child <file>", it writes its own environment to <file>.
+//   - invoked as "<binary> lz-fake-child <file>", it writes its own environment to <file>;
+//   - invoked through a symlink named "tofu" or "ovhcloud", or as "<binary> lz-fake-run <config>",
+//     it is the fake tofu, the fake ovhcloud or a fresh lz-live process of runner_test.go.
 //
 // The fake OVHcloud API (newFakeAPI) serves the OAuth2 client-credentials token endpoint,
 // GET /auth/details and GET /me, and enforces each credential's IAM policy actions from
@@ -34,6 +36,12 @@ func TestMain(m *testing.M) {
 	switch {
 	case filepath.Base(os.Args[0]) == "git":
 		os.Exit(fakeGit(os.Args[1:]))
+	case filepath.Base(os.Args[0]) == "tofu":
+		os.Exit(fakeTofu(os.Args[1:]))
+	case filepath.Base(os.Args[0]) == "ovhcloud":
+		os.Exit(fakeOvhcloud())
+	case len(os.Args) == 3 && os.Args[1] == fakeRunArg:
+		os.Exit(fakeRun(os.Args[2]))
 	case len(os.Args) == 3 && os.Args[1] == fakeChildArg:
 		if err := os.WriteFile(os.Args[2], []byte(strings.Join(os.Environ(), "\n")), 0o600); err != nil {
 			os.Exit(2)
