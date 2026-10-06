@@ -24,7 +24,7 @@ and one apply→destroy chain, started by the owner. Decisions and evidence: [re
 - **Target**: maintainer workstation (Linux amd64); OVHcloud `ovh-eu`, region GRA11 (compute) / `gra`
   (S3), confirmed by the operator (D87). One existing sandbox project.
 - **Constraints**: no secret in output, argv, generated files or repo; offline targets need no
-  network; live runs are owner-started from the reviewed main checkout; one run per tenant and one
+  network; live runs are owner-started from the dedicated owner clone at a reviewed commit (D92); one run per tenant and one
   per account scope at a time.
 - **Scale**: 1 tenant × 1 environment × 1 region in the sandbox; growth fixture 2 × 2 × 2 (two runtime
   slots) and a tenant-only fixture offline.
@@ -37,7 +37,7 @@ and one apply→destroy chain, started by the owner. Decisions and evidence: [re
 | III Tests first; test the sensors | pass | test task precedes each implementation task; captured fixtures for Terramate/`ovhcloud`; live tests in `tests/live/` |
 | III Mutation survivors block claimed coverage | pass (scoped) | mutation coverage is claimed only for FR-013's security guards G1–G15 (D85) |
 | IV Instances are roots, one owner, artefacts not state | pass | one state per stack; `outputs.json` through one adapter; no `terraform_remote_state` |
-| IV Privileged execution from protected immutable candidates | **deviation** (KD-2) | owner runs live targets from the workstation; already a known deviation in AGENTS.md (ADR-0019); narrowed by the host guard (main checkout via git metadata, clean tree, reviewed SHA on `origin/main`) |
+| IV Privileged execution from protected immutable candidates | **deviation** (KD-2) | owner runs live targets from the workstation; already a known deviation in AGENTS.md (ADR-0019); narrowed by the host guard (dedicated owner clone with a private `.git` and no linked worktrees, outside `LZ_AGENT_WORKTREE_ROOT`, via git metadata; clean tree; reviewed SHA on `origin/main`; D92) |
 | IV Tenant isolation | **deviation** (KD-1, D88; KD-3) | state buckets share the sandbox project with tenant resources; tenant authority reaches them through the management API; recorded in spec and ADR-0009, demonstrated by V010, not claimed. KD-3: platform `project` state and artefact sit in the tenant-writable tenant bucket; the adapter's bound-project check limits a forged artefact, state tampering is not detected |
 | V Fail closed; cleanup | pass | run core with deadline, incremental inventory, redaction, trap destroy and a leftover check over every created resource type, tested (T052–T055) before the first credential load, the parser qualified on captured listings (T065) before the first resource-creating probe; retained infrastructure protected on every verb by one shared plan guard (T063–T064) that precedes the run core and the first bootstrap apply |
 | V Cost guards (constitution 1.3.0) | pass | constitution 1.3.0 (D87) makes cost guards hygiene, not admission gates. Built: inventory of created ids outside state, bounded runtime, tested trap destroy and leftover check, approximate cost per live run; spend admission, leases and reaper are not built |

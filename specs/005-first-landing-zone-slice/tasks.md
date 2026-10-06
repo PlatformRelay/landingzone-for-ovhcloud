@@ -10,8 +10,8 @@ reporting `fail` on zero discovery — the expected, recorded result, never a `p
 creates the first subject (T012, T039) turns it green. One logical commit per task.
 Offline commands run through `lz-offline` (`<approved-absolute-path>/lz-offline --candidate <checkout>
 -- task <target>`); `go -C tools test …` lines are isolated-child commands entered the same way.
-Credential-bearing host targets (`bootstrap:account`, `live:*`) run in the owner's main checkout on
-a reviewed commit, enforced by the host guard (T052–T053, D87). `stacks:reconcile` and
+Credential-bearing host targets (`bootstrap:account`, `live:*`) run in the owner's dedicated clone on
+a reviewed commit, enforced by the host guard (T052–T053, T071–T072; D87, D92). `stacks:reconcile` and
 `stacks:generate` are host-side but credential-free and unguarded, like `generate:foundation-ci`:
 they run in any checkout, including an authoring worktree, because they exist to write `stacks/`
 before the commit is reviewed. Tasks marked **Owner session** in their title are started by the
