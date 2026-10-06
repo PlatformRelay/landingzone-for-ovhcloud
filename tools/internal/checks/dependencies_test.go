@@ -378,8 +378,263 @@ func TestDependenciesUnreadableFiles(t *testing.T) {
 	}
 }
 
+const purityDependencies = "../../../tests/check/fixtures/dependencies/purity"
+
+// FR-003, ADR-0004: only generated stacks configure backend and provider. The
+// purity fixture is the accepted shape: a generated stack with backend and
+// provider calling a stage, the stage passing providers to a component, the
+// component calling a module and naming, a module whose test files configure
+// and mock providers, and an example and a live probe root (both their own
+// roots) with backend and provider configuration.
+func TestDependenciesPurityAccepted(t *testing.T) {
+	g, findings := ScanDependencies(purityDependencies)
+	if len(findings) != 0 {
+		t.Fatalf("BEHAVIORAL_RED: purity fixture rejected: %+v", findings)
+	}
+	wantLayers := map[string]string{
+		"stacks/account/bootstrap":                     LayerInstance,
+		"stages/bootstrap":                             LayerStage,
+		"components/state-backend":                     LayerLibrary,
+		"modules/naming":                               LayerLibrary,
+		"modules/object-storage-protected":             LayerLibrary,
+		"modules/object-storage-protected/tests/setup": LayerTest,
+		"examples/state-backend":                       LayerExample,
+		"tests/live/probes/state-backend":              LayerTest,
+	}
+	if !reflect.DeepEqual(g.Layers, wantLayers) {
+		t.Errorf("BEHAVIORAL_RED: layers\n got %v\nwant %v", g.Layers, wantLayers)
+	}
+	wantUses := map[string][]string{
+		"stacks/account/bootstrap":         {"stages/bootstrap"},
+		"stages/bootstrap":                 {"components/state-backend"},
+		"components/state-backend":         {"modules/naming", "modules/object-storage-protected"},
+		"modules/object-storage-protected": {"modules/naming"},
+		"examples/state-backend":           {"components/state-backend"},
+	}
+	if !reflect.DeepEqual(g.Uses, wantUses) {
+		t.Errorf("BEHAVIORAL_RED: uses\n got %v\nwant %v", g.Uses, wantUses)
+	}
+	wantTestUses := map[string][]string{"modules/object-storage-protected": {"modules/object-storage-protected/tests/setup"}}
+	if !reflect.DeepEqual(g.TestUses, wantTestUses) {
+		t.Errorf("BEHAVIORAL_RED: test uses\n got %v\nwant %v", g.TestUses, wantTestUses)
+	}
+}
+
+// Each control breaks one purity rule of FR-003 (or several, named) in an
+// otherwise valid tree, and expects exactly those rules, reported against the
+// offending directory. A Terramate-generated file is held to the rules of the
+// directory it sits in: generation does not make library code a stack.
+func TestDependenciesPurityRejected(t *testing.T) {
+	none := `variable "x" {}`
+	backend := "terraform {\n  backend \"s3\" {\n    key = \"x.tfstate\"\n  }\n}\n"
+	provider := "provider \"ovh\" {\n  endpoint = \"ovh-eu\"\n}\n"
+	remoteState := "data \"terraform_remote_state\" \"up\" {\n  backend = \"s3\"\n  config  = {}\n}\n"
+	stack := generated + "module \"stage\" {\n  source = \"../../../stages/platform\"\n}\n"
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		want    []string
+	}{
+		// backend
+		"module declares a backend": {map[string]string{
+			"modules/a/main.tf": backend,
+		}, "modules/a", []string{"LIBRARY_BACKEND"}},
+		"nested module directory declares a backend": {map[string]string{
+			"modules/a/main.tf": `module "s" { source = "./sub" }`, "modules/a/sub/main.tf": backend,
+		}, "modules/a/sub", []string{"LIBRARY_BACKEND"}},
+		"naming declares a local backend": {map[string]string{
+			"modules/naming/main.tf": "terraform {\n  backend \"local\" {}\n}\n",
+		}, "modules/naming", []string{"LIBRARY_BACKEND"}},
+		"component declares a backend": {map[string]string{
+			"components/runtime/kube/main.tf": backend,
+		}, "components/runtime/kube", []string{"LIBRARY_BACKEND"}},
+		"singleton component declares a backend": {map[string]string{
+			"components/state-backend/main.tf": backend,
+		}, "components/state-backend", []string{"LIBRARY_BACKEND"}},
+		"stage declares a backend": {map[string]string{
+			"stages/platform/main.tf": backend,
+		}, "stages/platform", []string{"LIBRARY_BACKEND"}},
+		"stage declares a cloud block": {map[string]string{
+			"stages/platform/main.tf": "terraform {\n  cloud {\n    organization = \"x\"\n  }\n}\n",
+		}, "stages/platform", []string{"LIBRARY_BACKEND"}},
+		"backend in a second terraform block of a module": {map[string]string{
+			"modules/a/main.tf": "terraform {\n  required_version = \">= 1.13.0\"\n}\n", "modules/a/backend.tf": backend,
+		}, "modules/a", []string{"LIBRARY_BACKEND"}},
+		"generated backend in a module": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/backend.tf": generated + backend,
+		}, "modules/a", []string{"LIBRARY_BACKEND"}},
+		// provider configuration
+		"module configures a provider": {map[string]string{
+			"modules/a/main.tf": provider,
+		}, "modules/a", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"module configures an empty provider block": {map[string]string{
+			"modules/a/main.tf": `provider "ovh" {}`,
+		}, "modules/a", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"component configures an aliased provider": {map[string]string{
+			"components/runtime/kube/main.tf": "provider \"ovh\" {\n  alias = \"admin\"\n}\n",
+		}, "components/runtime/kube", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"singleton component subdirectory configures a provider": {map[string]string{
+			"components/account-baseline/main.tf": `module "p" { source = "./policy" }`, "components/account-baseline/policy/main.tf": provider,
+		}, "components/account-baseline/policy", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"stage configures a provider": {map[string]string{
+			"stages/platform/main.tf": provider,
+		}, "stages/platform", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"generated provider in a module": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/providers.tf": generated + provider,
+		}, "modules/a", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"provider in a module's override file": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/override.tf": provider,
+		}, "modules/a", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"stage with backend and provider": {map[string]string{
+			"stages/platform/main.tf": backend + provider,
+		}, "stages/platform", []string{"LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG"}},
+		// terraform_remote_state, in any directory
+		"module reads remote state": {map[string]string{
+			"modules/a/main.tf": remoteState,
+		}, "modules/a", []string{"REMOTE_STATE"}},
+		"component reads remote state": {map[string]string{
+			"components/runtime/kube/main.tf": remoteState,
+		}, "components/runtime/kube", []string{"REMOTE_STATE"}},
+		"stage reads remote state": {map[string]string{
+			"stages/platform/main.tf": remoteState,
+		}, "stages/platform", []string{"REMOTE_STATE"}},
+		"stage reads remote state inside a check block": {map[string]string{
+			"stages/platform/main.tf": "check \"upstream\" {\n" + remoteState + "  assert {\n    condition     = true\n    error_message = \"x\"\n  }\n}\n",
+		}, "stages/platform", []string{"REMOTE_STATE"}},
+		"generated stack reads remote state": {map[string]string{
+			"stages/platform/main.tf": none, "stacks/account/platform/main.tf": stack, "stacks/account/platform/upstream.tf": generated + remoteState,
+		}, "stacks/account/platform", []string{"REMOTE_STATE"}},
+		"example reads remote state": {map[string]string{
+			"examples/solo/main.tf": remoteState,
+		}, "examples/solo", []string{"REMOTE_STATE"}},
+		"live probe root reads remote state": {map[string]string{
+			"tests/live/probes/x/main.tf": remoteState,
+		}, "tests/live/probes/x", []string{"REMOTE_STATE"}},
+		"module test helper reads remote state": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/tests/setup/main.tf": remoteState,
+		}, "modules/a/tests/setup", []string{"REMOTE_STATE"}},
+		// hand-written configuration in a generated stack
+		"hand-written file beside generated ones in a stack": {map[string]string{
+			"stages/platform/main.tf": none, "stacks/account/platform/main.tf": stack, "stacks/account/platform/extra.tf": none,
+		}, "stacks/account/platform", []string{"HANDWRITTEN_INSTANCE"}},
+		"hand-written override file in a stack": {map[string]string{
+			"stages/platform/main.tf": none, "stacks/account/platform/main.tf": stack, "stacks/account/platform/override.tf": "module \"stage\" {\n  source = \"../../../stages/platform\"\n}\n",
+		}, "stacks/account/platform", []string{"HANDWRITTEN_INSTANCE"}},
+		"generator header not on the first line of a stack file": {map[string]string{
+			"stages/platform/main.tf": none, "stacks/account/platform/main.tf": stack, "stacks/account/platform/extra.tf": "# edited by hand\n" + generated + none,
+		}, "stacks/account/platform", []string{"HANDWRITTEN_INSTANCE"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			if got := ruleNames(findings); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+			}
+		})
+	}
+}
+
+// A stack directory with no generated file at all is hand-written: it is
+// reported as such, against its own directory, whether or not it is also
+// unclassified. A tests/ or examples/ segment under stacks/ does not exempt it.
+func TestDependenciesHandwrittenStacks(t *testing.T) {
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+	}{
+		"hand-written stack":            {map[string]string{"stages/platform/main.tf": `variable "x" {}`, "stacks/account/platform/main.tf": `module "stage" { source = "../../../stages/platform" }`}, "stacks/account/platform"},
+		"hand-written nested stack":     {map[string]string{"stages/platform/main.tf": `variable "x" {}`, "stacks/tenants/demo/dev/project/main.tf": `module "stage" { source = "../../../../../stages/platform" }`}, "stacks/tenants/demo/dev/project"},
+		"hand-written file at the root": {map[string]string{"stacks/main.tf": `variable "x" {}`}, "stacks"},
+		"hand-written tests directory in a stack": {map[string]string{
+			"components/runtime/kube/main.tf": `variable "x" {}`, "stacks/account/platform/tests/probe/main.tf": `module "k" { source = "../../../../../components/runtime/kube" }`,
+		}, "stacks/account/platform/tests/probe"},
+		"hand-written examples directory under stacks": {map[string]string{
+			"components/runtime/kube/main.tf": `variable "x" {}`, "stacks/examples/solo/main.tf": "provider \"ovh\" {}\nmodule \"k\" { source = \"../../../components/runtime/kube\" }\n",
+		}, "stacks/examples/solo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			reported := false
+			for _, f := range findings {
+				switch {
+				case f.Rule == "HANDWRITTEN_INSTANCE" && f.Subject == c.subject:
+					reported = true
+				case f.Rule != "HANDWRITTEN_INSTANCE" && f.Rule != "UNCLASSIFIED":
+					t.Errorf("BEHAVIORAL_RED: unexpected rule %s: %+v", f.Rule, findings)
+				}
+			}
+			if !reported {
+				t.Errorf("BEHAVIORAL_RED: hand-written stack %s not reported: %+v", c.subject, findings)
+			}
+		})
+	}
+}
+
+// OpenTofu also reads *.tofu (and *.tofu.json) configuration files, so they
+// cannot be a way around the purity rules: each is either refused as
+// unsupported, as JSON configuration is, or held to the same rule as a *.tf
+// file in its place.
+func TestDependenciesTofuFiles(t *testing.T) {
+	backend := "terraform {\n  backend \"s3\" {}\n}\n"
+	stack := generated + "module \"stage\" {\n  source = \"../../../stages/platform\"\n}\n"
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		rule    string
+	}{
+		"backend in a module's .tofu file": {map[string]string{
+			"modules/a/main.tf": `variable "x" {}`, "modules/a/backend.tofu": backend,
+		}, "modules/a", "LIBRARY_BACKEND"},
+		"provider in a stage's only .tofu file": {map[string]string{
+			"stages/platform/main.tofu": `provider "ovh" {}`,
+		}, "stages/platform", "LIBRARY_PROVIDER_CONFIG"},
+		"remote state in a component's .tofu file": {map[string]string{
+			"components/runtime/kube/main.tf": `variable "x" {}`, "components/runtime/kube/up.tofu": "data \"terraform_remote_state\" \"up\" {\n  backend = \"s3\"\n}\n",
+		}, "components/runtime/kube", "REMOTE_STATE"},
+		"hand-written .tofu file in a stack": {map[string]string{
+			"stages/platform/main.tf": `variable "x" {}`, "stacks/account/platform/main.tf": stack, "stacks/account/platform/extra.tofu": `variable "x" {}`,
+		}, "stacks/account/platform", "HANDWRITTEN_INSTANCE"},
+		"JSON .tofu file in a module": {map[string]string{
+			"modules/a/main.tf": `variable "x" {}`, "modules/a/backend.tofu.json": `{"terraform": {"backend": {"s3": {}}}}`,
+		}, "modules/a", "UNSUPPORTED_CONFIG"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			got := ruleNames(findings)
+			if !reflect.DeepEqual(got, []string{c.rule}) && !reflect.DeepEqual(got, []string{"UNSUPPORTED_CONFIG"}) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want [%s] or [UNSUPPORTED_CONFIG] (%+v)", got, c.rule, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+			}
+		})
+	}
+}
+
+// The purity rules add negatives; they never widen the ADR-0002 edge matrix.
+func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
+	want := map[string][]string{
+		"naming":      nil,
+		"module":      {"naming"},
+		"component":   {"naming", "module"},
+		LayerStage:    {"component"},
+		LayerInstance: {LayerStage},
+		LayerExample:  {"naming", "module", "component"},
+		LayerTest:     {"naming", "module", "component", LayerTest},
+	}
+	if !reflect.DeepEqual(mayUse, want) {
+		t.Errorf("BEHAVIORAL_RED: mayUse changed\n got %v\nwant %v", mayUse, want)
+	}
+}
+
 func TestDependenciesRulesListed(t *testing.T) {
-	want := []string{"CYCLE", "LAYER_VIOLATION", "PARSE_ERROR", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 	got := append([]string{}, DependencyRules...)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("BEHAVIORAL_RED: DependencyRules = %v, want %v", got, want)

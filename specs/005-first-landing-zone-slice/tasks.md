@@ -45,7 +45,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
   - Verify: `go -C tools test -tags offlinetools ./internal/checks -run TestUnit -count=1; task test:slice`: T003 controls green; mirror-only `init -backend=false -lockfile=readonly` then `tofu test -json`; `test:slice` discovers library and stage directories from the dependency graph and reports `fail` with zero discovery until T012 creates modules/naming (header exception: expected and recorded, not a pass).
   - Evidence: `evidence/T004.md`; PR; initial status `not-run`.
 
-- [ ] T005 Write purity-rule tests in tools/internal/checks/dependencies_test.go and tests/check/fixtures/dependencies/
+- [x] T005 Write purity-rule tests in tools/internal/checks/dependencies_test.go and tests/check/fixtures/dependencies/ — closed 2026-10-06, evidence: evidence/T005.md
   - Requirements: FR-003; ADRs: 0002, 0004. Depends on: 001/T009.
   - Verify: `go -C tools test ./internal/checks -run TestDependencies -count=1`: a generated stack with backend+provider calling a stage, a stage calling a component, a component calling a module and naming are accepted; a `backend` block or `provider` configuration block in a module/component/stage, `terraform_remote_state` in any directory, and a non-generated `.tf` under `stacks/` are behavioural red (currently unreported). Existing `mayUse` controls stay unchanged.
   - Evidence: `evidence/T005.md`; PR; initial status `not-run`.

@@ -1,0 +1,4 @@
+# Purity fixture: the manifest generated stacks come from (not read by the dependency checker).
+stacks:
+  - path: account/bootstrap
+    stage: bootstrap
