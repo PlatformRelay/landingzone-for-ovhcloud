@@ -22,6 +22,9 @@ design lives in [`docs/adr/`](docs/adr/README.md).
   `ovhcloud`), so the rate of spend stays visible.
 - The credit is one-off, not monthly. Until ADR-0008 is amended, this section overrides its
   nightly L7/L8 rotation.
+- Running out is an inconvenience, not a disaster: the maintainer moves to a fresh free-trial
+  account. That only works if the bootstrap (service account, state bucket, local credentials) can
+  be re-run against a new account, so keep it scripted.
 
 ## Sandbox credentials and environment
 
