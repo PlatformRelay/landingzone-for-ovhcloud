@@ -50,4 +50,9 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 - `lz-offline` accepts only `task <target>`: run `go -C tools test …` Verify lines on the host and also run the task target that covers them through the entry (T001).
 - Codex is at its usage limit until 2026-10-11: review leg 1 is a general-purpose subagent, leg 2 Opus; the astra review is owed per task and the D62 merge bar is not met until it runs (T001).
 - Do not push between a test task and its implementation: the red tests make `test:traceability`/CI red (T001→T002).
-- T002 must also change `tools/cmd/lz-check/main.go` (set `Trace.Spec` from the directory) and fix `ParseSpec` for spec 005's `- **FR-0NN Name** —` headings, otherwise the 14 FRs are dropped silently (T001).
+- T002 must also change `tools/cmd/lz-check/main.go` (set `Trace.Spec` from the directory) and fix `ParseSpec` for spec 005's `- **FR-0NN Name** —` headings, otherwise the 14 FRs are dropped silently (T001). Done in T002.
+- `task check:specs` now traces 001 and 005 by default (005: r=19 t=65 c=20); every tasks.md edit must keep it green (T002).
+- A check's creator is the task that creates it if its Verify runs it, else the first task whose Verify runs it (T002).
+- `mutate.py` counts occurrences from 0: all-NOT_FOUND means an off-by-one, not a pass (T002).
+- The fanout Opus leg runs with Bash denied: put sensor results in the review brief (T002).
+- Coordinator validations after T002 (2026-10-06): e91c86e (form-only spec-set edits) accepted; `verify:toolchain` stays mapped to 005/FR-011 so T047's "toolchain unchanged" gate keeps tracing.
