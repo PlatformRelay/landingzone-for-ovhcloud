@@ -1,19 +1,17 @@
 # ADR-0003: Layered taxonomy, naming and labelling
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0002, ADR-0005, ADR-0006, ADR-0010, ADR-0020
 
 ## Context
-Azure Verified Modules classify `res` (single resource), `ptn` (pattern) and `utl` (utility) with numbered
-requirements; OCI and Alibaba use modules → components → blueprints. The operator asked for
-"terraform/tofu naming modules" and clarified (D2): **both** a flexible naming convention (the resource
-short name may come first or last; organisations differ) and a naming module, **plus a labelling
-convention from the start** that adapts to different organisation structures, is policy-checkable, and
-always carries "managed by OpenTofu" and "managed in this repository" style tags, labels or
-annotations. OVHcloud IAM conditions on `resource.Tag(<key>)` make tags part of the authorisation
-model (ADR-0006), and the generated documentation (ADR-0020) and the scanner read them back, so the
-labelling convention is infrastructure, not decoration. Tag support is uneven across OVH products
-and tag key/value limits are UNVERIFIED.
+The operator asked for "terraform/tofu naming modules" and clarified (D2): **both** a flexible naming
+convention (the resource short name may come first or last; organisations differ) and a naming module,
+**plus a labelling convention from the start** that adapts to different organisation structures, is
+policy-checkable, and always carries "managed by OpenTofu" and "managed in this repository" style tags,
+labels or annotations. OVHcloud IAM conditions on `resource.Tag(<key>)` make tags part of the
+authorisation model (ADR-0006), and the generated documentation (ADR-0020) and the scanner read them
+back, so the labelling convention is infrastructure, not decoration. Tag support is uneven across OVH
+products and tag key/value limits are UNVERIFIED.
 
 ## Options considered
 - **Prefix classes in a flat directory** (`res-cloud-project`, `ptn-network-baseline`).
