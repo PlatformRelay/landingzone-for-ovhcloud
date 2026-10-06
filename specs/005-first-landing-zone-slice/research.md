@@ -227,7 +227,7 @@ check (G9). *Retained* rows are exempt when the resource is in a retained instan
 | `ovh_me_api_oauth2_client` | OAuth2 client | `/me/api/oauth2/client` | account-governance (retained), probes (ephemeral) | per instance | name prefix |
 | `ovh_iam_policy` | IAM policy | `/iam/policy` (v2) | account-governance (retained), probes incl. P25 (ephemeral) | per instance | name prefix |
 | `ovh_me_identity_group` | identity group | `/me/identity/group` | account-governance | retained | name prefix |
-| `ovh_iam_resource_tags` | IAM resource tags (a property of the project URN) | `/iam/resource/{urn}/tag` on the project URN | project (retained), probes (ephemeral `lzprobe-` keys) | per instance | `lz:run-id` key |
+| `ovh_iam_resource_tags` | IAM resource tags (a property of the project URN) | `GET /iam/resource/{urn}` (tags in the response) on the project URN; `/iam/resource/{urn}/tag` has no GET in kb/api | project (retained), probes (ephemeral `lzprobe-` keys) | per instance | `lz:run-id` key |
 | `ovh_cloud_project_alerting` (optional, P10) | project alert | `/cloud/project/{p}/alerting` | project when `budget_alert.enabled`, alerting probe | retained (project); probe ephemeral | id from inventory, name prefix |
 | `ovh_cloud_quota` (optional, P11) | quota setting (a property of the project, no object to leave behind) | read through the project's quota (`api/v2/publicCloud.json:5530`) | project when `quota_guard.enabled`, quota probe (plan only) | retained with the project; nothing to list as a leftover | — |
 | `ovh_cloud_project` | the adopted project | — | project (adopt; `reference` mode creates none) | retained, never destroyed | exempt by id |
