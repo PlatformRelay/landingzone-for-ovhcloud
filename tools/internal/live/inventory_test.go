@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,7 +64,7 @@ func completed(t *testing.T, stack string, lines []string) []InventoryEntry {
 func readInventory(t *testing.T, dir string) []InventoryEntry {
 	t.Helper()
 	got, err := ReadInventory(dir)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
 	return got

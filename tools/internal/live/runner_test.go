@@ -640,6 +640,7 @@ func TestRunnerSignals(t *testing.T) {
 			out := &syncBuffer{}
 			cmd.Stdout, cmd.Stderr = out, out
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
@@ -651,7 +652,8 @@ func TestRunnerSignals(t *testing.T) {
 			}
 			// While b hangs, the resource it created is already in the inventory (not parsed later).
 			if !waitFor(10*time.Second, func() bool {
-				for _, e := range readInventory(t, w.runDir) {
+				entries, _ := ReadInventory(w.runDir)
+				for _, e := range entries {
 					if e.Stack == "b" && e.ID == "pn-b-1" {
 						return true
 					}
@@ -743,6 +745,12 @@ func TestRunnerProtectRefusalStops(t *testing.T) {
 	}
 	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"a"}) {
 		t.Errorf("destroys %v, want [a]", got)
+	}
+	if s := w.summary(t); s["outcome"] != "fail" {
+		t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
+	}
+	if !strings.Contains(w.term.String(), "LZ-LIVE summary 20261006T120000Z-a1b2 fail") {
+		t.Errorf("terminal lacks the fail summary:\n%s", w.term.String())
 	}
 }
 
@@ -955,8 +963,10 @@ func TestProbeState(t *testing.T) {
 				t.Errorf("ProbeDir accepted run id %q", bad)
 			}
 		}
-		if _, err := ProbeDir(root, "..", "20261006T120000Z-a1b2"); err == nil {
-			t.Error(`ProbeDir accepted account ".."`)
+		for _, bad := range []string{"", "..", "../x", "a/b", "a/../../x"} {
+			if _, err := ProbeDir(root, bad, "20261006T120000Z-a1b2"); err == nil {
+				t.Errorf("ProbeDir accepted account %q", bad)
+			}
 		}
 	})
 
