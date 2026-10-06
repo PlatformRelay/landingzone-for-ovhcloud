@@ -543,7 +543,8 @@ func TestDependenciesPurityRejected(t *testing.T) {
 
 // A stack directory with no generated file at all is hand-written: it is
 // reported as such, against its own directory, whether or not it is also
-// unclassified. A tests/ or examples/ segment under stacks/ does not exempt it.
+// unclassified. A tests/, examples/ or fixtures/ segment under stacks/ does not
+// exempt it.
 func TestDependenciesHandwrittenStacks(t *testing.T) {
 	for name, c := range map[string]struct {
 		files   map[string]string
@@ -558,6 +559,9 @@ func TestDependenciesHandwrittenStacks(t *testing.T) {
 		"hand-written examples directory under stacks": {map[string]string{
 			"components/runtime/kube/main.tf": `variable "x" {}`, "stacks/examples/solo/main.tf": "provider \"ovh\" {}\nmodule \"k\" { source = \"../../../components/runtime/kube\" }\n",
 		}, "stacks/examples/solo"},
+		"hand-written fixtures directory under stacks": {map[string]string{
+			"stages/platform/main.tf": `variable "x" {}`, "stacks/fixtures/platform/main.tf": `module "stage" { source = "../../../stages/platform" }`,
+		}, "stacks/fixtures/platform"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, findings := ScanDependencies(writeModules(t, c.files))
@@ -630,6 +634,136 @@ func TestDependenciesGeneratedParseError(t *testing.T) {
 	}))
 	if got := ruleNames(findings); !reflect.DeepEqual(got, []string{"PARSE_ERROR"}) {
 		t.Errorf("BEHAVIORAL_RED: rules %v, want [PARSE_ERROR] (%+v)", got, findings)
+	}
+}
+
+const escapeDependencies = "../../../tests/check/fixtures/dependencies/escapes"
+
+// D91: the shapes the escape-route rules must keep accepting. Test helpers and
+// examples below a package root of a module, component, singleton component
+// and stage are their own roots and may configure backend and provider, also
+// one level down; a generated instance outside stacks/ may too (ADR-0002
+// tenant layout); fixture data under tests/ and tools/, at any depth, is not
+// configuration and is not reported however broken.
+func TestDependenciesEscapeRoutesAccepted(t *testing.T) {
+	g, findings := ScanDependencies(escapeDependencies)
+	if len(findings) != 0 {
+		t.Fatalf("BEHAVIORAL_RED: escape-route fixture rejected: %+v", findings)
+	}
+	wantLayers := map[string]string{
+		"modules/object-store":                    LayerLibrary,
+		"modules/object-store/tests/setup":        LayerTest,
+		"modules/object-store/examples/basic":     LayerExample,
+		"modules/object-store/sub/tests/helper":   LayerTest,
+		"components/runtime/kube":                 LayerLibrary,
+		"components/runtime/kube/tests/setup":     LayerTest,
+		"components/state-backend":                LayerLibrary,
+		"components/state-backend/examples/basic": LayerExample,
+		"stages/platform":                         LayerStage,
+		"stages/platform/tests/setup":             LayerTest,
+		"stages/platform/examples/solo":           LayerExample,
+		"live/prod":                               LayerInstance,
+	}
+	if !reflect.DeepEqual(g.Layers, wantLayers) {
+		t.Errorf("BEHAVIORAL_RED: layers\n got %v\nwant %v", g.Layers, wantLayers)
+	}
+}
+
+// D91 closes two routes around the FR-003 purity rules and the layer matrix,
+// found in T006's review: a directory named or nested under fixtures outside
+// tests/ and tools/ was skipped, and a package named tests or examples took the
+// test or example layer. A .tofutest.hcl or .tofutest.json file, which OpenTofu
+// loads as test configuration, is refused as unsupported. Each control expects
+// exactly its rules, reported against the offending directory.
+func TestDependenciesEscapeRoutesRejected(t *testing.T) {
+	none := `variable "x" {}`
+	backend := "terraform {\n  backend \"s3\" {\n    key = \"x.tfstate\"\n  }\n}\n"
+	provider := "provider \"ovh\" {\n  endpoint = \"ovh-eu\"\n}\n"
+	remoteState := "data \"terraform_remote_state\" \"up\" {\n  backend = \"s3\"\n  config  = {}\n}\n"
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		want    []string
+	}{
+		// route 1: fixtures outside tests/ and tools/
+		"module named fixtures declares a backend": {map[string]string{
+			"modules/fixtures/main.tf": backend,
+		}, "modules/fixtures", []string{"LIBRARY_BACKEND"}},
+		"fixtures directory in a module configures a provider": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/fixtures/main.tf": provider,
+		}, "modules/a/fixtures", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"component directory nested under fixtures declares a backend": {map[string]string{
+			"components/runtime/kube/main.tf": none, "components/runtime/kube/fixtures/basic/main.tf": backend,
+		}, "components/runtime/kube/fixtures/basic", []string{"LIBRARY_BACKEND"}},
+		"component family named fixtures configures a provider": {map[string]string{
+			"components/fixtures/kube/main.tf": provider,
+		}, "components/fixtures/kube", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"stage directory nested under fixtures reads remote state": {map[string]string{
+			"stages/platform/main.tf": none, "stages/platform/fixtures/x/main.tf": remoteState,
+		}, "stages/platform/fixtures/x", []string{"REMOTE_STATE"}},
+		"fixtures at the repository root read remote state": {map[string]string{
+			"fixtures/x/main.tf": remoteState,
+		}, "fixtures/x", []string{"REMOTE_STATE", "UNCLASSIFIED"}},
+		"fixtures in a module package named tests declares a backend": {map[string]string{
+			"modules/tests/fixtures/x/main.tf": backend,
+		}, "modules/tests/fixtures/x", []string{"LIBRARY_BACKEND"}},
+		"fixtures in a module package named tools declares a backend": {map[string]string{
+			"modules/tools/fixtures/x/main.tf": backend,
+		}, "modules/tools/fixtures/x", []string{"LIBRARY_BACKEND"}},
+		// route 2: a package named tests or examples is library code
+		"module named tests declares a backend": {map[string]string{
+			"modules/tests/main.tf": backend,
+		}, "modules/tests", []string{"LIBRARY_BACKEND"}},
+		"module named examples configures a provider": {map[string]string{
+			"modules/examples/main.tf": provider,
+		}, "modules/examples", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"subdirectory of a module named tests declares a backend": {map[string]string{
+			"modules/tests/main.tf": `module "s" { source = "./sub" }`, "modules/tests/sub/main.tf": backend,
+		}, "modules/tests/sub", []string{"LIBRARY_BACKEND"}},
+		"component named tests configures a provider": {map[string]string{
+			"components/runtime/tests/main.tf": provider,
+		}, "components/runtime/tests", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"component named examples declares a backend": {map[string]string{
+			"components/runtime/examples/main.tf": backend,
+		}, "components/runtime/examples", []string{"LIBRARY_BACKEND"}},
+		"component family named tests declares a backend": {map[string]string{
+			"components/tests/kube/main.tf": backend,
+		}, "components/tests/kube", []string{"LIBRARY_BACKEND"}},
+		"component family named tests without a variant": {map[string]string{
+			"components/tests/main.tf": backend,
+		}, "components/tests", []string{"UNCLASSIFIED"}},
+		"stage named examples declares a backend": {map[string]string{
+			"stages/examples/main.tf": backend,
+		}, "stages/examples", []string{"LIBRARY_BACKEND"}},
+		"stage named tests configures a provider": {map[string]string{
+			"stages/tests/main.tf": provider,
+		}, "stages/tests", []string{"LIBRARY_PROVIDER_CONFIG"}},
+		"stage named examples uses a module directly": {map[string]string{
+			"stages/examples/main.tf": `module "n" { source = "../../modules/naming" }`, "modules/naming/main.tf": none,
+		}, "stages/examples", []string{"LAYER_VIOLATION"}},
+		// OpenTofu test files
+		".tofutest.hcl file runs a stage": {map[string]string{
+			"modules/a/main.tf": none, "stages/platform/main.tf": none,
+			"modules/a/tests/unit.tofutest.hcl": "run \"x\" {\n  module {\n    source = \"../../stages/platform\"\n  }\n}\n",
+		}, "modules/a/tests", []string{"UNSUPPORTED_CONFIG"}},
+		".tofutest.hcl file beside a module": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/unit.tofutest.hcl": `run "x" {}`,
+		}, "modules/a", []string{"UNSUPPORTED_CONFIG"}},
+		".tofutest.json file": {map[string]string{
+			"modules/a/main.tf": none, "modules/a/tests/unit.tofutest.json": `{"run": {"x": {}}}`,
+		}, "modules/a/tests", []string{"UNSUPPORTED_CONFIG"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			if got := ruleNames(findings); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+			}
+		})
 	}
 }
 
