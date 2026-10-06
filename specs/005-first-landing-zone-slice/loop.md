@@ -34,6 +34,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 | T003 | CLOSED | codex not run (limit) → subagent REQUEST_CHANGES (lint-ignoring slice mutant survived); Opus CONCERNS (codex-unavailable); 1 round, coverage fixes, mutant killed | T004 must put `TestUnit*` in a Task target; astra owed |
 | T004 | CLOSED-WITH-GAPS | codex not run (limit) → subagent APPROVE (P2: per-directory `blocked` unpinned, fixed); Opus CLEAN (code diff, codex-unavailable); 1 round | `test:slice` red by design (NO_DISCOVERY) until T012; tagged controls not in CI until then + CI source extension (owner); `ci:foundation` stale since T001 (re-record after push); astra owed |
 | T005 | CLOSED | codex not run (limit) → subagent REQUEST_CHANGES (`.tofu` bypass); Opus CONCERNS (code diff, codex-unavailable; `stacks/**/tests` escape, Subject unchecked); 1 round, coverage fixes, 9+6 mutants killed | `test:dependencies`/`test:traceability` red until T006; T006 chooses `.tofu` → UNSUPPORTED_CONFIG or parse; astra owed |
+| T006 | CLOSED-WITH-GAPS | codex not run (limit) → subagent APPROVE (surviving `check`-overwrite mutant, row added); Opus CONCERNS (code diff, codex-unavailable; header-forged instance outside `stacks/`, pre-existing `classify`); 1 round, 16/16 mutants killed | `.tofu` → UNSUPPORTED_CONFIG; foundation CI targets green again (push point); decision request: pre-existing purity escapes (`fixtures` anywhere, package named `tests`/`examples`), Rec. A follow-up task; astra owed |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |
