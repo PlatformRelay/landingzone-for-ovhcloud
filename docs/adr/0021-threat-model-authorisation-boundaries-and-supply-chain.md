@@ -1,6 +1,6 @@
 # ADR-0021: Threat model, authorisation boundaries and supply chain
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0009, ADR-0018, ADR-0019
 
 ## Context

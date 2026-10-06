@@ -1,6 +1,6 @@
 # ADR-0020: Generated landing-zone documentation — system map, accounts and permissions with their reasons
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0005, ADR-0006, ADR-0012, ADR-0013, ADR-0018, ADR-0019
 
 ## Context

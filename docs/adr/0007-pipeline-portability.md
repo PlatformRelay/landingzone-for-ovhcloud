@@ -1,6 +1,6 @@
 # ADR-0007: Pipeline portability and instance orchestration with Terramate
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0004, ADR-0005, ADR-0008, ADR-0009, ADR-0021
 
 ## Context

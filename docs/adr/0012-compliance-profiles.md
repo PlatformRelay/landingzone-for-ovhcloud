@@ -1,6 +1,6 @@
 # ADR-0012: Compliance profiles
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0001, ADR-0006
 
 ## Context

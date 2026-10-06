@@ -18,26 +18,26 @@ with the first public release.
 | [0002](0002-repository-structure.md) | Repository structure (monorepo) | Accepted |
 | [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy, naming and labelling | Accepted |
 | [0004](0004-staged-roots-and-output-contracts.md) | Staged roots, separate state, typed output contracts | Proposed |
-| [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Proposed |
-| [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Proposed |
-| [0007](0007-pipeline-portability.md) | Pipeline portability and instance orchestration with Terramate | Proposed |
-| [0008](0008-testing-strategy.md) | Testing strategy | Proposed |
-| [0009](0009-state-backend-bootstrap-and-credentials.md) | State backend, bootstrap and credentials | Proposed |
-| [0010](0010-versioning-release-and-distribution.md) | Versioning, release and distribution | Proposed |
-| [0011](0011-provider-strategy-and-opentofu-first.md) | Provider strategy and OpenTofu-first | Proposed |
-| [0012](0012-compliance-profiles.md) | Compliance profiles | Proposed |
-| [0013](0013-documentation-strategy.md) | Documentation strategy | Proposed |
+| [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Accepted |
+| [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Accepted |
+| [0007](0007-pipeline-portability.md) | Pipeline portability and instance orchestration with Terramate | Accepted |
+| [0008](0008-testing-strategy.md) | Testing strategy | Accepted |
+| [0009](0009-state-backend-bootstrap-and-credentials.md) | State backend, bootstrap and credentials | Accepted |
+| [0010](0010-versioning-release-and-distribution.md) | Versioning, release and distribution | Accepted |
+| [0011](0011-provider-strategy-and-opentofu-first.md) | Provider strategy and OpenTofu-first | Accepted |
+| [0012](0012-compliance-profiles.md) | Compliance profiles | Accepted |
+| [0013](0013-documentation-strategy.md) | Documentation strategy | Accepted |
 | [0014](0014-ovh-docs-knowledge-base.md) | OVHcloud docs knowledge base | Proposed |
-| [0015](0015-licence-and-project-name.md) | Licence and project name | Proposed (licence decided) |
-| [0016](0016-golden-paths-as-profiles.md) | Golden paths as profiles over one composition graph | Proposed |
-| [0017](0017-runtime-families-and-output-contract.md) | Runtime families and the output-only contract (multiple base stacks) | Proposed |
-| [0018](0018-identity-planes-roles-and-providers.md) | Identity model: three planes, a role catalogue, pluggable providers | Proposed |
-| [0019](0019-agent-experience-sensors-and-guides.md) | Agent experience: sensors and guides for implementing agents | Proposed |
-| [0020](0020-generated-landing-zone-documentation.md) | Generated landing-zone documentation: system map, accounts and permissions with reasons | Proposed |
-| [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Proposed |
-| [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Proposed |
-| [0023](0023-guided-repository-preconfiguration.md) | Friendly, resumable repository preconfiguration | Proposed |
-| [0024](0024-cost-and-sandbox-operations.md) | Cost and sandbox operations | Proposed |
+| [0015](0015-licence-and-project-name.md) | Licence and project name | Accepted |
+| [0016](0016-golden-paths-as-profiles.md) | Golden paths as profiles over one composition graph | Accepted |
+| [0017](0017-runtime-families-and-output-contract.md) | Runtime families and the output-only contract (multiple base stacks) | Accepted |
+| [0018](0018-identity-planes-roles-and-providers.md) | Identity model: three planes, a role catalogue, pluggable providers | Accepted |
+| [0019](0019-agent-experience-sensors-and-guides.md) | Agent experience: sensors and guides for implementing agents | Accepted |
+| [0020](0020-generated-landing-zone-documentation.md) | Generated landing-zone documentation: system map, accounts and permissions with reasons | Accepted |
+| [0021](0021-threat-model-authorisation-boundaries-and-supply-chain.md) | Threat model, authorisation boundaries and supply chain | Accepted |
+| [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Accepted |
+| [0023](0023-guided-repository-preconfiguration.md) | Friendly, resumable repository preconfiguration | Accepted |
+| [0024](0024-cost-and-sandbox-operations.md) | Cost and sandbox operations | Accepted |
 
 ADR-0024 records the proposed operating contract; documentation-task closure does not
 approve its open numerical/setup choices or authorize live implementation.

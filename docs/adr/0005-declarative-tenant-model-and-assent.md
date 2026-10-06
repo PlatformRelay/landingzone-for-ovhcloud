@@ -1,6 +1,6 @@
 # ADR-0005: Declarative tenant model, policy-driven auto-merge and the self-service transaction
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0003, ADR-0004, ADR-0006, ADR-0016, ADR-0017, ADR-0018, ADR-0021
 
 ## Context

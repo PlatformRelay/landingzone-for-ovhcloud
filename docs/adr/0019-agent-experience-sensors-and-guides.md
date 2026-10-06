@@ -1,6 +1,6 @@
 # ADR-0019: Agent experience — sensors and guides for implementing agents
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0002, ADR-0003, ADR-0008, ADR-0013, ADR-0016
 
 ## Context

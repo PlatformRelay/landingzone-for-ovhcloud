@@ -1,6 +1,6 @@
 # ADR-0009: State backend, bootstrap, recovery and credentials
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0004, ADR-0007, ADR-0011, ADR-0018, ADR-0021
 
 ## Context

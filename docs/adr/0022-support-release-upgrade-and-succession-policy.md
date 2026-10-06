@@ -1,6 +1,6 @@
 # ADR-0022: Support, release, upgrade and succession policy
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0010, ADR-0011, ADR-0012, ADR-0016, ADR-0019
 
 ## Context

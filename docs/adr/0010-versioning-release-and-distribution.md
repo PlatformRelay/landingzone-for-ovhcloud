@@ -1,6 +1,6 @@
 # ADR-0010: Versioning, release and distribution
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0002, ADR-0003, ADR-0004
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR-0015: Licence and project name
-- Status: Proposed
-- Date: 2026-10-01
+- Status: Accepted
+- Date: 2026-10-06
 - Related: ADR-0001, ADR-0014
 
 ## Context
