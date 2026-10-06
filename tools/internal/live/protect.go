@@ -44,6 +44,7 @@ type showPlan struct {
 	ResourceChanges []struct {
 		Address         string `json:"address"`
 		PreviousAddress string `json:"previous_address"`
+		Deposed         string `json:"deposed"`
 		Change          struct {
 			Actions []string `json:"actions"`
 		} `json:"change"`
@@ -68,13 +69,14 @@ func owner(retained []Retained, a string) (string, bool) {
 
 // Protect returns a *Refusal (CondRetained) naming every retained change the plan deletes, replaces
 // or forgets (judged by the actions, whatever the action reason) or moves out of the retained set,
-// or when plan is not a complete `tofu show -json` plan or is marked errored; nil otherwise. A
-// change is retained when its address or, after a `moved` block, its previous address is covered.
+// or any deposed object it holds, or when plan is not a complete `tofu show -json` plan of JSON
+// format version 1.x or is marked errored; nil otherwise. A change is retained when its address
+// or, after a `moved` block, its previous address is covered.
 // The refusal names each address verbatim (unquoted), the previous address, the actions as the
 // plan spells them and the instance; never an attribute value of the plan.
 func Protect(plan []byte, retained []Retained) error {
 	var p showPlan
-	if err := json.Unmarshal(plan, &p); err != nil || p.FormatVersion == "" ||
+	if err := json.Unmarshal(plan, &p); err != nil || !strings.HasPrefix(p.FormatVersion, "1.") ||
 		len(p.PlannedValues) == 0 || string(p.PlannedValues) == "null" {
 		return refuse(CondRetained, "plan is not a complete `tofu show -json` plan")
 	}
@@ -95,6 +97,11 @@ func Protect(plan []byte, retained []Retained) error {
 			addr += " (moved from " + rc.PreviousAddress + ")"
 		}
 		if !covered {
+			continue
+		}
+		if rc.Deposed != "" {
+			// A deposed object of a retained address: refused whatever its actions (fail closed).
+			hits = append(hits, fmt.Sprintf("%s deposed object %s: %s (instance %s)", addr, rc.Deposed, strings.Join(acts, "+"), inst))
 			continue
 		}
 		if len(acts) > 0 && !slices.ContainsFunc(acts, func(a string) bool { return !slices.Contains(harmless, a) }) {

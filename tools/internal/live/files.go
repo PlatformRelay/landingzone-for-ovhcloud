@@ -196,3 +196,69 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 	done = true
 	return nil
 }
+
+// Run record (.local/live/<run-id>/) and scratch files of the run core: directories 0700, files
+// 0600, like the credential files above.
+
+// ensureDir creates dir and missing parents with mode 0700.
+func ensureDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o700)
+}
+
+// appendLine appends line and a newline to path (created 0600) and syncs it before returning.
+func appendLine(path string, line []byte) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// writeRecord writes a run-record file (0600), replacing it.
+func writeRecord(path string, data []byte) error {
+	if err := ensureDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// scratchHome creates a private per-run HOME for the children.
+func scratchHome() (string, error) {
+	d, err := os.MkdirTemp("", "lz-live-home-")
+	if err != nil {
+		return "", err
+	}
+	return d, os.Chmod(d, 0o700)
+}
+
+// removeTree removes a scratch directory.
+func removeTree(dir string) error { return os.RemoveAll(dir) }
+
+// removeEmptyDir removes dir if it is empty; a missing directory is not an error.
+func removeEmptyDir(dir string) error {
+	if err := os.Remove(dir); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// removeFiles removes the named files; a missing file is not an error.
+func removeFiles(paths ...string) error {
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
