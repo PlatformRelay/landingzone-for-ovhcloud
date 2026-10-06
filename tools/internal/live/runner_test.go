@@ -1338,6 +1338,47 @@ func exists(p string) bool {
 	return err == nil
 }
 
+// TestRunnerDataDirPerStack: T074 review r1 — a run of several stacks gives each stack its own
+// data directory (backend configuration and module manifest are per root): with one directory for
+// the run, the second stack's init replaces the first's, and the first stack's destroy-on-exit
+// then runs against the other root's data. Every call of one stack (init, plan, show, apply, state
+// list, destroy) uses that stack's directory; none is in a stack root or the run record.
+func TestRunnerDataDirPerStack(t *testing.T) {
+	w := newRunWorld(t)
+	s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{})}
+	r := w.runner(t, s...)
+	r.StateListFallback = true
+	if err, _ := execute(t, r); err != nil {
+		t.Fatalf("run of two stacks: %v\n%s", err, w.term)
+	}
+	dirs := map[string]string{}
+	cmds := map[string][]string{}
+	for _, c := range w.calls(t, "tofu.log") {
+		if c.Cmd == "protect" || c.Cmd == "signal" {
+			continue
+		}
+		cmds[c.Stack] = append(cmds[c.Stack], c.Cmd)
+		switch {
+		case within(c.DataDir, resolvedPath(w.stacks)) || within(c.DataDir, resolvedPath(w.runDir)):
+			t.Errorf("stack %s: tofu %s with its data directory %s in a stack root or the run record", c.Stack, c.Cmd, c.DataDir)
+		case dirs[c.Stack] == "":
+			dirs[c.Stack] = c.DataDir
+		case dirs[c.Stack] != c.DataDir:
+			t.Errorf("stack %s: tofu %s with data directory %s, earlier calls %s: one per stack", c.Stack, c.Cmd, c.DataDir, dirs[c.Stack])
+		}
+	}
+	for _, id := range []string{"a", "b"} {
+		for _, want := range []string{"init", "apply", "state-list", "destroy"} {
+			if !slices.Contains(cmds[id], want) {
+				t.Errorf("stack %s: no tofu %s (calls %v)", id, want, cmds[id])
+			}
+		}
+	}
+	if dirs["a"] == "" || dirs["a"] == dirs["b"] {
+		t.Errorf("stacks a and b share the data directory %q: the second init replaces the first's backend and modules", dirs["a"])
+	}
+}
+
 // TestProbeState: G9 probe part. A probe keeps its state and a private per-run passphrase under
 // accounts/<account>/state/probes/<run-id>/ until destroy and the leftover check pass; a fresh
 // process resumes the cleanup from them; both files are deleted only when both pass.

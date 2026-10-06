@@ -31,8 +31,8 @@ import (
 // apply started, in reverse order, continuing after a failed destroy; then it runs the leftover
 // check and writes summary.json. Every child gets the environment of env.go with a per-run scratch
 // HOME (0700, removed when the run ends; never the caller's HOME, so ~/.ovh.conf,
-// ~/.aws/credentials and the like cannot reach tofu or ovhcloud), and every child stream passes
-// through redact.go.
+// ~/.aws/credentials and the like cannot reach tofu or ovhcloud) and, for tofu, a data directory
+// (TF_DATA_DIR) per stack inside it, and every child stream passes through redact.go.
 //
 // Stopping a child: SIGINT, SIGTERM or the deadline is forwarded to the running child (the
 // deadline and SIGHUP, a closed terminal, as SIGINT) so tofu can stop gracefully and write its
@@ -119,8 +119,20 @@ type session struct {
 	started []Stack // stacks whose apply started, in order
 }
 
-func (s *session) tofu(ctx context.Context, st Stack, stdout io.Writer, args ...string) error {
+// tofuCmd is tofu on st's root with st's data directory (TF_DATA_DIR: backend configuration,
+// module manifest, providers) in the run's scratch HOME, one per stack and run, never in the root:
+// a probe root's backend path changes with each run id, so a data directory kept from another run
+// fails init ("Backend configuration changed"); stacks of one run differ in backend and modules,
+// so a shared one would leave a stack's destroy with another root's data; and the reviewed
+// checkout stays untouched. A cleanup is a fresh run and initialises its own.
+func (s *session) tofuCmd(ctx context.Context, st Stack, args ...string) *exec.Cmd {
 	cmd := s.child.command(ctx, s.r.Tofu, append([]string{"-chdir=" + st.Dir}, args...)...)
+	cmd.Env = append(cmd.Env, "TF_DATA_DIR="+filepath.Join(s.child.home, "tofu-data", st.ID))
+	return cmd
+}
+
+func (s *session) tofu(ctx context.Context, st Stack, stdout io.Writer, args ...string) error {
+	cmd := s.tofuCmd(ctx, st, args...)
 	cmd.Stdout, cmd.Stderr = stdout, s.term
 	err := cmd.Run()
 	killGroup(ctx, cmd)
@@ -177,7 +189,7 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 		return nil
 	}
 	s.started = append(s.started, st)
-	cmd := s.child.command(ctx, s.r.Tofu, "-chdir="+st.Dir, "apply", "-json", "-input=false", plan)
+	cmd := s.tofuCmd(ctx, st, "apply", "-json", "-input=false", plan)
 	cmd.Stderr = s.term
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -243,6 +255,7 @@ func (r Runner) Execute(ctx context.Context) error {
 		vars = map[string]string{}
 	}
 	maps.Copy(vars, r.Creds)
+	delete(vars, "TF_DATA_DIR") // set per stack by tofuCmd; a caller cannot move it
 	s := &session{r: r, red: red, term: term, child: &childEnv{home: home, vars: vars, grace: grace}}
 	if s.inv, err = OpenInventory(r.Dir, red); err != nil {
 		return err
@@ -394,7 +407,9 @@ func errString(err error) string {
 // TF_VAR_state_passphrase, 0600, written by files.go) live under ProbeDir until destroy and the
 // leftover check pass, then both are deleted, with the probe-root record (probe.env) that lets
 // `--cleanup` find the root again. A run that wrote no state (it failed before any apply wrote
-// one, or was plan-only) leaves nothing to clean up, so its files go whatever the outcome. Children get TF_VAR_state_path and TF_VAR_state_passphrase.
+// one, or was plan-only) leaves nothing to clean up, so its files go whatever the outcome.
+// Children get TF_VAR_state_path, TF_VAR_state_passphrase and TF_VAR_run_id (the probe roots name
+// their resources with it).
 type Probe struct {
 	Run        Runner
 	ConfigRoot string // ~/.config/ovh-lz
@@ -471,6 +486,7 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 		r.Vars = map[string]string{}
 	}
 	r.Vars["TF_VAR_state_path"] = state
+	r.Vars["TF_VAR_run_id"] = r.ID
 	r.cleanupOnly = cleanup
 	if err := r.Execute(ctx); err != nil {
 		if _, serr := os.Lstat(state); errors.Is(serr, os.ErrNotExist) {

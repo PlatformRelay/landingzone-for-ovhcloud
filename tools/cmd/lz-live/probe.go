@@ -18,13 +18,24 @@ import (
 // its account (GET /auth/details against accounts/<account>/account.env). Its state is local and
 // encrypted (TF_VAR_state_path, TF_VAR_state_passphrase) under
 // accounts/<account>/state/probes/<run-id>/; the run record is .local/live/<run-id>/ in the
-// checkout. `--cleanup <run-id>` finishes a probe whose destroy or leftover check failed.
+// checkout. The root gets its run id (TF_VAR_run_id) and the sandbox project, LZ_PROJECT_ID_STATE
+// of account.env (TF_VAR_project_id). `--cleanup <run-id>` finishes a probe whose destroy or
+// leftover check failed.
 
 // probePrefix names what probes create; the leftover check matches it.
 const probePrefix = "lzprobe-"
 
 // probeRoots is where probe roots live in the checkout.
 var probeRoots = filepath.Join("tests", "live", "probes")
+
+// planOnlyRoots run only with --plan-only (T008 run sheet): an apply of project-import would
+// import the retained project into probe state, and every destroy would then fail on
+// prevent_destroy; quota changes a project singleton whose destroy is UNVERIFIED. Matched by the
+// name of the resolved root directory, so an alias or a trailing slash cannot pass.
+var planOnlyRoots = map[string]bool{"project-import": true, "quota": true}
+
+// condPlanOnly is the refusal of a plan-only root without --plan-only (exit 3).
+const condPlanOnly = "plan-only"
 
 type probeArgs struct {
 	root          string
@@ -99,6 +110,10 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		if root, err = probeRoot(checkout, p.root); err != nil {
 			return err
 		}
+		// Before any credential is read, any file written or any child started.
+		if planOnlyRoots[filepath.Base(root)] && !p.planOnly {
+			return &live.Refusal{Condition: condPlanOnly, Detail: fmt.Sprintf("probe root %s runs only with --plan-only", filepath.Base(root))}
+		}
 	}
 	sandbox, err := live.ReadCredentialFile(filepath.Join(cfg, "sandbox.env"))
 	if err != nil {
@@ -145,6 +160,12 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		projects = append(projects, live.Project{ID: acc[k], URN: projectURN(cred.Endpoint, acc[k])})
 	}
 
+	// The probes' project, for start and cleanup alike (a destroy evaluates the root's variables).
+	projectID := acc["LZ_PROJECT_ID_STATE"]
+	if projectID == "" {
+		return errors.New("account.env: LZ_PROJECT_ID_STATE (the probes' project) is required")
+	}
+
 	runID := p.cleanup
 	if runID == "" {
 		if runID, err = live.NewRunID(d.Now()); err != nil {
@@ -170,6 +191,7 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		Tofu:      tofu,
 		Authority: live.AuthorityBootstrap,
 		Creds:     map[string]string{"OVH_ENDPOINT": cred.Endpoint, "OVH_CLIENT_ID": cred.ClientID, "OVH_CLIENT_SECRET": cred.ClientSecret},
+		Vars:      map[string]string{"TF_VAR_project_id": projectID},
 		Stacks:    []live.Stack{{ID: filepath.Base(root), Dir: root, Ephemeral: true}},
 		Deadline:  p.deadline,
 		Leftovers: live.LeftoverCheck{Ovhcloud: ovhcloud, Projects: projects, Prefix: probePrefix, RunID: runID, Exempt: exempt},
