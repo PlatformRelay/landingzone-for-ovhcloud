@@ -23,12 +23,15 @@ applies has to follow real dependencies.
 ## Decision
 
 ### Stage modules are reusable code
-`stages/` holds the stage modules: `account-admin` (the re-runnable bootstrap authority of ADR-0009
-"bootstrap / order": the admin service account and its IAM policy that `bootstrap` runs as to create
-and own the state buckets; applied with short-lived root credentials on a fresh account, or imported),
-`bootstrap`, `account-governance`, `account-fabric` (shared vRack
+`stages/` holds the stage modules: `bootstrap` (the account state bucket), `tenant-state` (one per
+tenant, account-owned: that tenant's state bucket and its bucket-scoped S3 users),
+`account-governance`, `account-fabric` (shared vRack
 and audit facilities), `project` (adoption or vending, quotas, budget alert, machine identities,
-resource group), `project-network`, `runtime`, `observability`. A stage module is an ordinary child
+resource group), `project-network`, `runtime`, `observability`. The authority `bootstrap` runs as
+(ADR-0009 "bootstrap / order": the admin service account and its IAM policy) is not a stage: the
+bootstrap script creates it through the OVHcloud API with short-lived root credentials on a fresh
+account, because no stack can run as a principal that it must first create (D88). The stage name
+`account-admin` stays reserved. A stage module is an ordinary child
 module. It takes typed inputs and returns typed outputs. It has **no backend and no provider
 credentials**, so it never holds state on its own.
 
@@ -61,7 +64,7 @@ stack's values reads **only** that file; no stack reads another stack's state. C
 schema follow the contract versioning rules (ADR-0010).
 
 ### Order follows real dependencies
-account-admin → bootstrap → account-governance → account-fabric → project → project-network → runtime →
+bootstrap → tenant-state, account-governance → account-fabric → project → project-network → runtime →
 observability. Each arrow exists because the later stack reads the earlier stack's outputs (or runs
 as a principal the earlier stack creates), not because of a stage number. Audit sinks the account needs before any project exists belong to
 `account-fabric`. A runtime never waits on observability, and unrelated tenants never wait on each

@@ -32,6 +32,16 @@ instance's credential class (ADR-0004), otherwise per-tenant buckets isolate not
 interrupted-writer procedures are documented and drilled; a replica is **never** a second active
 writer; promotion is an explicit, logged step; Object Lock never applies to lock objects.
 
+**Known sandbox deviation (2026-10-06, D88).** The maintainer sandbox has one Public Cloud project,
+which holds both tenant resources and every state bucket. OVHcloud IAM grants bucket management
+actions (`region/storage/delete`, `bulkDeleteObjects`) on the project, so a tenant deployer that may
+manage its own buckets there can also delete state buckets through the API, whatever its S3
+credentials allow. Per-tenant buckets therefore do not isolate tenant state in the sandbox. Spec 005
+records this as KD-1: the state project is an input that must differ from tenant projects outside the
+sandbox, the tenant allowlist is as narrow as the API allows, and a live negative demonstrates the
+gap (expected red until a separate state project exists). No tenant-isolation claim rests on the
+sandbox.
+
 ### Encryption and key recovery (replaces the false fallback claim)
 - Client-side `encryption {}` is mandatory for every instance; plan files encrypted too.
 - **Bootstrap starts with an independently escrowed method**: the bootstrap root encrypts with a
