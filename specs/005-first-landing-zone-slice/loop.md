@@ -46,3 +46,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 - Owner/SUPERSEDED markers only count in the task TITLE line; never strike through task ids.
 - Agents never call the OVHcloud API or read `~/.config/ovh-lz/`; live behaviour is tested with fakes and T009's captured listings.
 - Mutation proof only for security guards (D85); plain red/green TDD elsewhere.
+- `lz-offline` accepts only `task <target>`: run `go -C tools test …` Verify lines on the host and also run the task target that covers them through the entry (T001).
+- Codex is at its usage limit until 2026-10-11: review leg 1 is a general-purpose subagent, leg 2 Opus; the astra review is owed per task and the D62 merge bar is not met until it runs (T001).
+- Do not push between a test task and its implementation: the red tests make `test:traceability`/CI red (T001→T002).
+- T002 must also change `tools/cmd/lz-check/main.go` (set `Trace.Spec` from the directory) and fix `ParseSpec` for spec 005's `- **FR-0NN Name** —` headings, otherwise the 14 FRs are dropped silently (T001).
