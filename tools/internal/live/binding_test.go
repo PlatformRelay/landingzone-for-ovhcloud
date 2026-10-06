@@ -112,3 +112,25 @@ func TestBindingRefuses(t *testing.T) {
 		}
 	})
 }
+
+// TestBindingRefusesIncompleteBinding: an account.env missing a field binds nothing, even when
+// the credential or the manifest is empty in the same place.
+func TestBindingRefusesIncompleteBinding(t *testing.T) {
+	f := newFakeAPI(t)
+	admin := credentialOf(f.credential("admin"))
+	noEndpoint := admin
+	noEndpoint.Endpoint = ""
+	for name, r := range map[string]struct {
+		cred Credential
+		b    Binding
+		org  string
+	}{
+		"no-account":  {admin, Binding{Endpoint: "ovh-eu", Org: "lz"}, "lz"},
+		"no-endpoint": {noEndpoint, Binding{AccountID: boundAccount, Org: "lz"}, "lz"},
+		"no-org":      {admin, Binding{AccountID: boundAccount, Endpoint: "ovh-eu"}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertRefused(t, Bind(context.Background(), f.API(), r.cred, r.b, r.org), []string{CondAccount, CondEndpoint, CondOrg})
+		})
+	}
+}

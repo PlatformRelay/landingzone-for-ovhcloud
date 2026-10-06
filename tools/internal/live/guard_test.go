@@ -53,14 +53,16 @@ func newGuardWorld(t *testing.T) guardWorld {
 
 // guardCase describes one host; the zero value of each field means "as admitted".
 type guardCase struct {
-	dir        string // working directory (default: main)
-	owner      string // LZ_OWNER_CHECKOUT (default: main)
-	scenario   string // fake git scenario (default: main-clean)
-	reviewed   string // --reviewed-sha (default: HEAD)
-	liveEnv    string // live.env content (default: testdata/live.env); "-" = no file
-	marker     bool   // /tcb marker present
-	offlineEnv string // LZ_OFFLINE value
-	brokenGit  bool   // every git call exits 128
+	dir        string      // working directory (default: main)
+	owner      string      // LZ_OWNER_CHECKOUT (default: main)
+	scenario   string      // fake git scenario (default: main-clean)
+	reviewed   string      // --reviewed-sha (default: HEAD)
+	liveEnv    string      // live.env content (default: testdata/live.env); "-" = no file
+	marker     bool        // /tcb marker present
+	offlineEnv string      // LZ_OFFLINE value
+	brokenGit  bool        // every git call exits 128
+	liveMode   os.FileMode // live.env mode (default 0600)
+	markerErr  bool        // the marker cannot be examined (its parent is a file)
 }
 
 func (w guardWorld) host(t *testing.T, c guardCase) Host {
@@ -91,7 +93,16 @@ func (w guardWorld) host(t *testing.T, c guardCase) Host {
 	default:
 		writeFile(t, liveEnv, c.liveEnv)
 	}
+	if c.liveMode != 0 {
+		if err := os.Chmod(liveEnv, c.liveMode); err != nil {
+			t.Fatal(err)
+		}
+	}
 	marker := filepath.Join(cfg, "tcb")
+	if c.markerErr {
+		writeFile(t, marker, "")
+		marker = filepath.Join(marker, "tcb")
+	}
 	if c.marker {
 		if err := os.Mkdir(marker, 0o700); err != nil {
 			t.Fatal(err)
@@ -162,6 +173,21 @@ func TestGuardRefuses(t *testing.T) {
 		{"live-env-missing", guardCase{liveEnv: "-"}, []string{CondLiveEnv}},
 		{"live-env-without-owner", guardCase{liveEnv: "# no owner checkout\nLZ_OTHER=x\n"}, []string{CondLiveEnv}},
 		{"live-env-empty-owner", guardCase{liveEnv: "LZ_OWNER_CHECKOUT=\n"}, []string{CondLiveEnv}},
+		// T053 review round 1: data-model "the lane refuses group/world-readable files"; whoever
+		// can write live.env chooses the checkout the guard admits.
+		{"live-env-group-writable", guardCase{liveMode: 0o664}, []string{CondLiveEnv}},
+		// A marker that cannot be examined is not proof of being outside the entry.
+		{"offline-marker-unreadable", guardCase{markerErr: true}, []string{CondOffline}},
+		// HEAD must equal the reviewed SHA, not start with it.
+		{"reviewed-sha-abbreviated", guardCase{reviewed: headSHA[:12]}, []string{CondHead}},
+		// Index bits hide a modified tracked file from status (host git 2.53.0, t053-gitprobe3.sh).
+		{"dirty-assume-unchanged", guardCase{scenario: "main-assume-unchanged"}, []string{CondDirty}},
+		{"dirty-skip-worktree", guardCase{scenario: "main-skip-worktree"}, []string{CondDirty}},
+		// core.worktree in the shared repository config makes status answer for another tree.
+		{"core-worktree-elsewhere", guardCase{scenario: "main-core-worktree"}, []string{CondCheckout}},
+		// A failure of any one git call refuses.
+		{"status-fails", guardCase{scenario: "main-status-fails"}, []string{CondDirty}},
+		{"ls-files-fails", guardCase{scenario: "main-ls-files-fails"}, []string{CondDirty}},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
