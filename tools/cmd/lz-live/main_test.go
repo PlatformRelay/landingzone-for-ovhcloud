@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 )
 
 // The entry point runs the host guard (tools/internal/live) for every verb before anything else
@@ -443,6 +446,281 @@ func TestProbePlanOnlyRoots(t *testing.T) {
 			}
 		})
 	}
+}
+
+// treeOf maps every path under dir (relative; directories end in "/") to its content; a missing dir
+// is empty.
+func treeOf(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if p == dir && errors.Is(err, fs.ErrNotExist) {
+				return filepath.SkipAll
+			}
+			return err
+		}
+		rel, _ := filepath.Rel(dir, p)
+		if d.IsDir() {
+			out[rel+"/"] = ""
+			return nil
+		}
+		raw, err := os.ReadFile(p)
+		out[rel] = string(raw)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// sameTreeAs fails for every path added, changed or lost between two treeOf snapshots.
+func sameTreeAs(t *testing.T, what string, before, after map[string]string) {
+	t.Helper()
+	for p, v := range before {
+		if got, ok := after[p]; !ok {
+			t.Errorf("%s lost %s", what, p)
+		} else if got != v {
+			t.Errorf("%s: %s changed", what, p)
+		}
+	}
+	for p := range after {
+		if _, ok := before[p]; !ok {
+			t.Errorf("the refused run wrote %s into %s", p, what)
+		}
+	}
+}
+
+func mkdirPrivate(t *testing.T, d string) string {
+	t.Helper()
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// failedProbe runs tests/live/probes/net with a failing destroy, so its state, passphrase and
+// probe.env stay for a cleanup, and returns its run id; later destroys work again.
+func (w *probeWorld) failedProbe(t *testing.T) string {
+	t.Helper()
+	marker := filepath.Join(filepath.Dir(w.git), "destroy-fails")
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+	if code == 0 {
+		t.Fatalf("a probe whose destroy failed exited 0:\n%s", stdout)
+	}
+	id := runIDOf(t, stdout)
+	if _, err := os.Stat(filepath.Join(w.probeDir(id), "passphrase.env")); err != nil {
+		t.Fatalf("the failed probe kept no passphrase: %v\n%s", err, stderr)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestProbeScratchOutsideCheckout (T077; T074 review r1 gap): the run's scratch HOME and the tofu
+// data directories in it are made under $TMPDIR. A TMPDIR that resolves inside the checkout
+// (.local/ included: gitignored, so the guard's clean-tree check does not see it; symlinks
+// resolved) is refused (exit 3, naming TMPDIR) before any credential (no API call; refused before
+// sandbox.env is read), any file (no run record, no probe file, nothing in TMPDIR, the checkout
+// unchanged) and any child, for a probe and a --cleanup alike. A TMPDIR beside the checkout, a
+// prefix sibling included, is admitted and used.
+func TestProbeScratchOutsideCheckout(t *testing.T) {
+	for name, c := range map[string]struct {
+		place     func(t *testing.T, w *probeWorld) string
+		noSandbox bool
+		cleanup   bool
+	}{
+		"local-tmp": {place: func(t *testing.T, w *probeWorld) string {
+			return mkdirPrivate(t, filepath.Join(w.checkout, ".local", "tmp"))
+		}},
+		"checkout-itself": {place: func(_ *testing.T, w *probeWorld) string { return w.checkout }},
+		"probe-root": {place: func(t *testing.T, w *probeWorld) string {
+			return mkdirPrivate(t, filepath.Join(w.checkout, "tests", "live", "probes", "net", "tmp"))
+		}},
+		"symlink-alias": {place: func(t *testing.T, w *probeWorld) string {
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(mkdirPrivate(t, filepath.Join(w.checkout, ".local", "tmp")), alias); err != nil {
+				t.Fatal(err)
+			}
+			return alias
+		}},
+		"no-sandbox-env": {place: func(t *testing.T, w *probeWorld) string {
+			return mkdirPrivate(t, filepath.Join(w.checkout, ".local", "tmp"))
+		}, noSandbox: true},
+		"cleanup": {place: func(t *testing.T, w *probeWorld) string {
+			return mkdirPrivate(t, filepath.Join(w.checkout, ".local", "tmp"))
+		}, cleanup: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newProbeWorld(t)
+			args := []string{"probe", "--reviewed-sha", fakeHead, "tests/live/probes/net"}
+			if c.cleanup {
+				args = []string{"probe", "--reviewed-sha", fakeHead, "--cleanup", w.failedProbe(t)}
+			}
+			if c.noSandbox {
+				if err := os.Remove(filepath.Join(w.cfg, "sandbox.env")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tmp := c.place(t, w)
+			tofuN, ovhN, apiN := len(w.childCalls(t, "tofu.log")), len(w.childCalls(t, "ovhcloud.log")), *w.apiCalls
+			checkout := checkoutSnapshot(t, w.checkout)
+			local := treeOf(t, filepath.Join(w.checkout, ".local"))
+			state := treeOf(t, filepath.Join(w.cfg, "accounts", probeAccount, "state"))
+			// The credentials this run could read: the sandbox credential and, for a cleanup, the
+			// run's passphrase. Watched after the snapshots (which read them) and read before
+			// anything else opens them (review r1: a read whose result is discarded leaves no
+			// other trace, and a missing sandbox.env cannot tell a read from no read).
+			var creds []string
+			if !c.noSandbox {
+				creds = append(creds, filepath.Join(w.cfg, "sandbox.env"))
+			}
+			if c.cleanup {
+				creds = append(creds, filepath.Join(w.probeDir(args[4]), "passphrase.env"))
+			}
+			opened := watchOpens(t, creds...)
+			t.Setenv("TMPDIR", tmp)
+			w.env["TMPDIR"] = tmp
+			code, stdout, stderr := w.run(t, args...)
+			if got := opened(); len(got) != 0 {
+				t.Errorf("the refused run read the credential files %v", got)
+			}
+			if code != 3 || !strings.Contains(stderr, "TMPDIR") {
+				t.Errorf("TMPDIR %s: exit %d, stderr %q; want 3 naming TMPDIR", tmp, code, stderr)
+			}
+			if n := len(w.childCalls(t, "tofu.log")) - tofuN; n != 0 {
+				t.Errorf("%d tofu calls before the refusal", n)
+			}
+			if n := len(w.childCalls(t, "ovhcloud.log")) - ovhN; n != 0 {
+				t.Errorf("%d ovhcloud calls before the refusal", n)
+			}
+			if n := *w.apiCalls - apiN; n != 0 {
+				t.Errorf("%d API calls (the credential was used) before the refusal", n)
+			}
+			sameTreeAs(t, "the checkout", checkout, checkoutSnapshot(t, w.checkout))
+			sameTreeAs(t, "the checkout's .local", local, treeOf(t, filepath.Join(w.checkout, ".local")))
+			sameTreeAs(t, "the account's probe state", state, treeOf(t, filepath.Join(w.cfg, "accounts", probeAccount, "state")))
+			w.noSecret(t, stdout, stderr)
+		})
+	}
+
+	t.Run("prefix-sibling", func(t *testing.T) {
+		w := newProbeWorld(t)
+		tmp := mkdirPrivate(t, w.checkout+"-tmp")
+		sandbox := filepath.Join(w.cfg, "sandbox.env")
+		opened := watchOpens(t, sandbox)
+		t.Setenv("TMPDIR", tmp)
+		w.env["TMPDIR"] = tmp
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+		if code != 0 {
+			t.Fatalf("TMPDIR %s beside the checkout: exit %d\nstdout:\n%s\nstderr:\n%s", tmp, code, stdout, stderr)
+		}
+		// The watch sees a credential read (else the refused rows' "no read" proves nothing).
+		if got := opened(); opensObservable && !slices.Contains(got, sandbox) {
+			t.Errorf("an admitted run's read of sandbox.env was not observed (opened %v)", got)
+		}
+		calls := w.childCalls(t, "tofu.log")
+		if len(calls) == 0 {
+			t.Fatal("no tofu call")
+		}
+		for _, c := range calls {
+			if h := resolvedPath(c.env()["HOME"]); !strings.HasPrefix(h, resolvedPath(tmp)+string(filepath.Separator)) {
+				t.Errorf("tofu %v ran with HOME %s, not under TMPDIR %s", c.Args, h, tmp)
+			}
+		}
+	})
+}
+
+// TestProbeCleanupRecordedProjectEntry (T077; T074 review r1/r2 gap): `lz-live probe` records the
+// project it ran against (LZ_PROJECT_ID_STATE at start) in the run's probe.env; `--cleanup
+// <run-id>` destroys with that recorded id (TF_VAR_project_id) and lists leftovers in that project
+// even when account.env now names another; a run record without a project id is refused for
+// cleanup: no child, the probe's files kept.
+func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
+	t.Run("account-env-changed", func(t *testing.T) {
+		w := newProbeWorld(t)
+		id := w.failedProbe(t)
+		rec, err := live.ReadCredentialFile(filepath.Join(w.probeDir(id), "probe.env"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, v := range rec {
+			found = found || v == "p1"
+		}
+		if !found {
+			t.Errorf("probe.env %v records no project id p1 (LZ_PROJECT_ID_STATE at start)", rec)
+		}
+		writePrivate(t, filepath.Join(w.cfg, "accounts", probeAccount, "account.env"),
+			"LZ_ACCOUNT_ID="+probeAccount+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_STATE=p9\nLZ_ADMIN_POLICY_ID=pol-admin\n")
+		tofuN, ovhN := len(w.childCalls(t, "tofu.log")), len(w.childCalls(t, "ovhcloud.log"))
+		pass := filepath.Join(w.probeDir(id), "passphrase.env")
+		opened := watchOpens(t, pass)
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id)
+		if code != 0 {
+			t.Errorf("cleanup after account.env changed: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		// Positive control of the passphrase watch of TestProbeScratchOutsideCheckout/cleanup.
+		if got := opened(); opensObservable && !slices.Contains(got, pass) {
+			t.Errorf("a cleanup's read of passphrase.env was not observed (opened %v)", got)
+		}
+		calls := w.childCalls(t, "tofu.log")[tofuN:]
+		if got := subcommands(calls); !slices.Equal(got, []string{"init", "destroy"}) {
+			t.Errorf("cleanup tofu calls %v, want [init destroy]", got)
+		}
+		for _, c := range calls {
+			if got := c.env()["TF_VAR_project_id"]; got != "p1" {
+				t.Errorf("cleanup: tofu %v with TF_VAR_project_id %q, want the recorded p1 (account.env now names p9)", c.Args, got)
+			}
+		}
+		asked := map[string]bool{}
+		for _, c := range w.childCalls(t, "ovhcloud.log")[ovhN:] {
+			asked[c.Args[len(c.Args)-1]] = true
+		}
+		if !asked["/cloud/project/p1/network/private"] {
+			t.Errorf("the cleanup's leftover check never listed the recorded project p1 (asked %v)", asked)
+		}
+		w.noSecret(t, stdout, stderr)
+	})
+
+	t.Run("record-without-project", func(t *testing.T) {
+		w := newProbeWorld(t)
+		id := w.failedProbe(t)
+		path := filepath.Join(w.probeDir(id), "probe.env")
+		rec, err := live.ReadCredentialFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lines []string
+		for k, v := range rec {
+			if v != "p1" {
+				lines = append(lines, k+"="+v+"\n")
+			}
+		}
+		slices.Sort(lines)
+		writePrivate(t, path, strings.Join(lines, ""))
+		tofuN := len(w.childCalls(t, "tofu.log"))
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id)
+		// "project id": the temporary directories carry the test name, so "project" alone would
+		// match any path in an unrelated error (review r1).
+		if code == 0 || !strings.Contains(stderr, "project id") {
+			t.Errorf("cleanup of a run record without a project id: exit %d, stderr %q; want a failure naming the project", code, stderr)
+		}
+		if n := len(w.childCalls(t, "tofu.log")) - tofuN; n != 0 {
+			t.Errorf("%d tofu calls for a run record without a project id", n)
+		}
+		for _, f := range []string{"passphrase.env", "probe.env", "net.tfstate"} {
+			if _, err := os.Stat(filepath.Join(w.probeDir(id), f)); err != nil {
+				t.Errorf("the refused cleanup lost %s: %v", f, err)
+			}
+		}
+		w.noSecret(t, stdout, stderr)
+	})
 }
 
 // TestLiveLaneRunsProbeTests (T073; T008 gap "probe tests in no CI target"): every probe root

@@ -153,7 +153,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T075 controls green with one killed mutant per clause; the run sheet lists the two-stage probes for T010.
   - Evidence: `evidence/T076.md`; PR; initial status `not-run`.
 
-- [ ] T077 Write scratch-location and cleanup-binding tests in tools/internal/live/runner_test.go and tools/cmd/lz-live/main_test.go
+- [x] T077 Write scratch-location and cleanup-binding tests in tools/internal/live/runner_test.go and tools/cmd/lz-live/main_test.go — closed 2026-10-07, evidence: evidence/T077.md
   - Requirements: FR-011, FR-013; ADRs: 0008, 0009. Depends on: T074.
   - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: a `TMPDIR` (or resolved scratch HOME or data directory) inside the checkout is refused before any credential, file or child; a probe run records its project id in the run's `probe.env`, and `--cleanup <run-id>` uses that recorded id even when `account.env` now names another project; a run record without a project id is refused for cleanup. Today the scratch follows `TMPDIR` wherever it points and cleanup reads the current `account.env`: behavioural red. Found in T074 (evidence/T074.md gaps).
   - Evidence: `evidence/T077.md`; PR; initial status `not-run`.
