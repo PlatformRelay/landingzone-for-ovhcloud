@@ -1,0 +1,1 @@
+{"case":"state-not-plan","variant":"base","applied_base_first":"yes","plan_args":"","command":"tofu show -json (no plan file)","tool":"tofu","tool_version":"1.13.0","json_sha256":"54cef560f42f87b9804f583878521f01f49f9d7dbeb88f3c9e2558b409df7428","captured_on":"2026-10-06"}
