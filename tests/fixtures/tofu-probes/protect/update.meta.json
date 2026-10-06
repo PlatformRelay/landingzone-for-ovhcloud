@@ -1,0 +1,1 @@
+{"case":"update","variant":"base","applied_base_first":"yes","plan_args":"-var=user_label=platform-renamed","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"ecea12fe9c326f96ee5a22a2ac5b5aee5c43ffec8a262f73143b7b49729fab0a","captured_on":"2026-10-06"}

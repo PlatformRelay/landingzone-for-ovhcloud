@@ -1,0 +1,1 @@
+{"case":"removed-block","variant":"removed-block","applied_base_first":"yes","plan_args":"","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"1bc68f9212951c272fab36ef5f95b33b7130c9ac1339c5ee011742745a01f0c3","captured_on":"2026-10-06"}

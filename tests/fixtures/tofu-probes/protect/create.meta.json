@@ -1,0 +1,1 @@
+{"case":"create","variant":"base","applied_base_first":"no","plan_args":"","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"9536527f75ab85fae1b20e0f72ba616f00c3f2960f0769bb9da9a6c8d32f01af","captured_on":"2026-10-06"}

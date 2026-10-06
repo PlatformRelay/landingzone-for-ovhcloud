@@ -1,0 +1,1 @@
+{"case":"two-replacements","variant":"base","applied_base_first":"yes","plan_args":"-var=org=acme2 -var=project_id=p-2222","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"f743b49b88da6ede3ee019feb8a3eaf1f5170d11e51fa1bd8e10ec49bcc8304d","captured_on":"2026-10-06"}

@@ -1,0 +1,1 @@
+{"case":"region-removed","variant":"base","applied_base_first":"yes","plan_args":"-var=regions=[\"eu\"]","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"09a0c2a187cbe933dd7faefcc81c35d1daef9cb60958752bbf45506478dd45b2","captured_on":"2026-10-06"}
