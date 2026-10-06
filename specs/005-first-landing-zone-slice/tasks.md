@@ -35,7 +35,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
   - Verify: `task check:specs -- specs/001-offline-foundation; task check:specs -- specs/005-first-landing-zone-slice`: both green (planned spec 005 checks report not-run, never pass); T001 controls green. `check:specs` takes the spec directory from CLI_ARGS; spec 001 keys keep working (recommended form `005/FR-001`, research R18).
   - Evidence: `evidence/T002.md`; PR; initial status `not-run`.
 
-- [ ] T003 Write unit-runner tests in tools/internal/checks/unit_test.go and tests/check/fixtures/unit/{pass,fail,zero,skip,malformed}/
+- [x] T003 Write unit-runner tests in tools/internal/checks/unit_test.go and tests/check/fixtures/unit/{pass,fail,zero,skip,malformed}/ — closed 2026-10-06, evidence: evidence/T003.md
   - Requirements: FR-013; ADRs: 0008. Depends on: 001/T005, 001/T009.
   - Verify: `go -C tools test -tags offlinetools ./internal/checks -run TestUnit -count=1`: pinned `tofu test -json` through the 001 report adapter on the pass fixture is accepted; fail, zero-tests, skipped and malformed/truncated-stream fixtures and a directory list with zero entries are behavioural red against a stub that reports pass.
   - Evidence: `evidence/T003.md`; PR; initial status `not-run`.

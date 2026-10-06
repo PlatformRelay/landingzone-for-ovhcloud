@@ -25,16 +25,22 @@ func pinnedTools(t *testing.T) StaticTools {
 // next to the configuration.
 func staticFixture(t *testing.T, name string) string {
 	t.Helper()
+	return copyFixture(t, staticFixtures, name)
+}
+
+// copyFixture copies the flat fixture directory root+name into private scratch.
+func copyFixture(t *testing.T, root, name string) string {
+	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(staticFixtures + name)
+	entries, err := os.ReadDir(root + name)
 	if err != nil {
 		t.Fatalf("FIXTURE_MISSING: %v", err)
 	}
 	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(staticFixtures+name, e.Name()))
+		data, err := os.ReadFile(filepath.Join(root+name, e.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
