@@ -96,7 +96,8 @@ func newWorld(t *testing.T, withLiveEnv bool) world {
 		marker:   filepath.Join(base, "tcb"),
 		env:      map[string]string{},
 	}
-	for _, d := range []string{w.home, w.checkout + "/.git", filepath.Dir(w.git)} {
+	// worktrees/ is the agent worktree root live.env names; the guard requires it to exist (T072).
+	for _, d := range []string{w.home, w.checkout + "/.git/objects", filepath.Dir(w.git), filepath.Join(base, "worktrees")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}

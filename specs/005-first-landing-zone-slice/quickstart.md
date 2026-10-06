@@ -27,11 +27,20 @@ Changing an `id` or a dimension of an existing row fails with `UNSUPPORTED_CHANG
 postponed).
 
 ## Owner session (maintainer workstation only)
-Prerequisites: `~/.config/ovh-lz/sandbox.env` (existing); `~/.config/ovh-lz/live.env` with
-`LZ_OWNER_CHECKOUT=<canonical path of your main checkout>`; `MISE_ENV=live mise install`. `lz-live`
+Prerequisites: `~/.config/ovh-lz/sandbox.env` (existing); a dedicated owner clone used only for live
+runs, e.g. `~/Projects/PlatformRelay/lz-live` — a plain `git clone` with its own `.git`, never a
+linked worktree, never `--shared`, `--reference` or `--separate-git-dir`, and no `git worktree add`
+from it (D92: agent worktrees share their main checkout's `.git`, which the guard cannot defend);
+`~/.config/ovh-lz/live.env` (mode 0600) with `LZ_OWNER_CHECKOUT=<canonical absolute path of that
+clone>` and `LZ_AGENT_WORKTREE_ROOT=<absolute path of the existing directory holding agent
+worktrees>` — on the maintainer's workstation `/home/koni/Projects/PlatformRelay/lz-live` and
+`/home/koni/Projects/PlatformRelay/worktrees`; `MISE_ENV=live mise install`. `lz-live`
 reads credentials itself and builds each child environment from scratch, so a `.envrc` is not needed
-and anything it exports is ignored. Run from your own main checkout, clean, at the reviewed commit,
-passing its SHA (D87); the guard refuses anything else before reading a credential.
+and anything it exports is ignored. Run from the dedicated clone, clean, at the reviewed commit,
+passing its SHA (D87); the guard refuses anything else before reading a credential — a linked
+worktree, a git directory listing linked worktrees, a shared or alternates-backed repository, a
+checkout at or under the agent worktree root, and an agent root that is unset, relative, absent on
+disk or not a directory.
 
 ```sh
 S=<reviewed sha on origin/main>

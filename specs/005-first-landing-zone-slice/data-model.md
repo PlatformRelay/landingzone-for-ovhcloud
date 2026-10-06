@@ -199,7 +199,7 @@ disagrees with the credential or the manifest.
 
 | Path | Content | Writer |
 | --- | --- | --- |
-| `~/.config/ovh-lz/live.env` | `LZ_OWNER_CHECKOUT` (canonical path of the owner's main checkout) | owner, once |
+| `~/.config/ovh-lz/live.env` | `LZ_OWNER_CHECKOUT` (canonical absolute path of the owner's dedicated live clone, D92); `LZ_AGENT_WORKTREE_ROOT` (absolute path of the existing directory under which agent worktrees and clones live; no live run starts at or below it; missing, relative, absent on disk or not a directory → `live-env` refusal) | owner, once |
 | `~/.config/ovh-lz/sandbox.env` | `OVH_ENDPOINT`, `OVH_CLIENT_ID/SECRET` (lz-sandbox-admin) | existing; `bootstrap:account --fresh-account` (`admin` phase) |
 | `accounts/<account>/account.env` | `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`, `LZ_PROJECT_ID_<REF>`, `LZ_ADMIN_CLIENT_ID`, `LZ_ADMIN_POLICY_ID` (leftover exemption, research R12) | bootstrap `identify` (binding; project ids prompted under `--fresh-account`, else filled by the owner) and `admin` (admin ids) |
 | `accounts/<account>/sandbox.env` | a previous account's admin credential, moved there on migration | bootstrap `identify` on `--fresh-account` |
