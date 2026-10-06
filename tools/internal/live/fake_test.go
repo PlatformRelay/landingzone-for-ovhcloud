@@ -8,7 +8,10 @@ package live
 //     output (rev-parse prints ".git" for the git dir of the current directory, absolute paths
 //     otherwise; status prints ignored files only with --ignored, and hides untracked files
 //     when the scenario's git config says status.showUntrackedFiles=no and no -u flag is given;
-//     merge-base --is-ancestor exits 1 for a known non-ancestor, 128 for an unknown commit);
+//     merge-base --is-ancestor exits 1 for a known non-ancestor, 128 for an unknown commit;
+//     worktree list --porcelain lists the main worktree, then every entry of the common dir's
+//     worktrees/ on disk that has a gitdir file, then the scenario's linked_worktrees; config
+//     --get answers from the scenario's config and exits 1 for an unset key);
 //   - invoked as "<binary> lz-fake-child <file>", it writes its own environment to <file>;
 //   - invoked through a symlink named "tofu" or "ovhcloud", or as "<binary> lz-fake-run <config>",
 //     it is the fake tofu, the fake ovhcloud or a fresh lz-live process of runner_test.go.
@@ -72,6 +75,10 @@ type gitScenario struct {
 	TopLevel string `json:"toplevel"`
 	// Fail lists subcommands that exit 128 (a git failure in one call only).
 	Fail []string `json:"fail"`
+	// LinkedWorktrees are listed by worktree list after the entries found on disk (T071).
+	LinkedWorktrees []string `json:"linked_worktrees"`
+	// Config is the repository configuration config --get reads; keys in lower case.
+	Config map[string]string `json:"config"`
 }
 
 // fakeGit reads scenario.json next to its own path, appends the call to git.log there, and
@@ -135,6 +142,13 @@ parsed:
 		return s.status(args[1:], unsupported)
 	case "ls-files":
 		return s.lsFiles(args[1:], unsupported)
+	case "worktree":
+		if len(args) != 3 || args[1] != "list" || args[2] != "--porcelain" {
+			return unsupported()
+		}
+		return s.worktreeList()
+	case "config":
+		return s.config(args[1:], unsupported)
 	case "merge-base":
 		if len(args) != 4 || args[1] != "--is-ancestor" {
 			return unsupported()
@@ -264,6 +278,66 @@ func (s gitScenario) lsFiles(args []string, unsupported func() int) int {
 		fmt.Print(l, sep)
 	}
 	return 0
+}
+
+// worktreeList prints what git 2.53.0 prints for worktree list --porcelain (t071-gitprobe.sh):
+// the main worktree (the git dir itself when it is not named .git, as for --separate-git-dir),
+// then each linked worktree. An entry of worktrees/ without a gitdir file is not listed
+// (t071-gitprobe2.sh); one whose directory is gone is marked prunable.
+func (s gitScenario) worktreeList() int {
+	main := s.CommonDir
+	if filepath.Base(main) == ".git" {
+		main = filepath.Dir(main)
+	}
+	entry := func(path string, prunable bool) {
+		fmt.Printf("worktree %s\nHEAD %s\nbranch refs/heads/main\n", path, s.Head)
+		if prunable {
+			fmt.Println("prunable gitdir file points to non-existent location")
+		}
+		fmt.Println()
+	}
+	entry(main, false)
+	dirs, _ := os.ReadDir(filepath.Join(s.CommonDir, "worktrees"))
+	for _, d := range dirs {
+		raw, err := os.ReadFile(filepath.Join(s.CommonDir, "worktrees", d.Name(), "gitdir"))
+		if err != nil {
+			continue
+		}
+		path := filepath.Dir(strings.TrimSpace(string(raw)))
+		_, err = os.Stat(path)
+		entry(path, err != nil)
+	}
+	for _, path := range s.LinkedWorktrees {
+		entry(path, false)
+	}
+	return 0
+}
+
+// config answers config [--local] --get <key> (exit 1 when unset) and config [--local] --list.
+func (s gitScenario) config(args []string, unsupported func() int) int {
+	if len(args) > 0 && args[0] == "--local" {
+		args = args[1:]
+	}
+	switch {
+	case len(args) == 2 && args[0] == "--get":
+		v, ok := s.Config[strings.ToLower(args[1])]
+		if !ok {
+			return 1
+		}
+		fmt.Println(v)
+		return 0
+	case len(args) == 1 && (args[0] == "--list" || args[0] == "-l"):
+		keys := make([]string, 0, len(s.Config))
+		for k := range s.Config {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			fmt.Printf("%s=%s\n", k, s.Config[k])
+		}
+		return 0
+	}
+	return unsupported()
 }
 
 func canonical(p string) string {
