@@ -53,7 +53,7 @@ re-derives the tree from live tags and diffs it against the model.
 - **Decision binding.** Every decision is bound to the exact candidate commit, base commit, policy
   and schema versions, effective-document digest, target instance, the **digests of every consumed
   input artefact** (ADR-0004) and required checks; a rebase, merge-queue change, new commit or a
-  changed upstream artefact generation invalidates it and re-evaluation runs on the merged candidate.
+  changed upstream `outputs.json` invalidates it and re-evaluation runs on the merged candidate.
 - **Aggregate reservations.** Quota and budget changes reserve against the account's totals
   atomically, so two individually in-bounds requests cannot combine into an over-budget state.
 - **Review paths.** New tenant, new environment, profile change → platform review. Identity-binding

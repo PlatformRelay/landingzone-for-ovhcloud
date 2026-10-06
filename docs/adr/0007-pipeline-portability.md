@@ -44,26 +44,26 @@ configurable. Operator decision (D12): default to Terramate, skip the custom gen
      reconciler derives both from the artefact edges in the manifest: `after` for order, and
      `wants` on each producer naming its consumers so that a selected producer pulls its transitive
      consumers into the run. Git-based selection (`terramate list --changed`) is then widened by the
-     transaction driver with instances whose consumed artefacts changed outside git (ADR-0004);
+     deploy task with instances whose consumed `outputs.json` changed outside git (ADR-0004);
      Terramate's `--include-all-dependents` applies only to its own outputs-sharing dependencies and
      is not relied upon. The pinned Terramate version is qualified with upstream-only,
      intermediate-only and unrelated-tenant changes.
-3. **Outputs stay artefacts, not state reads.** Instances consume immutable, generation-stamped
-   `outputs.json` artefacts with publication records (ADR-0004). If Terramate outputs sharing is ever
+3. **Outputs stay artefacts, not state reads.** Instances consume the schema-checked
+   `outputs.json` their producers publish (ADR-0004). If Terramate outputs sharing is ever
    used, its `sharing_backend.command` points at the artefact reader, never at `tofu output` on
    another instance's state; until spiked, inputs are generated from the artefact store directly.
-   The **transaction driver** (`task deploy`, a script, qualified like the reconciler) runs the graph
-   in waves: plan, gate, apply and publish each wave before planning the next, binding consumed
-   digests into each plan's approval and fencing at apply (ADR-0004).
+   The **deploy task** (`task deploy`, a script, qualified like the reconciler) applies producers
+   before their consumers and re-plans a consumer whose inputs changed; one run at a time per
+   tenant. The generation-and-fencing transaction is postponed until needed (ADR-0004).
 4. **The Taskfile is the contract for the monorepo** (`task lint|test|policy|docs|check|dod`): CI
    definitions contain no logic beyond checkout, tool setup (mise), credentials and `task <target>`;
    `pipelines/github/` and `pipelines/gitlab/` ship reusable workflows and includes, tested on real
    repositories on both forges (`act` and `gitlab-ci-local` are a local convenience only).
 5. **Tenant-repo pipeline** (ADR-0005): schema validation → `assent run` (policy-driven auto-merge,
    same on both forges) → reconcile and `terramate generate` freshness checks → affected-set
-   computation → per wave: plan on the selected instances, post-plan policy gate on each current
-   plan, apply of the exact approved saved-plan artefact from the protected branch with artefact
-   fencing, publication → next wave. A re-plan invalidates the approval (ADR-0006).
+   computation → in dependency order: plan on the selected instances, post-plan policy gate on each
+   current plan, apply of the exact approved saved-plan artefact from the protected branch,
+   publication of `outputs.json` → its consumers. A re-plan invalidates the approval (ADR-0006).
 6. **TACOs run the generated instances.** Because each instance directory is plain OpenTofu, a TACO
    points at the instance directories; Terramate's generation and change detection run in CI before
    the TACO, or the TACO runs the generated directories directly. Each adapter must provide pre-plan
@@ -88,8 +88,8 @@ configurable. Operator decision (D12): default to Terramate, skip the custom gen
 ## Consequences
 - One more pinned tool for every consumer (Terramate in `mise.toml`), in exchange for no bespoke
   generator and change detection that an agent and an adopter already know. Two small scripts
-  remain ours and are qualified like any component: the manifest reconciler and the transaction
-  driver. Their existence is stated, not hidden behind the tool.
+  remain ours and are qualified like any component: the manifest reconciler and the deploy
+  task. Their existence is stated, not hidden behind the tool.
 - The monorepo's own tests never run inside Terramate or a TACO; the dependency checker (ADR-0002)
   selects tests in the monorepo, Terramate selects instances in the tenant repo.
 - Terragrunt is a documented future option; Terramate can orchestrate it if a consumer needs it.
@@ -103,7 +103,7 @@ configurable. Operator decision (D12): default to Terramate, skip the custom gen
   check in CI is what keeps those honest.
 
 ## Verification
-- Spike (with the transaction spike of ADR-0004): two tenants, two instances materialised from
+- Spike (with the producer/consumer spike of ADR-0004): two tenants, two instances materialised from
   `deployments.yaml`; distinct backend keys; an upstream-only change selects the consumer through
   `wants` and the artefact graph, an intermediate-only change selects only its consumers, an
   unrelated tenant is never selected; ordered run respects the artefact edges; outputs flow through

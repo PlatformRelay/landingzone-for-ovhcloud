@@ -17,7 +17,7 @@ with the first public release.
 | [0001](0001-scope-positioning-and-unofficial-status.md) | Scope, positioning and unofficial status | Proposed |
 | [0002](0002-repository-structure.md) | Repository structure (monorepo) | Accepted |
 | [0003](0003-layered-taxonomy-and-module-naming.md) | Layered taxonomy, naming and labelling | Accepted |
-| [0004](0004-staged-roots-and-output-contracts.md) | Staged roots, separate state, typed output contracts | Proposed |
+| [0004](0004-staged-roots-and-output-contracts.md) | Stacks, one state each, and outputs passed as files | Proposed |
 | [0005](0005-declarative-tenant-model-and-assent.md) | Declarative tenant model and `assent` as the self-service gate | Accepted |
 | [0006](0006-guardrails-without-org-level-policy.md) | Guardrails without organisation-level policy | Accepted |
 | [0007](0007-pipeline-portability.md) | Pipeline portability and instance orchestration with Terramate | Accepted |

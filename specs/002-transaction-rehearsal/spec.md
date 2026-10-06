@@ -14,7 +14,8 @@ consumers and preserve distinct roots; another tenant stays untouched. Repeat su
 rename/removal without retirement fails. Independent test: V001–V002.
 ### User Story 2 — Publish and consume safely (Priority: P1)
 Given an applied producer, its consumer waits for publication. Concurrent producer change,
-crash after apply or stale approval prevents consumer apply. Independent test: V003–V004.
+crash after apply or stale approval prevents consumer apply. Postponed except stale approval
+(D83): ADR-0004 defers the publication/fencing transaction until it is needed. Independent test: V003–V004.
 ### User Story 3 — Authorise a routine request (Priority: P2)
 Given trusted owners and policy, an allowed tenant field change can pass; request-authored
 authority, stale candidate and oversubscribed aggregate requests block on either forge.
@@ -24,7 +25,7 @@ Independent test: V005–V007.
 | ID | Mechanism premise | Probe | Evidence status |
 | --- | --- | --- | --- |
 | P1 | Pinned Terramate materialisation, wants selection and after ordering match ADR-0007 | Capture exact 0.17.3 config, changed sets and execution order from a disposable Git repo | UNVERIFIED; only actual pinned-tool capture qualifies |
-| P2 | Producer publication and consumer apply can share an effective fencing boundary | Concurrent local-store race harness holding locks over fence-to-apply and publication | UNVERIFIED; V003 proves local mechanism only |
+| P2 | Producer publication and consumer apply can share an effective fencing boundary | Concurrent local-store race harness holding locks over fence-to-apply and publication | POSTPONED (D83); UNVERIFIED |
 | P3 | assent adapters bind decisions and required checks on GitHub and GitLab | Pinned assent output plus live disposable-repo candidate/rebase/check races | UNVERIFIED; missing adapter is an external blocker, never a stub pass |
 
 ## Requirements

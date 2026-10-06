@@ -59,24 +59,24 @@ Independent test: V001–V002.
 
 Independent test: V003–V004.
 
-- [ ] T009 [US2] Write cross-process publication/fencing/crash tests in tools/internal/transaction/store_test.go and tools/internal/probes/transaction/races_test.go
+- [ ] T009 [US2] Owner gate: postponed (D83, ADR-0004) until the artefact transaction is needed. Write cross-process publication/fencing/crash tests in tools/internal/transaction/store_test.go and tools/internal/probes/transaction/races_test.go
   - Requirements: FR-004, FR-005; ADRs: 0004, 0007, 0008. Depends on: T008.
   - Verify: `go -C tools test ./internal/transaction ./internal/probes/transaction -run "TestPublication|TestFence|TestCrash" -count=1`: valid publish/reconciled retry succeeds; late publisher, failed+old-current, producer after fence, owner death and no-current cases expose behavioural red; 30s process deadlines.
   - Evidence: `.local/evidence/002/t009-transaction-red.json`; initial status `not-run`.
 
-- [ ] T010 [US2] Implement durable local store, sorted cross-process locks and driver in tools/internal/transaction/ and tools/cmd/lz-deploy/
+- [ ] T010 [US2] Owner gate: postponed (D83, ADR-0004) until the artefact transaction is needed. Implement durable local store, sorted cross-process locks and driver in tools/internal/transaction/ and tools/cmd/lz-deploy/
   - Requirements: FR-004, FR-005, SC-002; ADRs: 0004, 0007. Depends on: T009.
   - Verify: `task test:transaction`: safety and eventual reconciled retry pass; producer waits or consumer aborts from fence through apply; crashes freeze until reconciled; old publisher cannot regress current. Creates target; production store remains unqualified.
   - Evidence: `.local/evidence/002/t010-transaction.json`; initial status `not-run`.
 
 - [ ] T011 [US2] Write each-field approval tamper tests in tools/internal/transaction/binding_test.go
-  - Requirements: FR-005; ADRs: 0005, 0007, 0021. Depends on: T010.
+  - Requirements: FR-005; ADRs: 0005, 0007, 0021. Depends on: T008 (T010 postponed, D83).
   - Verify: `go -C tools test ./internal/transaction -run TestPlanBinding -count=1`: exact unchanged saved plan valid; individually change candidate/base/policy/schema/toolchain/instance/effective/input/plan digest/check state and reject; omitted field yields behavioural red.
   - Evidence: `.local/evidence/002/t011-binding-red.json`; initial status `not-run`.
 
 - [ ] T012 [US2] Implement exact plan/approval binding in schemas/{artifact,decision}.schema.json and tools/internal/transaction/binding.go
   - Requirements: FR-005, SC-002; ADRs: 0005, 0007, 0021. Depends on: T011.
-  - Verify: `task test:plan-binding; task test:transaction`: stale or changed field fails, valid single-use operation succeeds, uncertain retry reconciles before replay; creates test:plan-binding.
+  - Verify: `task test:plan-binding`: stale or changed field fails, valid single-use operation succeeds, uncertain retry reconciles before replay; creates test:plan-binding.
   - Evidence: `.local/evidence/002/t012-plan-binding.json`; initial status `not-run`.
 
 ## US3
