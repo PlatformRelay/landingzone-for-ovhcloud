@@ -69,6 +69,73 @@ type tofuCall struct {
 	Env      []string `json:"env"`
 	PassOK   *bool    `json:"pass_ok,omitempty"` // destroy: the state's passphrase matched
 	Pgrp     int      `json:"pgrp"`              // the child's process group
+	DataDir  string   `json:"data_dir"`          // the data directory tofu used (TF_DATA_DIR, else <root>/.terraform), symlinks resolved
+}
+
+// Backend model of the fake tofu (T073), as host tofu 1.10.3 behaves offline on a provider-free
+// root with `backend "local" { path = var.state_path }` (t073-reinit.sh, 2026-10-07): init records
+// the backend in <data dir>/terraform.tfstate, where the data dir is TF_DATA_DIR (relative to the
+// -chdir directory) or <root>/.terraform; a second init with another path in the same data dir
+// fails "Backend configuration changed" (unless -reconfigure); plan, destroy and state commands in
+// a data dir no init prepared for this backend fail "Backend initialization required".
+type fakeBackend struct {
+	Backend struct {
+		Type   string `json:"type"`
+		Config struct {
+			Path string `json:"path"`
+		} `json:"config"`
+	} `json:"backend"`
+}
+
+func fakeDataDir(root string) string {
+	d := os.Getenv("TF_DATA_DIR")
+	if d == "" {
+		d = ".terraform"
+	}
+	if !filepath.IsAbs(d) {
+		d = filepath.Join(root, d)
+	}
+	return d
+}
+
+// resolvedPath is p with symlinks resolved as far as p exists (a data directory before its first
+// init does not).
+func resolvedPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	if parent := filepath.Dir(p); parent != p {
+		return filepath.Join(resolvedPath(parent), filepath.Base(p))
+	}
+	return p
+}
+
+// fakeInit records the backend of statePath in dataDir, or fails as tofu does on a changed one.
+func fakeInit(dataDir, statePath string, reconfigure bool) int {
+	file := filepath.Join(dataDir, "terraform.tfstate")
+	var b fakeBackend
+	if raw, err := os.ReadFile(file); err == nil && json.Unmarshal(raw, &b) == nil && b.Backend.Config.Path != statePath && !reconfigure {
+		fmt.Fprintln(os.Stderr, "Error: Backend configuration changed")
+		return 1
+	}
+	b.Backend.Type, b.Backend.Config.Path = "local", statePath
+	raw, _ := json.Marshal(b)
+	if os.MkdirAll(dataDir, 0o755) != nil || os.WriteFile(file, raw, 0o644) != nil {
+		fmt.Fprintln(os.Stderr, "Error: cannot write the data directory")
+		return 1
+	}
+	return 0
+}
+
+// fakeInitialised reports whether init prepared dataDir for the backend of statePath.
+func fakeInitialised(dataDir, statePath string) bool {
+	var b fakeBackend
+	raw, err := os.ReadFile(filepath.Join(dataDir, "terraform.tfstate"))
+	if err != nil || json.Unmarshal(raw, &b) != nil || b.Backend.Config.Path != statePath {
+		fmt.Fprintln(os.Stderr, `Error: Backend initialization required, please run "tofu init"`)
+		return false
+	}
+	return true
 }
 
 func logCall(dir, name string, c tofuCall) {
@@ -127,7 +194,8 @@ func fakeTofu(args []string) int {
 		}
 		args = args[1:]
 	}
-	call := tofuCall{Stack: filepath.Base(dir), Args: os.Args[1:]}
+	dataDir := fakeDataDir(dir)
+	call := tofuCall{Stack: filepath.Base(dir), Args: os.Args[1:], DataDir: resolvedPath(dataDir)}
 	var sc tofuScenario
 	if raw, err := os.ReadFile(filepath.Join(bin, "tofu.json")); err == nil {
 		_ = json.Unmarshal(raw, &sc)
@@ -166,9 +234,13 @@ func fakeTofu(args []string) int {
 	case sub == "init":
 		call.Cmd = "init"
 		logCall(bin, "tofu.log", call)
-		return 0
+		return fakeInit(call.DataDir, statePath, has("-reconfigure"))
 	case sub == "plan":
 		call.Cmd = "plan"
+		if !fakeInitialised(call.DataDir, statePath) {
+			logCall(bin, "tofu.log", call)
+			return 1
+		}
 		out := ""
 		for i, a := range rest {
 			if v, ok := strings.CutPrefix(a, "-out="); ok {
@@ -223,6 +295,10 @@ func fakeTofu(args []string) int {
 		call.Nonce = pf.Nonce
 		if sub == "destroy" || has("-destroy") || (planOK && pf.Destroy) {
 			call.Cmd = "destroy"
+			if sub == "destroy" && !fakeInitialised(call.DataDir, statePath) {
+				logCall(bin, "tofu.log", call)
+				return 1
+			}
 			if statePath != "" {
 				var s fakeState
 				raw, err := os.ReadFile(statePath)
@@ -278,6 +354,9 @@ func fakeTofu(args []string) int {
 	case sub == "state" && len(rest) > 0 && rest[0] == "list":
 		call.Cmd = "state-list"
 		logCall(bin, "tofu.log", call)
+		if !fakeInitialised(call.DataDir, statePath) {
+			return 1
+		}
 		for _, l := range st.StateList {
 			fmt.Println(l)
 		}
@@ -1520,6 +1599,172 @@ func TestProbeCleanupShortPassphrase(t *testing.T) {
 	}
 	if after := len(sequence(w.calls(t, "tofu.log"), "destroy")); after != before {
 		t.Errorf("cleanup with a short passphrase ran %d destroys", after-before)
+	}
+}
+
+// ---------------------------------------------------------------- probe re-runs
+
+// treeSnapshot maps every path under dir (relative; directories end in "/") to its content.
+func treeSnapshot(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, p)
+		if d.IsDir() {
+			out[rel+"/"] = ""
+			return nil
+		}
+		raw, err := os.ReadFile(p)
+		out[rel] = string(raw)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func within(p, dir string) bool {
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// TestProbeRerun (T073; found in T008, decision request 4): the backend path of a probe root
+// changes with every run id, and tofu keeps the backend it initialised in its data directory. A
+// root initialised in place (<root>/.terraform) therefore fails `init` with "Backend configuration
+// changed" on its second run under a new run id, and on a `--cleanup` of an older run after a
+// later one (host tofu 1.10.3, t073-reinit.sh). Each run initialises in a TF_DATA_DIR of its own,
+// outside the probe root and the run record (both in the reviewed checkout), so the second run
+// and the cleanup initialise cleanly and the root is left exactly as it was: nothing added,
+// changed or deleted, a `.terraform/` left by an older runner included. Every probe child also
+// receives the run id as TF_VAR_run_id.
+func TestProbeRerun(t *testing.T) {
+	const id2 = "20261006T130000Z-c3d4"
+	for _, stale := range []bool{false, true} {
+		name := "clean-root"
+		if stale {
+			name = "stale-terraform-dir-kept"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			p1 := w.probe(t, root, tofuStack{DestroyExit: 1})
+			dir := p1.Run.Stacks[0].Dir
+			if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte("# probe\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			unchanged := func(phase string, before map[string]string) {
+				t.Helper()
+				after := treeSnapshot(t, dir)
+				for p, v := range before {
+					if got, ok := after[p]; !ok {
+						t.Errorf("%s: the probe root lost %s", phase, p)
+					} else if got != v {
+						t.Errorf("%s: the probe root's %s changed", phase, p)
+					}
+				}
+				for p := range after {
+					if _, ok := before[p]; !ok {
+						t.Errorf("%s: a run wrote %s into the probe root", phase, p)
+					}
+				}
+			}
+			before := treeSnapshot(t, dir)
+
+			// Run 1 applies, its destroy fails: state and passphrase stay for a cleanup.
+			if err := p1.Start(context.Background()); ExitCode(err) == 0 {
+				t.Fatal("run 1: a probe whose destroy failed exited 0")
+			}
+			n1 := len(w.calls(t, "tofu.log"))
+			unchanged("run 1", before)
+			if stale {
+				// What a later in-place init of this root left behind (another run id's backend;
+				// gitignored, not ours to delete): the cleanup of run 1 must not trip over it either.
+				if err := os.MkdirAll(filepath.Join(dir, ".terraform"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, ".terraform", "terraform.tfstate"), []byte(`{"backend":{"type":"local","config":{"path":"/old/state/probes/20261006T123000Z-ffff/p.tfstate"}}}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before = treeSnapshot(t, dir)
+			// Run 2 of the same root under a new run id, destroy working again.
+			w.scenario.Stacks["p"] = tofuStack{ApplyStream: w.scenario.Stacks["p"].ApplyStream}
+			w.save(t)
+			p2 := p1
+			p2.Run.ID, p2.Run.Dir = id2, filepath.Join(filepath.Dir(w.runDir), id2)
+			if err := p2.Start(context.Background()); err != nil {
+				t.Errorf("run 2 of the same root under a new run id: %v", err)
+			}
+			n2 := len(w.calls(t, "tofu.log"))
+			// A fresh process cleans up run 1 after run 2.
+			if out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}}).CombinedOutput(); err != nil {
+				t.Errorf("cleanup of run 1 after run 2: %v\n%s", err, out)
+			} else if strings.Contains(string(out), "Backend") {
+				t.Errorf("cleanup of run 1 after run 2 initialised against another backend:\n%s", out)
+			}
+			for _, msg := range []string{"Backend configuration changed", "Backend initialization required"} {
+				if strings.Contains(w.term.String(), msg) {
+					t.Errorf("a run's tofu said %q:\n%s", msg, w.term.String())
+				}
+			}
+
+			calls := w.calls(t, "tofu.log")
+			runs := []struct {
+				name, id, record string
+				calls            []tofuCall
+			}{
+				{"run 1", p1.Run.ID, p1.Run.Dir, calls[:n1]},
+				{"run 2", id2, p2.Run.Dir, calls[n1:n2]},
+				{"cleanup of run 1", p1.Run.ID, w.runDir, calls[n2:]},
+			}
+			dataDirs := make([]string, len(runs))
+			for i, r := range runs {
+				var inits, destroys int
+				for _, c := range r.calls {
+					if c.Cmd == "protect" || c.Cmd == "signal" {
+						continue
+					}
+					env := map[string]string{}
+					for _, kv := range c.Env {
+						k, v, _ := strings.Cut(kv, "=")
+						env[k] = v
+					}
+					// The fake logs where the data directory really is (relative to -chdir, symlinks
+					// resolved), so neither a relative path nor a symlink hides a directory in the root.
+					dd := c.DataDir
+					switch {
+					case env["TF_DATA_DIR"] == "":
+						t.Errorf("%s: tofu %s without TF_DATA_DIR: want a data directory of its own", r.name, c.Cmd)
+					case within(dd, resolvedPath(dir)) || within(dd, resolvedPath(r.record)) || within(dd, resolvedPath(filepath.Dir(w.runDir))):
+						t.Errorf("%s: tofu %s with its data directory %s inside the probe root or the run record (the checkout)", r.name, c.Cmd, dd)
+					case dataDirs[i] == "":
+						dataDirs[i] = dd
+					case dataDirs[i] != dd:
+						t.Errorf("%s: tofu %s with TF_DATA_DIR %s, earlier calls %s: one data directory per run", r.name, c.Cmd, dd, dataDirs[i])
+					}
+					if got := env["TF_VAR_run_id"]; got != r.id {
+						t.Errorf("%s: tofu %s with TF_VAR_run_id %q, want %q", r.name, c.Cmd, got, r.id)
+					}
+					switch c.Cmd {
+					case "init":
+						inits++
+					case "destroy":
+						destroys++
+					}
+				}
+				if inits != 1 || destroys != 1 {
+					t.Errorf("%s: %d inits and %d destroys, want one each", r.name, inits, destroys)
+				}
+			}
+			if dataDirs[1] != "" && (dataDirs[1] == dataDirs[0] || dataDirs[1] == dataDirs[2]) {
+				t.Errorf("run 2 shares its data directory %s with run 1 or its cleanup", dataDirs[1])
+			}
+			unchanged("run 2 and the cleanup", before)
+		})
 	}
 }
 
