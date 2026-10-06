@@ -232,6 +232,16 @@ Independent test: V003, V008.
   - CI proof: execute the T003/T005/T007/T009 aggregate in T003 isolation. Independently reviewed YAML uses full-SHA Actions and digest-pinned approved host launcher/image, owned-branch push triggers, ephemeral hosted runner, contents-read outer fetch and 10-minute timeout; candidate archive is data, never host checkout/build/source/execution. Tokens stay outside the child. Retain tests green, an actual failing behavioral run and valid GitHub run/check on the foundation PR head. Verify executed workflow/launcher/image/publisher identities, exact candidate SHA, counts and evidence. Missing/foreign/stale/cancelled/skipped CI blocks merge, not review PR creation; no cloud/deployment/protected-environment authority. Creates both child targets, source manifest and the active V009 packet; full T010–T012 qualification remains open.
   - Evidence: `.local/evidence/001/t023-foundation-ci.json`; initial status `not-run`; retain pre-implementation red, green controls, independent source review, actual run/check IDs and exact head/source bindings, plus the V009 packet reference. Record C010.5/P4 as DEFERRED to KI-001, never passed or silently omitted.
 
+- [ ] T024 Write snapshot-admission tests for generated stacks in tools/cmd/lz-offline/ tests and fixtures
+  - Requirements: FR-001, FR-002; ADRs: 0002, 0008, 0011, 0021. Depends on: T003.
+  - Verify: `go -C tools test ./cmd/lz-offline -count=1`: a candidate holding `stacks/` (generated stacks, `stacks/deployments.yaml`, `stacks/_lz/*.tm.hcl`) and a root `terramate.tm.hcl` is snapshotted with those paths present; a hostile file under `stacks/` stays data with no effect on the entry's own targets; a root file outside the allowlist stays absent; symlink, size and depth limits apply under `stacks/` as elsewhere. The current entry omits `stacks/` and `terramate.tm.hcl`: behavioural red. Found 2026-10-06: without this no offline check sees the stacks spec 005 generates (005/T038).
+  - Evidence: `evidence/T024.md`; PR; initial status `not-run`.
+
+- [ ] T025 Admit `stacks/` and `terramate.tm.hcl` in tools/cmd/lz-offline/main.go and publish the next runtime revision
+  - Requirements: FR-001, FR-002, FR-010; ADRs: 0002, 0008, 0011, 0021. Depends on: T024, T023.
+  - Verify: `task test:offline-boundary; task test:runtime-image; task test:foundation-ci`: T024 controls green; the boundary suite unchanged and green; the entry rebuilt for the current runtime manifest; the runtime packed reproducibly by `lz-pack` as the next revision (two packs, identical digest), published to `ghcr.io/platformrelay/landingzone-for-ovhcloud/runtime` (D89), and `pipelines/github/foundation-source.json` plus the rendered workflow pinned to its manifest and layer digests; the previous revision stays published.
+  - Evidence: `evidence/T025.md`; PR (image digests, run id); initial status `not-run`.
+
 ## Dependencies & execution order
 
 The per-task Depends on fields are authoritative; local task references form a DAG.

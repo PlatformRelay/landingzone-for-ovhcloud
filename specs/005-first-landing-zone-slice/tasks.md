@@ -281,7 +281,7 @@ Independent test: V005, V006, V012.
   - Evidence: `evidence/T037.md`; PR; initial status `not-run`.
 
 - [ ] T038 [US3] Implement Terramate configuration in terramate.tm.hcl and stacks/_lz/*.tm.hcl with `task stacks:generate` and `task test:stack-plans`
-  - Requirements: FR-002, FR-007, FR-008, FR-013; ADRs: 0004, 0007, 0009. Depends on: T037; T010 result for P1–P3 (a refutation revises FR-008, V005 and V010 before this task closes, research R5).
+  - Requirements: FR-002, FR-007, FR-008, FR-013; ADRs: 0004, 0007, 0009. Depends on: T037, 001/T025; T010 result for P1–P3 (a refutation revises FR-008, V005 and V010 before this task closes, research R5).
   - Verify: `task test:stacks; task test:stack-plans`: T037 controls green; the growth and tenant-only fixtures generated into scratch plan every stack under mocks with fixture inputs (SC-002), the two growth runtime slots planning distinct bucket names (`lz-demo-dev-gra11-bkt-runtime-blue`, `…-green`) and `test:stack-plans` failing with `NAME_COLLISION` on the colliding fixture; `stacks:generate` is host-side, credential-free and unguarded; `test:stack-plans` reports zero discovery as `fail` until T039 (header exception).
   - Evidence: `evidence/T038.md`; PR; initial status `not-run`.
 
