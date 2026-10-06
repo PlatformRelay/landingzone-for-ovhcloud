@@ -123,8 +123,18 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task lint -- tests/live/probes/project-import` and the same for each probe root: L0 green; every root names its resources with the prefix `lzprobe-` and tag `lz:run-id`; no root declares a backend path inside the checkout (state goes to `accounts/<account>/state/probes/<run-id>/`, encrypted, via `lz-live probe`); `storage-iam` holds a probe tenant identity with the P9 allowlist (also used for the P26 binding call) and two tagged probe buckets for P25. The run sheet lists commands, expected observations, destroy step and the leftover listing per matrix kind. No apply here.
   - Evidence: `evidence/T008.md`; PR; initial status `not-run`.
 
+- [ ] T071 Write separate-clone guard tests in tools/internal/live/guard_test.go with fake git fixtures in tools/internal/live/testdata/
+  - Requirements: FR-011, SC-005; ADRs: 0008, 0009. Depends on: T053.
+  - Verify: `go -C tools test ./internal/live -run TestGuard -count=1`: every live verb is refused when the checkout is a linked worktree, when its git directory lists any linked worktree (`worktrees/` entries or `git worktree list` showing more than one), when it is a shared or alternates-backed repository, and when its path lies under the agent worktree root; a dedicated clone with a private `.git` and no linked worktrees is admitted; each refusal names the condition. The current guard admits a main checkout that has linked agent worktrees: behavioural red. Operator decision D92 (2026-10-06).
+  - Evidence: `evidence/T071.md`; PR; initial status `not-run`.
+
+- [ ] T072 Require a dedicated owner clone in tools/internal/live/guard.go
+  - Requirements: FR-011, SC-005; ADRs: 0008, 0009. Depends on: T071.
+  - Verify: `task test:live-lane`: T071 controls green with one killed mutant per refusal condition; the quickstart and the T009, T010, T044, T045, T049 command sheets name the dedicated clone (e.g. ~/Projects/PlatformRelay/lz-live) instead of the main checkout.
+  - Evidence: `evidence/T072.md`; PR; initial status `not-run`.
+
 - [ ] T009 Owner session: run read-only and plan-only probes P5, P10, P11, P18 and capture `ovhcloud` listings for every leftover kind in tests/fixtures/ovhcloud/
-  - Requirements: FR-004, FR-011; ADRs: 0005, 0008, 0024. Depends on: T008, T055; owner, `sandbox.env`, `ovhcloud` 0.15.0.
+  - Requirements: FR-004, FR-011; ADRs: 0005, 0008, 0024. Depends on: T008, T055, T072; owner, `sandbox.env`, `ovhcloud` 0.15.0.
   - Verify: Owner session through `task live:probe -- <root> --plan-only` (guard and child environment active): `tofu plan -generate-config-out` with an import block for the sandbox project (no apply) — pass when no replacement or order is planned, refute otherwise (→ `reference` mode in T039); `tofu plan` of alerting and quota roots; read-only `ovhcloud` (or fallback API) listings, each with version and command and ids sanitised, for every kind of the research R12 matrix: buckets per region, private networks, subnets per network, cloud project users, S3 credentials and S3 policies per user, OAuth2 clients, IAM policies, identity groups, project alerts, IAM resource tags on the project URN — and a paginated listing where the account has enough entries, else recorded as not observed. A failed listing is recorded as refuted for that kind with its fallback, not skipped. Also `GET /auth/details` with the admin credential (P26, account field present).
   - Evidence: `evidence/T009.md`; PR (commands, outcomes); initial status `not-run`.
 
