@@ -60,4 +60,8 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 - A test task proves its red can be satisfied with a throw-away implementation in a scratch copy (not committed); reviewers mutate it, and the implementation task may start from it (T003: `~/.local/share/ovh-lz/review/t003-impl-unit.go`).
 - An aggregate's control needs a member that fails exactly one aggregated clause, or an implementation ignoring that clause passes (T003).
 - Every new Go test must run under some Task target, or CI never enforces it; the implementation task wires it (T003→T004 `test:unit`).
+- Until T012 turns `test:slice` green, its exit code says nothing about the controls: read step 1's `ok` lines (the `TestUnit` controls run first) (T004).
+- `task test:unit -- <fixture dir>` through the entry is a cheap positive control (T004).
+- Every nested library/stage directory with `*.tf` is a slice member and needs its own `.tftest.hcl` (T004, applies from T012).
+- Queued for after T012: add `test:slice` to `pipelines/github/foundation-source.json` once it is green (changes the recorded runs; coordinator task line then).
 - Coordinator validations after T002 (2026-10-06): e91c86e (form-only spec-set edits) accepted; `verify:toolchain` stays mapped to 005/FR-011 so T047's "toolchain unchanged" gate keeps tracing.
