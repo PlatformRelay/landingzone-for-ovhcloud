@@ -17,10 +17,13 @@ const (
 	olderSHA = "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a" // reachable from origin/main, not HEAD
 )
 
-// guardWorld is a temporary host: the owner's main checkout, a linked worktree outside any
-// worktrees/ directory, another clone, and symlinks to them.
+// guardWorld is a temporary host (D92): the owner's dedicated live clone (main: private .git, no
+// linked worktrees), the owner's day-to-day checkout with a linked worktree outside any worktrees/
+// directory (shared), another clone, the agent worktree root holding an agent's clone, a clone
+// whose path only shares a prefix with that root, a clone made with --separate-git-dir, and
+// symlinks to them.
 type guardWorld struct {
-	root, main, wt, clone string
+	root, main, shared, wt, clone, agents, agentClone, sibling, sep, sepGit string
 }
 
 func newGuardWorld(t *testing.T) guardWorld {
@@ -30,20 +33,28 @@ func newGuardWorld(t *testing.T) guardWorld {
 		t.Fatal(err)
 	}
 	w := guardWorld{
-		root:  root,
-		main:  filepath.Join(root, "owner", "landingzone"),
-		wt:    filepath.Join(root, "elsewhere", "wt"),
-		clone: filepath.Join(root, "clone"),
+		root:       root,
+		main:       filepath.Join(root, "owner", "lz-live"),
+		shared:     filepath.Join(root, "owner", "landingzone"),
+		wt:         filepath.Join(root, "elsewhere", "wt"),
+		clone:      filepath.Join(root, "clone"),
+		agents:     filepath.Join(root, "worktrees"),
+		agentClone: filepath.Join(root, "worktrees", "landingzone", "agent-clone"),
+		sibling:    filepath.Join(root, "worktrees-owner", "lz-live"),
+		sep:        filepath.Join(root, "sep"),
+		sepGit:     filepath.Join(root, "sep.git"),
 	}
-	for _, d := range []string{w.main + "/.git/worktrees/wt", w.wt, w.clone + "/.git"} {
+	for _, d := range []string{w.main + "/.git/objects/info", w.shared + "/.git/worktrees/wt", w.wt, w.clone + "/.git",
+		w.agentClone + "/.git", w.sibling + "/.git", w.sep, w.sepGit} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(w.wt, ".git"), []byte("gitdir: "+w.main+"/.git/worktrees/wt\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for link, target := range map[string]string{"link-main": w.main, "link-wt": w.wt, "swapped": w.clone} {
+	// As git worktree add and clone --separate-git-dir write them (t071-gitprobe.sh).
+	writeFile(t, filepath.Join(w.wt, ".git"), "gitdir: "+w.shared+"/.git/worktrees/wt\n")
+	writeFile(t, filepath.Join(w.shared, ".git", "worktrees", "wt", "gitdir"), w.wt+"/.git\n")
+	writeFile(t, filepath.Join(w.sep, ".git"), "gitdir: "+w.sepGit+"\n")
+	for link, target := range map[string]string{"link-main": w.main, "link-wt": w.wt, "swapped": w.clone, "link-agents": w.agents} {
 		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
 			t.Fatal(err)
 		}
@@ -63,6 +74,8 @@ type guardCase struct {
 	brokenGit  bool        // every git call exits 128
 	liveMode   os.FileMode // live.env mode (default 0600)
 	markerErr  bool        // the marker cannot be examined (its parent is a file)
+	agentRoot  string      // LZ_AGENT_WORKTREE_ROOT in the default live.env (default: agents)
+	sharedRepo string      // core.sharedRepository in scenario main-shared-config (default "1")
 }
 
 func (w guardWorld) host(t *testing.T, c guardCase) Host {
@@ -74,7 +87,11 @@ func (w guardWorld) host(t *testing.T, c guardCase) Host {
 		return v
 	}
 	owner := or(c.owner, w.main)
-	git := fakeGitDir(t, or(c.scenario, "main-clean"), map[string]string{"@MAIN@": w.main, "@CLONE@": w.clone})
+	dir := or(c.dir, w.main)
+	git := fakeGitDir(t, or(c.scenario, "main-clean"), map[string]string{
+		"@MAIN@": w.main, "@CLONE@": w.clone, "@SHARED@": w.shared, "@SEPGIT@": w.sepGit,
+		"@ROOT@": w.root, "@DIR@": canonical(dir), "@SHAREDREPO@": or(c.sharedRepo, "1"),
+	})
 	if c.brokenGit {
 		if err := os.Remove(filepath.Join(filepath.Dir(git), "scenario.json")); err != nil {
 			t.Fatal(err)
@@ -89,7 +106,8 @@ func (w guardWorld) host(t *testing.T, c guardCase) Host {
 		if err != nil {
 			t.Fatal(err)
 		}
-		writeFile(t, liveEnv, strings.ReplaceAll(string(raw), "@OWNER@", owner))
+		text := strings.ReplaceAll(string(raw), "@OWNER@", owner)
+		writeFile(t, liveEnv, strings.ReplaceAll(text, "@AGENTS@", or(c.agentRoot, w.agents)))
 	default:
 		writeFile(t, liveEnv, c.liveEnv)
 	}
@@ -110,7 +128,7 @@ func (w guardWorld) host(t *testing.T, c guardCase) Host {
 	}
 	env := map[string]string{"LZ_OFFLINE": c.offlineEnv}
 	return Host{
-		Dir:           or(c.dir, w.main),
+		Dir:           dir,
 		ReviewedSHA:   or(c.reviewed, headSHA),
 		LiveEnv:       liveEnv,
 		OfflineMarker: marker,
@@ -129,9 +147,14 @@ func writeFile(t *testing.T, path, content string) {
 func TestGuardAdmitsOwnerCheckout(t *testing.T) {
 	w := newGuardWorld(t)
 	for name, c := range map[string]guardCase{
-		// Ignored files (.terraform/, .local/) are present in every scenario.
-		"main checkout":             {},
-		"main checkout via symlink": {dir: filepath.Join(w.root, "link-main")},
+		// Ignored files (.terraform/, .local/) are present in every scenario. D92: the owner's
+		// checkout is a dedicated clone with a private .git and no linked worktrees.
+		"dedicated clone":             {},
+		"dedicated clone via symlink": {dir: filepath.Join(w.root, "link-main")},
+		// worktrees-owner/ shares only a name prefix with the agent root worktrees/.
+		"dedicated clone beside the agent root": {dir: w.sibling, owner: w.sibling, scenario: "dir-clean"},
+		// A root that does not exist (no agent worktree yet) cannot hold the checkout.
+		"agent root absent on disk": {agentRoot: filepath.Join(w.root, "no-worktrees-yet")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := w.host(t, c)
@@ -194,6 +217,136 @@ func TestGuardRefuses(t *testing.T) {
 			err := w.host(t, r.c).Check()
 			assertRefused(t, err, r.want)
 		})
+	}
+}
+
+// TestGuardSeparateClone (T071, operator decision D92): live runs start only from a dedicated
+// clone. An agent worktree shares the owner's .git, so every guarded verb refuses a checkout that
+// is a linked worktree, whose git dir lists a linked worktree, whose objects or git dir are shared,
+// or that lies under the agent worktree root, before any credential loads. Each row fails exactly
+// one of these clauses; the fixtures follow host git 2.53.0 (t071-gitprobe.sh, t071-gitprobe2.sh).
+func TestGuardSeparateClone(t *testing.T) {
+	rows := []struct {
+		name string
+		c    func(w guardWorld) guardCase
+		prep func(t *testing.T, w guardWorld)
+		want []string
+	}{
+		{name: "linked-worktree", want: []string{CondWorktree},
+			c: func(w guardWorld) guardCase { return guardCase{dir: w.wt, owner: w.wt, scenario: "linked-worktree"} }},
+		// The behavioural red of D92: the owner's main checkout, clean, with an agent's linked
+		// worktree registered in its .git/worktrees/ (listed by git worktree list too).
+		{name: "main-with-linked-worktrees", want: []string{CondLinked},
+			c: func(w guardWorld) guardCase { return guardCase{dir: w.shared, owner: w.shared, scenario: "dir-clean"} }},
+		// A worktrees/ entry without a gitdir file is not listed by git worktree list
+		// (t071-gitprobe2.sh): only the directory says it is there.
+		{name: "worktrees-entry-unlisted", want: []string{CondLinked},
+			prep: func(t *testing.T, w guardWorld) { mkdir(t, filepath.Join(w.main, ".git", "worktrees", "half")) }},
+		// A worktree whose directory was removed without git worktree remove: listed as prunable.
+		{name: "worktrees-entry-prunable", want: []string{CondLinked},
+			prep: func(t *testing.T, w guardWorld) {
+				mkdir(t, filepath.Join(w.main, ".git", "worktrees", "gone"))
+				writeFile(t, filepath.Join(w.main, ".git", "worktrees", "gone", "gitdir"), w.root+"/gone/.git\n")
+			}},
+		// A worktrees/ that cannot be listed is not proof that it is empty.
+		{name: "worktrees-not-listable", want: []string{CondLinked, CondShared},
+			prep: func(t *testing.T, w guardWorld) { writeFile(t, filepath.Join(w.main, ".git", "worktrees"), "") }},
+		// git worktree list shows a second worktree although no worktrees/ entry is on disk.
+		{name: "worktree-list-two", want: []string{CondLinked},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-listed-worktree"} }},
+		// A failing git worktree list is a refusal, never an admission.
+		{name: "worktree-list-fails", want: []string{CondLinked},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-worktree-fails"} }},
+		// clone --shared and clone --reference write objects/info/alternates (t071-gitprobe.sh).
+		{name: "alternates", want: []string{CondShared},
+			prep: func(t *testing.T, w guardWorld) {
+				writeFile(t, filepath.Join(w.main, ".git", "objects", "info", "alternates"), w.clone+"/.git/objects\n")
+			}},
+		// init --shared=group stores core.sharedRepository=1 (t071-gitprobe.sh).
+		{name: "shared-repository-config", want: []string{CondShared},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-shared-config"} },
+			prep: func(t *testing.T, w guardWorld) {
+				writeFile(t, filepath.Join(w.main, ".git", "config"), "[core]\n\tsharedRepository = 1\n")
+			}},
+		// Other values git accepts for a shared repository (git-config(1): group/true, all/world/
+		// everybody, an octal mode; init --shared=all stores 2) — review round 2.
+		{name: "shared-repository-all", want: []string{CondShared},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-shared-config", sharedRepo: "2"} }},
+		{name: "shared-repository-group-word", want: []string{CondShared},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-shared-config", sharedRepo: "group"} }},
+		{name: "shared-repository-octal", want: []string{CondShared},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-shared-config", sharedRepo: "0660"} }},
+		// .git is a symlink to another repository's git dir, so two checkouts share one .git;
+		// rev-parse prints the resolved git dir and the checkout as top level (t071-gitprobe3.sh)
+		// (review round 2).
+		{name: "git-dir-symlink", want: []string{CondShared, CondWorktree},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "separate-git-dir"} },
+			prep: func(t *testing.T, w guardWorld) {
+				if err := os.RemoveAll(filepath.Join(w.main, ".git")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(w.sepGit, filepath.Join(w.main, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		// clone --separate-git-dir: .git is a file and the git dir lives outside the checkout, so
+		// the .git is not private to it.
+		{name: "separate-git-dir", want: []string{CondShared, CondWorktree},
+			c: func(w guardWorld) guardCase { return guardCase{dir: w.sep, owner: w.sep, scenario: "separate-git-dir"} }},
+		// An agent's own clone (private .git, no linked worktrees) under the agent worktree root.
+		{name: "under-agent-root", want: []string{CondAgentRoot},
+			c: func(w guardWorld) guardCase {
+				return guardCase{dir: w.agentClone, owner: w.agentClone, scenario: "dir-clean"}
+			}},
+		{name: "agent-root-via-symlink", want: []string{CondAgentRoot},
+			c: func(w guardWorld) guardCase {
+				return guardCase{dir: w.agentClone, owner: w.agentClone, scenario: "dir-clean", agentRoot: filepath.Join(w.root, "link-agents")}
+			}},
+		{name: "agent-root-is-checkout", want: []string{CondAgentRoot},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: w.main} }},
+		{name: "agent-root-above-checkout-via-dotdot", want: []string{CondAgentRoot},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: w.agents + "/../owner"} }},
+		// Every checkout lies under /: a root+"/" prefix test reads "//" and admits it (review r1).
+		{name: "agent-root-is-filesystem-root", want: []string{CondAgentRoot, CondLiveEnv},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: "/"} }},
+		// Fail closed: without an absolute root the clause cannot be judged.
+		{name: "agent-root-missing", want: []string{CondLiveEnv, CondAgentRoot},
+			c: func(w guardWorld) guardCase { return guardCase{liveEnv: "LZ_OWNER_CHECKOUT=" + w.main + "\n"} }},
+		{name: "agent-root-empty", want: []string{CondLiveEnv, CondAgentRoot},
+			c: func(w guardWorld) guardCase {
+				return guardCase{liveEnv: "LZ_OWNER_CHECKOUT=" + w.main + "\nLZ_AGENT_WORKTREE_ROOT=\n"}
+			}},
+		{name: "agent-root-relative", want: []string{CondLiveEnv, CondAgentRoot},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: "worktrees"} }},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			w := newGuardWorld(t)
+			if r.prep != nil {
+				r.prep(t, w)
+			}
+			c := guardCase{}
+			if r.c != nil {
+				c = r.c(w)
+			}
+			for _, verb := range guardedVerbs {
+				t.Run(verb, func(t *testing.T) {
+					loaded := false
+					err := Run(verb, w.host(t, c), func() error { loaded = true; return nil })
+					if loaded {
+						t.Fatal("credentials loaded on a refused host")
+					}
+					assertRefused(t, err, r.want)
+				})
+			}
+		})
+	}
+}
+
+func mkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
 	}
 }
 

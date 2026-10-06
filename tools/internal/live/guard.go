@@ -24,12 +24,16 @@ const (
 	CondLiveEnv  = "live-env" // live.env missing or without LZ_OWNER_CHECKOUT
 	CondCheckout = "checkout" // canonical working directory is not LZ_OWNER_CHECKOUT
 	CondWorktree = "worktree" // git dir differs from the common git dir (linked worktree)
-	CondDirty    = "dirty"    // git status --porcelain not empty (ignored files excepted)
-	CondHead     = "head"     // HEAD differs from --reviewed-sha
-	CondOrigin   = "origin"   // HEAD is not an ancestor of origin/main
-	CondAccount  = "account"  // GET /auth/details account differs from account.env
-	CondEndpoint = "endpoint" // credential endpoint differs from account.env
-	CondOrg      = "org"      // manifest org differs from account.env
+	// D92: live runs start only from a dedicated clone. Named here by T071; enforced by T072.
+	CondLinked    = "linked-worktrees" // the git dir lists a linked worktree (worktrees/ entry or worktree list)
+	CondShared    = "shared"           // alternates, core.sharedRepository, or a git dir outside the checkout
+	CondAgentRoot = "agent-root"       // checkout at or under LZ_AGENT_WORKTREE_ROOT
+	CondDirty     = "dirty"            // git status --porcelain not empty (ignored files excepted)
+	CondHead      = "head"             // HEAD differs from --reviewed-sha
+	CondOrigin    = "origin"           // HEAD is not an ancestor of origin/main
+	CondAccount   = "account"          // GET /auth/details account differs from account.env
+	CondEndpoint  = "endpoint"         // credential endpoint differs from account.env
+	CondOrg       = "org"              // manifest org differs from account.env
 )
 
 // Refusal is a guard refusal; the process exits with RefusalExit.

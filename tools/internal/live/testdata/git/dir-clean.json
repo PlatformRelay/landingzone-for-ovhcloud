@@ -1,6 +1,6 @@
 {
-  "git_dir": "@SHARED@/.git/worktrees/wt",
-  "common_dir": "@SHARED@/.git",
+  "git_dir": "@DIR@/.git",
+  "common_dir": "@DIR@/.git",
   "head": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
   "modified": [],
   "untracked": [],

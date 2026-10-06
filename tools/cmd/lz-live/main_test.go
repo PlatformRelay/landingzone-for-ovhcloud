@@ -54,6 +54,14 @@ func fakeGit(args []string) int {
 	case len(args) > 0 && args[0] == "ls-files":
 		fmt.Print("H README.md\x00")
 		return 0
+	case len(args) == 3 && args[0] == "worktree" && args[1] == "list" && args[2] == "--porcelain":
+		// A dedicated clone (D92): one worktree, no linked ones.
+		fmt.Printf("worktree %s\nHEAD %s\nbranch refs/heads/main\n\n", cwd, fakeHead)
+		return 0
+	case len(args) > 1 && args[0] == "config" && (args[1] == "--get" || len(args) > 2 && args[1] == "--local" && args[2] == "--get"):
+		return 1 // unset, as git config --get answers for a key the repository does not set
+	case len(args) > 1 && args[0] == "config" && (args[len(args)-1] == "--list" || args[len(args)-1] == "-l"):
+		return 0 // no repository configuration
 	case len(args) > 0 && args[0] == "rev-parse":
 		for _, a := range args[1:] {
 			switch a {
@@ -105,7 +113,7 @@ func newWorld(t *testing.T, withLiveEnv bool) world {
 		if err := os.MkdirAll(cfg, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(cfg, "live.env"), []byte("LZ_OWNER_CHECKOUT="+w.checkout+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(cfg, "live.env"), []byte("LZ_OWNER_CHECKOUT="+w.checkout+"\nLZ_AGENT_WORKTREE_ROOT="+filepath.Join(base, "worktrees")+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
