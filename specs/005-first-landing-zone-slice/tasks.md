@@ -138,7 +138,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: a second `lz-live probe` of the same root under a new run id, and `--cleanup <old run-id>` after a later run, both initialise without "Backend configuration changed" and without deleting anything in the checkout (each run uses its own `TF_DATA_DIR` outside the checkout); the child receives `TF_VAR_run_id` and `TF_VAR_project_id`; `project-import` and `quota` without `--plan-only` are refused before init; the probe roots' `tofu test` controls run under `task test:live-lane`. The current runner re-initialises in place: behavioural red. Found in T008 (evidence/T008.md).
   - Evidence: `evidence/T073.md`; PR; initial status `not-run`.
 
-- [ ] T074 Implement per-run `TF_DATA_DIR`, run and project variables and plan-only roots in tools/internal/live/runner.go and tools/cmd/lz-live/
+- [x] T074 Implement per-run `TF_DATA_DIR`, run and project variables and plan-only roots in tools/internal/live/runner.go and tools/cmd/lz-live/ — closed 2026-10-07, evidence: evidence/T074.md
   - Requirements: FR-011, FR-013; ADRs: 0008, 0009. Depends on: T073.
   - Verify: `task test:live-lane`: T073 controls green with one killed mutant per clause; the run sheet in tests/live/probes/README.md drops the `.terraform` removal workaround and the probe roots read `run_id`/`project_id` from variables where T008 derived them.
   - Evidence: `evidence/T074.md`; PR; initial status `not-run`.

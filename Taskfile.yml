@@ -82,6 +82,12 @@ tasks:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
       - go -C tools test -count=1 ./internal/live ./cmd/lz-live
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/alerting
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/iam
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/network
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/quota
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/state-backend
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam
 
   # Host target: the owner on the maintainer host only, never inside lz-offline
   # and never run by an agent (it loads ~/.config/ovh-lz/ credentials and calls

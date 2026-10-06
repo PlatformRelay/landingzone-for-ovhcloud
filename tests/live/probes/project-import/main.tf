@@ -22,7 +22,7 @@ module "project" {
 }
 
 output "project_id" {
-  description = "Id of the project the import targets: must equal LZ_PROJECT_ID_STATE in account.env."
+  description = "Id of the project the import targets: project_id (LZ_PROJECT_ID_STATE in account.env)."
   value       = local.project.service_name
 }
 

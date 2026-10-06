@@ -11,7 +11,8 @@ destroy-on-exit, redaction, leftover check). No agent runs anything here.
   *Owner session*): a plain clone, clean, `HEAD` at the reviewed SHA on `origin/main`;
   `~/.config/ovh-lz/live.env` with `LZ_OWNER_CHECKOUT` and `LZ_AGENT_WORKTREE_ROOT`;
   `accounts/<account>/account.env` with `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`,
-  `LZ_ADMIN_POLICY_ID` and the `LZ_PROJECT_ID_*` the leftover check lists.
+  `LZ_ADMIN_POLICY_ID`, `LZ_PROJECT_ID_STATE` (the probes' project; without it `lz-live probe`
+  stops before any tofu call) and the other `LZ_PROJECT_ID_*` the leftover check lists.
 - `MISE_ENV=live mise install` (OpenTofu 1.13.0), `ovhcloud` 0.15.0 on `PATH` (without it every
   leftover check fails closed).
 - T010 only: T065 has qualified the leftover parser on T009's captured listings (research R12).
@@ -36,19 +37,18 @@ task's evidence file, never the record itself (it may hold ids and the account e
   `lz-live` places the file; the `state_path` validation is a shape check on top (a path not of
   the form `…/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/<root>.tfstate`, or another
   root's file, fails the plan). No root holds a backend path, a credential or a `*.tfvars`.
-- **Before every run and every `--cleanup`: `rm -rf tests/live/probes/<root>/.terraform`.** The
-  backend path changes with each run id, and `lz-live` initialises without `-reconfigure` in the
-  root directory, where `.terraform/` keeps the previous run's backend: the second run of a root
-  (T009 then T010 for `alerting`, any rerun, a cleanup after a later run) otherwise fails `init`
-  with "Backend configuration changed" (observed offline with a provider-free root, 2026-10-06).
-  `.terraform/` holds no state (that is under `~/.config/ovh-lz/`) and is gitignored, so removing
-  it keeps the clone clean.
-- Run id: the name of the state file's directory (`lz-live` passes no `TF_VAR_run_id`).
-- Project: the account's only public cloud project (`data "ovh_cloud_projects"` + `one()`; several
-  projects fail the plan). The leftover check lists the `LZ_PROJECT_ID_*` of `account.env`
-  instead; with exactly one project on the account, any valid id there is that project, and an
-  invalid one fails the listing (fail closed). Still compare the plan's project id with
-  `LZ_PROJECT_ID_STATE` after T009's first run.
+- tofu's data directory: `lz-live` gives every run, and every `--cleanup`, its own `TF_DATA_DIR`
+  in the run's scratch HOME, removed when the run ends. That HOME is created under `$TMPDIR`
+  (default `/tmp`): keep `TMPDIR` unset or outside the clone, or it lands in the clone. A root's backend path
+  changes with each run id, so a second run of a root (T009 then T010 for `alerting`, any rerun,
+  a cleanup after a later run) initialises afresh instead of failing on "Backend configuration
+  changed", and nothing is written into `tests/live/probes/<root>/`.
+- Run id: `TF_VAR_run_id`, set by `lz-live`; the root refuses a run id other than the name of the
+  state file's directory.
+- Project: `TF_VAR_project_id`, set by `lz-live` from `LZ_PROJECT_ID_STATE` of `account.env`; the
+  root takes that project from `data "ovh_cloud_projects"`, and the plan fails when the account
+  has no project with that id. The leftover check lists every `LZ_PROJECT_ID_*` of
+  `account.env`.
 - Names: `lzprobe-<root>-<run-id>` (buckets: lowercased, P21). Tags: `lz:run-id = <run-id>` on
   every resource that takes tags (buckets); the project URN gets `lzprobe-p15:run-id`. Resources
   without a name or tags (alert, quota) are matched by the id the inventory recorded.
@@ -58,15 +58,15 @@ task's evidence file, never the record itself (it may hold ids and the account e
 
 ## Runs
 
-Every command below, and every retry of it, is preceded by
-`rm -rf tests/live/probes/<root>/.terraform` (see *What every root shares*).
+`project-import` and `quota` run only with `--plan-only`: without it `lz-live probe` refuses them
+(exit 3, naming `--plan-only`) before any credential is read or any tofu call is made.
 
 | # | Root | Premises | Task | Command | Expected observation (pass) | Refuted when | Destroy step |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `project-import` | P5, P6 | T009 | `task live:probe -- --reviewed-sha $S tests/live/probes/project-import --plan-only` | plan: `module.project.ovh_cloud_project.this` *will be imported*, id = the sandbox project; no `must be replaced`, no create, no order; in-place changes allowed and recorded attribute by attribute (expected: `deletion_protection`, `plan`) | the plan fails on `prevent_destroy` (a replacement) or plans a create; then `reference` mode in T039 (research R7) | none (plan only: no state is written, the probe files go with the run) — **never run without `--plan-only`**: an apply would import the retained project into probe state and change it in place, and the destroy-on-exit and every `--cleanup` would then fail on `prevent_destroy` (the project survives; stop and report it to the coordinator, do not edit the probe state by hand) |
-| 2 | `alerting` | P10 | T009 | `rm -rf tests/live/probes/alerting/.terraform`, then `task live:probe -- --reviewed-sha $S tests/live/probes/alerting --plan-only` | plan: one `ovh_cloud_project_alerting.probe` to create on the sandbox project | plan error (e.g. alerting not offered on a trial project) | none |
+| 2 | `alerting` | P10 | T009 | `task live:probe -- --reviewed-sha $S tests/live/probes/alerting --plan-only` | plan: one `ovh_cloud_project_alerting.probe` to create on the sandbox project | plan error (e.g. alerting not offered on a trial project) | none |
 | 3 | `quota` | P11 | T009 | `task live:probe -- --reviewed-sha $S tests/live/probes/quota --plan-only` | plan: `ovh_cloud_quota.probe` with `prevent_automatic_quota_upgrade = true` and the project's current regions/profiles unchanged; output `current_prevent_automatic_quota_upgrade` recorded | plan error, or a plan that changes a region profile | none — **never run without `--plan-only`** (singleton; destroy semantics UNVERIFIED) |
-| 4 | `alerting` | P10 | T010 | `rm -rf tests/live/probes/alerting/.terraform` (it holds run 2's backend), then `task live:probe -- --reviewed-sha $S tests/live/probes/alerting` | apply creates the alert; destroy removes it; `GET /cloud/project/<p>/alerting` no longer lists its id | apply or destroy error | destroy-on-exit (automatic) |
+| 4 | `alerting` | P10 | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/alerting` | apply creates the alert; destroy removes it; `GET /cloud/project/<p>/alerting` no longer lists its id | apply or destroy error | destroy-on-exit (automatic) |
 | 5 | `network` | P12 | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/network` | network `lzprobe-network-<run-id>` in GRA11 and subnet `10.250.0.0/24` (no gateway, DHCP) created without any vRack step and destroyed; no line item on the bill (P12 cost) | apply asks for a vRack or a gateway; a charge appears | destroy-on-exit |
 | 6 | `iam` | P7, P8 (object), P15 (URN) | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/iam` | client `lzprobe-iam-<run-id>` and policy of the same name created by the admin and deleted on destroy (P7); the policy accepts the client's `identity` URN (P8, object half); the project URN accepts the key `lzprobe-p15:run-id` (P15); after destroy that key is gone and other project tags are unchanged | 403 on client or policy create (P7: extend the admin policy, R13); policy rejects the identity URN; tag key refused | destroy-on-exit |
 | 7 | `state-backend` | P13, P14 (bucket), P15 (bucket), P1–P3 infrastructure | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/state-backend` | versioned bucket `lzprobe-state-<run-id>` in GRA with tag `lz:run-id` (P15 bucket half); S3 user `lzprobe-state-<run-id>` with one credential and a bucket-scoped S3 policy; all destroyed, bucket included (P14, empty bucket) | tag key refused; versioning not enabled; destroy leaves the bucket | destroy-on-exit |
@@ -80,7 +80,6 @@ this order (cheapest and least privileged first). Record the approximate cost af
 **A failed destroy** (summary `outcome: fail`, error naming `destroy`): in the same session,
 
 ```sh
-rm -rf tests/live/probes/<root>/.terraform   # the root that run used
 task live:probe -- --reviewed-sha $S --cleanup <run-id>
 ```
 
