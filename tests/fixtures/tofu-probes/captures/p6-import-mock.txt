@@ -1,0 +1,117 @@
+### tofu version
+OpenTofu v1.13.0
+on linux_amd64
+### tofu test -no-color -filter=apply.tftest.hcl
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!! OPENTOFU CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+OpenTofu crashed! This is always indicative of a bug within OpenTofu.
+Please report the crash with OpenTofu[1] so that we can fix this.
+
+When reporting bugs, please include your OpenTofu version, the stack trace
+shown below, and any additional information which may help replicate the issue.
+
+[1]: https://github.com/opentofu/opentofu/issues
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!! OPENTOFU CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Walking vertex module.project.ovh_cloud_project.this - *tofu.NodePlannableResourceInstance
+
+Importing is not supported in testing context. providerForTest must not be used to call ImportResourceState
+goroutine 220 [running]:
+runtime/debug.Stack()
+	runtime/debug/stack.go:26 +0x5e
+github.com/opentofu/opentofu/internal/logging.panicHandler({0x68c6940, 0x3b277d0}, {0x2f42898fe800, 0x38f, 0x400}, {0x2f4289612900, 0x5a}, 0x2f4289afd260)
+	github.com/opentofu/opentofu/internal/logging/panic.go:113 +0x173
+github.com/opentofu/opentofu/internal/logging.PanicHandlerWithTraceHandlerFn.func1({0x2f4289612900, 0x5a}, 0x2f4289afd260)
+	github.com/opentofu/opentofu/internal/logging/panic.go:92 +0xb5
+panic({0x68c6940?, 0x3b277d0?})
+	runtime/panic.go:859 +0x125
+github.com/opentofu/opentofu/internal/tofu.providerForTest.ImportResourceState(...)
+	github.com/opentofu/opentofu/internal/tofu/provider_for_test_framework.go:167
+github.com/opentofu/opentofu/internal/tofu.(*NodePlannableResourceInstance).importState(_, {_, _}, {_, _}, {{}, {0x2f4289afcc40, 0x1, 0x1}, {{}, ...}}, ...)
+	github.com/opentofu/opentofu/internal/tofu/node_resource_plan_instance.go:582 +0x3c4
+github.com/opentofu/opentofu/internal/tofu.(*NodePlannableResourceInstance).managedResourceExecute(0x2f4289952dd0, {0x6ee67c8, 0x2f4289aff560}, {0x6ef80a8, 0x2f42892dbb30})
+	github.com/opentofu/opentofu/internal/tofu/node_resource_plan_instance.go:293 +0x86c
+github.com/opentofu/opentofu/internal/tofu.(*NodePlannableResourceInstance).Execute(0x2f4289952dd0, {0x6ee67c8, 0x2f4289749aa0}, {0x6ef80a8, 0x2f42892dbb30}, 0x60?)
+	github.com/opentofu/opentofu/internal/tofu/node_resource_plan_instance.go:123 +0xa48
+github.com/opentofu/opentofu/internal/tofu.(*ContextGraphWalker).Execute(0x2f4288991b00, {0x6ee67c8, 0x2f4289749aa0}, {0x6ef80a8, 0x2f42892dbb30}, {0x747880b63df8, 0x2f4289952dd0})
+	github.com/opentofu/opentofu/internal/tofu/graph_walk_context.go:140 +0xdc
+github.com/opentofu/opentofu/internal/tofu.(*Graph).walk.func2({0x64ac198, 0x2f4289952dd0})
+	github.com/opentofu/opentofu/internal/tofu/graph.go:94 +0x44a
+github.com/opentofu/opentofu/internal/dag.(*Walker).walkVertex(0x2f42893ff560, {0x64ac198, 0x2f4289952dd0}, 0x2f4289af67c0)
+	github.com/opentofu/opentofu/internal/dag/walk.go:386 +0x2a5
+created by github.com/opentofu/opentofu/internal/dag.(*Walker).Update in goroutine 192
+	github.com/opentofu/opentofu/internal/dag/walk.go:309 +0x1070
+With go-routine called from:
+goroutine 192 [running]:
+runtime/debug.Stack()
+	runtime/debug/stack.go:26 +0x5e
+github.com/opentofu/opentofu/internal/logging.PanicHandlerWithTraceHandlerFn(...)
+	github.com/opentofu/opentofu/internal/logging/panic.go:82
+github.com/opentofu/opentofu/internal/tofu.(*Graph).walk(0x2f4289ad4900, {0x6ee67c8, 0x2f4289749aa0}, {0x6ee77f8, 0x2f4288991b00}, 0x0)
+	github.com/opentofu/opentofu/internal/tofu/graph.go:51 +0x52
+github.com/opentofu/opentofu/internal/tofu.(*Graph).walk.func2({0x64aeff8, 0x2f4289d190e0})
+	github.com/opentofu/opentofu/internal/tofu/graph.go:135 +0x865
+github.com/opentofu/opentofu/internal/dag.(*Walker).walkVertex(0x2f4288961440, {0x64aeff8, 0x2f4289d190e0}, 0x2f428976a500)
+	github.com/opentofu/opentofu/internal/dag/walk.go:386 +0x2a5
+created by github.com/opentofu/opentofu/internal/dag.(*Walker).Update in goroutine 177
+	github.com/opentofu/opentofu/internal/dag/walk.go:309 +0x1070
+LZ_EXIT=11
+### tofu test -no-color -filter=plan.tftest.hcl
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!! OPENTOFU CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+OpenTofu crashed! This is always indicative of a bug within OpenTofu.
+Please report the crash with OpenTofu[1] so that we can fix this.
+
+When reporting bugs, please include your OpenTofu version, the stack trace
+shown below, and any additional information which may help replicate the issue.
+
+[1]: https://github.com/opentofu/opentofu/issues
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!! OPENTOFU CRASH !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Walking vertex module.project.ovh_cloud_project.this - *tofu.NodePlannableResourceInstance
+
+Importing is not supported in testing context. providerForTest must not be used to call ImportResourceState
+goroutine 162 [running]:
+runtime/debug.Stack()
+	runtime/debug/stack.go:26 +0x5e
+github.com/opentofu/opentofu/internal/logging.panicHandler({0x68c6940, 0x3b277d0}, {0x10b6c91a0c00, 0x38e, 0x400}, {0x10b6c8162780, 0x5a}, 0x10b6c948cb00)
+	github.com/opentofu/opentofu/internal/logging/panic.go:113 +0x173
+github.com/opentofu/opentofu/internal/logging.PanicHandlerWithTraceHandlerFn.func1({0x10b6c8162780, 0x5a}, 0x10b6c948cb00)
+	github.com/opentofu/opentofu/internal/logging/panic.go:92 +0xb5
+panic({0x68c6940?, 0x3b277d0?})
+	runtime/panic.go:859 +0x125
+github.com/opentofu/opentofu/internal/tofu.providerForTest.ImportResourceState(...)
+	github.com/opentofu/opentofu/internal/tofu/provider_for_test_framework.go:167
+github.com/opentofu/opentofu/internal/tofu.(*NodePlannableResourceInstance).importState(_, {_, _}, {_, _}, {{}, {0x10b6c948c500, 0x1, 0x1}, {{}, ...}}, ...)
+	github.com/opentofu/opentofu/internal/tofu/node_resource_plan_instance.go:582 +0x3c4
+github.com/opentofu/opentofu/internal/tofu.(*NodePlannableResourceInstance).managedResourceExecute(0x10b6c91ed110, {0x6ee67c8, 0x10b6c94a5530}, {0x6ef80a8, 0x10b6c91c2a50})
+	github.com/opentofu/opentofu/internal/tofu/node_resource_plan_instance.go:293 +0x86c
+github.com/opentofu/opentofu/internal/tofu.(*NodePlannableResourceInstance).Execute(0x10b6c91ed110, {0x6ee67c8, 0x10b6c9280c60}, {0x6ef80a8, 0x10b6c91c2a50}, 0x60?)
+	github.com/opentofu/opentofu/internal/tofu/node_resource_plan_instance.go:123 +0xa48
+github.com/opentofu/opentofu/internal/tofu.(*ContextGraphWalker).Execute(0x10b6c7f41400, {0x6ee67c8, 0x10b6c9280c60}, {0x6ef80a8, 0x10b6c91c2a50}, {0x737ec3c78838, 0x10b6c91ed110})
+	github.com/opentofu/opentofu/internal/tofu/graph_walk_context.go:140 +0xdc
+github.com/opentofu/opentofu/internal/tofu.(*Graph).walk.func2({0x64ac198, 0x10b6c91ed110})
+	github.com/opentofu/opentofu/internal/tofu/graph.go:94 +0x44a
+github.com/opentofu/opentofu/internal/dag.(*Walker).walkVertex(0x10b6c91eb380, {0x64ac198, 0x10b6c91ed110}, 0x10b6c9486bc0)
+	github.com/opentofu/opentofu/internal/dag/walk.go:386 +0x2a5
+created by github.com/opentofu/opentofu/internal/dag.(*Walker).Update in goroutine 145
+	github.com/opentofu/opentofu/internal/dag/walk.go:309 +0x1070
+With go-routine called from:
+goroutine 145 [running]:
+runtime/debug.Stack()
+	runtime/debug/stack.go:26 +0x5e
+github.com/opentofu/opentofu/internal/logging.PanicHandlerWithTraceHandlerFn(...)
+	github.com/opentofu/opentofu/internal/logging/panic.go:82
+github.com/opentofu/opentofu/internal/tofu.(*Graph).walk(0x10b6c91f4d40, {0x6ee67c8, 0x10b6c9280c60}, {0x6ee77f8, 0x10b6c7f41400}, 0x0)
+	github.com/opentofu/opentofu/internal/tofu/graph.go:51 +0x52
+github.com/opentofu/opentofu/internal/tofu.(*Graph).walk.func2({0x64aeff8, 0x10b6c929ede0})
+	github.com/opentofu/opentofu/internal/tofu/graph.go:135 +0x865
+github.com/opentofu/opentofu/internal/dag.(*Walker).walkVertex(0x10b6c929fe00, {0x64aeff8, 0x10b6c929ede0}, 0x10b6c92bb8c0)
+	github.com/opentofu/opentofu/internal/dag/walk.go:386 +0x2a5
+created by github.com/opentofu/opentofu/internal/dag.(*Walker).Update in goroutine 24
+	github.com/opentofu/opentofu/internal/dag/walk.go:309 +0x1070
+LZ_EXIT=11

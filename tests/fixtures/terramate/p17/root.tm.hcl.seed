@@ -1,0 +1,12 @@
+# P17 (005 T007) seed: copied to <scratch>/terramate.tm.hcl by `task capture:p17-terramate`.
+# Kept under a non-.tm.hcl name so a Terramate project at the repository root never loads it.
+# Without git, `required_version` is what makes this directory the project root (the capture
+# runs root-no-version.tm.hcl.seed first as the control).
+terramate {
+  required_version = "0.17.3"
+  config {
+    git {
+      default_branch = "main"
+    }
+  }
+}

@@ -134,6 +134,112 @@ tasks:
   capture:tflint-malformed:
     cmds: [{task: capture-tflint, vars: {CASE: malformed}}]
 
+  # Premise captures (005 T007); tests/fixtures/tofu-probes/capture.sh records their stdout.
+  # JSON captures print exactly the pinned tool's document; transcripts mark each step with
+  # `### <command>` and its exit with `LZ_EXIT=<status>`. State and scratch trees stay in /tmp.
+  capture:p4-encryption:
+    dir: tests/fixtures/tofu-probes/p4-encryption
+    env:
+      TF_VAR_state_path: /tmp/lz-p4/state/terraform.tfstate
+      TF_VAR_passphrase: p4-fixture-passphrase-not-a-secret
+    cmds:
+      - |
+        echo '### tofu version'
+        /tcb/tofu version
+        mkdir -p /tmp/lz-p4/state
+        echo '### tofu init -input=false -no-color (TF_VAR_state_path, TF_VAR_passphrase)'
+        status=0; /tcb/tofu init -input=false -no-color 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### tofu apply -auto-approve -input=false -no-color'
+        status=0; /tcb/tofu apply -auto-approve -input=false -no-color 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### state files in the root directory (.terraform/terraform.tfstate is the backend cache)'
+        find . -name '*.tfstate*' | sort
+        echo '### backend cache holding the variable-derived state path'
+        echo "state_path=$(grep -c -F '/tmp/lz-p4/state/terraform.tfstate' .terraform/terraform.tfstate)"
+        echo '### files holding the passphrase (root directory and state directory)'
+        grep -r -l -F "$TF_VAR_passphrase" . /tmp/lz-p4 | sort
+        echo "passphrase_files=$(grep -r -l -F "$TF_VAR_passphrase" . /tmp/lz-p4 | wc -l)"
+        echo '### state file at TF_VAR_state_path'
+        status=0; test -f /tmp/lz-p4/state/terraform.tfstate || status=$?; echo "LZ_EXIT=$status"
+        echo '### state file keys holding plaintext resources / an encryption envelope'
+        echo "resources=$(grep -c '"resources"' /tmp/lz-p4/state/terraform.tfstate)"
+        echo "encrypted_data=$(grep -c '"encrypted_data"' /tmp/lz-p4/state/terraform.tfstate)"
+        echo '### tofu plan -input=false -no-color (wrong TF_VAR_passphrase)'
+        status=0; TF_VAR_passphrase=wrong-passphrase-for-the-p4-fixture /tcb/tofu plan -input=false -no-color 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### tofu plan -input=false -no-color -detailed-exitcode (right TF_VAR_passphrase)'
+        status=0; /tcb/tofu plan -input=false -no-color -detailed-exitcode 2>&1 || status=$?; echo "LZ_EXIT=$status"
+
+  capture:p6-import:
+    dir: tests/fixtures/tofu-probes/p6-import
+    cmds:
+      - /tcb/tofu init -input=false -no-color > /dev/null
+      - /tcb/tofu plan -input=false -no-color -out=/tmp/lz-p6.plan > /dev/null
+      - /tcb/tofu show -json /tmp/lz-p6.plan
+
+  capture:p6-import-test:
+    dir: tests/fixtures/tofu-probes/p6-import
+    cmds:
+      - |
+        echo '### tofu version'
+        /tcb/tofu version
+        /tcb/tofu init -input=false -no-color > /dev/null
+        echo '### tofu test -no-color'
+        status=0; /tcb/tofu test -no-color 2>&1 || status=$?; echo "LZ_EXIT=$status"
+
+  capture:p6-import-mock:
+    dir: tests/fixtures/tofu-probes/p6-import-mock
+    cmds:
+      - |
+        echo '### tofu version'
+        /tcb/tofu version
+        /tcb/tofu init -input=false -no-color > /dev/null
+        echo '### tofu test -no-color -filter=apply.tftest.hcl'
+        status=0; /tcb/tofu test -no-color -filter=apply.tftest.hcl 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### tofu test -no-color -filter=plan.tftest.hcl'
+        status=0; /tcb/tofu test -no-color -filter=plan.tftest.hcl 2>&1 || status=$?; echo "LZ_EXIT=$status"
+
+  capture:p16-ignore-changes:
+    dir: tests/fixtures/tofu-probes/p16-ignore-changes
+    cmds:
+      - /tcb/tofu init -input=false -no-color > /dev/null
+      - /tcb/tofu test -json
+
+  capture:p24-apply-json:
+    dir: tests/fixtures/tofu-probes/p24-apply-json
+    cmds:
+      - /tcb/tofu init -input=false -no-color > /dev/null
+      - /tcb/tofu apply -json -auto-approve -input=false
+
+  capture:p17-terramate:
+    dir: tests/fixtures/terramate/p17
+    cmds:
+      - |
+        echo '### terramate version'
+        /tcb/terramate version
+        mkdir -p /tmp/lz-p17-control /tmp/lz-p17
+        cp root-no-version.tm.hcl.seed /tmp/lz-p17-control/terramate.tm.hcl
+        echo '### terramate list (control: root config without required_version, no git)'
+        status=0; /tcb/terramate -C /tmp/lz-p17-control list 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        cp root.tm.hcl.seed /tmp/lz-p17/terramate.tm.hcl
+        cp generate.tm.hcl.seed /tmp/lz-p17/lz_generate.tm.hcl
+        echo '### terramate create --id lz-account --name account --tags lz-stage-account --no-generate stacks/z-account'
+        status=0; /tcb/terramate -C /tmp/lz-p17 create --id lz-account --name account --tags lz-stage-account --no-generate stacks/z-account 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### terramate create --id lz-tenant-alpha --name tenant-alpha --tags lz-stage-tenant,lz-tenant-alpha --after tag:lz-stage-account --no-generate stacks/a-tenant-alpha'
+        status=0; /tcb/terramate -C /tmp/lz-p17 create --id lz-tenant-alpha --name tenant-alpha --tags lz-stage-tenant,lz-tenant-alpha --after tag:lz-stage-account --no-generate stacks/a-tenant-alpha 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### terramate create --id lz-runtime-alpha --name runtime-alpha --tags lz-stage-runtime,lz-tenant-alpha --after tag:lz-stage-tenant:lz-tenant-alpha --no-generate stacks/0-runtime-alpha'
+        status=0; /tcb/terramate -C /tmp/lz-p17 create --id lz-runtime-alpha --name runtime-alpha --tags lz-stage-runtime,lz-tenant-alpha --after tag:lz-stage-tenant:lz-tenant-alpha --no-generate stacks/0-runtime-alpha 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### terramate create --id lz-tenant-beta --name tenant-beta --tags lz-stage-tenant,lz-tenant-beta --after tag:lz-stage-runtime --no-generate stacks/1-tenant-beta'
+        status=0; /tcb/terramate -C /tmp/lz-p17 create --id lz-tenant-beta --name tenant-beta --tags lz-stage-tenant,lz-tenant-beta --after tag:lz-stage-runtime --no-generate stacks/1-tenant-beta 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        for s in z-account a-tenant-alpha 0-runtime-alpha 1-tenant-beta; do echo "### cat stacks/$s/stack.tm.hcl"; cat "/tmp/lz-p17/stacks/$s/stack.tm.hcl"; done
+        echo '### generated files before terramate generate'
+        find /tmp/lz-p17/stacks -name '_lz_*' | sort
+        echo '### terramate generate'
+        status=0; /tcb/terramate -C /tmp/lz-p17 generate 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        for s in z-account a-tenant-alpha 0-runtime-alpha 1-tenant-beta; do echo "### cat stacks/$s/_lz_main.tf"; cat "/tmp/lz-p17/stacks/$s/_lz_main.tf"; done
+        echo '### terramate list (lexical order)'
+        status=0; /tcb/terramate -C /tmp/lz-p17 list 2>&1 || status=$?; echo "LZ_EXIT=$status"
+        echo '### terramate list --run-order'
+        status=0; /tcb/terramate -C /tmp/lz-p17 list --run-order 2>&1 || status=$?; echo "LZ_EXIT=$status"
+
   capture-validate:
     internal: true
     dir: tests/check/fixtures/static/{{.CASE}}

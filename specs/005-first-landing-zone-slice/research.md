@@ -436,6 +436,32 @@ names the premise and the revision a refutation forces: T025–T028 (P5, both mo
 (P1–P4, P6: T038 closes only after T010's result; a refuted P1–P3 revises FR-008 first); T054/T055
 (P24: the fallback inventory path is tested too). Live tasks depend on the probe result directly.
 
+**T007 results (2026-10-06, pinned OpenTofu 1.13.0 and Terramate 0.17.3 through `lz-offline`
+capture admission; fixtures and sidecars in `tests/fixtures/{tofu-probes,terramate}/captures/`)**:
+P4, P16, P17 and P24 observed; P6 observed for the address form, but its offline test method is
+refuted. Two findings revise later tasks:
+- **Imports into a mocked provider cannot be tested (P6)**: `tofu test` with `mock_provider "ovh"`
+  crashes (exit 11, "Importing is not supported in testing context") on an `import` block whose
+  target is an `ovh` resource, for `command = plan` as well as `apply` (both captured); the same
+  address form into `terraform_data` under `tofu test` without a mock passes (captured), and the T007
+  review observed it passing under `mock_provider "ovh"` too (not captured): the crash is the
+  import into the mocked provider's resource. So R17's L2-lite test cannot load an adopt-mode `project` root with `_lz_import.tf` as
+  generated (T037/T038 stack plans; module and stage tests hold no root `import`). Revision owed
+  before T037 closes, one of:
+  (A, recommended) the offline test of an adopt root runs on a scratch copy without
+  `_lz_import.tf`, and a static check pins that file's `to`/`id` to the stage address; (B) an
+  `import` with `for_each` over a generated variable that the offline test sets to `{}`
+  (UNVERIFIED: not captured); (C) adopt roots are covered only by T009's live plan. The `to`
+  address itself (single and keyed module) is observed under `tofu plan` with `terraform_data`.
+- **Terramate root outside git (P17)**: a root `terramate.tm.hcl` with only `config { git {…} }`
+  is not taken as the project root outside a git repository; `required_version` is. R16's
+  `stacks:check` copies the tree to scratch: that copy needs a git repository or a root config
+  with `required_version`. `terramate create --tags` sets the stack's tags although its help lists
+  `--tags` as a filter. `after = ["tag:a:b"]` matches stacks carrying both tags (AND): an OR
+  reading would have made the captured tree cyclic.
+- P4: a wrong passphrase is refused, but the message reads "Error acquiring the state lock …
+  decryption failed"; the live lane's error text must not be read as a lock conflict.
+
 ## R24 Platform `project` state in the tenant bucket (KD-3)
 **Decision**: the platform-owned `project` stack keeps its state and its `artifacts/` object in the
 tenant's state bucket, which the tenant S3 user can write, so a tenant credential could overwrite

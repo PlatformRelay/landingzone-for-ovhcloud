@@ -1,0 +1,132 @@
+### terramate version
+0.17.3
+### terramate list (control: root config without required_version, no git)
+Error: Terramate was unable to detect a project root.
+
+Please ensure you run Terramate inside a Git repository or create a new one here by calling 'git init'.
+
+Using Terramate together with Git is the recommended way. Git is required to be installed.
+
+Alternatively you can create a Terramate config to make the current directory the project root.
+
+Please see https://terramate.io/docs/cli/projects/configuration for details.
+
+LZ_EXIT=1
+### terramate create --id lz-account --name account --tags lz-stage-account --no-generate stacks/z-account
+Created stack /stacks/z-account
+LZ_EXIT=0
+### terramate create --id lz-tenant-alpha --name tenant-alpha --tags lz-stage-tenant,lz-tenant-alpha --after tag:lz-stage-account --no-generate stacks/a-tenant-alpha
+Created stack /stacks/a-tenant-alpha
+LZ_EXIT=0
+### terramate create --id lz-runtime-alpha --name runtime-alpha --tags lz-stage-runtime,lz-tenant-alpha --after tag:lz-stage-tenant:lz-tenant-alpha --no-generate stacks/0-runtime-alpha
+Created stack /stacks/0-runtime-alpha
+LZ_EXIT=0
+### terramate create --id lz-tenant-beta --name tenant-beta --tags lz-stage-tenant,lz-tenant-beta --after tag:lz-stage-runtime --no-generate stacks/1-tenant-beta
+Created stack /stacks/1-tenant-beta
+LZ_EXIT=0
+### cat stacks/z-account/stack.tm.hcl
+stack {
+  name        = "account"
+  description = "account"
+  tags        = ["lz-stage-account"]
+  id          = "lz-account"
+}
+### cat stacks/a-tenant-alpha/stack.tm.hcl
+stack {
+  name        = "tenant-alpha"
+  description = "tenant-alpha"
+  tags        = ["lz-stage-tenant", "lz-tenant-alpha"]
+  after       = ["tag:lz-stage-account"]
+  id          = "lz-tenant-alpha"
+}
+### cat stacks/0-runtime-alpha/stack.tm.hcl
+stack {
+  name        = "runtime-alpha"
+  description = "runtime-alpha"
+  tags        = ["lz-stage-runtime", "lz-tenant-alpha"]
+  after       = ["tag:lz-stage-tenant:lz-tenant-alpha"]
+  id          = "lz-runtime-alpha"
+}
+### cat stacks/1-tenant-beta/stack.tm.hcl
+stack {
+  name        = "tenant-beta"
+  description = "tenant-beta"
+  tags        = ["lz-stage-tenant", "lz-tenant-beta"]
+  after       = ["tag:lz-stage-runtime"]
+  id          = "lz-tenant-beta"
+}
+### generated files before terramate generate
+### terramate generate
+Code generation report
+
+Successes:
+
+- /stacks/0-runtime-alpha
+	[+] _lz_main.tf
+
+- /stacks/1-tenant-beta
+	[+] _lz_main.tf
+
+- /stacks/a-tenant-alpha
+	[+] _lz_main.tf
+
+- /stacks/z-account
+	[+] _lz_main.tf
+
+Hint: '+', '~' and '-' mean the file was created, changed and deleted, respectively.
+LZ_EXIT=0
+### cat stacks/z-account/_lz_main.tf
+// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT
+
+locals {
+  lz_stack_id   = "lz-account"
+  lz_stack_name = "account"
+  lz_stack_tags = [
+    "lz-stage-account",
+  ]
+}
+### cat stacks/a-tenant-alpha/_lz_main.tf
+// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT
+
+locals {
+  lz_stack_id   = "lz-tenant-alpha"
+  lz_stack_name = "tenant-alpha"
+  lz_stack_tags = [
+    "lz-stage-tenant",
+    "lz-tenant-alpha",
+  ]
+}
+### cat stacks/0-runtime-alpha/_lz_main.tf
+// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT
+
+locals {
+  lz_stack_id   = "lz-runtime-alpha"
+  lz_stack_name = "runtime-alpha"
+  lz_stack_tags = [
+    "lz-stage-runtime",
+    "lz-tenant-alpha",
+  ]
+}
+### cat stacks/1-tenant-beta/_lz_main.tf
+// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT
+
+locals {
+  lz_stack_id   = "lz-tenant-beta"
+  lz_stack_name = "tenant-beta"
+  lz_stack_tags = [
+    "lz-stage-tenant",
+    "lz-tenant-beta",
+  ]
+}
+### terramate list (lexical order)
+stacks/0-runtime-alpha
+stacks/1-tenant-beta
+stacks/a-tenant-alpha
+stacks/z-account
+LZ_EXIT=0
+### terramate list --run-order
+stacks/z-account
+stacks/a-tenant-alpha
+stacks/0-runtime-alpha
+stacks/1-tenant-beta
+LZ_EXIT=0

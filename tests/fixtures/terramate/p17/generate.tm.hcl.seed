@@ -1,0 +1,11 @@
+# P17 (005 T007) seed: copied to <scratch>/lz_generate.tm.hcl. Renders one file per stack from
+# the stack's own metadata.
+generate_hcl "_lz_main.tf" {
+  content {
+    locals {
+      lz_stack_id   = terramate.stack.id
+      lz_stack_name = terramate.stack.name
+      lz_stack_tags = terramate.stack.tags
+    }
+  }
+}

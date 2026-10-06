@@ -108,7 +108,7 @@ the retained-resource guard (T063–T064) before the first bootstrap apply (T044
 Independent test: premise status rows in spec.md updated with observations. Refutations are recorded
 in research.md with the fallback; they never pass silently.
 
-- [ ] T007 Capture pinned OpenTofu and Terramate behaviour for P4, P6, P16, P17 and P24 in tests/fixtures/{tofu-probes,terramate}/
+- [x] T007 Capture pinned OpenTofu and Terramate behaviour for P4, P6, P16, P17 and P24 in tests/fixtures/{tofu-probes,terramate}/ — closed 2026-10-06, evidence: evidence/T007.md
   - Requirements: FR-007, FR-008, FR-009, FR-011; ADRs: 0007, 0009, 0011. Depends on: 001/T003 capture admission.
   - Verify: Procedure through `lz-offline` capture admission with the pinned binaries, recording each generating command and version: (P4) `tofu init`/`apply` of a provider-free root whose local backend path and PBKDF2 passphrase come from variables; wrong passphrase refuses to read state. (P6) `tofu test` with `mock_provider` where a root `import` block targets a nested module address. (P16) two applies with a changed `tags["lz:run-id"]` under `ignore_changes` keep the first value. (P17) `terramate create --id --tags --after`, `terramate generate`, `terramate list --run-order` on a scratch tree. (P24) `tofu apply -json` of a provider-free root with three `terraform_data` resources: one `apply_complete` event per resource with address and id. Each premise is marked observed or refuted in spec.md; a refutation updates research.md before T035/T037/T054.
   - Evidence: `evidence/T007.md`; PR; initial status `not-run`.
