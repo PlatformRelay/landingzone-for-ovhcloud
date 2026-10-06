@@ -1,0 +1,508 @@
+{
+ "_source": "synthetic, schema of kb/api v1 cloud.json/me.json and v2 iam.json (T054); qualified on captures by T065",
+ "projects": [
+  {
+   "id": "p1",
+   "urn": "urn:v1:eu:resource:publicCloudProject:p1"
+  }
+ ],
+ "prefix": "lz-",
+ "run_id": "20261006T120000Z-a1b2",
+ "exempt": {
+  "client_id": "EU.0a1b2c3d4e5f6a7b",
+  "policy_id": "6c1e5d0a-0b8e-4a55-9f0e-adm1n0000001"
+ },
+ "retained": {
+  "ovh_cloud_project_storage": [
+   "lz-bkt-state",
+   "lz-demo-bkt-state"
+  ],
+  "ovh_cloud_project_user": [
+   "101",
+   "102"
+  ],
+  "ovh_me_api_oauth2_client": [
+   "EU.p1atf0rmdep10y",
+   "EU.demodep10yer03"
+  ],
+  "ovh_iam_policy": [
+   "6c1e5d0a-0b8e-4a55-9f0e-p1at00000002",
+   "6c1e5d0a-0b8e-4a55-9f0e-dem000000003"
+  ],
+  "ovh_me_identity_group": [
+   "lz-demo-grp"
+  ],
+  "ovh_iam_resource_tags": [
+   "lz:org",
+   "lz:run-id"
+  ],
+  "ovh_cloud_project_alerting": [
+   "al-budget-0001"
+  ]
+ },
+ "inventory": [
+  {
+   "stack": "probe",
+   "address": "ovh_cloud_project_network_private.probe",
+   "type": "ovh_cloud_project_network_private",
+   "id": "pn-111_9"
+  },
+  {
+   "stack": "probe",
+   "address": "ovh_cloud_project_network_private_subnet.probe",
+   "type": "ovh_cloud_project_network_private_subnet",
+   "id": "sn-run-9"
+  },
+  {
+   "stack": "probe",
+   "address": "ovh_cloud_project_storage.probe",
+   "type": "ovh_cloud_project_storage",
+   "id": "lz-demo-dev-gra11-bkt-probe"
+  }
+ ],
+ "responses": {
+  "/cloud/project/p1/region": [
+   [
+    "GRA11",
+    "SBG5"
+   ]
+  ],
+  "/cloud/project/p1/region/GRA11/storage": [
+   [
+    {
+     "name": "lz-bkt-state",
+     "region": "GRA11",
+     "createdAt": "2026-10-01T09:00:00Z",
+     "objectsCount": 0,
+     "objectsSize": 0,
+     "ownerId": 1234567,
+     "virtualHost": "lz-bkt-state.s3.gra11.io.cloud.ovh.net",
+     "arn": "arn:aws:s3:::lz-bkt-state",
+     "objects": []
+    },
+    {
+     "name": "lz-demo-bkt-state",
+     "region": "GRA11",
+     "createdAt": "2026-10-01T09:00:00Z",
+     "objectsCount": 0,
+     "objectsSize": 0,
+     "ownerId": 1234567,
+     "virtualHost": "lz-demo-bkt-state.s3.gra11.io.cloud.ovh.net",
+     "arn": "arn:aws:s3:::lz-demo-bkt-state",
+     "objects": []
+    },
+    {
+     "name": "ops-logs",
+     "region": "GRA11",
+     "createdAt": "2026-10-01T09:00:00Z",
+     "objectsCount": 0,
+     "objectsSize": 0,
+     "ownerId": 1234567,
+     "virtualHost": "ops-logs.s3.gra11.io.cloud.ovh.net",
+     "arn": "arn:aws:s3:::ops-logs",
+     "objects": []
+    }
+   ]
+  ],
+  "/cloud/project/p1/region/SBG5/storage": [
+   [
+    {
+     "name": "ops-archive",
+     "region": "SBG5",
+     "createdAt": "2026-10-01T09:00:00Z",
+     "objectsCount": 0,
+     "objectsSize": 0,
+     "ownerId": 1234567,
+     "virtualHost": "ops-archive.s3.sbg5.io.cloud.ovh.net",
+     "arn": "arn:aws:s3:::ops-archive",
+     "objects": []
+    }
+   ]
+  ],
+  "/cloud/project/p1/network/private": [
+   [
+    {
+     "id": "pn-111_0",
+     "name": "default-net",
+     "status": "ACTIVE",
+     "type": "private",
+     "vlanId": 0,
+     "regions": [
+      {
+       "region": "GRA11",
+       "status": "ACTIVE",
+       "openstackId": "os-pn-111_0"
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "id": "pn-111_7",
+     "name": "ops-net",
+     "status": "ACTIVE",
+     "type": "private",
+     "vlanId": 7,
+     "regions": [
+      {
+       "region": "GRA11",
+       "status": "ACTIVE",
+       "openstackId": "os-pn-111_7"
+      }
+     ]
+    }
+   ]
+  ],
+  "/cloud/project/p1/network/private/pn-111_0/subnet": [
+   [
+    {
+     "id": "sn-0",
+     "cidr": "10.0.0.0/24",
+     "dhcpEnabled": true,
+     "gatewayIp": "10.0.0.1",
+     "ipPools": [
+      {
+       "start": "10.0.0.2",
+       "end": "10.0.0.254",
+       "network": "10.0.0.0/24",
+       "region": "GRA11",
+       "dhcp": true
+      }
+     ]
+    }
+   ]
+  ],
+  "/cloud/project/p1/network/private/pn-111_7/subnet": [
+   []
+  ],
+  "/cloud/project/p1/user": [
+   [
+    {
+     "id": 101,
+     "username": "user-101AbCdEf",
+     "description": "lz-s3u-state",
+     "status": "ok",
+     "creationDate": "2026-10-01T09:00:00Z",
+     "openstackId": "os-user-101",
+     "roles": [
+      {
+       "id": "r1",
+       "name": "objectstore_operator",
+       "description": "ObjectStore operator",
+       "permissions": []
+      }
+     ]
+    },
+    {
+     "id": 102,
+     "username": "user-102AbCdEf",
+     "description": "lz-demo-s3u-state",
+     "status": "ok",
+     "creationDate": "2026-10-01T09:00:00Z",
+     "openstackId": "os-user-102",
+     "roles": [
+      {
+       "id": "r1",
+       "name": "objectstore_operator",
+       "description": "ObjectStore operator",
+       "permissions": []
+      }
+     ]
+    },
+    {
+     "id": 900,
+     "username": "user-900AbCdEf",
+     "description": "ops-backup",
+     "status": "ok",
+     "creationDate": "2026-10-01T09:00:00Z",
+     "openstackId": "os-user-900",
+     "roles": [
+      {
+       "id": "r1",
+       "name": "objectstore_operator",
+       "description": "ObjectStore operator",
+       "permissions": []
+      }
+     ]
+    }
+   ]
+  ],
+  "/cloud/project/p1/alerting": [
+   [
+    "al-budget-0001",
+    "al-ops-0002"
+   ]
+  ],
+  "/cloud/project/p1/alerting/al-budget-0001": [
+   {
+    "id": "al-budget-0001",
+    "name": "lz-budget",
+    "email": "owner@example.invalid",
+    "emails": [],
+    "delay": 3600,
+    "monthlyThreshold": 50,
+    "service": "cloud",
+    "status": "ok",
+    "creationDate": "2026-10-01T09:00:00Z",
+    "formattedMonthlyThreshold": {
+     "currencyCode": "EUR",
+     "text": "50.00 EUR",
+     "value": 50
+    }
+   }
+  ],
+  "/cloud/project/p1/alerting/al-ops-0002": [
+   {
+    "id": "al-ops-0002",
+    "name": "ops-alert",
+    "email": "owner@example.invalid",
+    "emails": [],
+    "delay": 3600,
+    "monthlyThreshold": 50,
+    "service": "cloud",
+    "status": "ok",
+    "creationDate": "2026-10-01T09:00:00Z",
+    "formattedMonthlyThreshold": {
+     "currencyCode": "EUR",
+     "text": "50.00 EUR",
+     "value": 50
+    }
+   }
+  ],
+  "/iam/resource/urn:v1:eu:resource:publicCloudProject:p1": [
+   {
+    "id": "3f0c1a2b-0000-4000-8000-00000000p1p1",
+    "urn": "urn:v1:eu:resource:publicCloudProject:p1",
+    "name": "p1",
+    "displayName": "sandbox",
+    "type": "publicCloudProject",
+    "owner": "ab12345-ovh",
+    "tags": {
+     "lz:org": "lz",
+     "lz:run-id": "20261001T090000Z-0f0f",
+     "owner": "koni"
+    }
+   }
+  ],
+  "/me/api/oauth2/client": [
+   [
+    "EU.0a1b2c3d4e5f6a7b",
+    "EU.p1atf0rmdep10y",
+    "EU.demodep10yer03",
+    "EU.c1f0re1gn00004"
+   ]
+  ],
+  "/iam/policy": [
+   [
+    {
+     "id": "6c1e5d0a-0b8e-4a55-9f0e-adm1n0000001",
+     "name": "lz-sandbox-admin",
+     "description": "lz-sandbox-admin",
+     "owner": "ab12345-ovh",
+     "readOnly": false,
+     "createdAt": "2026-10-01T09:00:00Z",
+     "identities": [
+      "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-lz-sandbox-admin"
+     ],
+     "resources": [
+      {
+       "urn": "urn:v1:eu:resource:publicCloudProject:p1"
+      }
+     ],
+     "permissions": {
+      "allow": [
+       {
+        "action": "publicCloudProject:apiovh:*"
+       }
+      ]
+     }
+    },
+    {
+     "id": "6c1e5d0a-0b8e-4a55-9f0e-p1at00000002",
+     "name": "lz-pol-platform-deployer",
+     "description": "lz-pol-platform-deployer",
+     "owner": "ab12345-ovh",
+     "readOnly": false,
+     "createdAt": "2026-10-01T09:00:00Z",
+     "identities": [
+      "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-lz-pol-platform-deployer"
+     ],
+     "resources": [
+      {
+       "urn": "urn:v1:eu:resource:publicCloudProject:p1"
+      }
+     ],
+     "permissions": {
+      "allow": [
+       {
+        "action": "publicCloudProject:apiovh:*"
+       }
+      ]
+     }
+    }
+   ],
+   [
+    {
+     "id": "6c1e5d0a-0b8e-4a55-9f0e-dem000000003",
+     "name": "lz-demo-pol-deployer",
+     "description": "lz-demo-pol-deployer",
+     "owner": "ab12345-ovh",
+     "readOnly": false,
+     "createdAt": "2026-10-01T09:00:00Z",
+     "identities": [
+      "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-lz-demo-pol-deployer"
+     ],
+     "resources": [
+      {
+       "urn": "urn:v1:eu:resource:publicCloudProject:p1"
+      }
+     ],
+     "permissions": {
+      "allow": [
+       {
+        "action": "publicCloudProject:apiovh:*"
+       }
+      ]
+     }
+    },
+    {
+     "id": "6c1e5d0a-0b8e-4a55-9f0e-0vh000000004",
+     "name": "ovh-default-readonly",
+     "description": "ovh-default-readonly",
+     "owner": "ab12345-ovh",
+     "readOnly": true,
+     "createdAt": "2026-10-01T09:00:00Z",
+     "identities": [
+      "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-ovh-default-readonly"
+     ],
+     "resources": [
+      {
+       "urn": "urn:v1:eu:resource:publicCloudProject:p1"
+      }
+     ],
+     "permissions": {
+      "allow": [
+       {
+        "action": "publicCloudProject:apiovh:*"
+       }
+      ]
+     }
+    }
+   ]
+  ],
+  "/me/identity/group": [
+   [
+    "lz-demo-grp",
+    "admins"
+   ]
+  ],
+  "/me/identity/group/lz-demo-grp": [
+   {
+    "name": "lz-demo-grp",
+    "description": "lz-demo-grp",
+    "role": "NONE",
+    "defaultGroup": false,
+    "creation": "2026-10-01T09:00:00Z",
+    "lastUpdate": "2026-10-01T09:00:00Z",
+    "urn": "urn:v1:eu:identity:group:ab12345-ovh/lz-demo-grp"
+   }
+  ],
+  "/me/identity/group/admins": [
+   {
+    "name": "admins",
+    "description": "admins",
+    "role": "NONE",
+    "defaultGroup": false,
+    "creation": "2026-10-01T09:00:00Z",
+    "lastUpdate": "2026-10-01T09:00:00Z",
+    "urn": "urn:v1:eu:identity:group:ab12345-ovh/admins"
+   }
+  ],
+  "/cloud/project/p1/user/101/s3Credentials": [
+   [
+    {
+     "access": "AK101EXAMPLE",
+     "userId": "os-user-101",
+     "tenantId": "p1"
+    }
+   ]
+  ],
+  "/cloud/project/p1/user/101/policy": [
+   {
+    "policy": "{\"Statement\": [{\"Sid\": \"rw\", \"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:PutObject\"], \"Resource\": [\"arn:aws:s3:::lz-bkt-state\", \"arn:aws:s3:::lz-bkt-state/*\"]}]}"
+   }
+  ],
+  "/cloud/project/p1/user/102/s3Credentials": [
+   [
+    {
+     "access": "AK102EXAMPLE",
+     "userId": "os-user-102",
+     "tenantId": "p1"
+    }
+   ]
+  ],
+  "/cloud/project/p1/user/102/policy": [
+   {
+    "policy": "{\"Statement\": [{\"Sid\": \"rw\", \"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:PutObject\"], \"Resource\": [\"arn:aws:s3:::lz-demo-bkt-state\", \"arn:aws:s3:::lz-demo-bkt-state/*\"]}]}"
+   }
+  ],
+  "/cloud/project/p1/user/900/s3Credentials": [
+   [
+    {
+     "access": "AK900EXAMPLE",
+     "userId": "os-user-900",
+     "tenantId": "p1"
+    }
+   ]
+  ],
+  "/cloud/project/p1/user/900/policy": [
+   {
+    "policy": "{\"Statement\": [{\"Sid\": \"rw\", \"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:PutObject\"], \"Resource\": [\"arn:aws:s3:::ops-logs\", \"arn:aws:s3:::ops-logs/*\"]}]}"
+   }
+  ],
+  "/me/api/oauth2/client/EU.0a1b2c3d4e5f6a7b": [
+   {
+    "clientId": "EU.0a1b2c3d4e5f6a7b",
+    "name": "lz-sandbox-admin",
+    "description": "lz-sandbox-admin",
+    "flow": "CLIENT_CREDENTIALS",
+    "callbackUrls": [],
+    "createdAt": "2026-10-01T09:00:00Z",
+    "identity": "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-EU.0a1b2c3d4e5f6a7b"
+   }
+  ],
+  "/me/api/oauth2/client/EU.p1atf0rmdep10y": [
+   {
+    "clientId": "EU.p1atf0rmdep10y",
+    "name": "lz-platform-deployer",
+    "description": "lz-platform-deployer",
+    "flow": "CLIENT_CREDENTIALS",
+    "callbackUrls": [],
+    "createdAt": "2026-10-01T09:00:00Z",
+    "identity": "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-EU.p1atf0rmdep10y"
+   }
+  ],
+  "/me/api/oauth2/client/EU.demodep10yer03": [
+   {
+    "clientId": "EU.demodep10yer03",
+    "name": "lz-demo-deployer",
+    "description": "lz-demo-deployer",
+    "flow": "CLIENT_CREDENTIALS",
+    "callbackUrls": [],
+    "createdAt": "2026-10-01T09:00:00Z",
+    "identity": "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-EU.demodep10yer03"
+   }
+  ],
+  "/me/api/oauth2/client/EU.c1f0re1gn00004": [
+   {
+    "clientId": "EU.c1f0re1gn00004",
+    "name": "ci-foreign",
+    "description": "ci-foreign",
+    "flow": "CLIENT_CREDENTIALS",
+    "callbackUrls": [],
+    "createdAt": "2026-10-01T09:00:00Z",
+    "identity": "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-EU.c1f0re1gn00004"
+   }
+  ]
+ }
+}
