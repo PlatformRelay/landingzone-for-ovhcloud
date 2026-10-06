@@ -60,7 +60,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
   - Verify: `go -C tools test ./internal/checks -run TestDependencies -count=1`: a module, component or stage directory named or nested under `fixtures` outside `tests/` and `tools/`, a library package named `tests` or `examples` at a package root, and a `.tofutest.hcl` file are each behavioural red (currently skipped, exempted or unreported, found in T006's review); fixtures under `tests/` and `tools/`, and `tests`/`examples` below a package root, stay accepted; generated instances outside `stacks/` stay accepted (ADR-0002).
   - Evidence: `evidence/T066.md`; PR; initial status `not-run`.
 
-- [ ] T067 Close the purity-rule escape routes in tools/internal/checks/dependencies.go
+- [x] T067 Close the purity-rule escape routes in tools/internal/checks/dependencies.go — closed 2026-10-06, evidence: evidence/T067.md
   - Requirements: FR-003; ADRs: 0002, 0004. Depends on: T066.
   - Verify: `task test:dependencies`: T066 controls green; the walker skips `fixtures` only under `tests/` and `tools/`; the test/example role applies only below a package root; `.tofutest.hcl` reports `UNSUPPORTED_CONFIG`; `mayUse` diff is empty; the repository's own graph is green; one killed mutant per closed route.
   - Evidence: `evidence/T067.md`; PR; initial status `not-run`.
