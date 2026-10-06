@@ -118,7 +118,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: every plan fixture under tests/fixtures/tofu-probes/protect/ is produced by a `task capture:protect-<case>` target run through `lz-offline` capture admission with the pinned OpenTofu (T063/T064 captured them on the host); each sidecar's digest matches the recaptured file and names the admitted toolchain; the `TestProtect` controls stay green unchanged; a fixture whose sidecar names a host capture is red. Found 2026-10-06 in T007's review.
   - Evidence: `evidence/T070.md`; PR; initial status `not-run`.
 
-- [ ] T008 Write live probe roots in tests/live/probes/{project-import,alerting,quota,state-backend,iam,network,storage-iam}/ and their run sheet
+- [x] T008 Write live probe roots in tests/live/probes/{project-import,alerting,quota,state-backend,iam,network,storage-iam}/ and their run sheet — closed 2026-10-06, evidence: evidence/T008.md
   - Requirements: FR-004, FR-008, FR-010, FR-011; ADRs: 0005, 0008, 0009, 0018. Depends on: T004.
   - Verify: `task lint -- tests/live/probes/project-import` and the same for each probe root: L0 green; every root names its resources with the prefix `lzprobe-` and tag `lz:run-id`; no root declares a backend path inside the checkout (state goes to `accounts/<account>/state/probes/<run-id>/`, encrypted, via `lz-live probe`); `storage-iam` holds a probe tenant identity with the P9 allowlist (also used for the P26 binding call) and two tagged probe buckets for P25. The run sheet lists commands, expected observations, destroy step and the leftover listing per matrix kind. No apply here.
   - Evidence: `evidence/T008.md`; PR; initial status `not-run`.

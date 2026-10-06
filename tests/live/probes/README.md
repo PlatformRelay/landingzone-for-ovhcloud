@@ -1,0 +1,136 @@
+# Probe run sheet (spec 005, T009 and T010)
+
+Live probe roots for the premises of `specs/005-first-landing-zone-slice/spec.md` (*Premises*).
+Written in T008; run only by the owner, only through `task live:probe` (`lz-live probe`: host
+guard, account binding, child environment, deadline, retained-resource guard, inventory,
+destroy-on-exit, redaction, leftover check). No agent runs anything here.
+
+## Before a session
+
+- Run from the dedicated owner clone `~/Projects/PlatformRelay/lz-live` (D92; quickstart
+  *Owner session*): a plain clone, clean, `HEAD` at the reviewed SHA on `origin/main`;
+  `~/.config/ovh-lz/live.env` with `LZ_OWNER_CHECKOUT` and `LZ_AGENT_WORKTREE_ROOT`;
+  `accounts/<account>/account.env` with `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`,
+  `LZ_ADMIN_POLICY_ID` and the `LZ_PROJECT_ID_*` the leftover check lists.
+- `MISE_ENV=live mise install` (OpenTofu 1.13.0), `ovhcloud` 0.15.0 on `PATH` (without it every
+  leftover check fails closed).
+- T010 only: T065 has qualified the leftover parser on T009's captured listings (research R12).
+
+```sh
+cd ~/Projects/PlatformRelay/lz-live
+git fetch origin && git checkout --detach <reviewed sha> && git status --porcelain   # empty
+S=<reviewed sha>
+```
+
+Every run prints `LZ-LIVE run <run-id> start probe tests/live/probes/<root>` first. Its record is
+`.local/live/<run-id>/` in the clone: `plan-<root>.txt` (rendered plan), `inventory.jsonl`,
+`listings/<type>.json` (one file per leftover kind listed), `leftovers.json`, `summary.json`
+(`outcome`, `plan_only`, `error`). Copy the run id, the outcome and the observations into the
+task's evidence file, never the record itself (it may hold ids and the account e-mail).
+
+## What every root shares
+
+- State: `backend "local" { path = var.state_path }` with client-side encryption
+  (`state_passphrase`), both set by `lz-live probe` as `TF_VAR_state_path` /
+  `TF_VAR_state_passphrase`: `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/<root>.tfstate`.
+  `lz-live` places the file; the `state_path` validation is a shape check on top (a path not of
+  the form `…/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/<root>.tfstate`, or another
+  root's file, fails the plan). No root holds a backend path, a credential or a `*.tfvars`.
+- **Before every run and every `--cleanup`: `rm -rf tests/live/probes/<root>/.terraform`.** The
+  backend path changes with each run id, and `lz-live` initialises without `-reconfigure` in the
+  root directory, where `.terraform/` keeps the previous run's backend: the second run of a root
+  (T009 then T010 for `alerting`, any rerun, a cleanup after a later run) otherwise fails `init`
+  with "Backend configuration changed" (observed offline with a provider-free root, 2026-10-06).
+  `.terraform/` holds no state (that is under `~/.config/ovh-lz/`) and is gitignored, so removing
+  it keeps the clone clean.
+- Run id: the name of the state file's directory (`lz-live` passes no `TF_VAR_run_id`).
+- Project: the account's only public cloud project (`data "ovh_cloud_projects"` + `one()`; several
+  projects fail the plan). The leftover check lists the `LZ_PROJECT_ID_*` of `account.env`
+  instead; with exactly one project on the account, any valid id there is that project, and an
+  invalid one fails the listing (fail closed). Still compare the plan's project id with
+  `LZ_PROJECT_ID_STATE` after T009's first run.
+- Names: `lzprobe-<root>-<run-id>` (buckets: lowercased, P21). Tags: `lz:run-id = <run-id>` on
+  every resource that takes tags (buckets); the project URN gets `lzprobe-p15:run-id`. Resources
+  without a name or tags (alert, quota) are matched by the id the inventory recorded.
+- Provider `ovh/ovh` 2.21.0, pinned by the committed `.terraform.lock.hcl` (linux_amd64 hashes);
+  `lz-live` initialises with `-lockfile=readonly`, so a changed provider fails `init` before any
+  plan.
+
+## Runs
+
+Every command below, and every retry of it, is preceded by
+`rm -rf tests/live/probes/<root>/.terraform` (see *What every root shares*).
+
+| # | Root | Premises | Task | Command | Expected observation (pass) | Refuted when | Destroy step |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | `project-import` | P5, P6 | T009 | `task live:probe -- --reviewed-sha $S tests/live/probes/project-import --plan-only` | plan: `module.project.ovh_cloud_project.this` *will be imported*, id = the sandbox project; no `must be replaced`, no create, no order; in-place changes allowed and recorded attribute by attribute (expected: `deletion_protection`, `plan`) | the plan fails on `prevent_destroy` (a replacement) or plans a create; then `reference` mode in T039 (research R7) | none (plan only: no state is written, the probe files go with the run) — **never run without `--plan-only`**: an apply would import the retained project into probe state and change it in place, and the destroy-on-exit and every `--cleanup` would then fail on `prevent_destroy` (the project survives; stop and report it to the coordinator, do not edit the probe state by hand) |
+| 2 | `alerting` | P10 | T009 | `rm -rf tests/live/probes/alerting/.terraform`, then `task live:probe -- --reviewed-sha $S tests/live/probes/alerting --plan-only` | plan: one `ovh_cloud_project_alerting.probe` to create on the sandbox project | plan error (e.g. alerting not offered on a trial project) | none |
+| 3 | `quota` | P11 | T009 | `task live:probe -- --reviewed-sha $S tests/live/probes/quota --plan-only` | plan: `ovh_cloud_quota.probe` with `prevent_automatic_quota_upgrade = true` and the project's current regions/profiles unchanged; output `current_prevent_automatic_quota_upgrade` recorded | plan error, or a plan that changes a region profile | none — **never run without `--plan-only`** (singleton; destroy semantics UNVERIFIED) |
+| 4 | `alerting` | P10 | T010 | `rm -rf tests/live/probes/alerting/.terraform` (it holds run 2's backend), then `task live:probe -- --reviewed-sha $S tests/live/probes/alerting` | apply creates the alert; destroy removes it; `GET /cloud/project/<p>/alerting` no longer lists its id | apply or destroy error | destroy-on-exit (automatic) |
+| 5 | `network` | P12 | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/network` | network `lzprobe-network-<run-id>` in GRA11 and subnet `10.250.0.0/24` (no gateway, DHCP) created without any vRack step and destroyed; no line item on the bill (P12 cost) | apply asks for a vRack or a gateway; a charge appears | destroy-on-exit |
+| 6 | `iam` | P7, P8 (object), P15 (URN) | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/iam` | client `lzprobe-iam-<run-id>` and policy of the same name created by the admin and deleted on destroy (P7); the policy accepts the client's `identity` URN (P8, object half); the project URN accepts the key `lzprobe-p15:run-id` (P15); after destroy that key is gone and other project tags are unchanged | 403 on client or policy create (P7: extend the admin policy, R13); policy rejects the identity URN; tag key refused | destroy-on-exit |
+| 7 | `state-backend` | P13, P14 (bucket), P15 (bucket), P1–P3 infrastructure | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/state-backend` | versioned bucket `lzprobe-state-<run-id>` in GRA with tag `lz:run-id` (P15 bucket half); S3 user `lzprobe-state-<run-id>` with one credential and a bucket-scoped S3 policy; all destroyed, bucket included (P14, empty bucket) | tag key refused; versioning not enabled; destroy leaves the bucket | destroy-on-exit |
+| 8 | `storage-iam` | P9, P26, P25 (objects) | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/storage-iam` | client and policy `lzprobe-storage-iam-<run-id>` with exactly the 13 R6 actions on the project URN; buckets `lzprobe-p25a-…`/`lzprobe-p25b-…` tagged `lz:tenant = lzprobe-a|b`; client and policy `lzprobe-p25-<run-id>` with the `resource.Tag(lz:tenant)` condition accepted; all destroyed | policy create refuses an action name or the condition key with `:` (record, P25 then refuted for that form) | destroy-on-exit |
+
+Runs 1–3 are T009's; their leftover checks also produce T009's listings (`listings/<type>.json`
+for every kind below). T009 also records the account binding (`GET /auth/details` with the admin
+credential, P26 admin half) from the run's binding step. Runs 4–8 are T010's, one at a time, in
+this order (cheapest and least privileged first). Record the approximate cost after each session.
+
+**A failed destroy** (summary `outcome: fail`, error naming `destroy`): in the same session,
+
+```sh
+rm -rf tests/live/probes/<root>/.terraform   # the root that run used
+task live:probe -- --reviewed-sha $S --cleanup <run-id>
+```
+
+which destroys from the retained encrypted state and reruns the leftover check; the state and
+passphrase under `accounts/<account>/state/probes/<run-id>/` are deleted only when both pass.
+Never delete them by hand while a resource may exist.
+
+## Leftover listing per matrix kind
+
+The leftover check runs after every run, plan-only included, over every kind of research R12's
+matrix, and writes `listings/<type>.json` and `leftovers.json`. Pass: `leftovers.json` has
+`"outcome":"pass"`, no leftover and no error. The `ovhcloud` argv (`ovhcloud api get <path>`) and
+its pagination are UNVERIFIED until T065 (P18); a listing error is `fail`, never skipped.
+
+| Kind (provider type) | Listing | Probe roots that create it | A probe leftover is |
+| --- | --- | --- | --- |
+| bucket (`ovh_cloud_project_storage`) | `/cloud/project/<p>/region` → `/cloud/project/<p>/region/<r>/storage` | state-backend, storage-iam | a bucket named `lzprobe-…` |
+| private network (`ovh_cloud_project_network_private`) | `/cloud/project/<p>/network/private` | network | a network named `lzprobe-…` |
+| subnet (`ovh_cloud_project_network_private_subnet`) | `/cloud/project/<p>/network/private/<n>/subnet` per network | network | a subnet of a probe network, or an inventory id |
+| cloud project user (`ovh_cloud_project_user`) | `/cloud/project/<p>/user` | state-backend | a user whose description starts `lzprobe-` |
+| S3 credential (`ovh_cloud_project_user_s3_credential`) | `/cloud/project/<p>/user/<u>/s3Credentials` per user | state-backend | a credential of a probe user |
+| S3 policy (`ovh_cloud_project_user_s3_policy`) | `/cloud/project/<p>/user/<u>/policy` per user | state-backend | the policy of a probe user |
+| OAuth2 client (`ovh_me_api_oauth2_client`) | `/me/api/oauth2/client` → `/me/api/oauth2/client/<id>` | iam, storage-iam | a client named `lzprobe-…` (`lz-sandbox-admin` is exempt by its id only) |
+| IAM policy (`ovh_iam_policy`) | `/iam/policy` (v2) | iam, storage-iam | a policy named `lzprobe-…` (the admin policy is exempt by `LZ_ADMIN_POLICY_ID` only) |
+| identity group (`ovh_me_identity_group`) | `/me/identity/group` → `/me/identity/group/<name>` | none | any group named `lzprobe-…` |
+| IAM resource tags (`ovh_iam_resource_tags`) | `/iam/resource/<project urn>` (`tags`) | iam | a tag key `lzprobe-…` or a value holding the run id |
+| project alert (`ovh_cloud_project_alerting`) | `/cloud/project/<p>/alerting` → `/cloud/project/<p>/alerting/<id>` | alerting | the alert id the inventory recorded |
+| quota (`ovh_cloud_quota`) | none: a property of the project, nothing to leave behind | quota (plan only) | — |
+| project (`ovh_cloud_project`) | none: retained, never destroyed | project-import (plan only, import) | — |
+
+To look again by hand after a failed check (read only, same paths), with the admin credential
+loaded only in that shell: `ovhcloud api get <path>` (argv UNVERIFIED, P18).
+
+## Open: second stage (not runnable through `lz-live probe` as built)
+
+These observations need a credential that a probe root creates — the probe identities' client
+secrets, the probe S3 user's keys — used by a second client in the same session. `lz-live probe`
+runs one root under the admin credential, and OpenTofu does not support a provider configured
+from a resource of the same run. Until the coordinator decides how (decision request in
+`specs/005-first-landing-zone-slice/evidence/T008.md`), they are **not run**, and T010 records them
+`not-run`:
+
+- P1–P3: a second root with `backend "s3"` (`use_lockfile = true`, OVH endpoint flags, client-side
+  encryption) on the `state-backend` bucket, two writers, the second started after the first one's
+  lock object is listed; the state object is an encryption envelope.
+- P14 (versions): two object versions written to the `state-backend` bucket before its destroy, to
+  see whether destroy removes noncurrent versions too (the root's bucket is empty).
+- P8 (usage): the `iam` client reads `GET /cloud/project/<p>` and is denied
+  `GET /cloud/project/<p>/region`.
+- P9 (usage) and P26: the `storage-iam` tenant identity creates and destroys a network, subnet
+  and bucket, is denied an IAM write, reads its account from `GET /auth/details` and is denied
+  `GET /me`.
+- P25 (evaluation): the `lzprobe-p25` identity reads bucket A and is denied bucket B.
