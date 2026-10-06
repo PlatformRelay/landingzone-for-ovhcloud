@@ -3,6 +3,19 @@
 - Date: 2026-10-06
 - Related: ADR-0008, ADR-0009, ADR-0021, ADR-0022; spec 003 FR-001–FR-003
 
+## Amendment (2026-10-06): cost guards are hygiene
+
+Constitution 1.3.0 (principle V) and ADR-0008 "Sandbox safety" set the rule that applies now.
+Cloud work requires a dedicated sandbox, scoped cleanup authority, an inventory of created
+resource ids recorded outside state, a bounded runtime, a tested destroy-on-exit and a leftover
+check. Cost guards on the one-off trial credit are **hygiene, not admission gates**: exhausting
+the credit moves work to a fresh account through the scripted bootstrap, and the approximate
+cost of every live run is recorded in its PR. Where the text below makes prices, budget data,
+credit headroom, the exposure ceiling, leases, ledgers or reaper health a condition of
+admission, it describes the design to build when its trigger fires, not a gate in force: the
+first orphan that survives the leftover check, CI applying unattended, or spend outside a
+trial or shared sandbox.
+
 ## Context
 
 The sandbox has **one-off EUR 200 trial funding**, with no monthly reset. This is the
@@ -267,3 +280,5 @@ authority nor this ADR grants cloud authority. No cloud or credential operation 
 
 - 2026-10-02: Proposed draft prepared for independent documentation review. Operator
   acceptance, numeric/setup dispositions and live evidence remain outstanding.
+- 2026-10-06: accepted; amended the same day to constitution 1.3.0 (see "Amendment
+  (2026-10-06): cost guards are hygiene").

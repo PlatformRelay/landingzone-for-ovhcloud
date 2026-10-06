@@ -28,7 +28,7 @@ sandbox pays only for what mocks cannot prove.
 The layered taxonomy. Every layer has a Taskfile target (ADR-0007), a stated cost, and a cadence.
 Current one-off trial funding permits selective approved experiments, overriding any
 nightly/quarterly live cadence below; recurring recording/reference infrastructure and
-release-wide live runs require verified headroom and explicit run approval. Offline
+release-wide live runs require explicit run approval. Offline
 checks retain their full applicable coverage.
 
 **Verification is predefined.** Before implementation, every non-documentation requirement and
@@ -80,14 +80,17 @@ recording and apply lanes are separate, protected targets; forks cannot reach th
 
 **Sandbox safety (mandatory, not optional).** One dedicated sandbox project under D8;
 apply and drift fixtures rotate within it with independently recorded ownership.
-This is not cross-project or account isolation proof. Live runs are admitted only when an **external run-lease inventory**,
-bounded concurrent reservations, a maximum runtime and cleanup authority fit the approved exposure
-ceiling; unknown billing, inventory or reaper health **blocks new admission while cleanup stays
-enabled**. Created resource ids are persisted independently of tags; test cancellation, process death
-and reaper failure are themselves tested. Smallest flavours and an approved region. Additional projects, a pool and a second
-region require a separate operator decision; spend published weekly to `docs/reference/test-costs.md`. Current total exposure ceiling: 200 € one-off trial credit (repository working contract;
-no monthly reset). The earlier D8 monthly wording does not grant recurring funding. Recalibrate
-after bounded selective experiments; no funded recurring rotation is assumed.
+This is not cross-project or account isolation proof. A live run requires scoped cleanup authority,
+an **inventory of the resource ids it created, recorded outside state** (tags alone are not enough),
+a bounded runtime, a **tested destroy-on-exit** (also on failure and interruption) and a **leftover
+check** after the run. Cancellation and process death are themselves tested. Smallest flavours and
+an approved region. Additional projects, a pool and a second region require a separate operator
+decision. Current funding is a 200 € one-off trial credit (no monthly reset; the earlier D8 monthly
+wording does not grant recurring funding). Cost guards on it are **hygiene, not admission gates**:
+exhausting it moves work to a fresh account through the scripted bootstrap (constitution V,
+2026-10-06). Record the approximate cost of every live run in its PR; spend is summarised in
+`docs/reference/test-costs.md`. External leases, ledgers and a reaper (ADR-0024) return on the
+first orphan that survives the leftover check, or when CI applies unattended.
 
 **Reporting.** A common report envelope wraps each tool's own output (`-json-into` where a tool has
 it); `tools/json2junit` renders it for both forges; a skipped check, a crash, a cleanup error or zero
@@ -119,9 +122,11 @@ mock defaults are copied from recorded real values (`tests/fixtures/`), refreshe
 - Spike: replay proxy — provider with `endpoint` set to a local recorder; record one apply, replay the
   plan offline; pass if the plan is byte-identical after normalisation.
 - Spike: `override_module` wildcards (1.13.0) in an inclusion test.
-- Spike: a bounded selective sample under the remaining trial-credit exposure ceiling;
+- Spike: a bounded selective sample on the trial credit;
   record full cost and cleanup. Recurring rotation needs a new funding/approval decision.
 - Spike: `tofu test -json` → JUnit rendered in GitHub and GitLab.
 
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
+- 2026-10-06: "Sandbox safety" aligned with constitution 1.3.0: cost guards are hygiene, not
+  admission gates; leases, ledgers and reaper wait for ADR-0024's trigger.
