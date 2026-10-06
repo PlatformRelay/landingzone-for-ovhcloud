@@ -185,10 +185,12 @@ func ValidateFoundationSource(s FoundationSource) []Finding {
 
 // CheckFoundationCI judges the approved source and the committed workflow.
 // The source must pin a hosted runner, a bounded timeout and well-formed
-// digests, and account for every argument-free check of a closed task or of
-// T023 itself: each runs, or is deferred with a reason. The workflow must be
-// exactly the rendered one.
-func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task) []Finding {
+// digests, and account for every argument-free check of a closed spec 001
+// task or of T023 itself: each runs, or is deferred with a reason. An
+// argument-free check of another spec's closed task (tasks keyed by spec
+// number, creator "005/T055") may run too. The workflow must be exactly the
+// rendered one.
+func CheckFoundationCI(source, workflow []byte, registry Registry, tasks map[string][]Task) []Finding {
 	var findings []Finding
 	add := func(rule, subject, format string, args ...any) {
 		findings = append(findings, Finding{Rule: rule, Subject: subject, Detail: fmt.Sprintf(format, args...)})
@@ -200,16 +202,21 @@ func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task)
 	}
 	findings = append(findings, ValidateFoundationSource(s)...)
 
-	done := map[string]bool{}
-	for _, t := range tasks {
-		done[t.ID] = t.Done
-	}
 	known := map[string]bool{}
+	runnable := map[string]bool{}
 	required := map[string]bool{}
 	for _, c := range registry.Checks {
 		known[c.ID] = true
-		if c.Command == "task "+c.ID && (done[c.Creator] || c.Creator == foundationCreator) {
-			required[c.ID] = true
+		if c.Command != "task "+c.ID {
+			continue
+		}
+		if c.Creator == foundationCreator || creatorDone(c.Creator, tasks) {
+			runnable[c.ID] = true
+			// Only spec 001's own checks are owed to this workflow; another
+			// spec's closed check may join it, but need not.
+			if !strings.Contains(c.Creator, "/") {
+				required[c.ID] = true
+			}
 		}
 	}
 	if len(s.Targets) == 0 {
@@ -222,8 +229,8 @@ func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task)
 			add("CHECK_DUPLICATE", id, "listed twice")
 		case !known[id]:
 			add("CHECK_UNKNOWN", id, "not in the check registry")
-		case !required[id]:
-			add("CHECK_NOT_RUNNABLE", id, "its creator is open or its command takes an argument")
+		case !runnable[id]:
+			add("CHECK_NOT_RUNNABLE", id, "its creator is open or in no spec read, or its command takes an argument")
 		}
 		seen[id] = true
 	}
@@ -249,6 +256,25 @@ func CheckFoundationCI(source, workflow []byte, registry Registry, tasks []Task)
 		add("WORKFLOW_DRIFT", FoundationWorkflow, "differs from the workflow rendered from %s", FoundationSourcePath)
 	}
 	return findings
+}
+
+// creatorDone reports whether a registry creator names a ticked task of the
+// spec whose tasks are keyed by its number: a bare id is spec 001's, a
+// spec-scoped "005/T055" is spec 005's T055. An unread spec or an id it lacks
+// is not done.
+func creatorDone(creator string, tasks map[string][]Task) bool {
+	for spec, list := range tasks {
+		id, ok := ownKey(spec, creator)
+		if !ok {
+			continue
+		}
+		for _, t := range list {
+			if t.ID == id {
+				return t.Done
+			}
+		}
+	}
+	return false
 }
 
 const (
