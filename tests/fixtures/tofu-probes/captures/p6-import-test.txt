@@ -1,0 +1,9 @@
+### tofu version
+OpenTofu v1.13.0
+on linux_amd64
+### tofu test -no-color
+main.tftest.hcl... pass
+  run "plan_imports"... pass
+
+Success! 1 passed, 0 failed.
+LZ_EXIT=0

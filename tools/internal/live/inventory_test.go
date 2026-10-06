@@ -16,7 +16,8 @@ import (
 
 // Run inventory (FR-011, research R12, premise P24). The streams in testdata/tofu/ were produced
 // by the pinned OpenTofu 1.13.0 (runtime r3-e2) on provider-free terraform_data roots; the
-// generating command is in evidence/T054.md. T007 still owes the formal P24 capture.
+// generating command is in evidence/T054.md. The P24 capture admitted by T007 is read by
+// inventory_captured_test.go.
 
 // applyEvent is the part of a `tofu apply -json` line the tests read.
 type applyEvent struct {

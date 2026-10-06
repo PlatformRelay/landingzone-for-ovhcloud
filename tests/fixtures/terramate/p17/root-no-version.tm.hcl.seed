@@ -1,0 +1,9 @@
+# P17 (005 T007) control seed: the same root without `required_version`. Outside git, Terramate
+# 0.17.3 does not take this directory as the project root.
+terramate {
+  config {
+    git {
+      default_branch = "main"
+    }
+  }
+}
