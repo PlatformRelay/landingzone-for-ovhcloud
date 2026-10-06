@@ -133,7 +133,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T071 controls green with one killed mutant per refusal condition; the quickstart and the T009, T010, T044, T045, T049 command sheets name the dedicated clone (e.g. ~/Projects/PlatformRelay/lz-live) instead of the main checkout.
   - Evidence: `evidence/T072.md`; PR; initial status `not-run`.
 
-- [ ] T073 Write probe-runner re-run tests in tools/internal/live/runner_test.go and tools/cmd/lz-live/main_test.go
+- [x] T073 Write probe-runner re-run tests in tools/internal/live/runner_test.go and tools/cmd/lz-live/main_test.go — closed 2026-10-07, evidence: evidence/T073.md
   - Requirements: FR-011, FR-013; ADRs: 0008, 0009. Depends on: T055, T008.
   - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: a second `lz-live probe` of the same root under a new run id, and `--cleanup <old run-id>` after a later run, both initialise without "Backend configuration changed" and without deleting anything in the checkout (each run uses its own `TF_DATA_DIR` outside the checkout); the child receives `TF_VAR_run_id` and `TF_VAR_project_id`; `project-import` and `quota` without `--plan-only` are refused before init; the probe roots' `tofu test` controls run under `task test:live-lane`. The current runner re-initialises in place: behavioural red. Found in T008 (evidence/T008.md).
   - Evidence: `evidence/T073.md`; PR; initial status `not-run`.

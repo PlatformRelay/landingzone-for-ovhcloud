@@ -32,13 +32,18 @@ const (
 
 // fakeTofu logs each call (argv and environment) and behaves like a tofu whose probe creates one
 // private network; it prints the credential on stderr, which must never reach lz-live's output.
+// Its backend model is host tofu's (T073, t073-reinit.sh): init records the backend path in the
+// data directory (TF_DATA_DIR, relative to -chdir, else <root>/.terraform) and fails "Backend
+// configuration changed" when that directory holds another one; plan and destroy need an init of
+// this backend in their data directory. Each call's log line carries the data directory with
+// symlinks resolved.
 func fakeTofu(args []string) int {
 	bin := filepath.Dir(os.Args[0])
-	logChild(bin, "tofu.log", args)
-	fmt.Fprintf(os.Stderr, "fake-tofu-stderr token=%s\n", os.Getenv("OVH_CLIENT_SECRET"))
-	sub, out, positional := "", "", ""
+	sub, out, positional, root := "", "", "", "."
 	for _, a := range args {
 		switch {
+		case strings.HasPrefix(a, "-chdir="):
+			root = strings.TrimPrefix(a, "-chdir=")
 		case strings.HasPrefix(a, "-out="):
 			out = strings.TrimPrefix(a, "-out=")
 		case strings.HasPrefix(a, "-"):
@@ -49,6 +54,33 @@ func fakeTofu(args []string) int {
 		}
 	}
 	state := os.Getenv("TF_VAR_state_path")
+	data := os.Getenv("TF_DATA_DIR")
+	if data == "" {
+		data = ".terraform"
+	}
+	if !filepath.IsAbs(data) {
+		data = filepath.Join(root, data)
+	}
+	logChildIn(bin, "tofu.log", args, resolvedPath(data))
+	fmt.Fprintf(os.Stderr, "fake-tofu-stderr token=%s\n", os.Getenv("OVH_CLIENT_SECRET"))
+	backend := filepath.Join(data, "terraform.tfstate")
+	recorded, rerr := os.ReadFile(backend)
+	switch sub {
+	case "init":
+		if rerr == nil && string(recorded) != state && !slices.Contains(args, "-reconfigure") {
+			fmt.Fprintln(os.Stderr, "Error: Backend configuration changed")
+			return 1
+		}
+		if os.MkdirAll(data, 0o755) != nil {
+			return 1
+		}
+		return writeOK(backend, state)
+	case "plan", "destroy":
+		if rerr != nil || string(recorded) != state {
+			fmt.Fprintln(os.Stderr, `Error: Backend initialization required, please run "tofu init"`)
+			return 1
+		}
+	}
 	switch sub {
 	case "plan":
 		return writeOK(out, "fake plan")
@@ -74,6 +106,22 @@ func fakeTofu(args []string) int {
 		return 0
 	}
 	return 0
+}
+
+// resolvedPath is p with symlinks resolved as far as p exists.
+func resolvedPath(p string) string {
+	if !filepath.IsAbs(p) {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	if parent := filepath.Dir(p); parent != p {
+		return filepath.Join(resolvedPath(parent), filepath.Base(p))
+	}
+	return p
 }
 
 func writeOK(path, content string) int {
@@ -113,12 +161,15 @@ func fakeOvhcloud(args []string) int {
 }
 
 type childCall struct {
-	Args []string `json:"args"`
-	Env  []string `json:"env"`
+	Args    []string `json:"args"`
+	Env     []string `json:"env"`
+	DataDir string   `json:"data_dir,omitempty"` // tofu: its data directory, symlinks resolved
 }
 
-func logChild(dir, name string, args []string) {
-	raw, _ := json.Marshal(childCall{Args: args, Env: os.Environ()})
+func logChild(dir, name string, args []string) { logChildIn(dir, name, args, "") }
+
+func logChildIn(dir, name string, args []string, dataDir string) {
+	raw, _ := json.Marshal(childCall{Args: args, Env: os.Environ(), DataDir: dataDir})
 	if f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintln(f, string(raw))
 		f.Close()
@@ -176,7 +227,8 @@ type probeWorld struct {
 	api       *httptest.Server
 	apiCalls  *int
 	stdout    *bytes.Buffer
-	apiAcount string // the account GET /auth/details answers
+	apiAcount string    // the account GET /auth/details answers
+	now       time.Time // the clock run ids are made from (zero: 2026-10-06 12:00 UTC)
 }
 
 // newProbeWorld is an admitted host with a sandbox credential bound to probeAccount, one project,
@@ -200,7 +252,7 @@ func newProbeWorld(t *testing.T) *probeWorld {
 	}
 	writePrivate(t, filepath.Join(w.cfg, "sandbox.env"), "OVH_ENDPOINT=ovh-eu\nOVH_CLIENT_ID=EU.sandboxadmin\nOVH_CLIENT_SECRET="+probeSecret+"\n")
 	writePrivate(t, filepath.Join(w.cfg, "accounts", probeAccount, "account.env"),
-		"LZ_ACCOUNT_ID="+probeAccount+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_SANDBOX=p1\nLZ_ADMIN_POLICY_ID=pol-admin\n")
+		"LZ_ACCOUNT_ID="+probeAccount+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_STATE=p1\nLZ_ADMIN_POLICY_ID=pol-admin\n")
 	root := filepath.Join(w.checkout, "tests", "live", "probes", "net")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -263,7 +315,12 @@ func (w *probeWorld) run(t *testing.T, args ...string) (int, string, string) {
 			}
 			return live.API{TokenURL: w.api.URL + "/token", BaseURL: w.api.URL + "/v1", HTTP: w.api.Client()}, nil
 		},
-		Now: func() time.Time { return time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC) },
+		Now: func() time.Time {
+			if !w.now.IsZero() {
+				return w.now
+			}
+			return time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+		},
 	})
 	return code, stdout.String(), stderr.String()
 }
@@ -517,5 +574,5 @@ func TestProbeEntry(t *testing.T) {
 func writeAccount(w *probeWorld, dir, id string) {
 	path := filepath.Join(w.cfg, "accounts", dir, "account.env")
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
-	_ = os.WriteFile(path, []byte("LZ_ACCOUNT_ID="+id+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_SANDBOX=p1\nLZ_ADMIN_POLICY_ID=pol-admin\n"), 0o600)
+	_ = os.WriteFile(path, []byte("LZ_ACCOUNT_ID="+id+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_STATE=p1\nLZ_ADMIN_POLICY_ID=pol-admin\n"), 0o600)
 }
