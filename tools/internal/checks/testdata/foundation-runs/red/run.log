@@ -1,0 +1,175 @@
+foundation	Set up job	﻿2026-10-05T07:40:38.1582138Z Current runner version: '2.337.0'
+foundation	Set up job	2026-10-05T07:40:38.1607923Z ##[group]Runner Image Provisioner
+foundation	Set up job	2026-10-05T07:40:38.1608888Z Hosted Compute Agent
+foundation	Set up job	2026-10-05T07:40:38.1609530Z Version: 20260901.588
+foundation	Set up job	2026-10-05T07:40:38.1610199Z Commit: f88ec8081b781fac6c440065ac7ff9e710ce3d0b
+foundation	Set up job	2026-10-05T07:40:38.1611051Z Build Date: 2026-09-01T19:56:44Z
+foundation	Set up job	2026-10-05T07:40:38.1612104Z Worker ID: {11026afe-94b6-4ec9-85d3-066583d26b12}
+foundation	Set up job	2026-10-05T07:40:38.1612882Z Azure Region: westus
+foundation	Set up job	2026-10-05T07:40:38.1613554Z ##[endgroup]
+foundation	Set up job	2026-10-05T07:40:38.1615134Z ##[group]Operating System
+foundation	Set up job	2026-10-05T07:40:38.1615924Z Ubuntu
+foundation	Set up job	2026-10-05T07:40:38.1616471Z 24.04.5
+foundation	Set up job	2026-10-05T07:40:38.1616971Z LTS
+foundation	Set up job	2026-10-05T07:40:38.1617558Z ##[endgroup]
+foundation	Set up job	2026-10-05T07:40:38.1618116Z ##[group]Runner Image
+foundation	Set up job	2026-10-05T07:40:38.1618785Z Image: ubuntu-24.04
+foundation	Set up job	2026-10-05T07:40:38.1619377Z Version: 20260927.320.1
+foundation	Set up job	2026-10-05T07:40:38.1620471Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260927.320/images/ubuntu/Ubuntu2404-Readme.md
+foundation	Set up job	2026-10-05T07:40:38.1622602Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260927.320
+foundation	Set up job	2026-10-05T07:40:38.1623700Z ##[endgroup]
+foundation	Set up job	2026-10-05T07:40:38.1624785Z ##[group]GITHUB_TOKEN Permissions
+foundation	Set up job	2026-10-05T07:40:38.1626719Z Metadata: read
+foundation	Set up job	2026-10-05T07:40:38.1627382Z ##[endgroup]
+foundation	Set up job	2026-10-05T07:40:38.1629790Z Secret source: Actions
+foundation	Set up job	2026-10-05T07:40:38.1631014Z Cache mode: write
+foundation	Set up job	2026-10-05T07:40:38.1631977Z Prepare workflow directory
+foundation	Set up job	2026-10-05T07:40:38.2183816Z Prepare all required actions
+foundation	Set up job	2026-10-05T07:40:38.2257271Z Complete job name: foundation
+foundation	Locate the work directories	﻿2026-10-05T07:40:38.3164713Z ##[group]Run set -euo pipefail
+foundation	Locate the work directories	2026-10-05T07:40:38.3165964Z ^[[36;1mset -euo pipefail^[[0m
+foundation	Locate the work directories	2026-10-05T07:40:38.3167562Z ^[[36;1mecho "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"^[[0m
+foundation	Locate the work directories	2026-10-05T07:40:38.3169220Z ^[[36;1mecho "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"^[[0m
+foundation	Locate the work directories	2026-10-05T07:40:38.4310072Z shell: /usr/bin/bash -e {0}
+foundation	Locate the work directories	2026-10-05T07:40:38.4311930Z env:
+foundation	Locate the work directories	2026-10-05T07:40:38.4312840Z   LZ_HEAD: da612461f1dbc20a422043e4171e141ab0c62d33
+foundation	Locate the work directories	2026-10-05T07:40:38.4314118Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	Locate the work directories	2026-10-05T07:40:38.4315698Z   LZ_MANIFEST: sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+foundation	Locate the work directories	2026-10-05T07:40:38.4317663Z   LZ_LAYER: sha256:6e134d3ba40fcfdf2fbc7b67b21a8e29d6a6170bd77199e0c8277535ff58d2c9
+foundation	Locate the work directories	2026-10-05T07:40:38.4319480Z   LZ_ENTRY_SHA256: bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac
+foundation	Locate the work directories	2026-10-05T07:40:38.4321305Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	Locate the work directories	2026-10-05T07:40:38.4324251Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci
+foundation	Locate the work directories	2026-10-05T07:40:38.4326521Z ##[endgroup]
+foundation	Fetch the exact head as data	﻿2026-10-05T07:40:38.4841326Z ##[group]Run set -euo pipefail
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4842645Z ^[[36;1mset -euo pipefail^[[0m
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4843649Z ^[[36;1mgit init -q "$LZ_CANDIDATE"^[[0m
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4845368Z ^[[36;1mgit -C "$LZ_CANDIDATE" fetch -q --depth=1 --no-tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$LZ_HEAD"^[[0m
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4848382Z ^[[36;1mgit -c core.hooksPath=/dev/null -c filter.lfs.process= -c filter.lfs.smudge= -c filter.lfs.required=false -C "$LZ_CANDIDATE" checkout -q --detach FETCH_HEAD^[[0m
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4850943Z ^[[36;1mtest "$(git -C "$LZ_CANDIDATE" rev-parse HEAD)" = "$LZ_HEAD"^[[0m
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4852582Z ^[[36;1mecho "LZ_CANDIDATE_HEAD $LZ_HEAD"^[[0m
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4924307Z shell: /usr/bin/bash -e {0}
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4924857Z env:
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4925343Z   LZ_HEAD: da612461f1dbc20a422043e4171e141ab0c62d33
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4926077Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4927029Z   LZ_MANIFEST: sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4928138Z   LZ_LAYER: sha256:6e134d3ba40fcfdf2fbc7b67b21a8e29d6a6170bd77199e0c8277535ff58d2c9
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4929192Z   LZ_ENTRY_SHA256: bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4930474Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4932264Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4933599Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4934258Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	Fetch the exact head as data	2026-10-05T07:40:38.4934849Z ##[endgroup]
+foundation	Fetch the exact head as data	2026-10-05T07:40:39.1303006Z LZ_CANDIDATE_HEAD da612461f1dbc20a422043e4171e141ab0c62d33
+foundation	Fetch the runtime layer by digest	﻿2026-10-05T07:40:39.1357553Z ##[group]Run set -euo pipefail
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1358334Z ^[[36;1mset -euo pipefail^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1359256Z ^[[36;1mtoken=$(curl -fsS "https://ghcr.io/token?scope=repository:$LZ_IMAGE:pull" | jq -r .token)^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1361239Z ^[[36;1mcurl -fsSL -H "Authorization: ***" -H "Accept: application/vnd.oci.image.manifest.v1+json" -o "$RUNNER_TEMP/manifest.json" "https://ghcr.io/v2/$LZ_IMAGE/manifests/$LZ_MANIFEST"^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1363384Z ^[[36;1mecho "${LZ_MANIFEST#sha256:}  $RUNNER_TEMP/manifest.json" | sha256sum -c -^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1364436Z ^[[36;1mtest "$(jq -r '.layers | length' "$RUNNER_TEMP/manifest.json")" = 1^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1365450Z ^[[36;1mtest "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/manifest.json")" = "$LZ_LAYER"^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1366857Z ^[[36;1mcurl -fsSL -H "Authorization: ***" -o "$RUNNER_TEMP/layer.tgz" "https://ghcr.io/v2/$LZ_IMAGE/blobs/$LZ_LAYER"^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1368087Z ^[[36;1mecho "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1368941Z ^[[36;1mmkdir "$LZ_RUNTIME"^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1369613Z ^[[36;1mtar -xzpf "$RUNNER_TEMP/layer.tgz" -C "$LZ_RUNTIME"^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1370541Z ^[[36;1mecho "$LZ_ENTRY_SHA256  $LZ_RUNTIME/runtime/lz-offline" | sha256sum -c -^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1371890Z ^[[36;1mecho "$LZ_BWRAP_SHA256  $LZ_RUNTIME/host/bwrap" | sha256sum -c -^[[0m
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1437307Z shell: /usr/bin/bash -e {0}
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1437932Z env:
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1438474Z   LZ_HEAD: da612461f1dbc20a422043e4171e141ab0c62d33
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1439268Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1440252Z   LZ_MANIFEST: sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1441392Z   LZ_LAYER: sha256:6e134d3ba40fcfdf2fbc7b67b21a8e29d6a6170bd77199e0c8277535ff58d2c9
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1442914Z   LZ_ENTRY_SHA256: bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1444054Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1445711Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1447128Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1447863Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.1448515Z ##[endgroup]
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:39.4346608Z /home/runner/work/_temp/manifest.json: OK
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:45.9556207Z /home/runner/work/_temp/layer.tgz: OK
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:49.8066372Z /home/runner/work/_temp/runtime/runtime/lz-offline: OK
+foundation	Fetch the runtime layer by digest	2026-10-05T07:40:49.8085990Z /home/runner/work/_temp/runtime/host/bwrap: OK
+foundation	Install the pinned launcher	﻿2026-10-05T07:40:49.8137787Z ##[group]Run set -euo pipefail
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8138186Z ^[[36;1mset -euo pipefail^[[0m
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8138578Z ^[[36;1msudo install -m 0755 "$LZ_RUNTIME/host/bwrap" /usr/bin/bwrap^[[0m
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8139346Z ^[[36;1mif [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi^[[0m
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8206637Z shell: /usr/bin/bash -e {0}
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8206949Z env:
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8207230Z   LZ_HEAD: da612461f1dbc20a422043e4171e141ab0c62d33
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8207891Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8208410Z   LZ_MANIFEST: sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8209338Z   LZ_LAYER: sha256:6e134d3ba40fcfdf2fbc7b67b21a8e29d6a6170bd77199e0c8277535ff58d2c9
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8209952Z   LZ_ENTRY_SHA256: bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8210559Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8211924Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8212742Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8213123Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	Install the pinned launcher	2026-10-05T07:40:49.8213451Z ##[endgroup]
+foundation	Run the foundation checks inside the offline entry	﻿2026-10-05T07:40:49.8502611Z ##[group]Run set -euo pipefail
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8503046Z ^[[36;1mset -euo pipefail^[[0m
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8503375Z ^[[36;1mfor target in $LZ_TARGETS; do^[[0m
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8503862Z ^[[36;1m  "$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task "$target"^[[0m
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8504338Z ^[[36;1m  echo "LZ_TARGET_OK $target"^[[0m
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8504638Z ^[[36;1mdone^[[0m
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8504938Z ^[[36;1mecho "LZ_TARGETS_DONE $(wc -w <<<"$LZ_TARGETS")"^[[0m
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8572122Z shell: /usr/bin/bash -e {0}
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8572446Z env:
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8572725Z   LZ_HEAD: da612461f1dbc20a422043e4171e141ab0c62d33
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8573149Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8573682Z   LZ_MANIFEST: sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8574291Z   LZ_LAYER: sha256:6e134d3ba40fcfdf2fbc7b67b21a8e29d6a6170bd77199e0c8277535ff58d2c9
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8574876Z   LZ_ENTRY_SHA256: bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8575518Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8576374Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8577131Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8577498Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:49.8577818Z ##[endgroup]
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:51.3954551Z TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 tflint=0.64.0 provider=ovh/ovh@2.21.0 network=none
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:51.3983673Z LZ_TARGET_OK verify:toolchain
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:52.3575259Z BOUNDARY_QUALIFIED process=kernel:ENETUNREACH subprocess=kernel:ENETUNREACH
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:40:52.3601039Z LZ_TARGET_OK test:offline-boundary
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:01.5915585Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/report	0.019s
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:01.5916847Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/json2junit	0.005s
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:01.5942991Z LZ_TARGET_OK test:reports
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6380131Z task: Failed to run task "test:traceability": exit status 1
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6381044Z --- FAIL: TestDependenciesRejected (0.02s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6382271Z     --- FAIL: TestDependenciesRejected/stage_uses_a_generated_instance (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6383197Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6384121Z     --- FAIL: TestDependenciesRejected/generated_file_does_not_make_a_library_an_instance (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6385249Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6386424Z     --- FAIL: TestDependenciesRejected/component_uses_another_component (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6387487Z exit status 201
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6387943Z CHILD_FAILED: exit status 1
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6388917Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6390422Z     --- FAIL: TestDependenciesRejected/stage_uses_a_module_directly (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6391470Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6392900Z     --- FAIL: TestDependenciesRejected/example_uses_a_stage (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6394029Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6395301Z     --- FAIL: TestDependenciesRejected/naming_uses_another_module (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6396490Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6397733Z     --- FAIL: TestDependenciesRejected/library_uses_an_example (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6398892Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6400199Z     --- FAIL: TestDependenciesRejected/module_uses_a_component (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6401116Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6402232Z     --- FAIL: TestDependenciesRejected/component_uses_a_stage (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6403024Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6403860Z     --- FAIL: TestDependenciesRejected/instance_uses_a_component (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6404687Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6405471Z     --- FAIL: TestDependenciesRejected/stage_uses_another_stage (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6406243Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6407060Z     --- FAIL: TestDependenciesRejected/test_configuration_uses_a_stage (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6407884Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6408697Z     --- FAIL: TestDependenciesRejected/module_uses_a_peer_module (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6409482Z         dependencies_test.go:278: BEHAVIORAL_RED: rules [], want [LAYER_VIOLATION] ([])
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6410100Z FAIL
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6410670Z FAIL	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks	0.049s
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6411410Z --- FAIL: TestDependencyCommands (0.00s)
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6412200Z     main_test.go:178: BEHAVIORAL_RED: reversed edge accepted: code=0
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6412768Z         DEPENDENCIES_OK dirs=2
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6413343Z     main_test.go:181: BEHAVIORAL_RED: selection on a broken graph accepted: code=0
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6413991Z         SELECT modules/naming
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6414351Z FAIL
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6415132Z FAIL	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.026s
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6415795Z FAIL
+foundation	Run the foundation checks inside the offline entry	2026-10-05T07:41:13.6428067Z ##[error]Process completed with exit code 1.
+foundation	Complete job	﻿2026-10-05T07:41:13.6533854Z Cleaning up orphan processes

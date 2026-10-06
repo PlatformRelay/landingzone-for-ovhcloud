@@ -253,6 +253,120 @@ func TestFoundationCICommands(t *testing.T) {
 	}
 }
 
+const (
+	capturedRuns = "../../internal/checks/testdata/foundation-runs"
+	prHead       = "20b408842ae4d3a09b89d0639f61a6dd218cbc48"
+	redHead      = "da612461f1dbc20a422043e4171e141ab0c62d33"
+)
+
+func writeFiles(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// runTree is the run heads' tree as far as the digests see it: the captured
+// source and a registry defining its nine targets over tools/.
+func runTree(t *testing.T, source []byte) map[string]string {
+	t.Helper()
+	parsed, err := checks.ParseFoundationSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var defs []string
+	for _, id := range parsed.Targets {
+		defs = append(defs, `{"id": "`+id+`", "requirements": ["FR-001"], "command": "task `+id+`", "creator": "T001", "kind": "behavioral", "scope": ["tools"]}`)
+	}
+	return map[string]string{
+		"pipelines/github/foundation-source.json": string(source),
+		"harness/checks.yaml": `{"schema_version": 1, "requirements": {"FR-001": {"adrs": ["0011"]}}, "evaluators": [], "producers": [], "procedures": {},
+ "checks": [` + strings.Join(defs, ",\n") + `]}`,
+		"tools/pin.go": "package tools\n",
+	}
+}
+
+// capture copies a captured run and writes the head's tree beside it.
+func capture(t *testing.T, name string, tree map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{}
+	for _, f := range []string{"run.json", "jobs.json", "workflow.sha", "source.sha", "run.log"} {
+		data, err := os.ReadFile(filepath.Join(capturedRuns, name, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[f] = string(data)
+	}
+	for path, content := range tree {
+		files["tree/"+path] = content
+	}
+	writeFiles(t, dir, files)
+	return dir
+}
+
+// ci-observe turns captured GitHub output and the head's tree into the
+// record; ci-runs judges the committed record against the committed source
+// and tree, offline.
+func TestFoundationRunCommands(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join(capturedRuns, "source.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := runTree(t, source)
+	code, record := lzCheck(repo(t, nil), "ci-observe",
+		"head", prHead, capture(t, "head", tree), "red-control", redHead, capture(t, "red", tree))
+	if code != 0 || !strings.Contains(record, `"run_id": 37278768943`) || !strings.Contains(record, `"run_id": 37279007980`) {
+		t.Fatalf("BEHAVIORAL_RED: ci-observe exit %d:\n%s", code, record)
+	}
+	judged := func(files map[string]string) string {
+		root := repo(t, nil)
+		writeFiles(t, root, tree)
+		writeFiles(t, root, files)
+		return root
+	}
+	root := judged(map[string]string{"pipelines/github/foundation-runs.json": record})
+	want := "RUN_OK head run=37278768943 check=111661662616 event=pull_request head=" + prHead + " targets=9\n" +
+		"RUN_OK red-control run=37279007980 check=111662442027 event=pull_request head=" + redHead + " failed=test:traceability\n" +
+		"FOUNDATION_RUNS_OK runs=2\n"
+	if code, out := lzCheck(root, "ci-runs"); code != 0 || out != want {
+		t.Errorf("BEHAVIORAL_RED: recorded runs refused: exit %d\n%s", code, out)
+	}
+	// A reviewed change to the source makes the recorded runs stale.
+	stale := judged(map[string]string{
+		"pipelines/github/foundation-source.json": strings.Replace(string(source), `"timeout_minutes": 10`, `"timeout_minutes": 9`, 1),
+		"pipelines/github/foundation-runs.json":   record,
+	})
+	if code, out := lzCheck(stale, "ci-runs"); code != 1 || !strings.Contains(out, "RUN_STALE_SOURCE") || !strings.Contains(out, "FOUNDATION_RUNS_FAIL") {
+		t.Errorf("BEHAVIORAL_RED: stale runs accepted: exit %d\n%s", code, out)
+	}
+	// A change to what decides a target after the run makes the run stale
+	// for the judged tree, whatever the record says.
+	changed := judged(map[string]string{"pipelines/github/foundation-runs.json": record, "tools/pin.go": "package tools // changed\n"})
+	if code, out := lzCheck(changed, "ci-runs"); code != 1 || !strings.Contains(out, "RUN_STALE_HEAD") {
+		t.Errorf("BEHAVIORAL_RED: changed tree accepted: exit %d\n%s", code, out)
+	}
+	// No record is no evidence: a failure, not a pass.
+	absent := judged(nil)
+	if code, out := lzCheck(absent, "ci-runs"); code != 1 || !strings.Contains(out, "RUNS_MISSING") {
+		t.Errorf("BEHAVIORAL_RED: absent record accepted: exit %d\n%s", code, out)
+	}
+	for _, args := range [][]string{
+		{"ci-observe"}, {"ci-observe", "head", prHead}, {"ci-observe", "head", prHead, filepath.Join(capturedRuns, "absent")},
+		{"ci-runs", "extra"},
+	} {
+		if code, _ := lzCheck(root, args...); code != 2 {
+			t.Errorf("BEHAVIORAL_RED: %v accepted (code %d)", args, code)
+		}
+	}
+}
+
 func TestFoundationCICommandsWithoutSource(t *testing.T) {
 	root := repo(t, nil)
 	for _, args := range [][]string{{"ci-workflow"}, {"ci-source", "specs/001-x"}} {

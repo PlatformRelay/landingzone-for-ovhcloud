@@ -8,6 +8,8 @@
 //	lz-check [-root <repo>] [-tofu <bin>] [-tflint <bin>] lint <module-dir>
 //	lz-check [-root <repo>] ci-workflow
 //	lz-check [-root <repo>] ci-source <spec-dir>
+//	lz-check [-root <repo>] ci-runs
+//	lz-check ci-observe (<role> <candidate> <capture-dir>)...
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
@@ -19,10 +21,14 @@
 // ci-workflow prints the foundation workflow rendered from its approved source;
 // ci-source judges that source against the registry and <spec-dir>/tasks.md
 // and the committed workflow against the rendered one, and exits 1 on any
-// finding. Usage and input errors exit 2.
+// finding. ci-runs judges the recorded GitHub runs in
+// pipelines/github/foundation-runs.json against that source and exits 1 on
+// any finding or an absent record; ci-observe prints that record from
+// captured GitHub output. Usage and input errors exit 2.
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -60,8 +66,12 @@ func run(args []string, out io.Writer) int {
 		return selectChanged(out, *root, flags.Arg(1))
 	case flags.NArg() == 1 && flags.Arg(0) == "ci-workflow":
 		return ciWorkflow(out, *root)
+	case flags.NArg() == 1 && flags.Arg(0) == "ci-runs":
+		return ciRuns(out, *root)
+	case flags.NArg() > 1 && (flags.NArg()-1)%3 == 0 && flags.Arg(0) == "ci-observe":
+		return ciObserve(out, flags.Args()[1:])
 	case flags.NArg() != 2 || flags.Arg(0) == "deps":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | ci-workflow | ci-source <spec-dir>")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | ci-workflow | ci-source <spec-dir> | ci-runs | ci-observe (<role> <candidate> <capture-dir>)...")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -280,6 +290,106 @@ func ciSource(out io.Writer, root, dir string, registry checks.Registry) int {
 	}
 	source, _ := checks.ParseFoundationSource(data)
 	fmt.Fprintf(out, "FOUNDATION_CI_OK targets=%d deferred=%d\n", len(source.Targets), len(source.Deferred))
+	return 0
+}
+
+// ciObserve prints the record of the captured runs: for each role, candidate
+// and capture directory (run.json, jobs.json, workflow.sha, source.sha and
+// run.log, as GitHub returned them, and tree/, a checkout of the run's head),
+// the run's observation. It reads files only; capturing them is a separate,
+// read-only step on the host.
+func ciObserve(out io.Writer, args []string) int {
+	record := checks.FoundationRuns{Runs: []checks.FoundationRun{}}
+	for i := 0; i < len(args); i += 3 {
+		var c checks.RunCapture
+		for _, f := range []struct {
+			name string
+			into *[]byte
+		}{{"run.json", &c.Run}, {"jobs.json", &c.Jobs}, {"workflow.sha", &c.WorkflowBlob}, {"source.sha", &c.SourceBlob}, {"run.log", &c.Log}} {
+			data, err := os.ReadFile(filepath.Join(args[i+2], f.name))
+			if err != nil {
+				fmt.Fprintln(out, "CAPTURE_MISSING:", err)
+				return 2
+			}
+			*f.into = data
+		}
+		digests, err := foundationDigests(filepath.Join(args[i+2], "tree"))
+		if err != nil {
+			fmt.Fprintf(out, "%s: CAPTURE_TREE: %v\n", args[i+2], err)
+			return 2
+		}
+		c.Digests = digests
+		run, err := checks.ObserveFoundationRun(args[i], args[i+1], c)
+		if err != nil {
+			fmt.Fprintf(out, "%s: %v\n", args[i+2], err)
+			return 2
+		}
+		record.Runs = append(record.Runs, run)
+	}
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return 2
+	}
+	fmt.Fprintf(out, "%s\n", data)
+	return 0
+}
+
+// foundationDigests is checks.FoundationDigests of the source targets of the
+// tree at root, with that tree's own registry and source.
+func foundationDigests(root string) (map[string]string, error) {
+	registry, err := loadRegistry(root)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(root, checks.FoundationSourcePath))
+	if err != nil {
+		return nil, fmt.Errorf("SOURCE_MISSING: %w", err)
+	}
+	source, err := checks.ParseFoundationSource(data)
+	if err != nil {
+		return nil, err
+	}
+	return checks.FoundationDigests(root, registry, source.Targets)
+}
+
+// ciRuns judges the committed run record against the committed source. An
+// absent record is missing evidence, a failure; an absent source is an input
+// error.
+func ciRuns(out io.Writer, root string) int {
+	source, ok := readFoundationSource(out, root)
+	if !ok {
+		return 2
+	}
+	record, err := os.ReadFile(filepath.Join(root, checks.FoundationRunsPath))
+	if err != nil {
+		fmt.Fprintln(out, "RUNS_MISSING:", err)
+		fmt.Fprintln(out, "FOUNDATION_RUNS_FAIL findings=1")
+		return 1
+	}
+	current, err := foundationDigests(root)
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return 2
+	}
+	findings := checks.JudgeFoundationRuns(source, record, current)
+	for _, f := range findings {
+		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
+	}
+	if len(findings) > 0 {
+		fmt.Fprintf(out, "FOUNDATION_RUNS_FAIL findings=%d\n", len(findings))
+		return 1
+	}
+	var runs checks.FoundationRuns
+	_ = checks.DecodeStrict(record, &runs)
+	for _, r := range runs.Runs {
+		outcome := fmt.Sprintf("targets=%d", len(r.Targets))
+		if r.Role == checks.RoleRedControl {
+			outcome = "failed=" + r.Targets[len(r.Targets)-1].Name
+		}
+		fmt.Fprintf(out, "RUN_OK %s run=%d check=%d event=%s head=%s %s\n", r.Role, r.RunID, r.CheckRunID, r.Event, r.HeadSHA, outcome)
+	}
+	fmt.Fprintf(out, "FOUNDATION_RUNS_OK runs=%d\n", len(runs.Runs))
 	return 0
 }
 

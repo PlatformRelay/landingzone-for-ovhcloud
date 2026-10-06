@@ -33,6 +33,7 @@ No golangci/arch-lint config exists; `go vet`/`gofmt` are the only Go linters av
 | Task | Verdict | Review (legs, rounds, Claude?) | Gaps / decision request |
 |---|---|---|---|
 | T001–T009 | CLOSED (merged) | per-PR astra rounds | see evidence/T00*.md |
+| T023 | CLOSED-WITH-GAPS | codex + Opus, 2 rounds (Opus: CI/harness diff); r1 REQUEST_CHANGES fixed, r2 REQUEST_CHANGES on registry digest coverage → decision | owner: GitHub run of the final head + record-only commit; decision: registry scope/inputs (evidence/T023.md) |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |

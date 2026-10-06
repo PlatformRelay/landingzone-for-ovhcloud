@@ -86,7 +86,7 @@
      "scope": ["tools/internal/checks/foundation_ci.go", ".github/workflows/foundation.yml", "pipelines/github/foundation-source.json"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check", "harness/checks.yaml", "specs/001-offline-foundation/tasks.md"]},
     {"id": "ci:foundation", "requirements": ["FR-010", "SC-005"], "command": "task ci:foundation", "creator": "T023", "kind": "behavioral",
-     "scope": [".github/workflows/foundation.yml", "pipelines/github/foundation-source.json"],
-     "inputs": ["Taskfile.yml"], "review": true}
+     "scope": [".github/workflows/foundation.yml", "pipelines/github/foundation-source.json", "pipelines/github/foundation-runs.json"],
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check"], "review": true}
   ]
 }

@@ -2,6 +2,9 @@ package checks
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -246,6 +249,252 @@ func TestFoundationSourceRefusesInjectedNames(t *testing.T) {
 			}
 			if findings := ValidateFoundationSource(parsed); len(findings) == 0 {
 				t.Errorf("BEHAVIORAL_RED: %s validates for rendering", name)
+			}
+		})
+	}
+}
+
+// The captured runs are GitHub's own output for the PR #20 head run
+// 37278768943 and the red-control run 37279007980 (closed draft PR #21),
+// captured read-only with gh; source.json is the approved source at both
+// heads. See specs/001-offline-foundation/evidence/T023.md.
+const (
+	runsDir = "testdata/foundation-runs"
+	prHead  = "20b408842ae4d3a09b89d0639f61a6dd218cbc48"
+	redHead = "da612461f1dbc20a422043e4171e141ab0c62d33"
+)
+
+func readRunFile(t *testing.T, parts ...string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(append([]string{runsDir}, parts...)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func captureRun(t *testing.T, name string) RunCapture {
+	t.Helper()
+	return RunCapture{
+		Run: readRunFile(t, name, "run.json"), Jobs: readRunFile(t, name, "jobs.json"),
+		WorkflowBlob: readRunFile(t, name, "workflow.sha"), SourceBlob: readRunFile(t, name, "source.sha"),
+		Log: readRunFile(t, name, "run.log"), Digests: treeDigests(),
+	}
+}
+
+// treeDigests stands for FoundationDigests of the runs' head tree, which the
+// CLI computes from a checkout (TestFoundationRunCommands); here the judged
+// tree is that same tree unless a case changes it.
+func treeDigests() map[string]string {
+	digests := map[string]string{}
+	for i, id := range foundationTargets {
+		digests[id] = fmt.Sprintf("sha256:%064x", i+1)
+	}
+	return digests
+}
+
+func observeRun(t *testing.T, role, candidate, name string) FoundationRun {
+	t.Helper()
+	run, err := ObserveFoundationRun(role, candidate, captureRun(t, name))
+	if err != nil {
+		t.Fatalf("captured run %s refused: %v", name, err)
+	}
+	return run
+}
+
+// recordedRuns is the approved source and the record of the green PR head
+// and the red control, observed afresh for every caller.
+func recordedRuns(t *testing.T) ([]byte, FoundationRuns) {
+	t.Helper()
+	return readRunFile(t, "source.json"), FoundationRuns{Runs: []FoundationRun{
+		observeRun(t, RoleHead, prHead, "head"),
+		observeRun(t, RoleRedControl, redHead, "red"),
+	}}
+}
+
+var foundationTargets = []string{"verify:toolchain", "test:offline-boundary", "test:reports", "test:traceability", "check:specs",
+	"test:dependencies", "test:static", "test:runtime-image", "test:foundation-ci"}
+
+// The observation is read from GitHub's output, not written by hand: the
+// run, check run, heads, runner, token, executed identities and every
+// target with what it discovered.
+func TestFoundationObserve(t *testing.T) {
+	head := observeRun(t, RoleHead, prHead, "head")
+	for name, ok := range map[string]bool{
+		"run":        head.RunID == 37278768943 && head.Attempt == 1 && head.CheckRunID == 111661662616,
+		"repository": head.Repository == FoundationRepository && head.HeadRepository == FoundationRepository,
+		"event":      head.Event == "pull_request",
+		"head":       head.Candidate == prHead && head.HeadSHA == prHead && head.FetchedHead == prHead,
+		"workflow":   head.WorkflowPath == FoundationWorkflow && head.WorkflowBlob == "de1f3442b25ea94a490680e958103ad13cb141ea",
+		"source":     head.SourceBlob == "ec8547ce87ddc7b1b07e3b47a99c9fec8057d226",
+		"outcome":    head.Status == "completed" && head.Conclusion == "success" && head.JobConclusion == "success",
+		"runner": slices.Equal(head.RunnerLabels, []string{"ubuntu-24.04"}) && head.RunnerGroup == "GitHub Actions" &&
+			head.RunnerImage == "ubuntu-24.04",
+		"token": slices.Equal(head.Permissions, []string{"Metadata: read"}),
+		"steps": len(head.Steps) == 7 && head.Steps[5] == RunStep{Name: "Run the foundation checks inside the offline entry", Conclusion: "success"},
+		"image": head.Env["LZ_MANIFEST"] == "sha256:9425742e0c3e99b0a5d4f798ff796e441de78901ec7f7a6e110c74b5110c2614" &&
+			head.Env["LZ_HEAD"] == prHead && len(head.Env) == 9,
+		"targets": head.TargetsDone == 9 && len(head.Targets) == 9,
+	} {
+		if !ok {
+			t.Errorf("BEHAVIORAL_RED: head run observed wrongly: %s: %+v", name, head)
+		}
+	}
+	// test:runtime-image also printed a package without test files, which
+	// is not a package that ran no test.
+	for i, target := range head.Targets {
+		if target.Name != foundationTargets[i] || target.Status != "ok" || target.Discovered == 0 || target.Empty != 0 {
+			t.Errorf("BEHAVIORAL_RED: head target %d observed as %+v", i, target)
+		}
+	}
+	red := observeRun(t, RoleRedControl, redHead, "red")
+	if red.Conclusion != "failure" || red.TargetsDone != -1 || len(red.Targets) != 4 || red.FetchedHead != redHead {
+		t.Fatalf("BEHAVIORAL_RED: red control observed wrongly: %+v", red)
+	}
+	if last := red.Targets[3]; last.Name != "test:traceability" || last.Status != "failed" || last.Failures == 0 {
+		t.Errorf("BEHAVIORAL_RED: failing target observed as %+v", last)
+	}
+}
+
+// A capture that is not one run of one job, or whose blob is not a SHA, is
+// refused rather than observed.
+func TestFoundationObserveRefused(t *testing.T) {
+	for name, change := range map[string]func(*RunCapture){
+		"run not JSON":     func(c *RunCapture) { c.Run = []byte("{") },
+		"two jobs":         func(c *RunCapture) { c.Jobs = []byte(`{"total_count": 2, "jobs": [{}, {}]}`) },
+		"no log":           func(c *RunCapture) { c.Log = nil },
+		"workflow not SHA": func(c *RunCapture) { c.WorkflowBlob = []byte("main\n") },
+		"source not SHA":   func(c *RunCapture) { c.SourceBlob = []byte("") },
+		"no head digests":  func(c *RunCapture) { c.Digests = nil },
+		"job of another run": func(c *RunCapture) {
+			c.Jobs = []byte(strings.Replace(string(c.Jobs), `"run_id":37278768943`, `"run_id":37279007980`, 1))
+		},
+		"job at another head": func(c *RunCapture) {
+			c.Jobs = []byte(strings.Replace(string(c.Jobs), `"head_sha":"`+prHead+`"`, `"head_sha":"`+redHead+`"`, 1))
+		},
+		"job of another attempt": func(c *RunCapture) {
+			c.Jobs = []byte(strings.Replace(string(c.Jobs), `"run_attempt":1`, `"run_attempt":2`, 1))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := captureRun(t, "head")
+			change(&c)
+			if _, err := ObserveFoundationRun(RoleHead, prHead, c); err == nil {
+				t.Errorf("BEHAVIORAL_RED: %s observed", name)
+			}
+		})
+	}
+}
+
+func TestFoundationRunsValid(t *testing.T) {
+	source, runs := recordedRuns(t)
+	if findings := JudgeFoundationRuns(source, encode(t, runs), treeDigests()); len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: the recorded runs refused: %+v", findings)
+	}
+}
+
+// Each way a run can fail to prove the candidate is refused: a missing role,
+// a foreign or unexpected workflow, a stale head or source, other executed
+// identities, a run that did not complete green, and omitted, zero or
+// skipped checks; a red control must be red in the checks themselves.
+func TestFoundationRunsRejected(t *testing.T) {
+	other := strings.Repeat("e", 40)
+	head := func(r *FoundationRuns) *FoundationRun { return &r.Runs[0] }
+	red := func(r *FoundationRuns) *FoundationRun { return &r.Runs[1] }
+	for name, c := range map[string]struct {
+		change func(*FoundationRuns)
+		want   string
+	}{
+		"no head run":    {func(r *FoundationRuns) { r.Runs = r.Runs[1:] }, "RUN_MISSING"},
+		"no red control": {func(r *FoundationRuns) { r.Runs = r.Runs[:1] }, "RUN_MISSING"},
+		"unknown role": {func(r *FoundationRuns) {
+			r.Runs = append(r.Runs, r.Runs[0])
+			r.Runs[2].Role = "advisory"
+			r.Runs[2].RunID = 1
+		}, "RUN_ROLE"},
+		"repeated run":          {func(r *FoundationRuns) { r.Runs = append(r.Runs, r.Runs[0]) }, "RUN_DUPLICATE"},
+		"foreign workflow":      {func(r *FoundationRuns) { head(r).WorkflowPath = ".github/workflows/other.yml" }, "RUN_FOREIGN"},
+		"foreign repository":    {func(r *FoundationRuns) { head(r).Repository = "someone/fork" }, "RUN_FOREIGN"},
+		"fork head":             {func(r *FoundationRuns) { head(r).HeadRepository = "someone/fork" }, "RUN_FOREIGN"},
+		"manual event":          {func(r *FoundationRuns) { head(r).Event = "workflow_dispatch" }, "RUN_FOREIGN"},
+		"privileged event":      {func(r *FoundationRuns) { head(r).Event = "pull_request_target" }, "RUN_FOREIGN"},
+		"other steps":           {func(r *FoundationRuns) { head(r).Steps[2].Name = "Run actions/checkout" }, "RUN_STEPS"},
+		"extra step":            {func(r *FoundationRuns) { head(r).Steps = append(head(r).Steps, RunStep{"Post", "success"}) }, "RUN_STEPS"},
+		"stale head":            {func(r *FoundationRuns) { head(r).Candidate = other }, "RUN_STALE_HEAD"},
+		"other head fetched":    {func(r *FoundationRuns) { head(r).FetchedHead = other }, "RUN_STALE_HEAD"},
+		"other head in env":     {func(r *FoundationRuns) { head(r).Env["LZ_HEAD"] = other }, "RUN_STALE_HEAD"},
+		"candidate not a SHA":   {func(r *FoundationRuns) { head(r).Candidate = "main"; head(r).HeadSHA = "main" }, "RUN_STALE_HEAD"},
+		"stale source":          {func(r *FoundationRuns) { head(r).SourceBlob = other }, "RUN_STALE_SOURCE"},
+		"stale workflow":        {func(r *FoundationRuns) { head(r).WorkflowBlob = other }, "RUN_STALE_SOURCE"},
+		"stale red source":      {func(r *FoundationRuns) { red(r).SourceBlob = other }, "RUN_STALE_SOURCE"},
+		"other image":           {func(r *FoundationRuns) { head(r).Env["LZ_MANIFEST"] = "sha256:" + strings.Repeat("e", 64) }, "RUN_IDENTITY"},
+		"other layer":           {func(r *FoundationRuns) { head(r).Env["LZ_LAYER"] = "sha256:" + strings.Repeat("e", 64) }, "RUN_IDENTITY"},
+		"other entry":           {func(r *FoundationRuns) { head(r).Env["LZ_ENTRY_SHA256"] = strings.Repeat("e", 64) }, "RUN_IDENTITY"},
+		"other launcher":        {func(r *FoundationRuns) { head(r).Env["LZ_BWRAP_SHA256"] = strings.Repeat("e", 64) }, "RUN_IDENTITY"},
+		"other targets":         {func(r *FoundationRuns) { head(r).Env["LZ_TARGETS"] = "test:reports" }, "RUN_IDENTITY"},
+		"extra environment":     {func(r *FoundationRuns) { head(r).Env["BASH_ENV"] = "/tmp/x" }, "RUN_IDENTITY"},
+		"missing environment":   {func(r *FoundationRuns) { delete(head(r).Env, "LZ_IMAGE") }, "RUN_IDENTITY"},
+		"widened token":         {func(r *FoundationRuns) { head(r).Permissions = append(head(r).Permissions, "Contents: write") }, "RUN_IDENTITY"},
+		"self-hosted runner":    {func(r *FoundationRuns) { head(r).RunnerLabels = []string{"self-hosted"} }, "RUN_IDENTITY"},
+		"other runner group":    {func(r *FoundationRuns) { head(r).RunnerGroup = "Default" }, "RUN_IDENTITY"},
+		"other runner image":    {func(r *FoundationRuns) { head(r).RunnerImage = "ubuntu-22.04" }, "RUN_IDENTITY"},
+		"incomplete run":        {func(r *FoundationRuns) { head(r).Status = "in_progress"; head(r).Conclusion = "" }, "RUN_INCOMPLETE"},
+		"cancelled run":         {func(r *FoundationRuns) { head(r).Conclusion = "cancelled" }, "RUN_CANCELLED"},
+		"cancelled job":         {func(r *FoundationRuns) { head(r).JobConclusion = "cancelled" }, "RUN_CANCELLED"},
+		"skipped run":           {func(r *FoundationRuns) { head(r).Conclusion = "skipped" }, "RUN_SKIPPED"},
+		"skipped step":          {func(r *FoundationRuns) { head(r).Steps[5].Conclusion = "skipped" }, "RUN_SKIPPED"},
+		"failed run":            {func(r *FoundationRuns) { head(r).Conclusion = "failure" }, "RUN_FAILED"},
+		"timed out run":         {func(r *FoundationRuns) { head(r).Conclusion = "timed_out" }, "RUN_FAILED"},
+		"failed target":         {func(r *FoundationRuns) { head(r).Targets[2].Status = "failed" }, "RUN_FAILED"},
+		"omitted check":         {func(r *FoundationRuns) { head(r).Targets = slices.Delete(head(r).Targets, 4, 5) }, "RUN_COUNT"},
+		"reordered checks":      {func(r *FoundationRuns) { t := head(r).Targets; t[0], t[1] = t[1], t[0] }, "RUN_COUNT"},
+		"wrong done count":      {func(r *FoundationRuns) { head(r).TargetsDone = 8 }, "RUN_COUNT"},
+		"zero checks":           {func(r *FoundationRuns) { head(r).Targets = []RunTarget{}; head(r).TargetsDone = 0 }, "RUN_COUNT"},
+		"zero discovery":        {func(r *FoundationRuns) { head(r).Targets[2].Discovered = 0 }, "RUN_ZERO_DISCOVERY"},
+		"package without tests": {func(r *FoundationRuns) { head(r).Targets[3].Empty = 1 }, "RUN_ZERO_DISCOVERY"},
+		"red control passed":    {func(r *FoundationRuns) { red(r).Conclusion = "success"; red(r).JobConclusion = "success" }, "RUN_NOT_RED"},
+		"red before the checks": {func(r *FoundationRuns) {
+			red(r).Steps[3].Conclusion = "failure"
+			red(r).Steps[5].Conclusion = "skipped"
+		}, "RUN_NOT_RED"},
+		"red without a target":   {func(r *FoundationRuns) { red(r).Targets = red(r).Targets[:3] }, "RUN_NOT_RED"},
+		"red after all targets":  {func(r *FoundationRuns) { red(r).TargetsDone = 9 }, "RUN_NOT_RED"},
+		"red in an unlisted one": {func(r *FoundationRuns) { red(r).Targets[3].Name = "test:ghost" }, "RUN_NOT_RED"},
+		"cancelled red control":  {func(r *FoundationRuns) { red(r).Conclusion = "cancelled" }, "RUN_CANCELLED"},
+		"stale red head":         {func(r *FoundationRuns) { red(r).Candidate = other }, "RUN_STALE_HEAD"},
+		"red without assertions": {func(r *FoundationRuns) { red(r).Targets[3].Failures = 0 }, "RUN_NOT_RED"},
+		"tree changed since run": {func(r *FoundationRuns) { head(r).CheckDigests["test:reports"] = "sha256:" + other }, "RUN_STALE_HEAD"},
+		"no digests recorded":    {func(r *FoundationRuns) { head(r).CheckDigests = map[string]string{} }, "RUN_STALE_HEAD"},
+		"extra digest recorded":  {func(r *FoundationRuns) { head(r).CheckDigests["test:ghost"] = "sha256:" + other }, "RUN_STALE_HEAD"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source, runs := recordedRuns(t)
+			c.change(&runs)
+			if got := ruleSet(JudgeFoundationRuns(source, encode(t, runs), treeDigests())); !reflect.DeepEqual(got, []string{c.want}) {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v, want [%s]", name, got, c.want)
+			}
+		})
+	}
+}
+
+// A record or source that does not decode strictly is refused, and so is a
+// source the workflow could not have been rendered from.
+func TestFoundationRunsSyntax(t *testing.T) {
+	source, runs := recordedRuns(t)
+	record := encode(t, runs)
+	for name, c := range map[string]struct {
+		source, record []byte
+		want           string
+	}{
+		"malformed record": {source, []byte("{"), "RUNS_SYNTAX"},
+		"null runs":        {source, []byte(`{"runs": null}`), "RUNS_SYNTAX"},
+		"unknown field":    {source, []byte(strings.Replace(string(record), `"runs":`, `"verdict":"pass","runs":`, 1)), "RUNS_SYNTAX"},
+		"malformed source": {[]byte("{"), record, "SOURCE_SYNTAX"},
+		"unpinned source":  {[]byte(strings.Replace(string(source), `"ubuntu-24.04"`, `"self-hosted"`, 1)), record, "SOURCE_PIN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := ruleSet(JudgeFoundationRuns(c.source, c.record, treeDigests())); !slices.Contains(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v, want %s", name, got, c.want)
 			}
 		})
 	}
