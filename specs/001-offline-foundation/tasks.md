@@ -242,7 +242,7 @@ Independent test: V003, V008.
   - Verify: `task test:offline-boundary; task test:runtime-image; task test:foundation-ci`: T024 controls green; the boundary suite unchanged and green; the entry rebuilt for the current runtime manifest; the runtime packed reproducibly by `lz-pack` as the next revision (two packs, identical digest), published to `ghcr.io/platformrelay/landingzone-for-ovhcloud/runtime` (D89), and `pipelines/github/foundation-source.json` plus the rendered workflow pinned to its manifest and layer digests; the previous revision stays published.
   - Evidence: `evidence/T025.md`; PR (image digests, run id); initial status `not-run`.
 
-- [ ] T026 Let the foundation CI check resolve spec-scoped creators in tools/internal/checks/foundation_ci.go and foundation_ci_test.go
+- [x] T026 Let the foundation CI check resolve spec-scoped creators in tools/internal/checks/foundation_ci.go and foundation_ci_test.go — closed 2026-10-06, evidence: evidence/T026.md
   - Requirements: FR-010; ADRs: 0007, 0008. Depends on: T023.
   - Verify: `task test:foundation-ci`: a test written first shows a target whose registry creator is a spec-scoped key (`005/T055`) of a ticked task in another spec is refused today as `CHECK_NOT_RUNNABLE` (behavioural red), then accepted; an open spec-scoped creator, an unknown spec prefix and a missing task id are still refused; bare spec 001 creators behave as before. Found 2026-10-06 when `test:live-lane` (creator 005/T055, closed) could not join the foundation workflow.
   - Evidence: `evidence/T026.md`; PR; initial status `not-run`.

@@ -16,7 +16,7 @@ import (
 // argument-free checks of a closed task and of T023, a T023 check that
 // judges the run afterwards, a check that takes an argument and one of an
 // open task.
-func foundationRegistry() (Registry, []Task) {
+func foundationRegistry() (Registry, map[string][]Task) {
 	check := func(id, creator, command string) CheckDefinition {
 		return CheckDefinition{ID: id, Creator: creator, Command: command, Kind: KindBehavioral}
 	}
@@ -26,9 +26,9 @@ func foundationRegistry() (Registry, []Task) {
 		check("ci:foundation", "T023", "task ci:foundation"),
 		check("lint", "T001", "task lint -- modules/x"),
 		check("test:later", "T050", "task test:later"),
-	}}, []Task{
+	}}, map[string][]Task{"001": {
 		{ID: "T001", Done: true}, {ID: "T023"}, {ID: "T050"},
-	}
+	}}
 }
 
 func foundationSource() map[string]any {
@@ -212,6 +212,48 @@ func TestFoundationSourceRejected(t *testing.T) {
 				t.Errorf("BEHAVIORAL_RED: %s gave %v, want %v", name, got, c.want)
 			}
 		})
+	}
+}
+
+// A spec-scoped creator resolves against its own spec's tasks by bare id: a
+// closed one admits its check as a target, without requiring it. An open one,
+// an unread spec, an id the spec lacks, a bare id only another spec closes and
+// a scoped id only spec 001 closes are still refused.
+func TestFoundationSpecScopedCreators(t *testing.T) {
+	registry, tasks := foundationRegistry()
+	check := func(id, creator string) CheckDefinition {
+		return CheckDefinition{ID: id, Creator: creator, Command: "task " + id, Kind: KindBehavioral}
+	}
+	registry.Checks = append(registry.Checks,
+		check("test:live", "005/T055"),
+		check("test:open", "005/T056"),
+		check("test:unread", "007/T055"),
+		check("test:missing", "005/T099"),
+		check("test:bare", "T055"),
+		check("test:shadow", "005/T001"),
+		check("test:own", "001/T001"),
+	)
+	tasks["005"] = []Task{{ID: "T055", Done: true}, {ID: "T056"}, {ID: "T001"}}
+	run := func(extra ...string) []string {
+		targets := []any{"test:a", "test:ci"}
+		for _, id := range extra {
+			targets = append(targets, id)
+		}
+		value := foundationSource()
+		value["targets"] = targets
+		source := encode(t, value)
+		return ruleSet(CheckFoundationCI(source, renderSource(t, source), registry, tasks))
+	}
+	if got := run("test:live"); len(got) != 0 {
+		t.Errorf("BEHAVIORAL_RED: check of closed 005/T055 gave %v, want accepted", got)
+	}
+	if got := run(); len(got) != 0 {
+		t.Errorf("BEHAVIORAL_RED: check of closed 005/T055 made required: %v", got)
+	}
+	for _, id := range []string{"test:open", "test:unread", "test:missing", "test:bare", "test:shadow", "test:own"} {
+		if got := run(id); !reflect.DeepEqual(got, []string{"CHECK_NOT_RUNNABLE"}) {
+			t.Errorf("BEHAVIORAL_RED: %s gave %v, want [CHECK_NOT_RUNNABLE]", id, got)
+		}
 	}
 }
 

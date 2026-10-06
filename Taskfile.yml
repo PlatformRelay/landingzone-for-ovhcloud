@@ -32,7 +32,7 @@ tasks:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
     cmds:
       - go -C tools test -count=1 -run 'TestFoundation|TestTraceabilityParse' ./internal/checks ./cmd/lz-check
-      - go -C tools run ./cmd/lz-check -root .. ci-source specs/001-offline-foundation
+      - go -C tools run ./cmd/lz-check -root .. ci-source specs/001-offline-foundation specs/005-first-landing-zone-slice
 
   # Judges recorded run evidence, so the workflow defers it: it cannot judge
   # its own run. The record is built on the host from read-only gh captures

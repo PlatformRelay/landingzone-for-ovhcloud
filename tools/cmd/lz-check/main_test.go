@@ -238,6 +238,13 @@ func TestUsage(t *testing.T) {
 			t.Errorf("BEHAVIORAL_RED: %v accepted (code %d)", args, code)
 		}
 	}
+	// Only ci-source takes more than one argument, and at least one.
+	withSource := repo(t, map[string]string{"pipelines/github/foundation-source.json": foundationSource})
+	for _, args := range [][]string{{"ci-source"}, {"specs", "specs/001-x", "specs/001-x"}, {"deps", "x"}} {
+		if code, out := lzCheck(withSource, args...); code != 2 || !strings.HasPrefix(out, "usage:") {
+			t.Errorf("BEHAVIORAL_RED: %v not refused with usage (code %d)\n%s", args, code, out)
+		}
+	}
 }
 
 func TestDependencyCommands(t *testing.T) {
@@ -405,6 +412,55 @@ func TestFoundationCICommands(t *testing.T) {
 	}
 	if code, out := lzCheck(root, "ci-source", "specs/001-x"); code != 1 || !strings.Contains(out, "WORKFLOW_DRIFT") {
 		t.Errorf("BEHAVIORAL_RED: absent workflow accepted: exit %d\n%s", code, out)
+	}
+}
+
+// ci-source resolves a spec-scoped creator against the tasks of the spec dirs
+// it is given: a closed 005/T055 admits its check only when spec 005 is read,
+// and an open one never does.
+func TestFoundationCISpecScopedCreators(t *testing.T) {
+	scoped := strings.Replace(registry, `"scope": ["tools"]}]}`, `"scope": ["tools"]},
+ {"id": "live", "requirements": ["FR-001"], "command": "task live", "creator": "005/T055", "kind": "behavioral", "scope": ["tools"]},
+ {"id": "later", "requirements": ["FR-001"], "command": "task later", "creator": "005/T056", "kind": "behavioral", "scope": ["tools"]}]}`, 1)
+	spec005 := strings.Replace(strings.Replace(tasks, "- [ ] T001", "- [x] T055", 1), "T001.md", "T055.md", 1) +
+		strings.Replace(tasks, "T001", "T056", -1)
+	root := repo(t, map[string]string{
+		"specs/001-x/tasks.md": strings.Replace(tasks, "- [ ] T001", "- [x] T001", 1),
+		"specs/005-y/tasks.md": spec005,
+		"harness/checks.yaml":  scoped,
+	})
+	withTargets := func(targets string) {
+		t.Helper()
+		writeFiles(t, root, map[string]string{"pipelines/github/foundation-source.json": strings.Replace(foundationSource, `["pins"]`, targets, 1)})
+		code, rendered := lzCheck(root, "ci-workflow")
+		if code != 0 {
+			t.Fatalf("ci-workflow exit %d:\n%s", code, rendered)
+		}
+		writeFiles(t, root, map[string]string{".github/workflows/foundation.yml": rendered})
+	}
+	withTargets(`["pins", "live"]`)
+	if code, out := lzCheck(root, "ci-source", "specs/001-x", "specs/005-y"); code != 0 || out != "FOUNDATION_CI_OK targets=2 deferred=0\n" {
+		t.Errorf("BEHAVIORAL_RED: check of closed 005/T055 refused with spec 005 read: exit %d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/001-x"); code != 1 || !strings.Contains(out, "CHECK_NOT_RUNNABLE live") {
+		t.Errorf("BEHAVIORAL_RED: check of 005/T055 admitted without spec 005 read: exit %d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/001-x", "specs/005-y", "specs/005-y"); code != 2 || !strings.Contains(out, "SPEC_DUPLICATE") {
+		t.Errorf("BEHAVIORAL_RED: spec 005 read twice: exit %d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/001-x", "specs/y"); code != 2 || !strings.Contains(out, "SPEC_NUMBER") {
+		t.Errorf("BEHAVIORAL_RED: unnumbered spec dir accepted: exit %d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "ci-source", "specs/005-y"); code != 2 || !strings.Contains(out, "SPEC_FOUNDATION") {
+		t.Errorf("BEHAVIORAL_RED: spec 001 not read, so its checks could not be required: exit %d\n%s", code, out)
+	}
+	withTargets(`["pins", "live", "later"]`)
+	if code, out := lzCheck(root, "ci-source", "specs/001-x", "specs/005-y"); code != 1 || !strings.Contains(out, "CHECK_NOT_RUNNABLE later") {
+		t.Errorf("BEHAVIORAL_RED: check of open 005/T056 admitted: exit %d\n%s", code, out)
+	}
+	withTargets(`["pins"]`)
+	if code, out := lzCheck(root, "ci-source", "specs/001-x", "specs/005-y"); code != 0 || out != "FOUNDATION_CI_OK targets=1 deferred=0\n" {
+		t.Errorf("BEHAVIORAL_RED: another spec's closed check made required: exit %d\n%s", code, out)
 	}
 }
 

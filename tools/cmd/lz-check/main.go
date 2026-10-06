@@ -9,7 +9,7 @@
 //	lz-check [-root <repo>] [-tofu <bin>] unit <module-dir>
 //	lz-check [-root <repo>] [-tofu <bin>] [-tflint <bin>] slice
 //	lz-check [-root <repo>] ci-workflow
-//	lz-check [-root <repo>] ci-source <spec-dir>
+//	lz-check [-root <repo>] ci-source <spec-dir>...
 //	lz-check [-root <repo>] ci-runs
 //	lz-check ci-observe (<role> <candidate> <capture-dir>)...
 //
@@ -21,8 +21,9 @@
 // changed path requires to be checked. lint runs the pinned fmt, init, validate
 // and TFLint clauses on one module directory and exits 1 unless all pass.
 // ci-workflow prints the foundation workflow rendered from its approved source;
-// ci-source judges that source against the registry and <spec-dir>/tasks.md
-// and the committed workflow against the rendered one, and exits 1 on any
+// ci-source judges that source against the registry and the tasks.md of each
+// <spec-dir> (spec 001 among them; a creator NNN/Txxx resolves against spec
+// NNN) and the committed workflow against the rendered one, and exits 1 on any
 // finding. ci-runs judges the recorded GitHub runs in
 // pipelines/github/foundation-runs.json against that source and exits 1 on
 // any finding or an absent record; ci-observe prints that record from
@@ -83,8 +84,10 @@ func run(args []string, out io.Writer) int {
 		return ciRuns(out, *root)
 	case flags.NArg() > 1 && (flags.NArg()-1)%3 == 0 && flags.Arg(0) == "ci-observe":
 		return ciObserve(out, flags.Args()[1:])
+	case flags.NArg() >= 2 && flags.Arg(0) == "ci-source":
+		// One or more spec dirs; judged with the registry below.
 	case flags.NArg() != 2 || flags.Arg(0) == "deps":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir> | ci-runs | ci-observe (<role> <candidate> <capture-dir>)...")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)...")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -98,7 +101,7 @@ func run(args []string, out io.Writer) int {
 	case "dod":
 		return dod(out, *root, filepath.Join(*root, *evidenceDir), flags.Arg(1), registry)
 	case "ci-source":
-		return ciSource(out, *root, flags.Arg(1), registry)
+		return ciSource(out, *root, flags.Args()[1:], registry)
 	}
 	fmt.Fprintf(out, "unknown command %q\n", flags.Arg(0))
 	return 2
@@ -112,10 +115,34 @@ func loadRegistry(root string) (checks.Registry, error) {
 	return checks.ParseRegistry(data)
 }
 
-func specs(out io.Writer, root, dir string, registry checks.Registry) int {
+// specDirNumber returns a spec directory's three-digit number.
+func specDirNumber(out io.Writer, dir string) (string, bool) {
 	number := specNumber.FindStringSubmatch(filepath.Base(filepath.Clean(dir)))
 	if number == nil {
 		fmt.Fprintf(out, "SPEC_NUMBER: %s does not start with a three-digit spec number\n", dir)
+		return "", false
+	}
+	return number[1], true
+}
+
+// specTasks reads and parses a spec directory's tasks.md.
+func specTasks(out io.Writer, root, dir string) ([]checks.Task, bool) {
+	tasksText, err := os.ReadFile(filepath.Join(root, dir, "tasks.md"))
+	if err != nil {
+		fmt.Fprintln(out, "TASKS_MISSING:", err)
+		return nil, false
+	}
+	tasks, err := checks.ParseTasks(string(tasksText))
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return nil, false
+	}
+	return tasks, true
+}
+
+func specs(out io.Writer, root, dir string, registry checks.Registry) int {
+	number, ok := specDirNumber(out, dir)
+	if !ok {
 		return 2
 	}
 	specText, err := os.ReadFile(filepath.Join(root, dir, "spec.md"))
@@ -128,14 +155,8 @@ func specs(out io.Writer, root, dir string, registry checks.Registry) int {
 		fmt.Fprintf(out, "NO_REQUIREMENTS: %s/spec.md defines no FR or SC\n", dir)
 		return 2
 	}
-	tasksText, err := os.ReadFile(filepath.Join(root, dir, "tasks.md"))
-	if err != nil {
-		fmt.Fprintln(out, "TASKS_MISSING:", err)
-		return 2
-	}
-	tasks, err := checks.ParseTasks(string(tasksText))
-	if err != nil {
-		fmt.Fprintln(out, err)
+	tasks, ok := specTasks(out, root, dir)
+	if !ok {
 		return 2
 	}
 	entries, err := os.ReadDir(filepath.Join(root, "docs/adr"))
@@ -149,7 +170,7 @@ func specs(out io.Writer, root, dir string, registry checks.Registry) int {
 			adrs = append(adrs, m[1])
 		}
 	}
-	findings := checks.CheckTrace(checks.Trace{Spec: number[1], Requirements: requirements, Tasks: tasks, Registry: registry, ADRs: adrs})
+	findings := checks.CheckTrace(checks.Trace{Spec: number, Requirements: requirements, Tasks: tasks, Registry: registry, ADRs: adrs})
 	for _, f := range findings {
 		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
 	}
@@ -157,7 +178,7 @@ func specs(out io.Writer, root, dir string, registry checks.Registry) int {
 		fmt.Fprintf(out, "TRACE_FAIL %s findings=%d\n", dir, len(findings))
 		return 1
 	}
-	fmt.Fprintf(out, "TRACE_OK %s requirements=%d tasks=%d checks=%d\n", dir, len(requirements), len(tasks), checks.SpecChecks(number[1], registry))
+	fmt.Fprintf(out, "TRACE_OK %s requirements=%d tasks=%d checks=%d\n", dir, len(requirements), len(tasks), checks.SpecChecks(number, registry))
 	return 0
 }
 
@@ -385,20 +406,29 @@ func ciWorkflow(out io.Writer, root string) int {
 }
 
 // ciSource judges the source and the committed workflow; an absent workflow
-// is judged as an empty one, so it is drift, not an input error.
-func ciSource(out io.Writer, root, dir string, registry checks.Registry) int {
+// is judged as an empty one, so it is drift, not an input error. A registry
+// creator resolves against the tasks of the spec dirs given, by spec number.
+func ciSource(out io.Writer, root string, dirs []string, registry checks.Registry) int {
 	data, ok := readFoundationSource(out, root)
 	if !ok {
 		return 2
 	}
-	tasksText, err := os.ReadFile(filepath.Join(root, dir, "tasks.md"))
-	if err != nil {
-		fmt.Fprintln(out, "TASKS_MISSING:", err)
-		return 2
+	tasks := map[string][]checks.Task{}
+	for _, dir := range dirs {
+		number, ok := specDirNumber(out, dir)
+		if !ok {
+			return 2
+		}
+		if _, seen := tasks[number]; seen {
+			fmt.Fprintf(out, "SPEC_DUPLICATE: spec %s given twice\n", number)
+			return 2
+		}
+		if tasks[number], ok = specTasks(out, root, dir); !ok {
+			return 2
+		}
 	}
-	tasks, err := checks.ParseTasks(string(tasksText))
-	if err != nil {
-		fmt.Fprintln(out, err)
+	if _, ok := tasks["001"]; !ok {
+		fmt.Fprintln(out, "SPEC_FOUNDATION: spec 001 not given; its checks could not be required")
 		return 2
 	}
 	workflow, err := os.ReadFile(filepath.Join(root, checks.FoundationWorkflow))
