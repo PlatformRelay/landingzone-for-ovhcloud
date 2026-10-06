@@ -226,8 +226,9 @@ dependent task closes.
 - **FR-011 Live lane** — `task live:plan|apply|destroy|chain -- <instance|all>` and
   `task live:probe -- <probe>` run on the maintainer host only. Before any credential loads, the
   guard requires: not inside `lz-offline`; the canonical (symlink-resolved) checkout equals the
-  owner's main checkout named in `~/.config/ovh-lz/live.env` and is not a linked worktree (git
-  metadata, not a path pattern); a clean tree; `HEAD` equal to the externally supplied
+  owner's dedicated clone named in `~/.config/ovh-lz/live.env`, has a private `.git` with no linked
+  worktrees, alternates or shared object store, and lies outside `LZ_AGENT_WORKTREE_ROOT` (git
+  metadata, not a path pattern; D92); a clean tree; `HEAD` equal to the externally supplied
   `--reviewed-sha` and reachable from `origin/main` (D87). `bootstrap:account` uses the same guard;
   credential-free generation (`stacks:reconcile`, `stacks:generate`) does not.
   Every run has a deadline (default 45 min, then the destroy-on-exit fires), appends each created
@@ -357,7 +358,7 @@ Details and controls: `contracts/checks.md`.
 
 ## Dependencies and stop conditions
 Depends on 001/T001–T009 and T023 (done). Live tasks additionally need the owner and the sandbox
-credentials in `~/.config/ovh-lz/`, and start only from the owner's main checkout on a reviewed
+credentials in `~/.config/ovh-lz/`, and start only from the owner's dedicated clone (D92) on a reviewed
 commit. Constitution 1.3.0 (D87) settles the earlier Principle V (cost guards are hygiene) and
 Principle VI (AgentEx deferred) conflicts. A refuted premise stops its dependent tasks and records
 the fallback.
