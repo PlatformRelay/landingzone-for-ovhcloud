@@ -1,5 +1,5 @@
 # Implementation Plan: First landing-zone slice
-Branch: `005-first-landing-zone-slice` · Date: 2026-10-06 · Revised: 2026-10-06 (D88) · Spec: [spec.md](spec.md) · Status: draft
+Branch: `005-first-landing-zone-slice` · Date: 2026-10-06 · Revised: 2026-10-06 (D88; round-2 review) · Spec: [spec.md](spec.md) · Status: draft
 
 ## Summary
 Real OpenTofu for six stacks (`bootstrap`, `tenant-state`, `account-governance`, `project`,
@@ -38,8 +38,8 @@ and one apply→destroy chain, started by the owner. Decisions and evidence: [re
 | III Mutation survivors block claimed coverage | pass (scoped) | mutation coverage is claimed only for FR-013's security guards G1–G15 (D85) |
 | IV Instances are roots, one owner, artefacts not state | pass | one state per stack; `outputs.json` through one adapter; no `terraform_remote_state` |
 | IV Privileged execution from protected immutable candidates | **deviation** (KD-2) | owner runs live targets from the workstation; already a known deviation in AGENTS.md (ADR-0019); narrowed by the host guard (main checkout via git metadata, clean tree, reviewed SHA on `origin/main`) |
-| IV Tenant isolation | **deviation** (KD-1, D88) | state buckets share the sandbox project with tenant resources; tenant authority reaches them through the management API; recorded in spec and ADR-0009, demonstrated by V010, not claimed |
-| V Fail closed; cleanup | pass | run core with deadline, incremental inventory, trap destroy and a leftover check over the full kind matrix, tested (T052–T055) before the first credential load or live probe; retained infrastructure protected on every verb |
+| IV Tenant isolation | **deviation** (KD-1, D88; KD-3) | state buckets share the sandbox project with tenant resources; tenant authority reaches them through the management API; recorded in spec and ADR-0009, demonstrated by V010, not claimed. KD-3: platform `project` state and artefact sit in the tenant-writable tenant bucket; the adapter's bound-project check limits a forged artefact, state tampering is not detected |
+| V Fail closed; cleanup | pass | run core with deadline, incremental inventory, redaction, trap destroy and a leftover check over every created resource type, tested (T052–T055) before the first credential load, the parser qualified on captured listings (T065) before the first resource-creating probe; retained infrastructure protected on every verb by one shared plan guard (T063–T064) that precedes the run core and the first bootstrap apply |
 | V Cost guards (constitution 1.3.0) | pass | constitution 1.3.0 (D87) makes cost guards hygiene, not admission gates. Built: inventory of created ids outside state, bounded runtime, tested trap destroy and leftover check, approximate cost per live run; spend admission, leases and reaper are not built |
 | V Key-loss recovery | non-claim | sandbox state is disposable and the bootstrap re-runnable; no recovery claim until OKMS/escrow |
 | VI Smallest useful slice; generators after two examples | pass | Terramate templates serve six real stacks; growth and tenant-only fixtures are the second shapes |
@@ -55,8 +55,10 @@ bucket per tenant is followed as written, and its 2026-10-06 note records KD-1. 
 recorded (operator direction overrides): ADR-0002 (`stacks/` in this repo, not
 `templates/tenant-repo/`); ADR-0003 (limits table in `modules/naming/kinds.yaml`, `release` label
 constant `unreleased`); ADR-0007 (reconciler reduced to create + `UNSUPPORTED_CHANGE`); ADR-0009
-(passphrase only; OKMS and escrow postponed; KD-1; the admin client is not in OpenTofu state, so its
-drift is found by the bootstrap's `admin` phase). Consistent with the reworded ADR-0004: transaction
+(passphrase only; OKMS and escrow postponed; KD-1; KD-3 — the platform `project` stack's state and
+artefact live in the tenant bucket, so backend permissions are not scoped to its credential class
+as ADR-0009 §Backend requires, research R24; the admin client is not in OpenTofu state, so its
+drift is found by the bootstrap's `admin` phase and the leftover check exempts it by recorded id). Consistent with the reworded ADR-0004: transaction
 postponed, outputs in the `artifacts/` prefix of each instance's state bucket, producers first,
 changed consumers re-planned, one run per tenant.
 
@@ -125,11 +127,12 @@ tools module; `tests/live/` holds only probe roots and observation data.
 
 ## Phases and ordering
 1. **Setup** (T001–T006): spec-scoped traceability, `test:unit`/`test:slice` runners, purity rules.
-2. **Live safety core** (T052–T055): host guard, child environment, account binding, run core
-   (deadline, inventory, destroy-on-exit, leftover matrix), `lz-live probe`.
+2. **Live safety core** (T052–T055, T063–T064): host guard, child environment, account binding,
+   shared retained-resource plan guard, run core (deadline, inventory, redaction, destroy-on-exit,
+   leftover matrix, probe state retention), `lz-live probe`.
 3. **Premise probes** (T007 offline captures, T008 probe roots — agents; T009 read-only and T010
-   create→destroy — owner sessions through `lz-live probe`). T007/T008/T052 start at once; T009 waits
-   for T055; US3 waits for T007; T038/T039 wait for T010's result, T039 and T046 for T009's.
+   create→destroy — owner sessions through `lz-live probe`; T065 qualifies the leftover parser on
+   T009's captures between them). T007/T008/T052 start at once; T009 waits for T055, T010 for T065; US3 waits for T007; T038/T039 wait for T010's result, T039 and T046 for T009's.
 4. **US1** (T011–T016): naming, object storage modules (plain and protected), `state-backend`,
    `bootstrap` stage.
 5. **US2** (T017–T032): output contracts, IAM, `tenant-state`, governance, project, network, runtime.
@@ -151,12 +154,14 @@ output summary, run id, approximate cost, known deviations) plus `evidence/T0NN.
 | --- | --- | --- |
 | Project import plans a replacement (P5) | an order for a new project | `prevent_destroy` fails the plan; the lane refuses delete/replace of retained resources; plan-only probe first; fallback reference mode |
 | Lockfile or encryption incompatible with OVH S3 (P1–P3) | no remote state | probe first; fallback: local encrypted state per stack with a per-tenant flock — changes FR-008, so the spec and V005/V010 are revised before T038 closes |
-| Retained infrastructure destroyed by a later apply (`org` change, tenant removal, removed block) | state and artefacts lost | `prevent_destroy` on state buckets and project; plan-level refusal on every verb; `destroy` refuses retained instances (G7) |
+| Retained infrastructure destroyed by a later apply (`org` change, tenant removal, removed block) | state and artefacts lost | `prevent_destroy` on state buckets and project; one shared plan-level refusal (T064) on every verb including the bootstrap `state` phase, built before the first bootstrap apply; `destroy` refuses retained instances (G7) |
+| Tenant credential overwrites `project` state or artefact in its bucket (KD-3) | consumers pointed at a wrong project | adapter checks the `project` artefact against the bound account's project id; recorded deviation; platform-only bucket later |
+| Deployer cannot bind (`GET /me` needs `account:apiovh:me/get`) | first tenant stack refused | binding through `GET /auth/details` (P26), probed in T010; fallback grants the read action |
 | Tenant authority deletes state buckets through the API (KD-1) | tenant can destroy platform or other tenants' state in the sandbox | narrowest allowlist; recorded deviation; V010 canary negative; no isolation claim; separate state project lifts it |
 | Provider docs ahead of pin (P20) | validate errors | L0 validate against the mirrored 2.21.0 provider catches it |
 | Bucket name collision (P21) | bootstrap fails on a new account | `org` discriminator (`lz`, D87) in the manifest; bootstrap fails clearly on a taken name and names the override |
 | Tenant allowlist too narrow (P9) | chain fails mid-apply | T010 probes the allowlist first; trap destroys; widen with recorded evidence |
-| Previous account's files used after migration | apply against the wrong account | per-account binding directory; credential's `GET /me` compared before use (G13) |
+| Previous account's files used after migration | apply against the wrong account | per-account binding directory; credential's `GET /auth/details` account compared before use (G13) |
 | Admin drift (outside OpenTofu state) | bootstrap authority wider or narrower than intended | bootstrap `admin` phase compares client and policy every run; repair only with root keys |
 | Passphrase loss | all state unreadable | sandbox only; re-run bootstrap; documented non-claim |
 | Live run from a candidate worktree or unreviewed tree | agent-authored code runs with credentials | host guard via git metadata, clean tree and reviewed SHA on `origin/main` (G10) |

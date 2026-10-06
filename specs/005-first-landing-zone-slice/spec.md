@@ -1,5 +1,5 @@
 # Feature Specification: First landing-zone slice
-Feature: `005-first-landing-zone-slice` · Created: 2026-10-06 · Revised: 2026-10-06 (round-1 spec-set review, D88) · Status: draft
+Feature: `005-first-landing-zone-slice` · Created: 2026-10-06 · Revised: 2026-10-06 (round-1 spec-set review, D88; round-2 review) · Status: draft
 ADRs: 0002, 0003, 0004 (reworded 2026-10-06, Proposed), 0005, 0006, 0007, 0008, 0009, 0017, 0018, 0024
 Input: operator decisions D83/D85/D87/D88 (2026-10-06), the 2026-10-06 cost/bootstrap update and
 constitution 1.3.0.
@@ -88,7 +88,9 @@ the slice that is absent from every state (fail, not pass); `ovhcloud` missing; 
 world-readable; passphrase file exists (never overwritten); bucket name taken globally; import of the
 project would replace it; the run happens inside `lz-offline`, from a linked worktree, a dirty tree
 or a commit other than the reviewed SHA (refused); the bound account differs from the credential's
-account (refused); two runs touching account stacks, or one tenant, at once (second refused).
+account (refused); a fresh-account run fails or is aborted after the root keys were entered (root
+credential revoked, retry resumes); a probe's destroy fails (state and passphrase kept for
+`--cleanup`); the script-created admin client and policy, outside every state (exempt by id only); two runs touching account stacks, or one tenant, at once (second refused).
 
 ## Premises
 
@@ -120,9 +122,10 @@ core of T055).
 | P20 | Features used exist in the pinned provider `ovh/ovh` 2.21.0, though the KB docs are 2.22.0-era | `terraform-provider-ovh/CHANGELOG.md:1,31` (`discard_client_secret` is 2.22.0, line 15) | L0 `tofu validate` against the mirrored 2.21.0 provider | doc; `discard_client_secret` excluded |
 | P21 | Bucket names are unique across OVHcloud | `.../object-storage/s3-limitations.mdx:49-53` | — | doc; template carries an org discriminator |
 | P22 | A fresh trial account has, or lets the owner create in the Control Panel, one Public Cloud project | none | T045 | UNVERIFIED; project ordering stays manual |
-| P23 | Root application credentials (AK/AS/CK) can create an OAuth2 client (`POST /me/api/oauth2/client`), an IAM policy (`POST /iam/policy`, API v2), read the caller's account (`GET /me`) and revoke their own credential (`GET /auth/currentCredential`, `DELETE /me/api/credential/{credentialId}`) | `kb/api/v1/me.json`, `kb/api/v2/iam.json`, `kb/api/v1/auth.json` (paths and methods present) | T045 fresh-account run; the current sandbox (T044) exercises only `GET /me` and the admin client/policy reads | doc; UNVERIFIED live |
+| P23 | Root application credentials (AK/AS/CK) can create an OAuth2 client (`POST /me/api/oauth2/client`), an IAM policy (`POST /iam/policy`, API v2), read the caller's account (`GET /auth/details`, P26) and revoke their own credential (`GET /auth/currentCredential`, `DELETE /me/api/credential/{credentialId}`) | `kb/api/v1/me.json`, `kb/api/v2/iam.json`, `kb/api/v1/auth.json` (paths and methods present) | T045 fresh-account run; the current sandbox (T044) exercises only `GET /auth/details` and the admin client/policy reads | doc; UNVERIFIED live |
 | P24 | `tofu apply -json` (1.13) emits one `apply_complete` event per resource with its address and id, early enough to append it to the run inventory before the next resource | OpenTofu machine-readable UI, none in KB | T007 offline capture on a provider-free root with `terraform_data` resources | UNVERIFIED; fallback: `tofu state list` after each stack plus external listing reconciliation (inventory then lags by one stack) |
 | P25 | IAM policy `conditions` on resource tags narrow `region/storage/*` actions to buckets carrying a tenant tag | `iam_policy.md:95` ("Conditions restrict permissions based on resource tags …"); evaluation of bucket tags for actions on the project URN: none | T010 optional probe on two probe buckets | UNVERIFIED; if observed, narrows KD-1 but does not close it |
+| P26 | `GET /auth/details` returns the caller's account for every credential class (root keys, admin, an OAuth2 client holding only project actions), with no IAM action; `GET /me` needs `account:apiovh:me/get`, which neither deployer policy grants | `kb/api/v1/auth.json` (`/auth/details`: no `iamActions`, `auth.Details.account`); `kb/api/v1/me.json:23` (`account:apiovh:me/get` required) | T009 (admin), T010 (P9-allowlist probe identity, `/me` denied), V010 (both deployers) | doc; UNVERIFIED live; fallback: grant `account:apiovh:me/get` on the account to both deployer policies (research R13) |
 
 A refuted premise blocks the clauses that rely on it and is recorded in `research.md` with the
 fallback taken; it never turns into a silent pass. A fallback that changes a requirement (for
@@ -135,13 +138,14 @@ dependent task closes.
 | --- | --- | --- | --- | --- |
 | KD-1 (D88) | The sandbox has one Public Cloud project, which holds both tenant resources and every state bucket. A tenant deployer's OAuth2 authority on that project includes `region/storage/delete` and `bulkDeleteObjects` (`kb/api/v1/cloud.json:58903,59095`), so it can reach state buckets through the management API even though its S3 credentials cannot. ADR-0009 assumes state lives where tenant authority does not reach | Operator answer "Known sandbox deviation" (D88): one trial project; a second project is a separate order | Tenant isolation of state is **not** demonstrated in this slice; S3-level scope (G6) and IAM-write denial are. `spec.state.project` must differ from every tenant project unless `spec.sandbox.shared_state_project: true`; the tenant allowlist is the narrowest the API allows (P9); V010 runs a negative that shows the gap on a disposable canary bucket and reports it as `known-deviation KD-1`, never as `pass` | A separate state project exists; the flag is removed and the same V010 negative must then pass |
 | KD-2 | Live runs start from the maintainer's workstation, not a protected pipeline (ADR-0019) | AGENTS.md known deviation; no pipeline lane yet | Guarded by FR-011's host guard | Protected-branch CI with sandbox credentials |
+| KD-3 | The platform-owned `project` stack keeps its state and `artifacts/` object in the tenant's state bucket, which the tenant S3 user can write (research R24). ADR-0009 scopes backend permissions to the instance's credential class | One bucket per tenant (D87) without prefix-scoped S3 policies (P19 withdrawn); moving `project` to the account bucket would cut its tenant consumers off from the artefact (G6) | A tenant credential could overwrite `project` state or publish a forged `project` artefact. The adapter refuses a `project` artefact whose project id differs from the bound account's reference (FR-005, V012), so a forged id cannot redirect consumers; tampering with the state object itself is not detected. Not claimed as isolated | A platform-only bucket (or a qualified prefix policy) per tenant holds `project` state and artefacts; trigger as KD-1 |
 
 ## Requirements
 
 ### Functional requirements
 - **FR-001 Naming** — `modules/naming` is pure (no provider, no data source). Inputs: hierarchy
-  coordinates (`org`, `tenant`, `environment`, `region`, `kind`, `role`) and a template object passed
-  as data. Only the default template ships; a second template exists in tests to prove the template
+  coordinates (`org`, `tenant`, `environment`, `region`, `kind`, `role`, and the runtime `slot`) and a
+  template object passed as data; two runtime slots in one scope get distinct names. Only the default template ships; a second template exists in tests to prove the template
   is data. Names are deterministic, independent of labels, validated against per-kind limits for
   the kinds this slice uses, and never silently truncated. An explicit name override (import) is
   passed through unchanged after validation. Supersedes 001/T013–T014 for this scope.
@@ -170,7 +174,8 @@ dependent task closes.
   not exist is absent, never a placeholder. Consumers receive producer values only as typed
   variables from these files, through one adapter: each consumed producer stage maps to one object
   variable named after that stage, typed by its outputs schema; the adapter refuses an artefact
-  whose `instance_id` or `stage` does not match the derived edge, or that fails validation.
+  whose `instance_id` or `stage` does not match the derived edge, or that fails validation, and a
+  `project` artefact whose project id differs from the bound account's reference (KD-3).
 - **FR-006 Manifest** — `stacks/deployments.yaml`, `apiVersion: lz.platformrelay.dev/v1alpha1`,
   `kind: Deployments`, strict decoding (unknown field, duplicate key, unsupported version rejected).
   Dimensions tenant × environment × region plus an optional runtime `slot`; `instance_id` is
@@ -187,7 +192,9 @@ dependent task closes.
   Generation renders backend, provider, the one stage call (module source derived from
   `spec.stage_source`: a relative path now, a versioned reference as the seam), typed input
   variables, labels and (adopt only) the import block. `task stacks:check` fails on any stale
-  generated file.
+  generated file, and on two stacks planning the same bucket name (`NAME_COLLISION`).
+  `stacks:reconcile` and `stacks:generate` read no credential and are not behind the host guard: they
+  run in any checkout, including an authoring worktree with the uncommitted manifest edit.
 - **FR-008 State** — `bootstrap` uses local encrypted state outside the repository; every other
   stack uses the S3 backend with `use_lockfile = true`, its own key and `encryption {}`: account and
   account-tenant stacks in the account state bucket, tenant stacks in their tenant's own state bucket
@@ -200,8 +207,9 @@ dependent task closes.
   `encryption {}`; OKMS and escrow are postponed.
 - **FR-009 Order and runs** — Terramate `after` follows derived edges (data and authority); producers
   run before consumers. The selected set of a run is: stacks whose recorded code digest (stack plus
-  its stage/component/module closure) changed, stacks whose consumed `outputs.json` digest differs
-  from the one recorded at their last apply (or have no record), and the transitive data consumers
+  its stage/component/module closure) changed, stacks whose consumed `outputs.json` digest — or
+  resolved-reference input from the bound account (project ids, data-model) — differs from the one
+  recorded at their last apply (or have no record), and the transitive data consumers
   of those; authority edges order but never select. A consumer whose producer has published nothing
   is `blocked`, not planned. Runs that touch an account or account-tenant stack hold the account
   lock; tenant stacks hold their tenant's lock; locks are taken in a fixed order and a second holder
@@ -214,20 +222,24 @@ dependent task closes.
   Secret values never reach stdout, stderr, logs, argv, generated files, `outputs.json`, the
   repository or a worktree; credential files are mode 600 under `~/.config/ovh-lz/` and have one
   writer (`lz-live`'s credential writer). Every credential is checked against the bound account
-  before use.
+  before use, through a call every credential class may make (`GET /auth/details`, P26).
 - **FR-011 Live lane** — `task live:plan|apply|destroy|chain -- <instance|all>` and
   `task live:probe -- <probe>` run on the maintainer host only. Before any credential loads, the
   guard requires: not inside `lz-offline`; the canonical (symlink-resolved) checkout equals the
   owner's main checkout named in `~/.config/ovh-lz/live.env` and is not a linked worktree (git
   metadata, not a path pattern); a clean tree; `HEAD` equal to the externally supplied
-  `--reviewed-sha` and reachable from `origin/main` (D87). `bootstrap:account` uses the same guard.
+  `--reviewed-sha` and reachable from `origin/main` (D87). `bootstrap:account` uses the same guard;
+  credential-free generation (`stacks:reconcile`, `stacks:generate`) does not.
   Every run has a deadline (default 45 min, then the destroy-on-exit fires), appends each created
   resource id to its inventory as it is created, and refuses any plan that deletes or replaces a
-  resource of a retained instance (`bootstrap`, `tenant-state`, `account-governance`, `project`);
+  resource of a retained instance (`bootstrap`, `tenant-state`, `account-governance`, `project`)
+  through one shared guard that every applying verb, including the bootstrap `state` phase and the
+  probes, runs on a saved plan before applying exactly that plan;
   `destroy` refuses retained instances on every verb. `chain` applies, asserts, then destroys
   ephemeral instances (`runtime`, `project-network`) in reverse dependency order from a trap that
   also fires on failure, interruption and deadline. It reconciles the inventory against
-  independent `ovhcloud` listings of every kind the slice creates, prints the run id, any observed
+  independent `ovhcloud` listings of every resource type the slice creates (the admin client and
+  policy exempt by recorded id only), prints the run id, any observed
   known deviation, and a reminder to record the approximate cost in the PR. Cost guards are hygiene:
   no spend gate, no cost ledger; the budget alert is optional.
 - **FR-012 Re-runnable bootstrap** — `task bootstrap:account` brings an account from empty (or any
@@ -241,7 +253,10 @@ dependent task closes.
   `state.env`); `publish`; `verify` (init and plan of `account-governance`, lock round-trip);
   `revoke` (fresh account only). Each phase detects completed work and reports `unchanged`; a
   re-run on a bootstrapped account changes nothing. On a fresh account the previous account's
-  `sandbox.env` moves into its own account directory and no file of the previous account is read.
+  `sandbox.env` moves into its own account directory and no file of the previous account is read;
+  missing project references are prompted for during `identify`, so the fresh run never stops
+  before the admin credential exists, and once root keys were entered they are revoked on every
+  exit path.
   Deployer credential files are written by the live lane after `account-governance` and
   `tenant-state` applies, not by the bootstrap. Bucket names are global: a taken name fails with a
   clear error that names `spec.org` (default `lz`, D87) as the override.
@@ -265,7 +280,7 @@ template, authority, account binding, credential file, live run record, known de
   credentials; every module, component and stage directory has at least one L1 test (V002).
 - **SC-002**: The sandbox manifest (1 tenant × 1 environment × 1 region) yields 6 stacks; the growth
   fixture (2 tenants × 2 environments × 2 regions, plus two runtime slots in one scope) yields unique
-  ids, paths and state keys and one state bucket per tenant; a tenant-only manifest generates in a
+  ids, paths, state keys and bucket names and one state bucket per tenant; a tenant-only manifest generates in a
   separate scratch repository; all plan offline with no stage code change (V005, V006).
 - **SC-003**: One owner session runs `task live:chain -- all` to completion within its deadline
   (< 60 min); six stacks apply, the two ephemeral ones are destroyed; the leftover check over the
@@ -301,8 +316,12 @@ Details and controls: `contracts/checks.md`.
 ## Growth seams (nothing here may block later growth)
 - More tenants/environments/regions: rows in `deployments.yaml`; paths and keys are derived; a new
   tenant is a `tenant-state` row, never a `bootstrap` change.
-- More runtimes per scope: the optional `slot` is part of instance identity, path and key
-  (ADR-0017 composable runtime instances); the growth fixture holds two.
+- More runtimes per scope: the optional `slot` is part of instance identity, path, key and resource
+  names (ADR-0017 composable runtime instances); the growth fixture holds two.
+- Tenant onboarding authority: `tenant-state` and `account-governance` run as the `bootstrap`
+  authority (`lz-sandbox-admin`, `account:apiovh:iam/*`); onboarding from CI will need a narrower
+  `onboarding` authority (deployer clients, policies and S3 users with the slice prefix only). The
+  seam is the stage table's authority column; nothing else changes.
 - Tenant repo: a `spec.scope: tenant` manifest with `external` platform producers and a versioned
   `spec.stage_source` generates on its own; the tenant-only fixture proves it offline.
 - Identity providers: `components/identity/<plane>-<source>` behind the same stage outputs; the stage
@@ -323,6 +342,7 @@ Details and controls: `contracts/checks.md`.
 | Tombstones, retirement, rename | `UNSUPPORTED_CHANGE` | first instance removal |
 | OKMS state key, escrow, backup | `encryption {}` in every backend | first non-sandbox tenant or a second maintainer |
 | Separate state project (lifts KD-1) | `spec.state.project` input, V010 negative | a second project in the sandbox, or the first claim of tenant isolation |
+| Narrower `onboarding` authority for `tenant-state`/`account-governance` | stage table authority column | tenant onboarding from CI |
 | Admin service account in OpenTofu state | reserved `account-admin` stage name | a self-managing authority decision, or admin drift found by the bootstrap `admin` phase more than once |
 | GitLab | Taskfile contract | operator request or a consumer on GitLab |
 | TACOs | vanilla roots | first TACO user |

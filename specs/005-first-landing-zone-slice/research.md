@@ -1,5 +1,5 @@
 # Research: First landing-zone slice
-Feature: 005-first-landing-zone-slice · 2026-10-06 · Revised: 2026-10-06 (D88) · Status: draft
+Feature: 005-first-landing-zone-slice · 2026-10-06 · Revised: 2026-10-06 (D88; round-2 review) · Status: draft
 
 Each entry: decision, rationale, alternatives rejected, evidence. KB paths are relative to
 `~/.local/share/ovh-lz/kb/mirror/` unless they start with `api/`. Provider doc paths are
@@ -74,7 +74,9 @@ flat variable per value (silent collisions between producers).
 P4), encrypted. Others: S3 backend in the account state bucket (account and account-tenant stacks)
 or the tenant's own state bucket (tenant stacks); the account bucket is created by `bootstrap`, each
 tenant bucket by that tenant's `tenant-state`; all live in `spec.state.project`. Key
-`<scope path>/<instance_id>/terraform.tfstate`, `use_lockfile = true`, OVH endpoint flags (P2).
+`<path minus "stacks/">/terraform.tfstate` (data-model *Derived instance fields*; e.g.
+`tenants/demo/dev/gra11/runtime/terraform.tfstate`), so key uniqueness follows path uniqueness and a
+runtime slot (`runtime-<slot>`) gets its own key; `use_lockfile = true`, OVH endpoint flags (P2).
 Every generated root has `terraform { encryption { key_provider "pbkdf2" "main" { passphrase =
 var.state_passphrase } … state { method = … enforced = true } plan { … enforced = true } } }`; the
 passphrase is `TF_VAR_state_passphrase` from the bound account's `state-passphrase.env` (mode 600,
@@ -184,8 +186,9 @@ only.
 **Rationale**: the guards (credential selection, child environment, redaction, trap ordering,
 deadline, leftover parsing) need offline tests with fake `tofu`/`ovhcloud`/`git` binaries and mutation
 proof; ADR-0002 chose Go for tools.
-**Host guard** (runs before any credential is read, for every subcommand including `bootstrap` and
-`probe`): refuse inside the offline entry (`/tcb` present or `LZ_OFFLINE=1`); resolve the working
+**Host guard** (runs before any credential is read, for every `lz-live` subcommand: `bootstrap`,
+`probe`, `plan`, `apply`, `destroy`, `chain`; not for `stacks:reconcile`/`stacks:generate`, which
+read no credential and must run in authoring worktrees, R16): refuse inside the offline entry (`/tcb` present or `LZ_OFFLINE=1`); resolve the working
 directory with symlinks evaluated and require it to equal `LZ_OWNER_CHECKOUT` from
 `~/.config/ovh-lz/live.env`; require `git rev-parse --git-dir` and `--git-common-dir` to resolve to the
 same directory (a linked worktree has a distinct git dir wherever it lives, so no path pattern is
@@ -197,7 +200,11 @@ test (any worktree outside that directory, or a symlink, passes it).
 
 ## R12 Run core, cleanup and leftover check
 **Decision**: one run core (`tools/internal/live/{runner,inventory,leftovers,deadline}.go`) serves
-probes (`lz-live probe`), `chain` and `bootstrap`. It registers the destroy-on-exit before the first
+probes (`lz-live probe`), `chain` and `bootstrap`. Every apply it performs is of a saved plan file
+that has passed the shared retained-resource guard (`protect.go`: refuses a delete, either
+replacement order or a `forget` of any resource of a retained instance, including one whose block
+was removed from configuration, where `prevent_destroy` no longer applies), and every child stream
+passes through `redact.go`. It registers the destroy-on-exit before the first
 apply (deferred function plus SIGINT/SIGTERM handling and the deadline context); destroy covers
 ephemeral instances (or the probe root) only, reverse order, continuing after a failure and exiting
 non-zero. The inventory is appended per resource from `tofu apply -json` `apply_complete` events
@@ -205,46 +212,75 @@ non-zero. The inventory is appended per resource from `tofu apply -json` `apply_
 also records each run's listings before the first apply.
 **Leftover kind matrix** (each listed with pagination; children listed per parent):
 
-| Kind | Listing (P18; fallback API path) | Created by | Match |
-| --- | --- | --- | --- |
-| Object Storage bucket | per region `/cloud/project/{p}/region/{r}/storage` | bootstrap, tenant-state, runtime, probes | name prefix, `lz:run-id` tag |
-| private network | `/cloud/project/{p}/network/private` | project-network, probes | name prefix |
-| subnet | `/cloud/project/{p}/network/private/{n}/subnet` (per network) | project-network, probes | parent network or CIDR from inventory |
-| cloud project user (S3 user) | `/cloud/project/{p}/user` | bootstrap, tenant-state | description/name prefix |
-| S3 credential | `/cloud/project/{p}/user/{u}/s3Credentials` (per user) | bootstrap, tenant-state | parent user |
-| OAuth2 client | `/me/api/oauth2/client` | account-governance, probes | name prefix |
-| IAM policy | `/iam/policy` (v2) | account-governance, probes | name prefix |
-| identity group | `/me/identity/group` | account-governance | name prefix |
-| IAM resource tags | `/iam/resource/{urn}/tag` on the project URN | project, probes | `lz:run-id` key |
+Every resource type the slice or its probes create has a row; a type outside this table fails the
+check (G9). *Retained* rows are exempt when the resource is in a retained instance's state;
+*ephemeral* rows must be gone after the run.
+
+| Provider type | Kind | Listing (P18; fallback API path) | Created by | Treatment | Match |
+| --- | --- | --- | --- | --- | --- |
+| `ovh_cloud_project_storage` | Object Storage bucket | per region `/cloud/project/{p}/region/{r}/storage` | bootstrap, tenant-state (retained); runtime, probes, KD-1 canary (ephemeral) | per instance | name prefix, `lz:run-id` tag |
+| `ovh_cloud_project_network_private` | private network | `/cloud/project/{p}/network/private` | project-network, probes | ephemeral | name prefix |
+| `ovh_cloud_project_network_private_subnet` | subnet | `/cloud/project/{p}/network/private/{n}/subnet` (per network) | project-network, probes | ephemeral | parent network or CIDR from inventory |
+| `ovh_cloud_project_user` | cloud project user (S3 user) | `/cloud/project/{p}/user` | bootstrap, tenant-state | retained | description/name prefix |
+| `ovh_cloud_project_user_s3_credential` | S3 credential | `/cloud/project/{p}/user/{u}/s3Credentials` (per user) | bootstrap, tenant-state | retained (with its user) | parent user |
+| `ovh_cloud_project_user_s3_policy` | S3 policy (a property of its user, one per user) | `/cloud/project/{p}/user/{u}/policy` (per user) | bootstrap, tenant-state, probes | retained (with its user); a policy under a user absent from every state is a leftover | parent user |
+| `ovh_me_api_oauth2_client` | OAuth2 client | `/me/api/oauth2/client` | account-governance (retained), probes (ephemeral) | per instance | name prefix |
+| `ovh_iam_policy` | IAM policy | `/iam/policy` (v2) | account-governance (retained), probes incl. P25 (ephemeral) | per instance | name prefix |
+| `ovh_me_identity_group` | identity group | `/me/identity/group` | account-governance | retained | name prefix |
+| `ovh_iam_resource_tags` | IAM resource tags (a property of the project URN) | `/iam/resource/{urn}/tag` on the project URN | project (retained), probes (ephemeral `lzprobe-` keys) | per instance | `lz:run-id` key |
+| `ovh_cloud_project_alerting` (optional, P10) | project alert | `/cloud/project/{p}/alerting` | project when `budget_alert.enabled`, alerting probe | retained (project); probe ephemeral | id from inventory, name prefix |
+| `ovh_cloud_quota` (optional, P11) | quota setting (a property of the project, no object to leave behind) | read through the project's quota (`api/v2/publicCloud.json:5530`) | project when `quota_guard.enabled`, quota probe (plan only) | retained with the project; nothing to list as a leftover | — |
+| `ovh_cloud_project` | the adopted project | — | project (adopt; `reference` mode creates none) | retained, never destroyed | exempt by id |
 
 A resource of a matrix kind that matches the slice prefix or the run id is a leftover unless it is in
-a retained instance's state (read with `tofu state list`/`show -json`) or is the retained adopted
-project. That catches resources that never reached a state. A listing error, a missing binary, an
-unparseable listing or a created resource type not in the matrix is `fail`. Each kind has a seeded
-leftover fixture, including one absent from every state.
+a retained instance's state (read with `tofu state list`/`show -json`), is the retained adopted
+project, or is covered by the **admin exemption**: exactly the client id in `sandbox.env`
+(`OVH_CLIENT_ID`) and the policy id recorded in `account.env` (`LZ_ADMIN_POLICY_ID`, written by the
+bootstrap `admin` phase). The admin is created by script, outside every state (D88), and its name
+`lz-sandbox-admin` matches the slice prefix, so without the exemption every run would report it;
+matching by id keeps the exemption to those two objects — another client or policy with the same
+name is still a leftover (seeded fixture in T054 and T065). That catches resources that never reached
+a state. A listing error, a missing binary, an unparseable listing or a created resource type not in
+the matrix is `fail`. Each kind has a seeded leftover fixture, including one absent from every state.
+**Qualification**: synthetic listings (T054) only build the parser; T065 qualifies it on T009's real
+captures before the first resource-creating probe (T010).
+**Probe state**: each probe run keeps its encrypted state and a private per-run passphrase file
+(0600, through `files.go`) under `accounts/<account>/state/probes/<run-id>/` until destroy and the
+leftover check pass, then deletes both. A failed destroy or a killed process leaves them, and
+`lz-live probe --cleanup <run-id>` finishes from a fresh process. No escrow is involved: the
+passphrase protects disposable probe state for the run's lifetime only.
 **Not built** (D85 update): spend admission, cost ledger, reaper service.
 
 ## R13 Re-runnable bootstrap (account migration path)
 **Decision** (D88): `lz-live bootstrap` phases, each idempotent and reporting `ran`, `unchanged`,
 `blocked` or `fail`:
 1. `guard` — R11.
-2. `identify` — `GET /me` with the available credential (`sandbox.env`, or the root keys under
-   `--fresh-account`) gives the account id; create or check `accounts/<account>/account.env`
+2. `identify` — `GET /auth/details` with the available credential (`sandbox.env`, or the root keys
+   under `--fresh-account`) gives the account id; create or check `accounts/<account>/account.env`
    (endpoint, account id, `org` from the manifest). A different account than the binding, or a
    manifest `org` that differs from the bound one, is refused. Under `--fresh-account` with an
    existing `sandbox.env` for another account, that file moves to `accounts/<old>/sandbox.env`; no
-   file of the old account is read afterwards. Missing `LZ_PROJECT_ID_STATE` → `blocked` (P22).
+   file of the old account is read afterwards. Missing project references (`LZ_PROJECT_ID_STATE`,
+   `LZ_PROJECT_ID_<REF>` for each manifest reference): without `--fresh-account` → `blocked` (the
+   admin credential exists, so the owner fills them and re-runs); with `--fresh-account` the phase
+   lists the account's projects with the root keys (`GET /cloud/project`) and prompts for each
+   missing reference (echo on, project ids are not secret), so a fresh run never stops before the
+   admin credential exists (P22).
 3. `passphrase` — create `state-passphrase.env` with 32 random bytes if absent; never overwrite.
    Runs before anything writes encrypted state.
-4. `admin` — two separate facts: *credential works* (`sandbox.env` authenticates; `GET /me` answers
+4. `admin` — two separate facts: *credential works* (`sandbox.env` authenticates; `GET /auth/details` answers
    for the bound account) and *admin present as expected* (the client exists; its policy grants
    exactly `account:apiovh:iam/*`, `account:apiovh:me/*`, `publicCloudProject:apiovh:*` on the
    account and project URNs). Both true → `unchanged`. Credential fails or admin missing without
    `--fresh-account` → `blocked` with the instruction. With `--fresh-account`: prompt for AK/AS/CK
    without echo, create the client and policy through the API (P23), write `sandbox.env` once.
+   Every run records the admin client id and policy id in `account.env` (`LZ_ADMIN_CLIENT_ID`,
+   `LZ_ADMIN_POLICY_ID`) for the leftover exemption (R12).
    Drift on an existing admin → `fail` naming the difference; repair is the same `--fresh-account`
    path with root keys, never the admin editing its own policy.
-5. `state` — apply the `bootstrap` root with the bootstrap authority; when the account bucket
+5. `state` — plan the `bootstrap` root with the bootstrap authority, pass the plan through the
+   retained-resource guard (R12; the account bucket and platform S3 user are retained), then apply
+   that plan file; when the account bucket
    exists but is not in state, import it by name (`service_name/region/name`,
    `cloud_project_storage.md` Import); a name taken by another account fails with the `spec.org`
    override message. Writes `state.env` from sensitive outputs through the credential writer.
@@ -252,10 +288,24 @@ leftover fixture, including one absent from every state.
 7. `verify` — `tofu init` + `plan` of `account-governance` against the bucket; lock round-trip.
 8. `revoke` (fresh account only) — `GET /auth/currentCredential` then
    `DELETE /me/api/credential/{id}`; a failed revocation prints the Control Panel step and exits 1.
+   Once root keys were entered, `revoke` runs on every exit path (success, `fail`, `blocked`, abort,
+   SIGINT), so a failed fresh run never leaves the root credential valid. A retry resumes by phase:
+   without `--fresh-account` when `admin` had completed (the new `sandbox.env` exists), with it when
+   it had not (new root keys, then completed phases report `unchanged`).
 **Partial states tested** (V008): each prefix of phases done; `sandbox.env` present but the
 credential rejected; credential works but admin policy drifted; passphrase present, `state.env`
 missing; `state.env` present, bucket missing; bucket present, not in state; binding for another
-account; previous account's files present during `--fresh-account`.
+account; previous account's files present during `--fresh-account`. **Fresh-account journeys**:
+from an empty `~/.config/ovh-lz/` (only `live.env`) and with a previous account's files present,
+each to `revoke` without a `blocked` exit, and each failing after `identify` and after `admin`, with
+the root credential revoked on exit and the retry resuming as above.
+**Account binding** (P26): the account id comes from `GET /auth/details`, which carries no IAM
+action in `kb/api/v1/auth.json` and returns `account`; `GET /me` needs `account:apiovh:me/get`
+(`kb/api/v1/me.json:23`), which the admin has but neither deployer policy grants (R6). Every
+credential class binds the same way. Whether an OAuth2 client token answers `/auth/details` with the
+account is UNVERIFIED (P26: T009 admin, T010 probe identity, V010 both deployers); if refuted,
+`account:apiovh:me/get` on the account is added to both deployer policies, recorded here, and G5's
+negative list is adjusted to allow exactly that read action.
 **Existing admin's previous owner**: on the current sandbox, `lz-sandbox-admin` and its policy are in
 the state of the one-off config in `~/.config/ovh-lz/bootstrap/`. The first `bootstrap:account` run
 leaves them in place and prints the `tofu state rm` commands that retire that config's ownership
@@ -281,8 +331,11 @@ provider schema → recorded in `outputs.json` `values.unlabelled[]` of their st
 **Evidence**: `cloud_project_storage.md` (`tags`), `iam_resource_tags.md` (pattern, `ovh:` reserved).
 
 ## R15 Naming
-**Decision**: default template `[org, tenant, environment, region, kind, role]`, separator `-`,
-lowercase, empty segments omitted (account scope), kind abbreviations (`bkt` bucket, `pn` private
+**Decision**: default template `[org, tenant, environment, region, kind, role, slot]`, separator
+`-`, lowercase, empty segments omitted (account scope; `slot` outside multi-runtime scopes); `slot`
+is the runtime instance's slot, so two runtimes in one scope get two bucket names
+(`lz-demo-dev-gra11-bkt-runtime-blue`, `…-green`) and the generator's planned-name check refuses a
+collision (`NAME_COLLISION`), kind abbreviations (`bkt` bucket, `pn` private
 network, `sn` subnet, `sa` service account, `pol` IAM policy, `grp` identity group, `s3u` S3 user).
 Per-kind limits live in `modules/naming/kinds.yaml` (only the kinds above), each row citing its source;
 unknown limits are marked and the module refuses names for kinds without a row.
@@ -304,7 +357,11 @@ directory as a generated instance. Fixture manifests generate into scratch direc
 the repository (Terramate would treat committed fixture stacks as real stacks).
 **Freshness**: `lz-offline` mounts the candidate read-only, so `stacks:check` copies the tree to scratch,
 runs reconcile `--check` and `terramate generate`, and diffs; `stacks:generate`/`stacks:reconcile` are
-host-side like `generate:foundation-ci`.
+host-side like `generate:foundation-ci`: credential-free, no host guard, allowed in an authoring
+worktree with a dirty tree (the manifest edit must precede them). The host guard protects
+credentials, not file generation; review of the committed generated files is what `stacks:check`
+and the PR provide. Tested as edit → reconcile → generate → check in a scratch linked worktree
+(T037).
 
 ## R17 Test layers for this slice
 | Layer | Where | What |
@@ -348,7 +405,12 @@ testing against the real account bucket (destructive if the gap exists).
 ## R21 Selection (ADR-0007)
 **Decision**: selected set = code-changed stacks (record `code_digest` ≠ digest of the stack directory
 plus its stage, component and module closure) ∪ input-changed stacks (consumed digest differs or no
-record) ∪ transitive data consumers of either. Authority edges and Terramate `after` order the
+record) ∪ transitive data consumers of either. Consumed inputs include the *resolved-reference
+input* the lane writes from `account.env` (data-model): the `tenants` map of `account-governance`
+(tenant names from the committed generated file, project ids from `account.env`) and the
+`project_id` of each `project`. A new tenant row changes the generated map, so `account-governance`
+is code-changed and selected with the new `tenant-state`; a changed `LZ_PROJECT_ID_<REF>` changes
+the resolved digest and selects `account-governance` and that `project`. Authority edges and Terramate `after` order the
 selected set but never add to it. `live:plan|apply -- all` acts on the selected set; `-- <instance>`
 acts on that instance and refuses when a producer it consumes is selected and not applied; a
 consumer whose producer has no artefact yet is `blocked`. `stacks:order` prints the order and the
@@ -359,7 +421,8 @@ second holder is refused with exit 3. Account stacks are retained, so a tenant c
 another tenant's deployer.
 
 ## R22 Growth seams in the schema
-**Decision**: `slot` on runtime instances (two runtimes in one scope: distinct id, path, key);
+**Decision**: `slot` on runtime instances (two runtimes in one scope: distinct id, path, key and
+resource names, since `slot` is a naming segment, R15);
 `spec.scope: tenant` with `external` producers (artefacts only, never planned) for a tenant-only
 repository; `spec.stage_source` (`local` relative path now; `git` with a version ref as the seam,
 refused by the generator with `STAGE_SOURCE_NOT_IMPLEMENTED`). Fixtures: growth manifest with two
@@ -372,3 +435,20 @@ Offline implementation that a premise could invalidate proceeds only under a rec
 names the premise and the revision a refutation forces: T025–T028 (P5, both modes built); T037/T038
 (P1–P4, P6: T038 closes only after T010's result; a refuted P1–P3 revises FR-008 first); T054/T055
 (P24: the fallback inventory path is tested too). Live tasks depend on the probe result directly.
+
+## R24 Platform `project` state in the tenant bucket (KD-3)
+**Decision**: the platform-owned `project` stack keeps its state and its `artifacts/` object in the
+tenant's state bucket, which the tenant S3 user can write, so a tenant credential could overwrite
+the `project` state or publish a forged `project` artefact. Recorded as known deviation KD-3 next to
+KD-1, not fixed in this slice. **Mitigation built**: the adapter refuses a `project` artefact whose
+`project_id`/`project_urn` differs from the bound account's `LZ_PROJECT_ID_<REF>` for that tenant
+and environment (`fail: unbound project`, T060), so a forged id cannot point `runtime` or
+`project-network` at another project; the `project` stack's own plan is protected by the
+retained-resource guard. A tampered `project` state object is not detected.
+**Rejected for now**: `project` state in the account bucket — its tenant consumers read the
+artefact with the tenant S3 user, which G6 forbids from reading the account bucket, so the
+artefact would need a second location and a second writer; a platform-only prefix in the tenant
+bucket excluded from the tenant S3 policy — needs prefix-scoped S3 policies (P19, withdrawn).
+**Lifted when**: a platform-only bucket per tenant (or a qualified prefix policy) holds `project`
+state and artefacts, with the tenant S3 user granted read on the artefact only; trigger: the first
+non-sandbox tenant or the first claim of tenant isolation (same trigger as KD-1).

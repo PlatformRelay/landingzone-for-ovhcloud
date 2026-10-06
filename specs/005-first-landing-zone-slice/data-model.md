@@ -1,5 +1,5 @@
 # Data model: First landing-zone slice
-Feature: 005-first-landing-zone-slice · 2026-10-06 · Revised: 2026-10-06 (D88) · Status: draft
+Feature: 005-first-landing-zone-slice · 2026-10-06 · Revised: 2026-10-06 (D88; round-2 review) · Status: draft
 
 ## Deployment manifest — `stacks/deployments.yaml`
 Strict decoding: unknown fields, duplicate keys, unsupported `apiVersion`/`kind` are errors.
@@ -76,7 +76,7 @@ Rules (FR-006):
 | bootstrap | account | — | — (admin created by `bootstrap:account`) | bootstrap | local | retained |
 | tenant-state | account-tenant | — | bootstrap | bootstrap | s3 (account bucket) | retained |
 | account-governance | account | — | bootstrap | bootstrap | s3 (account bucket) | retained |
-| project | environment | — | account-governance, tenant-state | platform | s3 (tenant bucket) | retained |
+| project | environment | — | account-governance, tenant-state | platform | s3 (tenant bucket; KD-3) | retained |
 | project-network | region | project | account-governance, tenant-state | tenant | s3 (tenant bucket) | ephemeral |
 | runtime | region (+ slot) | project | account-governance, tenant-state | tenant | s3 (tenant bucket) | ephemeral |
 
@@ -85,7 +85,7 @@ variables; a changed digest re-plans the consumer) and *authority* edges (the co
 principal, or reads/writes state with credentials, that the producer creates; no data flows). Both
 become Terramate `after`; only data edges and code changes select a stack for re-planning (FR-009).
 `account-governance` needs the tenant project URNs, which come from the bound account file, not from
-another stack. `runtime` does not depend on `project-network` (managed-only runtime has no network).
+another stack (see *Resolved-reference input*). `runtime` does not depend on `project-network` (managed-only runtime has no network).
 
 Retained instances are protected twice: `prevent_destroy` in code (state buckets, adopted project)
 and the live lane's refusal of any plan that deletes or replaces one of their resources, on every
@@ -96,7 +96,7 @@ verb.
 | --- | --- | --- |
 | path | scope rule (research R2), region lowercased, `-<slot>` suffix on the stage directory when set | `stacks/tenants/demo/dev/gra11/runtime`, `stacks/account/tenant-state/demo` |
 | state bucket | account and account-tenant scope: account state bucket; tenant scope: the tenant's state bucket (one per tenant, ADR-0009, D87) | `lz-demo-bkt-state` |
-| state key | `<path minus "stacks/">/terraform.tfstate` | `tenants/demo/dev/gra11/runtime/terraform.tfstate` |
+| state key | `<path minus "stacks/">/terraform.tfstate` — the only derivation (research R5); asserted exactly in T033/T037 | `tenants/demo/dev/gra11/runtime/terraform.tfstate`, `account/tenant-state/demo/terraform.tfstate`, `tenants/demo/dev/gra11/runtime-blue/terraform.tfstate` |
 | local state | `~/.config/ovh-lz/accounts/<account>/state/<id>.tfstate` (local backend, `bootstrap` only) | |
 | outputs object | `artifacts/<id>/outputs.json` in the instance's state bucket; `bootstrap` publishes to the account bucket (ADR-0004 `artifacts/` prefix) | |
 | Terramate tags | `lz-stage-*`, `lz-scope-*`, `lz-tenant-*`, `lz-env-*`, `lz-region-*`, `lz-slot-*` | |
@@ -105,8 +105,10 @@ verb.
 | managed-in | `<spec.forge>//<path>` | |
 | bucket name (account state) | naming(org, kind=bkt, role=state) | `lz-bkt-state` |
 | bucket name (tenant state) | naming(org, tenant, kind=bkt, role=state) | `lz-demo-bkt-state` |
+| bucket name (runtime) | naming(org, tenant, environment, region, kind=bkt, role=runtime, slot) | `lz-demo-dev-gra11-bkt-runtime`, `lz-demo-dev-gra11-bkt-runtime-blue` |
 
-Uniqueness checks: id, path, (state bucket, state key). Adding a tenant adds a `tenant-state` row
+Uniqueness checks: id, path, (state bucket, state key), and planned bucket names across all stacks
+(`NAME_COLLISION`, checked on the generated stacks' plans in `test:stack-plans`). Adding a tenant adds a `tenant-state` row
 (retained, `bootstrap` authority, state in the account bucket); `bootstrap` is not re-applied.
 
 ## Output envelope — `outputs.json` (`schemas/outputs/envelope.schema.json`)
@@ -145,10 +147,22 @@ For a consumer instance, for each derived data edge to producer stage `S` (insta
 1. read `artifacts/<P>/outputs.json` from `P`'s state bucket with the consumer's state credentials
    (offline: from the fixture or scratch publisher directory);
 2. refuse when missing (`blocked`), malformed or schema-invalid (`fail`), or when `instance_id ≠ P`
-   or `stage ≠ S` (`fail: wrong producer`);
+   or `stage ≠ S` (`fail: wrong producer`); for `S = project`, refuse when `project_id` or
+   `project_urn` differs from the resolved reference of that tenant and environment
+   (`fail: unbound project`, KD-3);
 3. write `{"<S with - → _>": <values>}` to `.local/live/<run-id>/inputs/<consumer>/<S>.tfvars.json`;
 4. the generated `_lz_variables.tf` declares `variable "<S_snake>"` typed from `S`'s schema; the plan
    gets `-var-file` per edge; the record stores `sha256` of each consumed file.
+
+## Resolved-reference input
+Project ids are not in the manifest, so the lane writes one more input per run from `account.env`,
+next to the producer inputs: `.local/live/<run-id>/inputs/<id>/resolved.tfvars.json`.
+- `account-governance`: `tenants = {<t>: {project_id, project_urn}}`. The tenant names come from a
+  generated, committed `_lz_tenants.auto.tfvars.json` in its stack (so a new tenant row changes its
+  code digest); the ids are resolved from `LZ_PROJECT_ID_<REF>`.
+- `project`: `project_id` from its environment's reference.
+Its `sha256` is recorded with the consumed digests (FR-009), so a changed reference selects the
+stack. The same resolved ids check every `project` artefact the adapter reads (KD-3 mitigation).
 
 ## Label set
 | Key | Value | Source |
@@ -165,7 +179,7 @@ Extra labels: map input; keys in the set above are rejected.
 ```hcl
 template = {
   version   = 1
-  segments  = ["org", "tenant", "environment", "region", "kind", "role"]
+  segments  = ["org", "tenant", "environment", "region", "kind", "role", "slot"]   # slot: runtime only
   separator = "-"
   case      = "lower"
   kinds     = { bucket = "bkt", private_network = "pn", subnet = "sn", service_account = "sa",
@@ -178,7 +192,8 @@ required segment, over the kind's limit, forbidden characters, doubled punctuati
 ## Account binding and local files (never in the repository)
 The active admin credential is `~/.config/ovh-lz/sandbox.env` (AGENTS.md). Everything else is bound to
 one account under `~/.config/ovh-lz/accounts/<account>/`, where `<account>` is the account id that
-`GET /me` returns for the credential in use. Every `lz-live` run resolves the account from the
+`GET /auth/details` returns for the credential in use (no IAM action needed, so the admin and both
+deployer classes bind the same way; `GET /me` needs `account:apiovh:me/get`, research R13, P26). Every `lz-live` run resolves the account from the
 credential, loads only that directory, and refuses when `account.env`'s account id, endpoint or `org`
 disagrees with the credential or the manifest.
 
@@ -186,7 +201,7 @@ disagrees with the credential or the manifest.
 | --- | --- | --- |
 | `~/.config/ovh-lz/live.env` | `LZ_OWNER_CHECKOUT` (canonical path of the owner's main checkout) | owner, once |
 | `~/.config/ovh-lz/sandbox.env` | `OVH_ENDPOINT`, `OVH_CLIENT_ID/SECRET` (lz-sandbox-admin) | existing; `bootstrap:account --fresh-account` (`admin` phase) |
-| `accounts/<account>/account.env` | `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`, `LZ_PROJECT_ID_<REF>` | bootstrap `identify` (binding); owner fills project ids |
+| `accounts/<account>/account.env` | `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`, `LZ_PROJECT_ID_<REF>`, `LZ_ADMIN_CLIENT_ID`, `LZ_ADMIN_POLICY_ID` (leftover exemption, research R12) | bootstrap `identify` (binding; project ids prompted under `--fresh-account`, else filled by the owner) and `admin` (admin ids) |
 | `accounts/<account>/sandbox.env` | a previous account's admin credential, moved there on migration | bootstrap `identify` on `--fresh-account` |
 | `accounts/<account>/state-passphrase.env` | `TF_VAR_state_passphrase` | bootstrap `passphrase`, once |
 | `accounts/<account>/state.env` | platform S3 keys for the account bucket | bootstrap `state` |
@@ -195,7 +210,7 @@ disagrees with the credential or the manifest.
 | `accounts/<account>/tenants/<t>/state.env` | tenant S3 keys for its bucket | live lane after `tenant-state` apply |
 | `accounts/<account>/tenants/<t>/platform-state.env` | platform S3 keys for that tenant's bucket | live lane after `tenant-state` apply |
 | `accounts/<account>/state/<id>.tfstate` | encrypted local state (`bootstrap`) | `bootstrap` |
-| `accounts/<account>/state/probes/<probe>.tfstate` | encrypted probe state (per-run passphrase in memory) | `lz-live probe` |
+| `accounts/<account>/state/probes/<run-id>/<probe>.tfstate` and `…/<run-id>/passphrase.env` | encrypted probe state and its per-run passphrase, kept until destroy and leftover check pass (`lz-live probe --cleanup <run-id>` resumes) | `lz-live probe` |
 | `accounts/<account>/locks/{account,tenant-<t>}.lock` | run locks | `lz-live` |
 Root AK/AS/CK have no file: typed at a no-echo prompt during `--fresh-account` and revoked before the
 run ends. All files mode 600, directories 700; the lane refuses group/world-readable files. Only

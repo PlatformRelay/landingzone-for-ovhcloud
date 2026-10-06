@@ -19,7 +19,9 @@ $E --candidate "$C" -- task check:specs -- specs/005-first-landing-zone-slice
 ## Adding a stack or a tenant (platform maintainer, host)
 1. Add a row to `stacks/deployments.yaml` (new `id`, `stage`, dimensions). A new tenant needs its
    `tenant-state` row as well; `bootstrap` is not touched.
-2. `task stacks:reconcile && task stacks:generate` (host; writes `stacks/…`).
+2. `task stacks:reconcile && task stacks:generate` (host, no credentials, no host guard; runs in your
+   authoring worktree with the edit uncommitted; writes `stacks/…`). Adding a tenant also regenerates
+   `account-governance`'s tenant map, so the next run selects it with the new `tenant-state`.
 3. Commit the manifest and generated files together; offline `stacks:check` must pass.
 Changing an `id` or a dimension of an existing row fails with `UNSUPPORTED_CHANGE` (rename/retirement
 postponed).
@@ -34,10 +36,12 @@ passing its SHA (D87); the guard refuses anything else before reading a credenti
 ```sh
 S=<reviewed sha on origin/main>
 task bootstrap:account -- --reviewed-sha $S   # bind account, passphrase, admin check, account bucket, publish, verify
-#   first run: fill LZ_PROJECT_ID_STATE and LZ_PROJECT_ID_DEMO_DEV in
+#   first run on the existing account: fill LZ_PROJECT_ID_STATE and LZ_PROJECT_ID_DEMO_DEV in
 #   ~/.config/ovh-lz/accounts/<account>/account.env when the run reports `blocked`, then re-run
+#   (the admin credential already exists, so the re-run needs no root keys)
 task live:chain -- --reviewed-sha $S all      # apply 6 stacks → assertions → destroy runtime + network (trap) → leftover check
 task live:plan -- --reviewed-sha $S all       # afterwards: plans the selected set; consumers of an unpublished producer show `blocked`
+# a probe whose destroy failed: task live:probe -- --reviewed-sha $S --cleanup <run-id>
 ```
 Single stacks: `task live:apply -- --reviewed-sha $S demo-dev-gra11-runtime`, `task live:destroy --
 --reviewed-sha $S demo-dev-gra11-runtime` (retained instances are refused).
@@ -52,12 +56,15 @@ description.
 3. Set a new `spec.org` (default `lz`) in `stacks/deployments.yaml` if the old account's state
    buckets still exist (bucket names are global), regenerate, commit, review.
 4. `task bootstrap:account -- --reviewed-sha $S --fresh-account` → enter the keys at the prompt;
-   the previous account's `sandbox.env` moves into `accounts/<old>/`; the run creates the admin
-   client and policy, writes `sandbox.env`, fills the binding, and revokes the root credential at
-   the end. Fill the project references when it reports `blocked`, then re-run without the flag.
+   the previous account's `sandbox.env` moves into `accounts/<old>/`; `identify` lists the account's
+   projects and asks for each project reference (`STATE`, `DEMO_DEV`; in the one-project sandbox
+   both are that project); the run creates the admin client and policy, writes `sandbox.env`, and
+   revokes the root credential at the end — also when it fails or you abort it.
+   If it stopped after the admin was created, re-run without the flag; if before, re-run with the
+   flag and fresh root keys. Completed phases report `unchanged`.
 5. `task bootstrap:account -- --reviewed-sha $S` again → every phase `unchanged`.
 
 ## What not to expect
 No cost gate, no spend ledger, no reaper, no GitLab, no TACO, no tenant self-service, no OKMS or key
-recovery, no artefact generations/fencing, no demonstrated tenant isolation of state (KD-1). See spec
+recovery, no artefact generations/fencing, no demonstrated tenant isolation of state (KD-1, KD-3). See spec
 *Out of scope / postponed* and *Known deviations*.
