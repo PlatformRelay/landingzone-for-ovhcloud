@@ -1876,6 +1876,24 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 			}
 			return alias
 		},
+		// Review r1 (codex): ".." after a symlink climbs from the link's target, as the kernel
+		// resolves it; a check that cleans the path first looks beside the alias instead.
+		"dotdot-after-symlink-into-stack-root": func(t *testing.T, _ *runWorld, stack string) string {
+			mkdirPrivate(t, filepath.Join(stack, "tmp"))
+			outside := t.TempDir()
+			mkdirPrivate(t, filepath.Join(outside, "tmp")) // where the cleaned path points: it exists
+			alias := filepath.Join(outside, "alias")
+			if err := os.Symlink(mkdirPrivate(t, filepath.Join(stack, "sub")), alias); err != nil {
+				t.Fatal(err)
+			}
+			return alias + string(filepath.Separator) + ".." + string(filepath.Separator) + "tmp"
+		},
+		// Review r1 (codex): a relative TMPDIR is resolved against the working directory.
+		"relative-in-stack-root": func(t *testing.T, _ *runWorld, stack string) string {
+			mkdirPrivate(t, filepath.Join(stack, "tmp"))
+			t.Chdir(stack)
+			return "tmp"
+		},
 		"in-run-record": func(t *testing.T, w *runWorld, _ string) string {
 			return mkdirPrivate(t, filepath.Join(w.runDir, "tmp"))
 		},
@@ -1930,6 +1948,59 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 			}
 		})
 	}
+
+	// Review r2 (codex): a stack root given through a symlink and ".." is the directory the kernel
+	// resolves (the alias target's parent), not the alias's lexical parent.
+	t.Run("stack-dir-dotdot-after-symlink", func(t *testing.T) {
+		w := newRunWorld(t)
+		s := w.stack(t, "p", true, tofuStack{})
+		r := w.runner(t, s)
+		tmp := mkdirPrivate(t, filepath.Join(s.Dir, "tmp"))
+		outside := t.TempDir()
+		alias := filepath.Join(outside, "alias")
+		if err := os.Symlink(mkdirPrivate(t, filepath.Join(s.Dir, "sub")), alias); err != nil {
+			t.Fatal(err)
+		}
+		r.Stacks[0].Dir = alias + string(filepath.Separator) + ".."
+		t.Setenv("TMPDIR", tmp)
+		err, _ := execute(t, r)
+		if ExitCode(err) != 3 || !strings.Contains(fmt.Sprint(err), "TMPDIR") {
+			t.Errorf("stack root %s, TMPDIR %s: error %v (exit %d); want a refusal (exit 3) naming TMPDIR", r.Stacks[0].Dir, tmp, err, ExitCode(err))
+		}
+		if n := len(w.calls(t, "tofu.log")); n != 0 {
+			t.Errorf("%d tofu calls before the refusal", n)
+		}
+	})
+
+	// Review r1 (codex): a relative TMPDIR outside the roots is admitted, and the children get it as
+	// one absolute directory: a relative HOME or TF_DATA_DIR would land under the stack root tofu
+	// runs in.
+	t.Run("relative-beside", func(t *testing.T) {
+		w := newRunWorld(t)
+		r := w.runner(t, w.stack(t, "p", true, tofuStack{}))
+		wd := t.TempDir()
+		tmp := mkdirPrivate(t, filepath.Join(wd, "scratch"))
+		t.Chdir(wd)
+		t.Setenv("TMPDIR", "scratch")
+		if err, _ := execute(t, r); err != nil {
+			t.Fatalf("relative TMPDIR beside the roots: %v\n%s", err, w.term)
+		}
+		calls := w.calls(t, "tofu.log")
+		if len(calls) == 0 {
+			t.Fatal("no tofu call")
+		}
+		for _, c := range calls {
+			if c.Cmd == "protect" {
+				continue
+			}
+			if !filepath.IsAbs(c.Home) || !within(resolvedPath(c.Home), resolvedPath(tmp)) {
+				t.Errorf("tofu %s ran with HOME %q, want an absolute directory under TMPDIR %s", c.Cmd, c.Home, tmp)
+			}
+			if !within(c.DataDir, resolvedPath(tmp)) {
+				t.Errorf("tofu %s used the data directory %s, not under TMPDIR %s", c.Cmd, c.DataDir, tmp)
+			}
+		}
+	})
 
 	// Review r2: with the obstruction below, a check placed right after a probe-file write whose
 	// error it ignores still refuses; without it, that write leaves its file behind.
@@ -2002,6 +2073,31 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 		}
 		sameTree(t, "the stack roots", w.stacks, before)
 	})
+
+	// T077 gap "the runner-level cleanup row does not watch the passphrase read", narrowed: a
+	// passphrase file another user could read is refused when read (file-mode, not naming TMPDIR),
+	// so the TMPDIR refusal must win over a passphrase read error. A read whose result is discarded
+	// before the check still passes here (review r1/r2, codex); lz-live's order is watched in
+	// cmd/lz-live (TestProbeScratchOutsideCheckout/cleanup).
+	t.Run("cleanup-refused-before-passphrase", func(t *testing.T) {
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.probe(t, root, tofuStack{DestroyExit: 1})
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Fatal("a probe whose destroy failed exited 0")
+		}
+		_, _, pass := probeFiles(t, root)
+		if err := os.Chmod(pass, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		tmp := mkdirPrivate(t, filepath.Join(p.Run.Stacks[0].Dir, "tmp"))
+		cmd := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}})
+		cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
+		out, err := cmd.CombinedOutput()
+		if code := exitOf(err); code != 3 || !strings.Contains(string(out), "TMPDIR") {
+			t.Errorf("cleanup, TMPDIR %s, passphrase readable by others: exit %d; want 3 naming TMPDIR (the refusal wins over the passphrase error)\n%s", tmp, code, out)
+		}
+	})
 }
 
 // TestProbeCleanupRecordedProject (T077; T074 review r1/r2 gap): a probe run records the project
@@ -2067,6 +2163,24 @@ func TestProbeCleanupRecordedProject(t *testing.T) {
 		}
 	})
 
+	// Review r1 (Opus): a probe start that could record no project id is refused before any probe
+	// file or child, not after the apply, when its cleanup would be refused.
+	t.Run("start-without-project-refused", func(t *testing.T) {
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.probe(t, root, tofuStack{})
+		p.Run.Vars = nil
+		before := treeSnapshot(t, root)
+		err := p.Start(context.Background())
+		if ExitCode(err) != RefusalExit || !strings.Contains(fmt.Sprint(err), "project id") {
+			t.Errorf("probe start without a project id: %v (exit %d); want %d naming the project id", err, ExitCode(err), RefusalExit)
+		}
+		if n := len(w.calls(t, "tofu.log")); n != 0 {
+			t.Errorf("%d tofu calls for a probe start without a project id", n)
+		}
+		sameTree(t, "the probe state", root, before)
+	})
+
 	t.Run("record-without-project-refused", func(t *testing.T) {
 		w, root := failedRun(t)
 		dir, state, pass := probeFiles(t, root)
@@ -2085,9 +2199,10 @@ func TestProbeCleanupRecordedProject(t *testing.T) {
 		out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}},
 			Vars: map[string]string{"TF_VAR_project_id": probeProject}}).CombinedOutput()
 		// "project id": the temporary directories carry the test name, so "project" alone would
-		// match any path in an unrelated error (review r1).
-		if err == nil || !strings.Contains(string(out), "project id") {
-			t.Errorf("cleanup of a record without a project id: exit %d; want a failure naming the project\n%s", exitOf(err), out)
+		// match any path in an unrelated error (review r1). A refusal (exit 3), as a recorded root
+		// outside the probes (T078, coordinator decision).
+		if exitOf(err) != RefusalExit || !strings.Contains(string(out), "project id") {
+			t.Errorf("cleanup of a record without a project id: exit %d; want %d naming the project id\n%s", exitOf(err), RefusalExit, out)
 		}
 		if got := len(w.calls(t, "tofu.log")) - n; got != 0 {
 			t.Errorf("%d tofu calls for a record without a project id", got)

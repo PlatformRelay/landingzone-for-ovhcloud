@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,8 +20,10 @@ import (
 // encrypted (TF_VAR_state_path, TF_VAR_state_passphrase) under
 // accounts/<account>/state/probes/<run-id>/; the run record is .local/live/<run-id>/ in the
 // checkout. The root gets its run id (TF_VAR_run_id) and the sandbox project, LZ_PROJECT_ID_STATE
-// of account.env (TF_VAR_project_id). `--cleanup <run-id>` finishes a probe whose destroy or
-// leftover check failed.
+// of account.env (TF_VAR_project_id), recorded in the run's probe.env. `--cleanup <run-id>`
+// finishes a probe whose destroy or leftover check failed, in the project the run recorded. A
+// TMPDIR inside the checkout (the children's scratch HOME and tofu data go under it) is refused
+// first.
 
 // probePrefix names what probes create; the leftover check matches it.
 const probePrefix = "lzprobe-"
@@ -106,6 +109,11 @@ func probeRoot(checkout, root string) (string, error) {
 func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error {
 	var root string
 	var err error
+	// Before any credential, file or child: the children's scratch HOME and tofu data directories
+	// go under TMPDIR, which must not lie in the reviewed checkout (.local/ included).
+	if err := live.ScratchOutside(checkout); err != nil {
+		return err
+	}
 	if p.cleanup == "" {
 		if root, err = probeRoot(checkout, p.root); err != nil {
 			return err
@@ -160,9 +168,9 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		projects = append(projects, live.Project{ID: acc[k], URN: projectURN(cred.Endpoint, acc[k])})
 	}
 
-	// The probes' project, for start and cleanup alike (a destroy evaluates the root's variables).
+	// The probes' project at start; a cleanup uses the one its run recorded (below).
 	projectID := acc["LZ_PROJECT_ID_STATE"]
-	if projectID == "" {
+	if projectID == "" && p.cleanup == "" {
 		return errors.New("account.env: LZ_PROJECT_ID_STATE (the probes' project) is required")
 	}
 
@@ -178,6 +186,14 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		}
 		if root, err = probeRoot(checkout, recorded); err != nil {
 			return err
+		}
+		// After the recorded root is confined (an outside root is the first refusal): the project
+		// the run ran against, not the one account.env names now; its leftovers are listed too.
+		if projectID, err = live.ProbeProject(cfg, account, runID); err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(projects, func(q live.Project) bool { return q.ID == projectID }) {
+			projects = append(projects, live.Project{ID: projectID, URN: projectURN(cred.Endpoint, projectID)})
 		}
 	}
 	tofu, err := d.LookPath("tofu")
