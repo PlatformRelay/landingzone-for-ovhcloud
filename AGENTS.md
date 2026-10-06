@@ -74,5 +74,5 @@ Credentials never enter the repository, a worktree, a command line or any output
 - Commit messages: `:gitmoji: type(scope): summary` with an ASCII gitmoji shortcode; types
   `feat fix docs style refactor test chore ci build`; one logical change per commit.
 - Nothing in commits, pull requests or committed files names the tool or model that authored it.
-- Claims about OVHcloud behaviour cite evidence or are marked UNVERIFIED
-  ([ADR-0014](docs/adr/0014-ovh-docs-knowledge-base.md)).
+- Claims about OVHcloud behaviour cite a source (docs.ovhcloud.com guide, API schema or provider
+  docs) or are marked UNVERIFIED.

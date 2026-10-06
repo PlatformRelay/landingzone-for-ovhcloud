@@ -1,7 +1,7 @@
 # ADR-0015: Licence and project name
 - Status: Accepted
 - Date: 2026-10-06
-- Related: ADR-0001, ADR-0014
+- Related: ADR-0001
 
 ## Context
 **Licence.** The `ovh/ovh` provider is MPL-2.0. Other PlatformRelay repos: _check each repo's LICENSE
@@ -13,7 +13,7 @@ name by necessity. The word "accelerator" echoes AWS's and Azure's product names
 
 ## Options considered
 Licence: **Apache-2.0** (patent grant, widely accepted by enterprises) · **MPL-2.0** (file-level copyleft,
-matches the provider) · MIT (minimal). Docs: same licence or CC BY 4.0 (avoid NC/SA mixing with ADR-0014).
+matches the provider) · MIT (minimal). Docs: same licence or CC BY 4.0 (avoid NC/SA mixing with OVHcloud's CC BY-NC-SA documentation).
 Name: `ovh-landing-zone-accelerator` · `landing-zone-for-ovhcloud` (nominative, reads as "for") ·
 neutral brand (e.g. `<brand>-lz` with "for OVHcloud" in the tagline) · keep generic `landing-zone-ovh`.
 

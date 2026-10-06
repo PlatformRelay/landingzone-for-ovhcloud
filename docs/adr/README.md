@@ -27,7 +27,7 @@ with the first public release.
 | [0011](0011-provider-strategy-and-opentofu-first.md) | Provider strategy and OpenTofu-first | Accepted |
 | [0012](0012-compliance-profiles.md) | Compliance profiles | Accepted |
 | [0013](0013-documentation-strategy.md) | Documentation strategy | Accepted |
-| [0014](0014-ovh-docs-knowledge-base.md) | OVHcloud docs knowledge base | Proposed |
+| 0014 | OVHcloud docs knowledge base | Withdrawn: maintainers' local tooling, not a product decision |
 | [0015](0015-licence-and-project-name.md) | Licence and project name | Accepted |
 | [0016](0016-golden-paths-as-profiles.md) | Golden paths as profiles over one composition graph | Accepted |
 | [0017](0017-runtime-families-and-output-contract.md) | Runtime families and the output-only contract (multiple base stacks) | Accepted |

@@ -56,7 +56,6 @@ landingzone-for-ovhcloud/
 ├── pipelines/{github,gitlab}/      # thin adapters calling `task …` (ADR-0007)
 ├── pipelines/tacos/<name>/         # generated consumer configs + conformance checklist
 ├── docs/{tutorials,how-to,reference,explanation,adr}/   # Diataxis (ADR-0013)
-├── kb/manifest.yaml                # committed index of cited OVH docs; kb/mirror/ is gitignored (ADR-0014)
 ├── .github/  .gitlab-ci.yml        # both CI definitions in-repo; neither is primary
 └── .specify/  specs/               # Spec Kit
 ```
@@ -77,7 +76,7 @@ Rules:
   tools are added when the first vertical slice needs them, not before.
 - Unit tests, examples, `CONTRACT.yaml` and generated docs live **next to the code**; `tests/` holds only
   what spans directories.
-- `kb/mirror/` and any `knowledge-base/` directory are gitignored; never committed.
+- Copies of OVHcloud documentation are never committed; maintainers keep them outside the repository.
 - Tool pins in `mise.toml` (OpenTofu ≥ 1.13, Terramate, tflint, trivy, conftest, task, terraform-docs, assent).
 - `tools/` is one Go module (static binaries on both forges). Go chosen; Python rejected for runtime
   install cost in CI.
