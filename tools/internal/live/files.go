@@ -233,13 +233,81 @@ func writeRecord(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// scratchHome creates a private per-run HOME for the children.
+// scratchHome creates a private per-run HOME for the children, under the resolved TMPDIR (the
+// path ScratchOutside checked, never a relative one).
 func scratchHome() (string, error) {
-	d, err := os.MkdirTemp("", "lz-live-home-")
+	base, err := scratchBase()
+	if err != nil {
+		return "", err
+	}
+	d, err := os.MkdirTemp(base, "lz-live-home-")
 	if err != nil {
 		return "", err
 	}
 	return d, os.Chmod(d, 0o700)
+}
+
+// CondScratch names the refusal of a TMPDIR inside the checkout: the children's scratch HOME and
+// their tofu data directories (<HOME>/tofu-data/<stack>) go under it (T077/T078).
+const CondScratch = "scratch"
+
+// ScratchOutside refuses (CondScratch) a TMPDIR that resolves to or inside one of dirs, symlinks
+// resolved on both sides. Call it before any credential is read, file written or child started.
+func ScratchOutside(dirs ...string) error {
+	tmp := os.TempDir()
+	real, err := scratchBase()
+	if err != nil {
+		return refuse(CondScratch, "TMPDIR %s does not resolve: %v", tmp, err)
+	}
+	for _, d := range dirs {
+		rel, err := filepath.Rel(resolveExisting(d), real)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return refuse(CondScratch, "TMPDIR %s lies inside %s; point TMPDIR outside the checkout", tmp, d)
+		}
+	}
+	return nil
+}
+
+// scratchBase is TMPDIR as the kernel resolves it: made absolute against the working directory
+// without cleaning it first, then resolved component by component, so ".." after a symlink climbs
+// from the link's target (review r1).
+func scratchBase() (string, error) {
+	tmp, err := absUncleaned(os.TempDir())
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(tmp)
+}
+
+// absUncleaned makes p absolute against the working directory without cleaning it: filepath.Abs
+// would drop "x/.." before x's symlink is followed.
+func absUncleaned(p string) (string, error) {
+	if filepath.IsAbs(p) {
+		return p, nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return wd + string(filepath.Separator) + p, nil
+}
+
+// resolveExisting is p as the kernel resolves it, for a root that may not exist yet (the run
+// records' directory): its longest existing prefix resolved component by component (symlinks,
+// then ".."; review r2), the missing rest appended.
+func resolveExisting(p string) string {
+	if abs, err := absUncleaned(p); err == nil {
+		p = abs
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	trimmed := strings.TrimRight(p, string(filepath.Separator))
+	i := strings.LastIndex(trimmed, string(filepath.Separator))
+	if i <= 0 {
+		return filepath.Clean(p)
+	}
+	return filepath.Join(resolveExisting(trimmed[:i]), trimmed[i+1:])
 }
 
 // removeTree removes a scratch directory.

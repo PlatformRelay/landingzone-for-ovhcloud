@@ -640,7 +640,7 @@ func TestProbeScratchOutsideCheckout(t *testing.T) {
 // project it ran against (LZ_PROJECT_ID_STATE at start) in the run's probe.env; `--cleanup
 // <run-id>` destroys with that recorded id (TF_VAR_project_id) and lists leftovers in that project
 // even when account.env now names another; a run record without a project id is refused for
-// cleanup: no child, the probe's files kept.
+// cleanup (exit 3 naming the project id, T078): no child, the probe's files kept.
 func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
 	t.Run("account-env-changed", func(t *testing.T) {
 		w := newProbeWorld(t)
@@ -707,9 +707,10 @@ func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
 		tofuN := len(w.childCalls(t, "tofu.log"))
 		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id)
 		// "project id": the temporary directories carry the test name, so "project" alone would
-		// match any path in an unrelated error (review r1).
-		if code == 0 || !strings.Contains(stderr, "project id") {
-			t.Errorf("cleanup of a run record without a project id: exit %d, stderr %q; want a failure naming the project", code, stderr)
+		// match any path in an unrelated error (review r1). A refusal (exit 3), as a recorded root
+		// outside the probes (T078, coordinator decision).
+		if code != 3 || !strings.Contains(stderr, "project id") {
+			t.Errorf("cleanup of a run record without a project id: exit %d, stderr %q; want 3 naming the project id", code, stderr)
 		}
 		if n := len(w.childCalls(t, "tofu.log")) - tofuN; n != 0 {
 			t.Errorf("%d tofu calls for a run record without a project id", n)

@@ -242,6 +242,9 @@ func (r Runner) Execute(ctx context.Context) error {
 	}
 	term := red.Writer(&quietWriter{w: terminal})
 	defer term.Close()
+	if err := r.scratchOutside(); err != nil {
+		return err
+	}
 	if err := ensureDir(r.Dir); err != nil {
 		return err
 	}
@@ -405,9 +408,10 @@ func errString(err error) string {
 // Probe is one `lz-live probe` run (research R12 *Probe state*): its encrypted state
 // (<ID>.tfstate of its one stack) and a private per-run passphrase file (passphrase.env,
 // TF_VAR_state_passphrase, 0600, written by files.go) live under ProbeDir until destroy and the
-// leftover check pass, then both are deleted, with the probe-root record (probe.env) that lets
-// `--cleanup` find the root again. A run that wrote no state (it failed before any apply wrote
-// one, or was plan-only) leaves nothing to clean up, so its files go whatever the outcome.
+// leftover check pass, then both are deleted, with the run record (probe.env: the probe root and
+// the project the run ran against) that lets `--cleanup` find the root and its project again. A
+// run that wrote no state (it failed before any apply wrote one, or was plan-only) leaves nothing
+// to clean up, so its files go whatever the outcome.
 // Children get TF_VAR_state_path, TF_VAR_state_passphrase and TF_VAR_run_id (the probe roots name
 // their resources with it).
 type Probe struct {
@@ -457,6 +461,43 @@ func ProbeRoot(configRoot, account, runID string) (string, error) {
 		return "", fmt.Errorf("probe.env of run %s names no probe root", runID)
 	}
 	return v[probeRootKey], nil
+}
+
+// probeProjectKey names the project the run ran against (its TF_VAR_project_id) in probe.env.
+const probeProjectKey = "LZ_PROBE_PROJECT_ID"
+
+// CondRecord names the refusal of a cleanup whose run record (probe.env) names no project id.
+const CondRecord = "record"
+
+// ProbeProject reads the project a run recorded (probe.env), for `--cleanup`: a cleanup destroys
+// and checks leftovers in that project, not the one account.env names now (T077/T078).
+func ProbeProject(configRoot, account, runID string) (string, error) {
+	dir, err := ProbeDir(configRoot, account, runID)
+	if err != nil {
+		return "", err
+	}
+	return recordedProject(filepath.Join(dir, "probe.env"), runID)
+}
+
+func recordedProject(path, runID string) (string, error) {
+	v, err := ReadCredentialFile(path)
+	if err != nil {
+		return "", err
+	}
+	if v[probeProjectKey] == "" {
+		return "", refuse(CondRecord, "probe.env of run %s records no project id; cleanup refused", runID)
+	}
+	return v[probeProjectKey], nil
+}
+
+// scratchOutside: the runner knows the stack roots and the run records' directory (the parent of
+// Dir, .local/live/ in the checkout); lz-live refuses the rest of the checkout.
+func (r Runner) scratchOutside() error {
+	dirs := []string{filepath.Dir(r.Dir)}
+	for _, s := range r.Stacks {
+		dirs = append(dirs, s.Dir)
+	}
+	return ScratchOutside(dirs...)
 }
 
 func (p Probe) files() (dir, state, pass, root string, err error) {
@@ -512,6 +553,14 @@ func (p Probe) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Before the probe's files are written (Execute checks again for every other run).
+	if err := p.Run.scratchOutside(); err != nil {
+		return err
+	}
+	// A run whose record names no project could not be cleaned up (review r1).
+	if p.Run.Vars["TF_VAR_project_id"] == "" {
+		return refuse(CondRecord, "probe start without a project id (TF_VAR_project_id): its cleanup would be refused")
+	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return err
@@ -521,7 +570,7 @@ func (p Probe) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := WriteCredentialFile(p.ConfigRoot, filepath.Join(rel, "probe.env"), map[string]string{probeRootKey: p.Run.Stacks[0].Dir}); err != nil {
+	if err := WriteCredentialFile(p.ConfigRoot, filepath.Join(rel, "probe.env"), map[string]string{probeRootKey: p.Run.Stacks[0].Dir, probeProjectKey: p.Run.Vars["TF_VAR_project_id"]}); err != nil {
 		return err
 	}
 	if err := WriteCredentialFile(p.ConfigRoot, filepath.Join(rel, "passphrase.env"), map[string]string{"TF_VAR_state_passphrase": phrase}); err != nil {
@@ -535,10 +584,24 @@ func (p Probe) Start(ctx context.Context) error {
 // leftover check and deletes the probe's files only when both pass. Without the passphrase it
 // destroys nothing.
 func (p Probe) Cleanup(ctx context.Context) error {
-	_, _, pass, _, err := p.files()
+	_, _, pass, record, err := p.files()
 	if err != nil {
 		return err
 	}
+	// Before the passphrase is read.
+	if err := p.Run.scratchOutside(); err != nil {
+		return err
+	}
+	// The project the run ran against, whatever the caller passes now.
+	project, err := recordedProject(record, p.Run.ID)
+	if err != nil {
+		return err
+	}
+	p.Run.Vars = maps.Clone(p.Run.Vars)
+	if p.Run.Vars == nil {
+		p.Run.Vars = map[string]string{}
+	}
+	p.Run.Vars["TF_VAR_project_id"] = project
 	v, err := ReadCredentialFile(pass)
 	if err != nil {
 		return err
