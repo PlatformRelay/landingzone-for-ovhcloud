@@ -71,6 +71,13 @@ type Registry struct {
 
 // Trace is everything the trace rules read.
 type Trace struct {
+	// Spec is the traced spec's number, the leading digits of its directory
+	// name ("005" for specs/005-…). It selects the registry's keys of that
+	// spec — requirements, check requirements and creators, procedures — as
+	// "005/FR-001", "005/T001"; unprefixed keys are spec 001's, and an empty
+	// Spec traces spec 001. Not yet read
+	// (T002).
+	Spec         string
 	Requirements []string
 	Tasks        []Task
 	Registry     Registry

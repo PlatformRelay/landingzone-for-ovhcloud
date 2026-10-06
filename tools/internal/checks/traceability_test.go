@@ -442,6 +442,137 @@ func TestTraceabilityRejected(t *testing.T) {
 	}
 }
 
+// Spec 005 defines FR-001 and SC-001 as spec 001 does. Its registry keys —
+// requirements, check requirements and creators, procedures — carry the "005/"
+// prefix; spec 001's carry none. Tasks name requirements unprefixed; the
+// traced spec selects the prefix.
+func spec005Tasks() []Task {
+	return []Task{
+		{ID: "T001", Paths: []string{"modules/naming/tests/naming.tftest.hcl"}, Requirements: []string{"FR-001"}, ADRs: []string{"0002"},
+			Verify: "`task test:naming`: names derive.", Evidence: "`evidence/T001.md`"},
+		{ID: "T002", Paths: []string{"modules/naming/main.tf"}, Requirements: []string{"SC-001"}, ADRs: []string{"0021"},
+			Verify: "`task test:slice`: the slice passes.", Evidence: "`evidence/T002.md`"},
+	}
+}
+
+// twoSpecRegistry is validRegistry (spec 001, unprefixed) plus spec 005's
+// prefixed entries, checks and procedure.
+func twoSpecRegistry() Registry {
+	reg := validRegistry()
+	reg.Requirements["005/FR-001"] = Requirement{ADRs: []string{"0002"}}
+	reg.Requirements["005/SC-001"] = Requirement{ADRs: []string{"0021"}}
+	reg.Checks = append(reg.Checks,
+		CheckDefinition{ID: "test:naming", Requirements: []string{"005/FR-001"}, Command: "task test:naming", Creator: "005/T001", Kind: KindBehavioral, Scope: []string{"modules/naming"}},
+		CheckDefinition{ID: "test:slice", Requirements: []string{"005/SC-001"}, Command: "task test:slice", Creator: "005/T002", Kind: KindBehavioral, Scope: []string{"modules"}},
+	)
+	reg.Procedures = map[string]string{"T001": "approved external procedure", "005/T002": "approved external procedure"}
+	return reg
+}
+
+func spec005Trace() Trace {
+	return Trace{
+		Spec:         "005",
+		Requirements: []string{"FR-001", "SC-001"},
+		Tasks:        spec005Tasks(),
+		Registry:     twoSpecRegistry(),
+		ADRs:         []string{"0002", "0008", "0011", "0019", "0021"},
+	}
+}
+
+// Each spec of a two-spec registry traces against its own entries only: a
+// requirement id both specs define resolves per spec, and the other spec's
+// checks, creators and procedures are neither findings nor coverage.
+func TestTraceabilitySpecScoped(t *testing.T) {
+	// Control: spec 001 against a registry holding only its own entries.
+	if findings := CheckTrace(validTrace()); len(findings) != 0 {
+		t.Fatalf("control: spec 001 alone rejected: %+v", findings)
+	}
+	spec001 := validTrace()
+	spec001.Spec, spec001.Registry = "001", twoSpecRegistry()
+	if findings := CheckTrace(spec001); len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: spec 001 traced against spec 005's entries: %+v", findings)
+	}
+	// A check shared by both specs lists each spec's requirement; its creator
+	// stays spec 001's T001.
+	spec001.Registry.Checks[0].Requirements = append(spec001.Registry.Checks[0].Requirements, "005/FR-001")
+	if findings := CheckTrace(spec001); len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: spec 001 with a shared check: %+v", findings)
+	}
+	// The reverse: a check spec 005 creates also covers spec 001's FR-001; its
+	// creator is judged in spec 005's trace only.
+	spec001.Registry.Checks[3].Requirements = append(spec001.Registry.Checks[3].Requirements, "FR-001")
+	if findings := CheckTrace(spec001); len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: spec 001 with a check spec 005 creates: %+v", findings)
+	}
+	if findings := CheckTrace(spec005Trace()); len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: spec 005 traced against spec 001's entries: %+v", findings)
+	}
+	for name, c := range map[string]struct {
+		mutate func(*Trace)
+		want   []string
+	}{
+		"ADR of spec 001's FR-001": {func(tr *Trace) {
+			task(tr, "T001").ADRs = []string{"0011"}
+		}, []string{"MISSING_ADR", "UNRELATED_ADR"}},
+		"unmapped requirement": {func(tr *Trace) {
+			tr.Requirements = append(tr.Requirements, "FR-002")
+			tr.Registry.Requirements["005/FR-002"] = Requirement{ADRs: []string{"0002"}}
+			tr.Registry.Checks[3].Requirements = append(tr.Registry.Checks[3].Requirements, "005/FR-002")
+		}, []string{"UNMAPPED_REQUIREMENT"}},
+		"task without Verify": {func(tr *Trace) {
+			task(tr, "T001").Verify = ""
+		}, []string{"CHECK_NOT_VERIFIED", "MISSING_VERIFY"}},
+		"requirement registered only for spec 001": {func(tr *Trace) {
+			tr.Requirements = append(tr.Requirements, "FR-003")
+			task(tr, "T001").Requirements = append(task(tr, "T001").Requirements, "FR-003")
+		}, []string{"UNCHECKED_REQUIREMENT", "UNREGISTERED_REQUIREMENT"}},
+		"check of spec 001's FR-001": {func(tr *Trace) {
+			task(tr, "T001").Verify = "`task test:naming; task verify:pins`"
+		}, []string{"UNRELATED_CHECK"}},
+		"evaluator over spec 001's checks only": {func(tr *Trace) {
+			tr.Tasks = append(tr.Tasks, Task{ID: "T003", Paths: []string{"tools/x.go"}, Requirements: []string{"FR-001"}, ADRs: []string{"0002"},
+				Verify: "`task check -- tools/internal`", Evidence: "`evidence/T003.md`"})
+		}, []string{"NO_APPLICABLE_CHECK"}},
+		"procedure of spec 001's T001": {func(tr *Trace) {
+			task(tr, "T001").Verify = "`true`: nothing runs."
+		}, []string{"CHECK_NOT_VERIFIED", "NO_APPLICABLE_CHECK"}},
+		"procedure for an unknown spec 005 task": {func(tr *Trace) {
+			tr.Registry.Procedures["005/T009"] = "approved external procedure"
+		}, []string{"UNKNOWN_PROCEDURE"}},
+		"check shared with spec 001": {func(tr *Trace) {
+			tr.Registry.Checks[0].Requirements = append(tr.Registry.Checks[0].Requirements, "005/FR-001")
+			task(tr, "T001").Verify = "`task test:naming; task verify:pins`"
+		}, nil},
+		"unknown spec 005 creator": {func(tr *Trace) {
+			tr.Registry.Checks[4].Creator = "005/T009"
+		}, []string{"UNKNOWN_CREATOR"}},
+		"check names an undefined spec 005 requirement": {func(tr *Trace) {
+			tr.Registry.Checks[3].Requirements = append(tr.Registry.Checks[3].Requirements, "005/FR-009")
+		}, []string{"UNKNOWN_REQUIREMENT"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := spec005Trace()
+			c.mutate(&tr)
+			if got := ruleSet(CheckTrace(tr)); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// Spec 005 names its requirements "- **FR-001 Naming** — …"; the name between
+// id and closing marker still defines the id, and prose mentions still do not.
+func TestTraceabilityParseNamedRequirements(t *testing.T) {
+	text := "- **FR-001 Naming** — `modules/naming` is pure.\n" +
+		"- **FR-014 Traceability** — traces FR-001 and SC-009.\n" +
+		"- **SC-001**: From a clean checkout.\n" +
+		"Prose: **FR-020 Other** is mentioned, not defined.\n" +
+		"- **FR-021 and FR-022 overlap** in prose, not defined.\n"
+	if got := ParseSpec(text); !reflect.DeepEqual(got, []string{"FR-001", "FR-014", "SC-001"}) {
+		t.Errorf("BEHAVIORAL_RED: spec requirements = %v", got)
+	}
+}
+
 // The exemption is judged on every path the title names, whatever its
 // extension, from the parsed text rather than a hand-built Task.
 func TestTraceabilityParsedExemption(t *testing.T) {

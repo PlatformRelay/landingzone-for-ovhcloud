@@ -89,6 +89,85 @@ func TestSpecsRejected(t *testing.T) {
 	}
 }
 
+// Spec 005 defines FR-001 and SC-001 again, in its own heading form; its
+// registry keys carry the "005/" prefix, spec 001's none.
+const (
+	spec005  = "- **FR-001 Naming** — `modules/naming` is pure.\n- **FR-002 Labels** — labels apply.\n- **SC-001**: Fast slice.\n"
+	tasks005 = "- [ ] T001 Write naming in modules/naming/main.tf\n" +
+		"  - Requirements: FR-001, FR-002, SC-001; ADRs: 0002. Depends on: none.\n" +
+		"  - Verify: `task naming`: names derive.\n" +
+		"  - Evidence: `evidence/T001.md`.\n"
+	registry005 = `{"schema_version": 1,
+ "requirements": {"FR-001": {"adrs": ["0011"]}, "SC-001": {"adrs": ["0011"]},
+                  "005/FR-001": {"adrs": ["0002"]}, "005/FR-002": {"adrs": ["0002"]}, "005/SC-001": {"adrs": ["0002"]}},
+ "evaluators": [],
+ "producers": ["test-producer"],
+ "procedures": {},
+ "checks": [{"id": "pins", "requirements": ["FR-001", "SC-001"], "command": "task pins", "creator": "T001", "kind": "behavioral", "scope": ["tools"]},
+            {"id": "naming", "requirements": ["005/FR-001", "005/FR-002", "005/SC-001"], "command": "task naming", "creator": "005/T001", "kind": "behavioral", "scope": ["modules/naming"]}]}
+`
+)
+
+func twoSpecRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
+	base := map[string]string{
+		"specs/005-y/spec.md":    spec005,
+		"specs/005-y/tasks.md":   tasks005,
+		"harness/checks.yaml":    registry005,
+		"docs/adr/0002-x.md":     "# ADR\n",
+		"modules/naming/main.tf": "locals {}\n",
+	}
+	for name, content := range files {
+		base[name] = content
+	}
+	return repo(t, base)
+}
+
+// Both specs define FR-001; each traces against its own registry entries.
+func TestSpecsScoped(t *testing.T) {
+	root := twoSpecRepo(t, nil)
+	if code, out := lzCheck(root, "specs", "specs/001-x"); code != 0 || !strings.Contains(out, "TRACE_OK specs/001-x requirements=2 tasks=1 checks=1") {
+		t.Errorf("BEHAVIORAL_RED: spec 001 refused beside spec 005: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(root, "specs", "specs/005-y/"); code != 0 || !strings.Contains(out, "TRACE_OK specs/005-y") || !strings.Contains(out, " requirements=3 tasks=1 checks=1") {
+		t.Errorf("BEHAVIORAL_RED: spec 005 refused beside spec 001: code=%d\n%s", code, out)
+	}
+}
+
+func TestSpecsScopedRejected(t *testing.T) {
+	for name, c := range map[string]struct {
+		files map[string]string
+		want  []string
+	}{
+		"ADR of spec 001": {map[string]string{"specs/005-y/tasks.md": strings.Replace(tasks005, "ADRs: 0002", "ADRs: 0011", 1)},
+			[]string{"MISSING_ADR T001", "UNRELATED_ADR T001", "TRACE_FAIL specs/005-y findings=4"}},
+		"unmapped": {map[string]string{"specs/005-y/tasks.md": strings.Replace(tasks005, "FR-001, FR-002, SC-001", "FR-001, SC-001", 1)},
+			[]string{"UNMAPPED_REQUIREMENT FR-002", "TRACE_FAIL specs/005-y findings=1"}},
+		"no Verify": {map[string]string{"specs/005-y/tasks.md": strings.Replace(tasks005, "  - Verify: `task naming`: names derive.\n", "", 1)},
+			[]string{"MISSING_VERIFY T001", "CHECK_NOT_VERIFIED naming", "TRACE_FAIL specs/005-y findings=2"}},
+		// Spec 001's unprefixed FR-001 entry must not stand in for spec 005's.
+		"registered only for spec 001": {map[string]string{"harness/checks.yaml": strings.Replace(strings.Replace(registry005,
+			`"005/FR-001": {"adrs": ["0002"]}, `, "", 1), `"005/FR-001", "005/FR-002"`, `"005/FR-002"`, 1)},
+			[]string{"UNREGISTERED_REQUIREMENT FR-001", "UNCHECKED_REQUIREMENT FR-001", "TRACE_FAIL specs/005-y findings=2"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(twoSpecRepo(t, c.files), "specs", "specs/005-y")
+			for _, want := range c.want {
+				if code != 1 || !strings.Contains(out, want) {
+					t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %q:\n%s", code, want, out)
+				}
+			}
+		})
+	}
+}
+
+// Spec 001's real tree and registry still trace.
+func TestSpecsRealTree(t *testing.T) {
+	if code, out := lzCheck("../../..", "specs", "specs/001-offline-foundation"); code != 0 || !strings.Contains(out, "TRACE_OK specs/001-offline-foundation") {
+		t.Errorf("BEHAVIORAL_RED: spec 001's real tree refused: code=%d\n%s", code, out)
+	}
+}
+
 func writeEvidence(t *testing.T, root, producer string) {
 	t.Helper()
 	reg, err := checks.ParseRegistry([]byte(registry))
