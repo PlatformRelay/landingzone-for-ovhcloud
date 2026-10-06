@@ -6,6 +6,8 @@
 //	lz-check [-root <repo>] deps
 //	lz-check [-root <repo>] select <changed-path>
 //	lz-check [-root <repo>] [-tofu <bin>] [-tflint <bin>] lint <module-dir>
+//	lz-check [-root <repo>] [-tofu <bin>] unit <module-dir>
+//	lz-check [-root <repo>] [-tofu <bin>] [-tflint <bin>] slice
 //	lz-check [-root <repo>] ci-workflow
 //	lz-check [-root <repo>] ci-source <spec-dir>
 //	lz-check [-root <repo>] ci-runs
@@ -42,6 +44,7 @@ import (
 	"strings"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/report"
 )
 
 var (
@@ -65,6 +68,11 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() == 2 && flags.Arg(0) == "lint":
 		tools := checks.StaticTools{Tofu: *tofu, TFLint: *tflint, TFLintConfig: filepath.Join(*root, ".tflint.hcl")}
 		return lint(out, *root, flags.Arg(1), tools)
+	case flags.NArg() == 2 && flags.Arg(0) == "unit":
+		return unit(out, *root, flags.Arg(1), checks.StaticTools{Tofu: *tofu})
+	case flags.NArg() == 1 && flags.Arg(0) == "slice":
+		tools := checks.StaticTools{Tofu: *tofu, TFLint: *tflint, TFLintConfig: filepath.Join(*root, ".tflint.hcl")}
+		return slice(out, *root, tools)
 	case flags.NArg() == 1 && flags.Arg(0) == "deps":
 		return deps(out, *root)
 	case flags.NArg() == 2 && flags.Arg(0) == "select":
@@ -76,7 +84,7 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() > 1 && (flags.NArg()-1)%3 == 0 && flags.Arg(0) == "ci-observe":
 		return ciObserve(out, flags.Args()[1:])
 	case flags.NArg() != 2 || flags.Arg(0) == "deps":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | ci-workflow | ci-source <spec-dir> | ci-runs | ci-observe (<role> <candidate> <capture-dir>)...")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir> | ci-runs | ci-observe (<role> <candidate> <capture-dir>)...")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -196,34 +204,142 @@ func dod(out io.Writer, root, evidenceDir, target string, registry checks.Regist
 // directory that does not exist yet is not run; a missing tool blocks; both
 // exit non-zero, like any failure.
 func lint(out io.Writer, root, dir string, tools checks.StaticTools) int {
-	clean := filepath.ToSlash(filepath.Clean(dir))
-	if filepath.IsAbs(dir) || clean == ".." || strings.HasPrefix(clean, "../") {
-		fmt.Fprintf(out, "lint needs a directory inside the repository, not %q\n", dir)
-		return 2
-	}
-	if info, err := os.Stat(filepath.Join(root, clean)); err != nil || !info.IsDir() {
-		fmt.Fprintf(out, "LINT_NOT_RUN %s: the module directory does not exist yet\n", clean)
-		return 1
+	clean, code, ok := moduleDir(out, root, dir, "lint", "LINT")
+	if !ok {
+		return code
 	}
 	o := checks.RunStatic(tools, filepath.Join(root, clean))
-	blocked := false
 	for _, r := range o.Results {
-		fmt.Fprintf(out, "%s %s %s\n", r.Status, r.Clause, r.Reason)
-		for _, detail := range append(append([]string{}, r.Files...), r.Messages...) {
-			fmt.Fprintf(out, "  %s\n", detail)
-		}
-		blocked = blocked || r.Status == checks.StatusBlocked
+		printResult(out, r)
 	}
-	switch {
+	switch status := staticStatus(o); {
 	case o.Pass:
 		fmt.Fprintf(out, "LINT_PASS %s files=%d\n", clean, len(o.Discovered))
 		return 0
-	case blocked && !slices.ContainsFunc(o.Results, func(r checks.StaticResult) bool { return r.Status == checks.StatusFail }):
+	case status == checks.StatusBlocked:
 		fmt.Fprintf(out, "LINT_BLOCKED %s\n", clean)
 	default:
 		fmt.Fprintf(out, "LINT_FAIL %s\n", clean)
 	}
 	return 1
+}
+
+// moduleDir cleans a directory argument of command: one inside the
+// repository, or a usage error (exit 2); a directory that does not exist yet
+// is not run (exit 1).
+func moduleDir(out io.Writer, root, dir, command, prefix string) (clean string, code int, ok bool) {
+	clean = filepath.ToSlash(filepath.Clean(dir))
+	if filepath.IsAbs(dir) || clean == ".." || strings.HasPrefix(clean, "../") {
+		fmt.Fprintf(out, "%s needs a directory inside the repository, not %q\n", command, dir)
+		return "", 2, false
+	}
+	if info, err := os.Stat(filepath.Join(root, clean)); err != nil || !info.IsDir() {
+		fmt.Fprintf(out, "%s_NOT_RUN %s: the module directory does not exist yet\n", prefix, clean)
+		return "", 1, false
+	}
+	return clean, 0, true
+}
+
+func printResult(out io.Writer, r checks.StaticResult) {
+	fmt.Fprintf(out, "%s %s %s\n", r.Status, r.Clause, r.Reason)
+	for _, detail := range append(append([]string{}, r.Files...), r.Messages...) {
+		fmt.Fprintf(out, "  %s\n", detail)
+	}
+}
+
+// staticStatus is pass, blocked when only missing tools stand in the way, or
+// fail.
+func staticStatus(o checks.StaticObservation) string {
+	switch {
+	case o.Pass:
+		return checks.StatusPass
+	case !slices.ContainsFunc(o.Results, func(r checks.StaticResult) bool { return r.Status == checks.StatusFail }):
+		return checks.StatusBlocked
+	}
+	return checks.StatusFail
+}
+
+// counts is a unit result's test counts from the adapter; tests that never
+// ran count zero.
+func counts(o checks.UnitObservation) string {
+	var r report.Observation
+	if o.Report != nil {
+		r = *o.Report
+	}
+	return fmt.Sprintf("tests=%d passed=%d failed=%d errored=%d skipped=%d", r.Discovered, r.Passed, r.Failed, r.Errored, r.Skipped)
+}
+
+// unit runs the L1 tests of one module directory of the repository.
+func unit(out io.Writer, root, dir string, tools checks.StaticTools) int {
+	clean, code, ok := moduleDir(out, root, dir, "unit", "UNIT")
+	if !ok {
+		return code
+	}
+	o := checks.RunUnit(tools, filepath.Join(root, clean))
+	if o.Init.Clause != "" {
+		printResult(out, o.Init)
+	}
+	if r := o.Report; r != nil {
+		fmt.Fprintf(out, "%s report %s %s\n", r.Status, strings.Join(r.Reasons, ","), counts(o))
+		for _, d := range r.Diagnostics {
+			fmt.Fprintf(out, "  %s: %s: %s\n", d.Severity, d.Summary, d.Detail)
+		}
+	}
+	switch o.Status {
+	case checks.StatusPass:
+		fmt.Fprintf(out, "UNIT_PASS %s %s\n", clean, counts(o))
+		return 0
+	case checks.StatusBlocked:
+		fmt.Fprintf(out, "UNIT_BLOCKED %s %s\n", clean, o.Reason)
+	default:
+		fmt.Fprintf(out, "UNIT_FAIL %s %s\n", clean, o.Reason)
+	}
+	return 1
+}
+
+// slice runs lint and unit on every library and stage directory of the
+// module graph. A broken graph cannot discover safely and zero directories
+// prove nothing; both fail before any tool runs.
+func slice(out io.Writer, root string, tools checks.StaticTools) int {
+	g, ok := scan(out, root)
+	if !ok {
+		fmt.Fprintln(out, "SLICE_FAIL DEPENDENCIES")
+		return 1
+	}
+	dirs := checks.SliceDirs(g)
+	paths := make([]string, len(dirs))
+	for i, d := range dirs {
+		paths[i] = filepath.Join(root, d)
+	}
+	o := checks.RunSlice(tools, paths)
+	if o.Reason == "NO_DISCOVERY" {
+		fmt.Fprintln(out, "SLICE_FAIL NO_DISCOVERY dirs=0")
+		return 1
+	}
+	for i, e := range o.Entries {
+		status := checks.StatusFail
+		switch lint := staticStatus(e.Static); {
+		case lint == checks.StatusPass && e.Unit.Pass:
+			status = checks.StatusPass
+		case lint != checks.StatusFail && e.Unit.Status != checks.StatusFail:
+			status = checks.StatusBlocked
+		}
+		fmt.Fprintf(out, "%s %s lint=%s %s %s\n", status, dirs[i], staticStatus(e.Static), counts(e.Unit), e.Unit.Reason)
+		for _, r := range e.Static.Results {
+			if r.Status != checks.StatusPass {
+				fmt.Fprintf(out, "  lint %s %s %s\n", r.Status, r.Clause, r.Reason)
+			}
+		}
+		if e.Unit.Report != nil && len(e.Unit.Report.Reasons) > 0 {
+			fmt.Fprintf(out, "  unit %s\n", strings.Join(e.Unit.Report.Reasons, ","))
+		}
+	}
+	if !o.Pass {
+		fmt.Fprintf(out, "SLICE_FAIL dirs=%d\n", len(o.Entries))
+		return 1
+	}
+	fmt.Fprintf(out, "SLICE_PASS dirs=%d\n", len(o.Entries))
+	return 0
 }
 
 // scan reports every dependency finding and whether the graph is usable.

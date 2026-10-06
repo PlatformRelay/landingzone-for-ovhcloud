@@ -40,7 +40,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
   - Verify: `go -C tools test -tags offlinetools ./internal/checks -run TestUnit -count=1`: pinned `tofu test -json` through the 001 report adapter on the pass fixture is accepted; fail, zero-tests, skipped and malformed/truncated-stream fixtures and a directory list with zero entries are behavioural red against a stub that reports pass.
   - Evidence: `evidence/T003.md`; PR; initial status `not-run`.
 
-- [ ] T004 Implement `task test:unit` and `task test:slice` in tools/internal/checks/unit.go, tools/cmd/lz-check/main.go and Taskfile.yml
+- [x] T004 Implement `task test:unit` and `task test:slice` in tools/internal/checks/unit.go, tools/cmd/lz-check/main.go and Taskfile.yml — closed 2026-10-06, evidence: evidence/T004.md
   - Requirements: FR-013, SC-001; ADRs: 0008. Depends on: T003.
   - Verify: `go -C tools test -tags offlinetools ./internal/checks -run TestUnit -count=1; task test:slice`: T003 controls green; mirror-only `init -backend=false -lockfile=readonly` then `tofu test -json`; `test:slice` discovers library and stage directories from the dependency graph and reports `fail` with zero discovery until T012 creates modules/naming (header exception: expected and recorded, not a pass).
   - Evidence: `evidence/T004.md`; PR; initial status `not-run`.
