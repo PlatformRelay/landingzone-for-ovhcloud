@@ -34,6 +34,16 @@ tasks:
       - go -C tools test -count=1 -run 'TestFoundation|TestTraceabilityParse' ./internal/checks ./cmd/lz-check
       - go -C tools run ./cmd/lz-check -root .. ci-source specs/001-offline-foundation
 
+  # Judges recorded run evidence, so the workflow defers it: it cannot judge
+  # its own run. The record is built on the host from read-only gh captures
+  # with `lz-check ci-observe`; see specs/001-offline-foundation/evidence/T023.md.
+  # Judge a clean checkout: the head runs are bound to the target digests of
+  # the files on disk, so an untracked file in a target's scope reads as stale.
+  ci:foundation:
+    desc: Recorded GitHub runs of the foundation workflow against its approved source; green head and red control (V009)
+    cmds:
+      - go -C tools run ./cmd/lz-check -root .. ci-runs
+
   # Host-side: the offline entry mounts the candidate read-only. Writes the
   # workflow rendered from pipelines/github/foundation-source.json.
   generate:foundation-ci:
