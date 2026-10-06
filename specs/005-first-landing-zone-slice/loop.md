@@ -29,6 +29,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 ## Tasks
 | Task | Verdict | Review (legs, rounds, Claude?) | Gaps / decision request |
 |---|---|---|---|
+| T001 | CLOSED | codex leg not run (usage limit) → general-purpose subagent APPROVE; Sonnet CONCERNS; Opus CONCERNS (codex-no-verdict trigger); 1 round; review fixes added 4 controls | none; T002 must also edit tools/cmd/lz-check/main.go (not in its file list) |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |

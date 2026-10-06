@@ -25,7 +25,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
 
 ## Setup and foundation
 
-- [ ] T001 Write spec-scoped traceability tests in tools/internal/checks/traceability_test.go and tools/cmd/lz-check/main_test.go
+- [x] T001 Write spec-scoped traceability tests in tools/internal/checks/traceability_test.go and tools/cmd/lz-check/main_test.go — closed 2026-10-06, evidence: evidence/T001.md
   - Requirements: FR-014; ADRs: 0008, 0019. Depends on: 001/T007.
   - Verify: `go -C tools test ./internal/checks ./cmd/lz-check -run "TestTraceability|TestSpecs" -count=1`: a two-spec fixture where both specs define FR-001 traces each against its own registry entries; spec 001's real tree still passes. A spec-005 requirement resolving to spec 001's ADR list, an unmapped requirement and a task without Verify are behavioural red on the current global-key registry.
   - Evidence: PR; `evidence/T001.md`; initial status `not-run`.
