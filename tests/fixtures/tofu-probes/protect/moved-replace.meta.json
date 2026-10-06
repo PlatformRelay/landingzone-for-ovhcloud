@@ -1,0 +1,1 @@
+{"case":"moved-replace","variant":"moved-replace","applied_base_first":"yes","plan_args":"-var=org=acme2","command":"tofu plan -out=plan.bin; tofu show -json plan.bin","tool":"tofu","tool_version":"1.13.0","json_sha256":"eaa8088c406f097e0872d496cd89e31a0d29d2326eb2e0ad2842dd2eaad2e32e","captured_on":"2026-10-06"}

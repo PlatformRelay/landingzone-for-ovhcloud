@@ -17,7 +17,9 @@ import (
 // capture.sh with the pinned OpenTofu on provider-free roots: terraform_data stands in for the
 // state bucket, the platform S3 user (create_before_destroy), the tenant buckets (for_each over
 // the tenants), the adopted project, a governance module and one non-retained resource
-// (project_scratch). truncated.json is org-change.json cut in half.
+// (project_scratch). truncated.json is org-change.json cut in half. The moved-* plans (T064) move
+// the state bucket with a `moved` block: alone, with a replacement, and to an address with no block;
+// state-not-plan.json is `tofu show -json` without a plan file (the state).
 
 var protectDir = filepath.Join("..", "..", "..", "tests", "fixtures", "tofu-probes", "protect")
 
@@ -153,9 +155,46 @@ func TestProtect(t *testing.T) {
 		{name: "refuse-unparseable-array", raw: "[]", retained: both, refused: []string{}},
 		{name: "refuse-unparseable-no-format-version", raw: "{}", retained: both, refused: []string{}},
 		// Valid JSON with a version, but not a plan's shape: a decoder that drops the type error admits it.
-		{name: "refuse-unparseable-wrong-type", raw: `{"format_version":"1.2","resource_changes":"none"}`, retained: both, refused: []string{}},
+		{name: "refuse-unparseable-wrong-type", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":"none"}`, retained: both, refused: []string{}},
 		// A plan OpenTofu marks as errored is incomplete: what it would delete is unknown.
-		{name: "refuse-errored", raw: `{"format_version":"1.2","errored":true,"resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "refuse-errored", raw: `{"format_version":"1.2","planned_values":{},"errored":true,"resource_changes":[]}`, retained: both, refused: []string{}},
+		// Fail closed (T064): an action the guard does not know as harmless is refused on a covered
+		// address, admitted on any other. Synthetic shape: no OpenTofu 1.13 plan emits such an action.
+		{name: "refuse-unknown-action", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.state_bucket","change":{"actions":["purge"]}}]}`,
+			retained: both, refused: []string{"terraform_data.state_bucket"}},
+		{name: "admit-unknown-action-unretained", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.project_scratch","change":{"actions":["purge"]}}]}`,
+			retained: both},
+		// An entry with no actions on a covered address is not a shape the guard can judge. Synthetic.
+		{name: "refuse-empty-actions", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.state_bucket","change":{"actions":[]}}]}`,
+			retained: both, refused: []string{"terraform_data.state_bucket"}},
+		{name: "refuse-no-change", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.state_bucket"}]}`,
+			retained: both, refused: []string{"terraform_data.state_bucket"}},
+		{name: "admit-empty-actions-unretained", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"terraform_data.project_scratch","change":{"actions":[]}}]}`,
+			retained: both},
+		// A data source read under a retained module (OpenTofu plans `read` for deferred data reads). Synthetic.
+		{name: "admit-read-under-retained-module", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[{"address":"module.governance.data.terraform_data.x","change":{"actions":["read"]}}]}`,
+			retained: both},
+		// T064 review: a `moved` block takes the retained address away in the same plan. The change's
+		// address is the new one, `previous_address` the retained one.
+		{name: "refuse-moved-replace", fixture: "moved-replace", retained: both,
+			shape:   map[string][]string{"terraform_data.bucket": {"delete", "create"}},
+			refused: []string{"terraform_data.bucket", "terraform_data.state_bucket"}},
+		{name: "refuse-moved-out", fixture: "moved-out", retained: both,
+			shape:   map[string][]string{"terraform_data.other": {"delete"}},
+			refused: []string{"terraform_data.other", "terraform_data.state_bucket"}},
+		// T064 review r2: a move alone out of the retained set is refused, or the next plan could
+		// delete the resource under an address no entry covers; a move within the set is admitted.
+		{name: "refuse-moved-out-of-set", fixture: "moved-only", retained: both,
+			shape:   map[string][]string{"terraform_data.bucket": {"no-op"}},
+			refused: []string{"terraform_data.bucket", "terraform_data.state_bucket"}},
+		{name: "admit-moved-within-set", fixture: "moved-only",
+			retained: []Retained{{Instance: "account-bootstrap", Addresses: []string{"terraform_data.state_bucket", "terraform_data.bucket"}}}},
+		// T064 review r2: `tofu show -json` without the plan file prints the state; it is not a plan.
+		{name: "refuse-state-not-plan", fixture: "state-not-plan", retained: both, refused: []string{}},
+		{name: "refuse-unparseable-no-planned-values", raw: `{"format_version":"1.2","resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "refuse-unparseable-null-planned-values", raw: `{"format_version":"1.2","planned_values":null,"resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "refuse-unparseable-planned-values-only", raw: `{"planned_values":{},"resource_changes":[]}`, retained: both, refused: []string{}},
+		{name: "admit-minimal-plan", raw: `{"format_version":"1.2","planned_values":{},"resource_changes":[]}`, retained: both},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -217,8 +256,8 @@ func TestProtectNamesInstance(t *testing.T) {
 // for is named by the sidecar's own file name; its `case` field must agree.
 func TestProtectFixtures(t *testing.T) {
 	metas, err := filepath.Glob(filepath.Join(protectDir, "*.meta.json"))
-	if err != nil || len(metas) != 15 {
-		t.Fatalf("%d meta sidecars (%v), want 15 (14 captured, 1 derived)", len(metas), err)
+	if err != nil || len(metas) != 19 {
+		t.Fatalf("%d meta sidecars (%v), want 19 (18 captured, 1 derived)", len(metas), err)
 	}
 	all, _ := filepath.Glob(filepath.Join(protectDir, "*.json"))
 	if len(all) != 2*len(metas) {

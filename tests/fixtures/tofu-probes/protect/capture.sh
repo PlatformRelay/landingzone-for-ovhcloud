@@ -95,6 +95,29 @@ removed {
 }
 EOF
     ;;
+  moved-replace | moved-only)
+    # T064: the retained address is moved (moved-only) or moved and replaced (with an org change)
+    # in the same plan.
+    cat >> "$1/main.tf" <<'EOF'
+moved {
+  from = terraform_data.state_bucket
+  to   = terraform_data.bucket
+}
+resource "terraform_data" "bucket" {
+  input            = "${var.org}-lz-state"
+  triggers_replace = [var.org]
+}
+EOF
+    ;;
+  moved-out)
+    # T064: the retained address is moved to an address with no block, so it is deleted.
+    cat >> "$1/main.tf" <<'EOF'
+moved {
+  from = terraform_data.state_bucket
+  to   = terraform_data.other
+}
+EOF
+    ;;
   *)
     cat >> "$1/main.tf" <<'EOF'
 resource "terraform_data" "state_bucket" {
@@ -158,6 +181,19 @@ capture module-removed module-removed yes
 capture two-replacements base yes -var=org=acme2 -var=project_id=p-2222
 capture region-removed base yes '-var=regions=["eu"]'
 capture replace-requested base yes -replace=terraform_data.state_bucket
+capture moved-replace moved-replace yes -var=org=acme2
+capture moved-out moved-out yes
+capture moved-only moved-only yes
+
+# T064: `tofu show -json` without a plan file prints the state, which is not a plan.
+d=$scratch/state-not-plan
+root "$d" base
+"$tofu" -chdir="$d" init -input=false -no-color > "$d/init.log" 2>&1
+"$tofu" -chdir="$d" apply -input=false -no-color -auto-approve > "$d/apply.log" 2>&1
+"$tofu" -chdir="$d" show -json > "$here/state-not-plan.json"
+printf '{"case":"state-not-plan","variant":"base","applied_base_first":"yes","plan_args":"","command":"tofu show -json (no plan file)","tool":"tofu","tool_version":"%s","json_sha256":"%s","captured_on":"%s"}\n' \
+  "$version" "$(sha256sum "$here/state-not-plan.json" | cut -d' ' -f1)" "$(date -u +%Y-%m-%d)" > "$here/state-not-plan.meta.json"
+echo "state-not-plan: ok"
 
 # A killed `show -json`: org-change.json cut in the middle.
 size=$(wc -c < "$here/org-change.json")
