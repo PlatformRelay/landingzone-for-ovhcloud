@@ -44,8 +44,8 @@ func newGuardWorld(t *testing.T) guardWorld {
 		sep:        filepath.Join(root, "sep"),
 		sepGit:     filepath.Join(root, "sep.git"),
 	}
-	for _, d := range []string{w.main + "/.git/objects/info", w.shared + "/.git/worktrees/wt", w.wt, w.clone + "/.git",
-		w.agentClone + "/.git", w.sibling + "/.git", w.sep, w.sepGit} {
+	for _, d := range []string{w.main + "/.git/objects/info", w.shared + "/.git/worktrees/wt", w.shared + "/.git/objects", w.wt, w.clone + "/.git/objects",
+		w.agentClone + "/.git/objects", w.sibling + "/.git/objects", w.sep, w.sepGit + "/objects"} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -153,8 +153,8 @@ func TestGuardAdmitsOwnerCheckout(t *testing.T) {
 		"dedicated clone via symlink": {dir: filepath.Join(w.root, "link-main")},
 		// worktrees-owner/ shares only a name prefix with the agent root worktrees/.
 		"dedicated clone beside the agent root": {dir: w.sibling, owner: w.sibling, scenario: "dir-clean"},
-		// A root that does not exist (no agent worktree yet) cannot hold the checkout.
-		"agent root absent on disk": {agentRoot: filepath.Join(w.root, "no-worktrees-yet")},
+		// T072: an agent root given through a symlink to an existing directory.
+		"agent root via symlink": {agentRoot: filepath.Join(w.root, "link-agents")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := w.host(t, c)
@@ -276,6 +276,44 @@ func TestGuardSeparateClone(t *testing.T) {
 			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-shared-config", sharedRepo: "group"} }},
 		{name: "shared-repository-octal", want: []string{CondShared},
 			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-shared-config", sharedRepo: "0660"} }},
+		// .git/objects is a symlink into another repository's objects: shared without alternates
+		// (T072 review round 1).
+		{name: "objects-symlink", want: []string{CondShared},
+			prep: func(t *testing.T, w guardWorld) {
+				if err := os.RemoveAll(filepath.Join(w.main, ".git", "objects")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(w.clone, ".git", "objects"), filepath.Join(w.main, ".git", "objects")); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		// A real objects directory whose pack/ is a symlink into another repository: git loads
+		// packs through it, so the objects are shared all the same (T072 review round 2).
+		{name: "objects-pack-symlink", want: []string{CondShared},
+			prep: func(t *testing.T, w guardWorld) {
+				if err := os.Symlink(filepath.Join(w.clone, ".git", "objects"), filepath.Join(w.main, ".git", "objects", "pack")); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		// An objects that is a file holds no symlink, but is no object store of its own either.
+		{name: "objects-is-file", want: []string{CondShared},
+			prep: func(t *testing.T, w guardWorld) {
+				if err := os.RemoveAll(filepath.Join(w.main, ".git", "objects")); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(w.main, ".git", "objects"), "")
+			}},
+		// No objects directory to examine is not proof of a private one.
+		{name: "objects-missing", want: []string{CondShared},
+			prep: func(t *testing.T, w guardWorld) {
+				if err := os.RemoveAll(filepath.Join(w.main, ".git", "objects")); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		// A failing git config (exit 128, not the exit 1 of an unset key) is a refusal, never an
+		// admission (T072 review round 1).
+		{name: "shared-repository-config-fails", want: []string{CondShared},
+			c: func(w guardWorld) guardCase { return guardCase{scenario: "main-config-fails"} }},
 		// .git is a symlink to another repository's git dir, so two checkouts share one .git;
 		// rev-parse prints the resolved git dir and the checkout as top level (t071-gitprobe3.sh)
 		// (review round 2).
@@ -318,6 +356,32 @@ func TestGuardSeparateClone(t *testing.T) {
 			}},
 		{name: "agent-root-relative", want: []string{CondLiveEnv, CondAgentRoot},
 			c: func(w guardWorld) guardCase { return guardCase{agentRoot: "worktrees"} }},
+		// T072, coordinator decision on T071's request: the configured root must exist as a
+		// directory, so a mistyped root does not turn the clause off silently.
+		// A relative root that exists from the test's working directory (the package directory):
+		// still refused as relative, not judged against the process's directory (review round 1).
+		{name: "agent-root-relative-existing", want: []string{CondLiveEnv},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: "testdata"} }},
+		{name: "agent-root-absent", want: []string{CondLiveEnv},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: filepath.Join(w.root, "worktres")} }},
+		{name: "agent-root-is-file", want: []string{CondLiveEnv},
+			c:    func(w guardWorld) guardCase { return guardCase{agentRoot: filepath.Join(w.root, "agents-file")} },
+			prep: func(t *testing.T, w guardWorld) { writeFile(t, filepath.Join(w.root, "agents-file"), "") }},
+		{name: "agent-root-dangling-symlink", want: []string{CondLiveEnv},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: filepath.Join(w.root, "link-gone")} },
+			prep: func(t *testing.T, w guardWorld) {
+				if err := os.Symlink(filepath.Join(w.root, "gone"), filepath.Join(w.root, "link-gone")); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		{name: "agent-root-symlink-to-file", want: []string{CondLiveEnv},
+			c: func(w guardWorld) guardCase { return guardCase{agentRoot: filepath.Join(w.root, "link-file")} },
+			prep: func(t *testing.T, w guardWorld) {
+				writeFile(t, filepath.Join(w.root, "agents-file"), "")
+				if err := os.Symlink(filepath.Join(w.root, "agents-file"), filepath.Join(w.root, "link-file")); err != nil {
+					t.Fatal(err)
+				}
+			}},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {

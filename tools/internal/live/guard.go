@@ -21,10 +21,10 @@ const RefusalExit = 3
 // Conditions a refusal names.
 const (
 	CondOffline  = "offline"  // inside the offline entry (/tcb present or LZ_OFFLINE=1)
-	CondLiveEnv  = "live-env" // live.env missing or without LZ_OWNER_CHECKOUT
+	CondLiveEnv  = "live-env" // live.env missing, without LZ_OWNER_CHECKOUT, or without an existing absolute LZ_AGENT_WORKTREE_ROOT
 	CondCheckout = "checkout" // canonical working directory is not LZ_OWNER_CHECKOUT
 	CondWorktree = "worktree" // git dir differs from the common git dir (linked worktree)
-	// D92: live runs start only from a dedicated clone. Named here by T071; enforced by T072.
+	// D92: live runs start only from a dedicated clone (T071 tests, T072 enforces).
 	CondLinked    = "linked-worktrees" // the git dir lists a linked worktree (worktrees/ entry or worktree list)
 	CondShared    = "shared"           // alternates, core.sharedRepository, or a git dir outside the checkout
 	CondAgentRoot = "agent-root"       // checkout at or under LZ_AGENT_WORKTREE_ROOT
@@ -132,6 +132,24 @@ func (h Host) Check() error {
 	if dir != owner {
 		return refuse(CondCheckout, "%s is not the owner's checkout %s", dir, owner)
 	}
+	// D92: no live run starts at or below the agent worktree root. The root must be an existing
+	// directory, so a mistyped root cannot turn the clause off (T072); it is resolved, so a
+	// symlinked or dotted root still covers its target.
+	agents := liveEnv["LZ_AGENT_WORKTREE_ROOT"]
+	if agents == "" || !filepath.IsAbs(agents) {
+		return refuse(CondLiveEnv, "%s has no absolute LZ_AGENT_WORKTREE_ROOT", h.LiveEnv)
+	}
+	if fi, err := os.Stat(agents); err != nil {
+		return refuse(CondLiveEnv, "LZ_AGENT_WORKTREE_ROOT %s: %v", agents, err)
+	} else if !fi.IsDir() {
+		return refuse(CondLiveEnv, "LZ_AGENT_WORKTREE_ROOT %s is not a directory", agents)
+	}
+	agents = canonicalPath(agents)
+	// Inside the root by path segment: Rel answers "." for the root itself and a path that does
+	// not climb out of it for anything below (worktrees-owner/ beside worktrees/ climbs out).
+	if rel, err := filepath.Rel(agents, dir); err != nil || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+		return refuse(CondAgentRoot, "%s lies under the agent worktree root %s", dir, agents)
+	}
 	out, err := h.git(dir, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel")
 	if err != nil {
 		return refuse(CondWorktree, "%v", err)
@@ -143,6 +161,51 @@ func (h Host) Check() error {
 	// core.worktree in the repository config would make status answer for another tree.
 	if canonicalPath(dirs[2]) != dir {
 		return refuse(CondCheckout, "git work tree is %s, not %s", dirs[2], dir)
+	}
+	// D92: a private .git — a directory inside the checkout, not a gitfile to a git dir elsewhere.
+	gitDir := filepath.Join(dir, ".git")
+	if fi, err := os.Lstat(gitDir); err != nil || !fi.IsDir() || canonicalPath(dirs[0]) != gitDir {
+		return refuse(CondShared, "git dir %s is not the private %s", dirs[0], gitDir)
+	}
+	// D92: no linked worktree registered on disk (git does not list an entry without a gitdir
+	// file) nor listed by git.
+	entries, err := os.ReadDir(filepath.Join(gitDir, "worktrees"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return refuse(CondLinked, "%v", err)
+	}
+	if len(entries) > 0 {
+		return refuse(CondLinked, "%s/worktrees has %d entries", gitDir, len(entries))
+	}
+	out, err = h.git(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return refuse(CondLinked, "%v", err)
+	}
+	if n := strings.Count("\n"+out, "\nworktree "); n != 1 {
+		return refuse(CondLinked, "git worktree list shows %d worktrees", n)
+	}
+	// D92: objects of no other repository, and no group-shared repository.
+	if _, err := os.Lstat(filepath.Join(gitDir, "objects", "info", "alternates")); !errors.Is(err, fs.ErrNotExist) {
+		return refuse(CondShared, "alternates present or not examinable (%v)", err)
+	}
+	// An object store of its own: no symlink at or below objects/, which would share another
+	// repository's objects without alternates (T072 review rounds 1 and 2: objects/ itself, a
+	// pack/ or fan-out directory). WalkDir does not follow symlinks; a missing objects/ is an
+	// error, and an objects that is a file was refused by the alternates Lstat above (ENOTDIR).
+	if err := filepath.WalkDir(filepath.Join(gitDir, "objects"), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", p)
+		}
+		return nil
+	}); err != nil {
+		return refuse(CondShared, "objects not private: %v", err)
+	}
+	if shared, set, err := h.gitConfig(dir, "core.sharedRepository"); err != nil {
+		return refuse(CondShared, "%v", err)
+	} else if set && shared != "umask" && shared != "false" && shared != "0" {
+		return refuse(CondShared, "core.sharedRepository=%s", shared)
 	}
 	// An explicit untracked mode: status.showUntrackedFiles in the repository's config must not
 	// hide untracked files. Ignored files are excepted (no --ignored).
@@ -175,6 +238,20 @@ func (h Host) Check() error {
 		return refuse(CondOrigin, "%s is not reachable from %s: %v", h.ReviewedSHA, originMain, err)
 	}
 	return nil
+}
+
+// gitConfig reads one key of the repository's configuration: git config --get exits 1 for an
+// unset key, which is not a failure.
+func (h Host) gitConfig(dir, key string) (string, bool, error) {
+	out, err := h.git(dir, "config", "--get", key)
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(out), true, nil
 }
 
 func canonicalPath(p string) string {
