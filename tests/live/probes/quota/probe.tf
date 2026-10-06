@@ -50,10 +50,32 @@ variable "state_passphrase" {
   sensitive   = true
 }
 
-# The sandbox project: the account's only one (`one` fails the plan when there are several).
-data "ovh_cloud_projects" "all" {}
+variable "run_id" {
+  description = "Run id, set by lz-live probe (TF_VAR_run_id): the directory of state_path."
+  type        = string
+
+  validation {
+    condition     = var.run_id == basename(dirname(var.state_path))
+    error_message = "run_id must be the run id of state_path's directory: run this root through `task live:probe`."
+  }
+}
+
+variable "project_id" {
+  description = "Sandbox project id, set by lz-live probe from LZ_PROJECT_ID_STATE of account.env (TF_VAR_project_id)."
+  type        = string
+}
+
+# The sandbox project's record: the plan fails when the account has no project with that id.
+data "ovh_cloud_projects" "all" {
+  lifecycle {
+    postcondition {
+      condition     = length([for p in self.projects : p if p.service_name == var.project_id]) == 1
+      error_message = "project_id is not a public cloud project of this account: check LZ_PROJECT_ID_STATE in account.env."
+    }
+  }
+}
 
 locals {
-  run_id  = basename(dirname(var.state_path))
-  project = one(data.ovh_cloud_projects.all.projects)
+  run_id  = var.run_id
+  project = one([for p in data.ovh_cloud_projects.all.projects : p if p.service_name == var.project_id])
 }
