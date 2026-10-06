@@ -62,9 +62,12 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. lint {{.CLI_ARGS}}
 
   check:specs:
-    desc: Trace every spec 001 requirement and task through harness/checks.yaml (V003)
+    desc: 'Trace a spec''s requirements and tasks through its keys in harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'
+    vars:
+      SPEC_DIRS: '{{.CLI_ARGS | default "specs/001-offline-foundation specs/005-first-landing-zone-slice"}}'
     cmds:
-      - go -C tools run ./cmd/lz-check -root .. specs specs/001-offline-foundation
+      - for: {var: SPEC_DIRS}
+        cmd: go -C tools run ./cmd/lz-check -root .. specs "{{.ITEM}}"
 
   dod:
     desc: 'Definition of done for a path, e.g. task dod -- modules/naming (V003)'

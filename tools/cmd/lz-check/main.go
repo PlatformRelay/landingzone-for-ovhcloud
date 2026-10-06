@@ -44,7 +44,12 @@ import (
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
-var adrFile = regexp.MustCompile(`^(\d{4})-.+\.md$`)
+var (
+	adrFile = regexp.MustCompile(`^(\d{4})-.+\.md$`)
+	// specNumber is the leading number of a spec directory's name, which
+	// selects the spec's registry keys.
+	specNumber = regexp.MustCompile(`^(\d{3})-`)
+)
 
 func run(args []string, out io.Writer) int {
 	flags := flag.NewFlagSet("lz-check", flag.ContinueOnError)
@@ -100,6 +105,11 @@ func loadRegistry(root string) (checks.Registry, error) {
 }
 
 func specs(out io.Writer, root, dir string, registry checks.Registry) int {
+	number := specNumber.FindStringSubmatch(filepath.Base(filepath.Clean(dir)))
+	if number == nil {
+		fmt.Fprintf(out, "SPEC_NUMBER: %s does not start with a three-digit spec number\n", dir)
+		return 2
+	}
 	specText, err := os.ReadFile(filepath.Join(root, dir, "spec.md"))
 	if err != nil {
 		fmt.Fprintln(out, "SPEC_MISSING:", err)
@@ -131,7 +141,7 @@ func specs(out io.Writer, root, dir string, registry checks.Registry) int {
 			adrs = append(adrs, m[1])
 		}
 	}
-	findings := checks.CheckTrace(checks.Trace{Requirements: requirements, Tasks: tasks, Registry: registry, ADRs: adrs})
+	findings := checks.CheckTrace(checks.Trace{Spec: number[1], Requirements: requirements, Tasks: tasks, Registry: registry, ADRs: adrs})
 	for _, f := range findings {
 		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
 	}
@@ -139,7 +149,7 @@ func specs(out io.Writer, root, dir string, registry checks.Registry) int {
 		fmt.Fprintf(out, "TRACE_FAIL %s findings=%d\n", dir, len(findings))
 		return 1
 	}
-	fmt.Fprintf(out, "TRACE_OK %s requirements=%d tasks=%d checks=%d\n", dir, len(requirements), len(tasks), len(registry.Checks))
+	fmt.Fprintf(out, "TRACE_OK %s requirements=%d tasks=%d checks=%d\n", dir, len(requirements), len(tasks), checks.SpecChecks(number[1], registry))
 	return 0
 }
 

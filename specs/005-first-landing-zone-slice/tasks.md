@@ -30,7 +30,7 @@ Evidence: the Verify output is summarised in the PR description with the run id 
   - Verify: `go -C tools test ./internal/checks ./cmd/lz-check -run "TestTraceability|TestSpecs" -count=1`: a two-spec fixture where both specs define FR-001 traces each against its own registry entries; spec 001's real tree still passes. A spec-005 requirement resolving to spec 001's ADR list, an unmapped requirement and a task without Verify are behavioural red on the current global-key registry.
   - Evidence: `evidence/T001.md`; PR; initial status `not-run`.
 
-- [ ] T002 Implement spec-scoped requirement keys in harness/checks.yaml, tools/internal/checks/traceability.go and Taskfile.yml
+- [x] T002 Implement spec-scoped requirement keys in harness/checks.yaml, tools/internal/checks/traceability.go and Taskfile.yml — closed 2026-10-06, evidence: evidence/T002.md
   - Requirements: FR-014; ADRs: 0008, 0019. Depends on: T001.
   - Verify: `task check:specs -- specs/001-offline-foundation; task check:specs -- specs/005-first-landing-zone-slice`: both green (planned spec 005 checks report not-run, never pass); T001 controls green. `check:specs` takes the spec directory from CLI_ARGS; spec 001 keys keep working (recommended form `005/FR-001`, research R18).
   - Evidence: `evidence/T002.md`; PR; initial status `not-run`.
