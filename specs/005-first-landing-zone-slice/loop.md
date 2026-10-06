@@ -65,4 +65,8 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 - `task test:unit -- <fixture dir>` through the entry is a cheap positive control (T004).
 - Every nested library/stage directory with `*.tf` is a slice member and needs its own `.tftest.hcl` (T004, applies from T012).
 - Queued for after T012: add `test:slice` to `pipelines/github/foundation-source.json` once it is green (changes the recorded runs; coordinator task line then).
+- OpenTofu also reads `*.tofu`: any check routing files by extension needs a `.tofu` control (T005).
+- `classify` lets `tests`/`examples` segments win anywhere in a path: a rule scoped to `stacks/` needs controls with those segments inside `stacks/` (T005).
+- `mutate.py` copies only `tools/`; tests reading `../../../tests/check/fixtures` then find nothing and every mutant falsely dies — mutate a scratch copy holding `tools/` and `tests/` (`~/.local/share/ovh-lz/review/t005-mutants.py`) (T005).
+- Landing (D89/D90): the coordinator pushes green points, opens a PR, rebase-merges on all-green checks (SonarCloud "analysis failed" excepted until fixed), then rebases this branch onto origin/main. PR #22 merged 2026-10-06 (main 49094ef). Queued: re-record `pipelines/github/foundation-runs.json` from the PR #22 / main runs so `ci:foundation` turns green (T023 owner sheet).
 - Coordinator validations after T002 (2026-10-06): e91c86e (form-only spec-set edits) accepted; `verify:toolchain` stays mapped to 005/FR-011 so T047's "toolchain unchanged" gate keeps tracing.
