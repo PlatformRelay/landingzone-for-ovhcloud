@@ -1318,12 +1318,17 @@ func TestRunnerChildHome(t *testing.T) {
 
 // ---------------------------------------------------------------- probe state
 
-const probeAccount = "ab12345-ovh"
+const (
+	probeAccount = "ab12345-ovh"
+	probeProject = "p1"
+)
 
 func (w *runWorld) probe(t *testing.T, root string, st tofuStack) Probe {
 	t.Helper()
 	s := w.stack(t, "p", true, st)
 	r := w.runner(t, s)
+	// The probes' project, as lz-live passes it (T074); a run records it for its cleanup (T077).
+	r.Vars = map[string]string{"TF_VAR_project_id": probeProject}
 	return Probe{Run: r, ConfigRoot: root, Account: probeAccount}
 }
 
@@ -1809,6 +1814,290 @@ func TestProbeRerun(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------- scratch location and cleanup binding
+
+func mkdirPrivate(t *testing.T, d string) string {
+	t.Helper()
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// sameTree fails for every path of dir added, changed or lost since before (a treeSnapshot).
+func sameTree(t *testing.T, what, dir string, before map[string]string) {
+	t.Helper()
+	after := treeSnapshot(t, dir)
+	for p, v := range before {
+		if got, ok := after[p]; !ok {
+			t.Errorf("%s lost %s", what, p)
+		} else if got != v {
+			t.Errorf("%s: %s changed", what, p)
+		}
+	}
+	for p := range after {
+		if _, ok := before[p]; !ok {
+			t.Errorf("the refused run wrote %s into %s", p, what)
+		}
+	}
+}
+
+// exitOf is a finished process's exit code (-1: it did not run).
+func exitOf(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	if err != nil {
+		return -1
+	}
+	return 0
+}
+
+// TestRunnerScratchOutsideRoots (T077; T074 review r1 gap): the scratch HOME, and with it every
+// stack's data directory, is made under $TMPDIR (os.MkdirTemp). A TMPDIR inside the reviewed
+// checkout would put the children's HOME, provider plugins and backend data there. The runner
+// does not know the checkout; it knows the parts of it a run touches, the stack roots and the run
+// record (.local/live/<run-id>/, among the other runs' records). A TMPDIR that resolves inside one
+// of them (symlinks resolved) is refused (exit 3, naming TMPDIR) before any file (no run record,
+// nothing in TMPDIR) and before any child or leftover listing, for a run, a probe start and a
+// fresh-process cleanup alike. A TMPDIR beside them, a prefix sibling included, is admitted and
+// used. (lz-live refuses the whole checkout: TestProbeScratchOutsideCheckout.)
+func TestRunnerScratchOutsideRoots(t *testing.T) {
+	for name, place := range map[string]func(t *testing.T, w *runWorld, stack string) string{
+		"in-stack-root": func(t *testing.T, _ *runWorld, stack string) string {
+			return mkdirPrivate(t, filepath.Join(stack, "tmp"))
+		},
+		"stack-root-itself": func(_ *testing.T, _ *runWorld, stack string) string { return stack },
+		"symlink-into-stack-root": func(t *testing.T, _ *runWorld, stack string) string {
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(mkdirPrivate(t, filepath.Join(stack, "tmp")), alias); err != nil {
+				t.Fatal(err)
+			}
+			return alias
+		},
+		"in-run-record": func(t *testing.T, w *runWorld, _ string) string {
+			return mkdirPrivate(t, filepath.Join(w.runDir, "tmp"))
+		},
+		"in-run-records-dir": func(t *testing.T, w *runWorld, _ string) string {
+			return mkdirPrivate(t, filepath.Join(filepath.Dir(w.runDir), "tmp"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newRunWorld(t)
+			s := w.stack(t, "p", true, tofuStack{})
+			r := w.runner(t, s)
+			lister := r.Leftovers.Lister.(*fakeLister)
+			records := filepath.Dir(filepath.Dir(w.runDir))
+			tmp := place(t, w, s.Dir)
+			stacksBefore, recordsBefore := treeSnapshot(t, w.stacks), treeSnapshot(t, records)
+			t.Setenv("TMPDIR", tmp)
+			err, _ := execute(t, r)
+			if ExitCode(err) != 3 || !strings.Contains(fmt.Sprint(err), "TMPDIR") {
+				t.Errorf("TMPDIR %s: error %v (exit %d); want a refusal (exit 3) naming TMPDIR", tmp, err, ExitCode(err))
+			}
+			if n := len(w.calls(t, "tofu.log")); n != 0 {
+				t.Errorf("%d tofu calls before the refusal", n)
+			}
+			if asked := lister.Asked(); len(asked) != 0 {
+				t.Errorf("the leftover check listed %v before the refusal", asked)
+			}
+			sameTree(t, "the stack roots", w.stacks, stacksBefore)
+			sameTree(t, "the run records", records, recordsBefore)
+		})
+	}
+
+	for name, place := range map[string]func(t *testing.T, w *runWorld) string{
+		"stack-root-prefix-sibling":  func(t *testing.T, w *runWorld) string { return mkdirPrivate(t, filepath.Join(w.stacks, "p-tmp")) },
+		"records-dir-prefix-sibling": func(t *testing.T, w *runWorld) string { return mkdirPrivate(t, filepath.Dir(w.runDir)+"-tmp") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newRunWorld(t)
+			r := w.runner(t, w.stack(t, "p", true, tofuStack{}))
+			tmp := place(t, w)
+			t.Setenv("TMPDIR", tmp)
+			if err, _ := execute(t, r); err != nil {
+				t.Fatalf("TMPDIR %s beside the stack roots and run records: %v\n%s", tmp, err, w.term)
+			}
+			calls := w.calls(t, "tofu.log")
+			if len(calls) == 0 {
+				t.Fatal("no tofu call")
+			}
+			for _, c := range calls {
+				if c.Cmd != "protect" && !within(resolvedPath(c.Home), resolvedPath(tmp)) {
+					t.Errorf("tofu %s ran with HOME %s, not under TMPDIR %s", c.Cmd, c.Home, tmp)
+				}
+			}
+		})
+	}
+
+	// Review r2: with the obstruction below, a check placed right after a probe-file write whose
+	// error it ignores still refuses; without it, that write leaves its file behind.
+	t.Run("probe-start-leaves-no-probe-file", func(t *testing.T) {
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.probe(t, root, tofuStack{})
+		tmp := mkdirPrivate(t, filepath.Join(p.Run.Stacks[0].Dir, "tmp"))
+		before := treeSnapshot(t, root)
+		t.Setenv("TMPDIR", tmp)
+		if err := p.Start(context.Background()); ExitCode(err) != 3 || !strings.Contains(fmt.Sprint(err), "TMPDIR") {
+			t.Errorf("probe start, TMPDIR %s: error %v; want a refusal (exit 3) naming TMPDIR", tmp, err)
+		}
+		if n := len(w.calls(t, "tofu.log")); n != 0 {
+			t.Errorf("%d tofu calls before the refusal", n)
+		}
+		sameTree(t, "the probe state", root, before)
+	})
+
+	t.Run("probe-start-in-stack-root", func(t *testing.T) {
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.probe(t, root, tofuStack{})
+		tmp := mkdirPrivate(t, filepath.Join(p.Run.Stacks[0].Dir, "tmp"))
+		// Review r1: Probe.run removes the files of a run that wrote no state, so their absence
+		// afterwards cannot show they were never written. A regular file where the probes'
+		// directory goes makes any write of probe.env or passphrase.env fail before the refusal
+		// could be reached, so only a refusal ahead of the files exits 3 naming TMPDIR.
+		dir, _, _ := probeFiles(t, root)
+		mkdirPrivate(t, filepath.Dir(filepath.Dir(dir)))
+		writeFile(t, filepath.Dir(dir), "not a directory\n")
+		records := filepath.Dir(filepath.Dir(w.runDir))
+		stacksBefore, recordsBefore, cfgBefore := treeSnapshot(t, w.stacks), treeSnapshot(t, records), treeSnapshot(t, root)
+		t.Setenv("TMPDIR", tmp)
+		err := p.Start(context.Background())
+		if ExitCode(err) != 3 || !strings.Contains(fmt.Sprint(err), "TMPDIR") {
+			t.Errorf("probe start, TMPDIR %s: error %v; want a refusal (exit 3) naming TMPDIR before any probe file", tmp, err)
+		}
+		if n := len(w.calls(t, "tofu.log")); n != 0 {
+			t.Errorf("%d tofu calls before the refusal", n)
+		}
+		sameTree(t, "the stack roots", w.stacks, stacksBefore)
+		sameTree(t, "the run records", records, recordsBefore)
+		sameTree(t, "the probe state", root, cfgBefore)
+	})
+
+	t.Run("cleanup-in-stack-root", func(t *testing.T) {
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.probe(t, root, tofuStack{DestroyExit: 1})
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Fatal("a probe whose destroy failed exited 0")
+		}
+		w.scenario.Stacks["p"] = tofuStack{ApplyStream: w.scenario.Stacks["p"].ApplyStream}
+		w.save(t)
+		n := len(w.calls(t, "tofu.log"))
+		tmp := mkdirPrivate(t, filepath.Join(p.Run.Stacks[0].Dir, "tmp"))
+		before := treeSnapshot(t, w.stacks)
+		cmd := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}})
+		cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
+		out, err := cmd.CombinedOutput()
+		if code := exitOf(err); code != 3 || !strings.Contains(string(out), "TMPDIR") {
+			t.Errorf("cleanup, TMPDIR %s: exit %d; want 3 naming TMPDIR\n%s", tmp, code, out)
+		}
+		if got := len(w.calls(t, "tofu.log")) - n; got != 0 {
+			t.Errorf("%d tofu calls before the refusal", got)
+		}
+		if _, state, pass := probeFiles(t, root); !exists(state) || !exists(pass) {
+			t.Errorf("the refused cleanup lost the probe's files: state %v, passphrase %v", exists(state), exists(pass))
+		}
+		sameTree(t, "the stack roots", w.stacks, before)
+	})
+}
+
+// TestProbeCleanupRecordedProject (T077; T074 review r1/r2 gap): a probe run records the project
+// it ran against (TF_VAR_project_id, LZ_PROJECT_ID_STATE in lz-live) in its probe.env, and a
+// cleanup destroys against that recorded project, whatever the cleanup's caller now passes (an
+// account.env edited between the failed destroy and the cleanup). A run record without a project
+// id is refused for cleanup: no child runs, the probe's files stay.
+func TestProbeCleanupRecordedProject(t *testing.T) {
+	failedRun := func(t *testing.T) (*runWorld, string) {
+		t.Helper()
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.probe(t, root, tofuStack{DestroyExit: 1})
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Fatal("a probe whose destroy failed exited 0")
+		}
+		w.scenario.Stacks["p"] = tofuStack{ApplyStream: w.scenario.Stacks["p"].ApplyStream}
+		w.save(t)
+		return w, root
+	}
+	recorded := func(t *testing.T, root string) map[string]string {
+		t.Helper()
+		dir, _, _ := probeFiles(t, root)
+		v, err := ReadCredentialFile(filepath.Join(dir, "probe.env"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	t.Run("recorded-and-used", func(t *testing.T) {
+		w, root := failedRun(t)
+		var found bool
+		for _, v := range recorded(t, root) {
+			found = found || v == probeProject
+		}
+		if !found {
+			t.Errorf("probe.env %v records no project id %s", recorded(t, root), probeProject)
+		}
+		n := len(w.calls(t, "tofu.log"))
+		out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}},
+			Vars: map[string]string{"TF_VAR_project_id": "p9"}}).CombinedOutput()
+		if err != nil {
+			t.Errorf("cleanup: %v\n%s", err, out)
+		}
+		var destroyed bool
+		for _, c := range w.calls(t, "tofu.log")[n:] {
+			if c.Cmd == "protect" || c.Cmd == "signal" {
+				continue
+			}
+			destroyed = destroyed || c.Cmd == "destroy"
+			env := map[string]string{}
+			for _, kv := range c.Env {
+				k, v, _ := strings.Cut(kv, "=")
+				env[k] = v
+			}
+			if env["TF_VAR_project_id"] != probeProject {
+				t.Errorf("cleanup: tofu %s with TF_VAR_project_id %q, want the recorded %q (the caller now passes p9)", c.Cmd, env["TF_VAR_project_id"], probeProject)
+			}
+		}
+		if !destroyed {
+			t.Error("the cleanup never destroyed")
+		}
+	})
+
+	t.Run("record-without-project-refused", func(t *testing.T) {
+		w, root := failedRun(t)
+		dir, state, pass := probeFiles(t, root)
+		var lines []string
+		for k, v := range recorded(t, root) {
+			if v != probeProject {
+				lines = append(lines, k+"="+v+"\n")
+			}
+		}
+		slices.Sort(lines)
+		if err := os.WriteFile(filepath.Join(dir, "probe.env"), []byte(strings.Join(lines, "")), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n := len(w.calls(t, "tofu.log"))
+		// The caller still passes the right project: only the record counts.
+		out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}},
+			Vars: map[string]string{"TF_VAR_project_id": probeProject}}).CombinedOutput()
+		// "project id": the temporary directories carry the test name, so "project" alone would
+		// match any path in an unrelated error (review r1).
+		if err == nil || !strings.Contains(string(out), "project id") {
+			t.Errorf("cleanup of a record without a project id: exit %d; want a failure naming the project\n%s", exitOf(err), out)
+		}
+		if got := len(w.calls(t, "tofu.log")) - n; got != 0 {
+			t.Errorf("%d tofu calls for a record without a project id", got)
+		}
+		if !exists(state) || !exists(pass) {
+			t.Errorf("the refused cleanup lost the probe's files: state %v, passphrase %v", exists(state), exists(pass))
+		}
+	})
+}
+
 // ---------------------------------------------------------------- fresh process
 
 type fakeRunStack struct {
@@ -1828,6 +2117,7 @@ type fakeRunConfig struct {
 	ConfigRoot string
 	Seed       string
 	ListerLog  string
+	Vars       map[string]string // Runner.Vars of the fresh process (lz-live's current TF_VAR_project_id)
 }
 
 func (w *runWorld) subprocess(t *testing.T, c fakeRunConfig) *exec.Cmd {
@@ -1870,7 +2160,7 @@ func fakeRun(cfgPath string) (code int) {
 	r := Runner{
 		ID: "20261006T120000Z-a1b2", Dir: c.RunDir, Tofu: filepath.Join(c.Bin, "tofu"), Authority: AuthorityTenant,
 		Creds: runCreds, Deadline: time.Duration(c.DeadlineMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond,
-		Leftovers: check, Terminal: os.Stdout,
+		Vars: c.Vars, Leftovers: check, Terminal: os.Stdout,
 		Protect: func(Stack, []byte) error { return nil },
 	}
 	if r.Deadline == 0 {
