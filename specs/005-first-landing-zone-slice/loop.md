@@ -33,6 +33,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 | T002 | CLOSED | codex not run (limit) → subagent APPROVE; Opus CONCERNS (codex-unavailable); 1 round; lint/SC-001 dropped, ITEM quoted, spec-set edits split into e91c86e | owner validates tasks.md form edits (e91c86e) and `verify:toolchain`→`005/FR-011`; astra owed |
 | T003 | CLOSED | codex not run (limit) → subagent REQUEST_CHANGES (lint-ignoring slice mutant survived); Opus CONCERNS (codex-unavailable); 1 round, coverage fixes, mutant killed | T004 must put `TestUnit*` in a Task target; astra owed |
 | T004 | CLOSED-WITH-GAPS | codex not run (limit) → subagent APPROVE (P2: per-directory `blocked` unpinned, fixed); Opus CLEAN (code diff, codex-unavailable); 1 round | `test:slice` red by design (NO_DISCOVERY) until T012; tagged controls not in CI until then + CI source extension (owner); `ci:foundation` stale since T001 (re-record after push); astra owed |
+| T005 | CLOSED | codex not run (limit) → subagent REQUEST_CHANGES (`.tofu` bypass); Opus CONCERNS (code diff, codex-unavailable; `stacks/**/tests` escape, Subject unchecked); 1 round, coverage fixes, 9+6 mutants killed | `test:dependencies`/`test:traceability` red until T006; T006 chooses `.tofu` → UNSUPPORTED_CONFIG or parse; astra owed |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |
