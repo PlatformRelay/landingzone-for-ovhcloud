@@ -574,11 +574,7 @@ func derive(r docRow, s docSpec, all []docRow) (Instance, error) {
 	}
 	if st.Backend == "s3" {
 		in.StateKey = strings.TrimPrefix(in.Path, "stacks/") + "/terraform.tfstate"
-		if st.Bucket == "account" {
-			in.StateBucket = s.Org + "-bkt-state"
-		} else {
-			in.StateBucket = s.Org + "-" + r.Tenant + "-bkt-state"
-		}
+		in.StateBucket = stateBucket(s.Org, r.Tenant, st)
 	}
 	in.Tags = []string{"lz-stage-" + r.Stage, "lz-scope-" + st.Scope}
 	for _, tag := range [][2]string{{"lz-tenant-", r.Tenant}, {"lz-env-", r.Environment},
@@ -607,4 +603,14 @@ func derive(r docRow, s docSpec, all []docRow) (Instance, error) {
 		}
 	}
 	return in, nil
+}
+
+// stateBucket is the bucket a stage instance's state (and its published artefact) lives in: the
+// tenant's bucket for a tenant-bucket stage, the account bucket otherwise, including the
+// local-state bootstrap, which creates the account bucket and publishes there (FR-008).
+func stateBucket(org, tenant string, st Stage) string {
+	if st.Bucket == "tenant" {
+		return org + "-" + tenant + "-bkt-state"
+	}
+	return org + "-bkt-state"
 }
