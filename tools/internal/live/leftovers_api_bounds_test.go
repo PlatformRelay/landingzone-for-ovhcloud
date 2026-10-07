@@ -71,6 +71,11 @@ func newBoundsAPI(t *testing.T) *boundsAPI {
 			fmt.Fprint(w, body)
 		case strings.HasPrefix(path, "/v2/iam/resource/"):
 			fmt.Fprint(w, `{"urn":"x","tags":{}}`)
+		// One region offering Object Storage, as every project of the slice has (T065).
+		case strings.HasPrefix(path, "/v1/cloud/project/") && strings.HasSuffix(path, "/region"):
+			fmt.Fprint(w, `["GRA"]`)
+		case strings.HasPrefix(path, "/v1/cloud/project/") && strings.HasSuffix(path, "/region/GRA"):
+			fmt.Fprint(w, `{"name":"GRA","services":[{"name":"storage-s3-standard","status":"UP"}]}`)
 		case strings.HasPrefix(path, "/v1/") && strings.HasSuffix(path, "/policy"):
 			fmt.Fprint(w, `{"policy":""}`)
 		default:

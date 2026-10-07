@@ -20,8 +20,9 @@ import (
 // error, a missing API client, an unparseable listing or a created type outside the matrix is
 // `fail`. It lists through lz-live's own read-only API client (T084): ovhcloud 0.15.0 has no `api`
 // command (premise P18 refuted, evidence/T009.md).
-// The parser follows the API response schemas in kb/api (synthetic listings, T054); T065 qualifies
-// it on T009's captured listings before the first resource-creating probe (T010).
+// The parser follows the API response schemas in kb/api (synthetic listings, T054); T065 qualified
+// it on the captured listings of the plan-only run 20261007T125154Z-14a6
+// (tests/fixtures/ovhcloud/captured/; its provenance.json names the kinds still uncaptured).
 
 // Lister returns one page of an OVHcloud API GET listing. cursor "" asks for the first page; next
 // is "" on the last page.
@@ -108,6 +109,9 @@ const (
 	tAlert   = "ovh_cloud_project_alerting"
 	tQuota   = "ovh_cloud_quota"
 	tProject = "ovh_cloud_project"
+	// tRegion records the project's region details (not a matrix kind): the evidence of which
+	// regions offer Object Storage (T065).
+	tRegion = "ovh_cloud_project_region"
 )
 
 var matrix = []string{tStorage, tNetwork, tSubnet, tUser, tCred, tS3Pol, tClient, tPolicy, tGroup, tTags, tAlert, tQuota, tProject}
@@ -285,16 +289,38 @@ func (l lister) under(parent, id string) (string, bool) {
 }
 
 func (l lister) object(path string, v any) bool {
+	_, ok := l.objectRaw(path, v)
+	return ok
+}
+
+// objectRaw is object returning the answer as well.
+func (l lister) objectRaw(path string, v any) (json.RawMessage, bool) {
 	body, _, err := l.l.Get(l.ctx, path, "")
 	if err != nil {
 		l.fail("listing %s: %v", path, err)
-		return false
+		return nil, false
 	}
 	if len(bytes.TrimSpace(body)) == 0 || bytes.TrimSpace(body)[0] != '{' || json.Unmarshal(body, v) != nil {
 		l.fail("listing %s: not a JSON object", path)
-		return false
+		return nil, false
 	}
-	return true
+	return json.RawMessage(bytes.TrimSpace(body)), true
+}
+
+// offersObjectStorage reports whether a region detail (cloud.Region, kb/api/v1/cloud.json:67596)
+// lists an S3-compatible Object Storage service among its services (cloud.Component[],
+// cloud.json:67651, 64709). The schema does not enumerate the service names: the "storage-s3"
+// prefix (storage-s3-standard, storage-s3-high-perf) is UNVERIFIED until a live run records the
+// region details (T065). A service that is DOWN still counts: its listing then fails, closed.
+func offersObjectStorage(services []struct {
+	Name string `json:"name"`
+}) bool {
+	for _, s := range services {
+		if strings.HasPrefix(s.Name, "storage-s3") {
+			return true
+		}
+	}
+	return false
 }
 
 func (l lister) strings(path string) ([]string, bool) {
@@ -418,9 +444,15 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	return rep
 }
 
+// list lists every kind. Buckets are listed per region, and only in the regions whose detail
+// offers Object Storage: the storage listing of a compute region answers 404 (live run
+// 20261007T125154Z-14a6, evidence/T084.md). A region detail without services is an error, and so
+// is a check in which no region offers Object Storage: every project of the slice holds buckets
+// (state, runtime), and a wrong service-name rule must not silently hide every bucket.
 func (c LeftoverCheck) list(l lister) []*item {
 	var items []*item
 	add := func(it *item) *item { items = append(items, it); return it }
+	storageRegions := 0
 	for _, p := range c.Projects {
 		base, ok := l.under("/cloud/project", p.ID)
 		if !ok {
@@ -432,6 +464,24 @@ func (c LeftoverCheck) list(l lister) []*item {
 				if !ok {
 					continue
 				}
+				var reg struct {
+					Services *[]struct {
+						Name string `json:"name"`
+					} `json:"services"`
+				}
+				detail, ok := l.objectRaw(rp, &reg)
+				if !ok {
+					continue
+				}
+				l.record(tRegion, detail)
+				if reg.Services == nil {
+					l.fail("listing %s: no services field", rp)
+					continue
+				}
+				if !offersObjectStorage(*reg.Services) {
+					continue
+				}
+				storageRegions++
 				path := rp + "/storage"
 				raw, ok := l.all(path)
 				if !ok {
@@ -532,20 +582,25 @@ func (c LeftoverCheck) list(l lister) []*item {
 				}
 			}
 		}
+		// iam.resource.Resource marks tags "required": false, "canBeNull": true
+		// (kb/api/v2/iam.json:2661-2667): an absent or null tags field is no tags (the untagged
+		// project of run 20261007T125154Z-14a6 answered without one). Tags of another type fail.
 		var res struct {
-			Tags *map[string]string `json:"tags"`
+			Tags map[string]string `json:"tags"`
 		}
 		if rp, ok := l.under("/iam/resource", p.URN); ok && l.object(rp, &res) {
 			if res.Tags == nil {
-				l.fail("listing /iam/resource/%s: no tags field", p.URN)
-			} else {
-				raw, _ := json.Marshal(res.Tags)
-				l.record(tTags, raw)
-				for k, v := range *res.Tags {
-					add(&item{typ: tTags, id: k, name: k, values: []string{v}})
-				}
+				res.Tags = map[string]string{}
+			}
+			raw, _ := json.Marshal(res.Tags)
+			l.record(tTags, raw)
+			for k, v := range res.Tags {
+				add(&item{typ: tTags, id: k, name: k, values: []string{v}})
 			}
 		}
+	}
+	if storageRegions == 0 && len(c.Projects) > 0 {
+		l.fail("listing buckets: no region of the projects offers Object Storage (a storage-s3 service)")
 	}
 	if ids, ok := l.strings("/me/api/oauth2/client"); ok {
 		for _, id := range ids {

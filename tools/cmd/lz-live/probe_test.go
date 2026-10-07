@@ -317,6 +317,11 @@ func newProbeWorld(t *testing.T) *probeWorld {
 				fmt.Fprint(rw, body)
 			case strings.HasPrefix(r.URL.Path, "/v2/iam/resource/"):
 				fmt.Fprint(rw, `{"urn":"x","name":"p1","type":"publicCloudProject","tags":{}}`)
+			// One region offering Object Storage, as every project of the slice has (T065).
+			case strings.HasSuffix(r.URL.Path, "/region"):
+				fmt.Fprint(rw, `["GRA"]`)
+			case strings.HasSuffix(r.URL.Path, "/region/GRA"):
+				fmt.Fprint(rw, `{"name":"GRA","services":[{"name":"storage-s3-standard","status":"UP"}]}`)
 			default:
 				fmt.Fprint(rw, "[]")
 			}
