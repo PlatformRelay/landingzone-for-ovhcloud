@@ -140,6 +140,14 @@ the companion does not run. `--cleanup <run-id>` re-reads `companion_env` from t
 state, binds it again, destroys the companion, then the root, and removes `companion.env`; a root
 that published nothing (its apply failed before) has no companion to destroy.
 
+If the companion's destroy (or its binding) fails, on a run or a cleanup, the root is still
+destroyed, so no probe identity outlives the session. That also removes the identity and the
+`lzprobe-p1-<run-id>` bucket that held the companion's state: a further `--cleanup` cannot reach
+what the companion left. The leftover check lists it (`lzprobe-p9-<run-id>` network, subnet,
+bucket); remove it as the admin in the same session (`ovhcloud`, or the Control Panel) and record
+it in T010's evidence. A second writer that never started (the companion's apply reported no
+resource operation) is written as `second writer never started` in its record.
+
 | # | Root (stage) | Premises | Task | Command | Expected observation (pass) | Refuted when | Destroy step |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 8a | `storage-iam` → `companion` (state) | P1, P2, P3 | T010 | row 8's command (one run) | the companion's `init` and `apply` succeed on the S3 backend in `lzprobe-p1-<run-id>` with the OVHcloud options (P2) and enforced client-side encryption (P3); `second-writer-storage-iam-companion.txt` holds `Error acquiring the state lock` and a non-zero exit (P1) | the S3 backend or the lock file is refused (P2); the second writer's plan succeeds while the apply runs (P1: read the record's exit line) | destroy-on-exit: companion, then root |
