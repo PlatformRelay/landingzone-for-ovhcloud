@@ -26,6 +26,9 @@ module "state_user" {
   bucket and its objects*).
 - **Deny** `s3:ListAllMyBuckets` on `*`: every S3 user may list all buckets of the account by default
   (same guide, *Deny listing of all buckets owned by the parent account*).
+- **Deny** the actions in `deny_actions` on `*` (statement `DenyGivenActions`, unconditioned), when
+  the caller names any; none by default. `components/state-backend` names the history and
+  bucket-configuration writes its state bucket must keep (spec 005 T016).
 - What an action neither allowed nor denied does falls back to the bucket ACLs (same guide,
   *permissions are evaluated*); what `objectstore_operator` grants there is UNVERIFIED offline (T010).
 
@@ -36,6 +39,7 @@ module "state_user" {
 | `project_id` | string | required | Public Cloud project id (service name) that holds the user and the buckets. |
 | `description` | string | required | User description from `modules/naming` (kind `s3_user`). |
 | `buckets` | list(string) | required | Bucket names the policy allows; at least one, each within the bucket-name charset and length (no wildcard, ARN or path; `a..b` is not refused here). |
+| `deny_actions` | list(string) | `[]` | S3 actions denied on `*` in one unconditioned statement; each `s3:<Action>`, no wildcard. |
 
 ## Outputs
 
@@ -44,6 +48,7 @@ module "state_user" {
 | `user_id` | Id of the user. |
 | `access_key_id` | Access key id of the S3 credential. |
 | `secret_access_key` | Secret access key; sensitive. Never published (G2). |
+| `policy` | The S3 policy document (JSON) the policy resource carries. |
 
 ## Resources
 

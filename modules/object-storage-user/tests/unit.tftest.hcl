@@ -164,6 +164,92 @@ run "policy_denies_listing_all_buckets" {
   }
 }
 
+# Spec 005 T016: the caller may add one Deny statement for the actions it names (`deny_actions`,
+# default none): unconditioned, on every resource, without NotAction, NotResource, Principal or
+# NotPrincipal. It only narrows: the Allow statements stay as above. The state-backend component
+# names its list (coordinator decision 2026-10-07); see that component's tests.
+run "deny_actions_default_adds_no_statement" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement :
+      flatten([lookup(s, "Action", [])]) == ["s3:ListAllMyBuckets"] if lookup(s, "Effect", "") == "Deny"
+    ])
+    error_message = "without deny_actions the only Deny statement is the listing one"
+  }
+}
+
+run "deny_actions_one_unconditioned_deny" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:DeleteObjectVersion", "s3:PutBucketVersioning"]
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement :
+      lookup(s, "Effect", "") == "Deny" && toset(flatten([lookup(s, "Action", [])])) == toset(["s3:DeleteObjectVersion", "s3:PutBucketVersioning"]) && flatten([lookup(s, "Resource", [])]) == ["*"] && length(setsubtract(keys(s), ["Sid", "Effect", "Action", "Resource"])) == 0
+    ])
+    error_message = "one Deny statement refuses exactly the given actions on every resource, with no Condition, NotAction, NotResource, Principal or NotPrincipal"
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Resource", []) if lookup(s, "Effect", "") == "Allow"
+      ])) == toset([
+      "arn:aws:s3:::lz-demo-bkt-state",
+      "arn:aws:s3:::lz-demo-bkt-state/*",
+    ])
+    error_message = "with deny_actions the Allow statements still cover exactly the given bucket and its objects"
+  }
+}
+
+run "deny_actions_wildcard_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:Delete*"]
+  }
+
+  expect_failures = [var.deny_actions]
+}
+
+run "deny_actions_other_service_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["iam:DeletePolicy"]
+  }
+
+  expect_failures = [var.deny_actions]
+}
+
+run "deny_actions_null_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:DeleteBucket", null]
+  }
+
+  expect_failures = [var.deny_actions]
+}
+
+# Spec 005 T016 (T015 gap 3): the state-backend component publishes the policy from this output.
+run "policy_output_is_the_policy_document" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:DeleteBucket"]
+  }
+
+  assert {
+    condition     = output.policy == ovh_cloud_project_user_s3_policy.this.policy
+    error_message = "output policy is the S3 policy resource's document"
+  }
+}
+
 run "secret_only_a_sensitive_output" {
   command = apply
 

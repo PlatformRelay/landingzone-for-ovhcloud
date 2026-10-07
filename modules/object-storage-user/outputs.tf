@@ -13,3 +13,8 @@ output "secret_access_key" {
   value       = ovh_cloud_project_user_s3_credential.this.secret_access_key
   sensitive   = true
 }
+
+output "policy" {
+  description = "The user's S3 policy document (JSON), as the policy resource carries it."
+  value       = ovh_cloud_project_user_s3_policy.this.policy
+}

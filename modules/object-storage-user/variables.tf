@@ -29,3 +29,15 @@ variable "buckets" {
     error_message = "buckets: each a bucket name; no wildcard, no ARN, no null."
   }
 }
+
+variable "deny_actions" {
+  description = "S3 actions the policy denies on every resource, in one unconditioned Deny statement; empty (default) adds none. Each an `s3:<Action>` name, no wildcard."
+  type        = list(string)
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for a in var.deny_actions : a != null && can(regex("^s3:[A-Za-z]+$", a))])
+    error_message = "deny_actions: each an s3:<Action> name; no wildcard, no other service, no null."
+  }
+}

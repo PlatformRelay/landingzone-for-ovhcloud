@@ -227,7 +227,7 @@ Independent test: V001, V002 on the US1 directories, V003.
   - Verify: `task test:unit -- components/state-backend; task test:unit -- stages/bootstrap`: the component creates one protected, versioned bucket and the S3 users it is given, each with a policy limited to that bucket; the bootstrap stage creates only the account bucket (name from naming: `org`, kind bucket, role state) in `state_project_id` plus the platform S3 user; mandatory labels; outputs `state_bucket`, `state_project_id`, `state_region`, `state_endpoint`, `platform_s3_user_id`, `unlabelled[]` (S3 user, credential, policy) and only-sensitive credentials; no tenant bucket; stage has no backend/provider configuration. Stubs are behavioural red.
   - Evidence: `evidence/T015.md`; PR; initial status `not-run`.
 
-- [ ] T016 [US1] Implement components/state-backend and stages/bootstrap
+- [x] T016 [US1] Implement components/state-backend and stages/bootstrap — closed 2026-10-07, evidence: evidence/T016.md
   - Requirements: FR-002, FR-003, FR-004, FR-005, FR-008; ADRs: 0004, 0009. Depends on: T015.
   - Verify: `task test:unit -- components/state-backend; task test:unit -- stages/bootstrap; task test:slice; task test:dependencies`: green; `test:slice` now discovers and passes every US1 directory.
   - Evidence: `evidence/T016.md`; PR; initial status `not-run`.

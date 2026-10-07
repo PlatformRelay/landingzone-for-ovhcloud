@@ -7,6 +7,8 @@ versioning is always enabled and is not an input, and the bucket carries a liter
 `prevent_destroy` cannot be asserted by `tofu test` (spec 005 T013); `task test:dependencies` checks
 it statically instead: every resource of this package needs the literal setting, and a `removed`
 block or a module source that is not a relative path is refused (rule `RETAINED_UNPROTECTED`, contracts/checks.md G7).
+`components/state-backend` may create buckets only through this module (rule
+`STATE_BUCKET_UNPROTECTED`).
 An `_override.tf` touching the bucket must repeat the lifecycle block (the scan judges each block,
 not the merged configuration). The unit tests are plan-only
 for the same reason (an apply run's cleanup destroy would be refused).
@@ -36,6 +38,8 @@ module "state_bucket" {
 |---|---|
 | `name` | Bucket name. |
 | `region` | Object Storage region name. |
+| `project_id` | Project id (service name) that holds the bucket. |
+| `tags` | Tags the bucket carries. |
 
 ## Resources
 

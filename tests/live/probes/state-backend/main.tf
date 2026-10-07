@@ -36,12 +36,35 @@ resource "ovh_cloud_project_user_s3_policy" "probe" {
   service_name = local.project.service_name
   user_id      = ovh_cloud_project_user.probe.id
   policy = jsonencode({
-    Statement = [{
-      Sid      = "ProbeStateBucket"
-      Effect   = "Allow"
-      Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:GetObjectVersion"]
-      Resource = ["arn:aws:s3:::${local.bucket}", "arn:aws:s3:::${local.bucket}/*"]
-    }]
+    Statement = [
+      {
+        Sid      = "ProbeStateBucket"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:GetObjectVersion"]
+        Resource = ["arn:aws:s3:::${local.bucket}", "arn:aws:s3:::${local.bucket}/*"]
+      },
+      # The state-backend users' Deny statement, verbatim (spec 005 T016: components/state-backend
+      # `deny_actions`, modules/object-storage-user `DenyGivenActions`). DeleteObjectVersion,
+      # PutBucketPolicy and DeleteBucketPolicy are not in OVHcloud's supported-action list
+      # (s3-identity-and-access-management.mdx:263-317): whether OVHcloud accepts the policy is
+      # what this run observes (UNVERIFIED until T010).
+      {
+        Sid    = "DenyGivenActions"
+        Effect = "Deny"
+        Action = [
+          "s3:DeleteObjectVersion",
+          "s3:PutBucketVersioning",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy",
+          "s3:PutLifecycleConfiguration",
+          "s3:PutBucketCORS",
+          "s3:PutEncryptionConfiguration",
+          "s3:PutBucketAcl",
+          "s3:DeleteBucket",
+        ]
+        Resource = ["*"]
+      },
+    ]
   })
 }
 
