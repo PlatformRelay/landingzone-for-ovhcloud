@@ -173,6 +173,16 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T079 controls green with one killed mutant per clause.
   - Evidence: `evidence/T080.md`; PR; initial status `not-run`.
 
+- [ ] T081 Write reserved-name tests for published companion variables in tools/internal/live/probe_identity_test.go
+  - Requirements: FR-010, FR-011; ADRs: 0008, 0009. Depends on: T080.
+  - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: a root that publishes in `companion_env` any name the run itself sets for the companion (`OVH_ENDPOINT`, `TF_VAR_state_passphrase`, `TF_VAR_run_id`, `TF_VAR_project_id`, `TF_DATA_DIR`, `HOME`, `TMPDIR`, `PATH`, any `TF_CLI_*`, in any case) is refused before the companion starts, the root is still destroyed and no value leaks; today such a name overrides the run's value for the companion: behavioural red. Found in T080's review (evidence/T080.md).
+  - Evidence: `evidence/T081.md`; PR; initial status `not-run`.
+
+- [ ] T082 Refuse run-controlled names in published companion variables in tools/internal/live/runner.go
+  - Requirements: FR-010, FR-011; ADRs: 0008, 0009. Depends on: T081.
+  - Verify: `task test:live-lane`: T081 controls green with one killed mutant per clause.
+  - Evidence: `evidence/T082.md`; PR; initial status `not-run`.
+
 - [ ] T009 Owner session: run read-only and plan-only probes P5, P10, P11, P18 and capture `ovhcloud` listings for every leftover kind in tests/fixtures/ovhcloud/
   - Requirements: FR-004, FR-011; ADRs: 0005, 0008, 0024. Depends on: T008, T055, T072, T074; owner, `sandbox.env`, `ovhcloud` 0.15.0.
   - Verify: Owner session in the dedicated owner clone `~/Projects/PlatformRelay/lz-live` (D92; `live.env`: `LZ_OWNER_CHECKOUT` its canonical absolute path, `LZ_AGENT_WORKTREE_ROOT` the existing agent worktree root, `/home/koni/Projects/PlatformRelay/worktrees` on the maintainer's workstation; quickstart *Owner session*), through `task live:probe -- <root> --plan-only` (guard and child environment active): `tofu plan -generate-config-out` with an import block for the sandbox project (no apply) — pass when no replacement or order is planned, refute otherwise (→ `reference` mode in T039); `tofu plan` of alerting and quota roots; read-only `ovhcloud` (or fallback API) listings, each with version and command and ids sanitised, for every kind of the research R12 matrix: buckets per region, private networks, subnets per network, cloud project users, S3 credentials and S3 policies per user, OAuth2 clients, IAM policies, identity groups, project alerts, IAM resource tags on the project URN — and a paginated listing where the account has enough entries, else recorded as not observed. A failed listing is recorded as refuted for that kind with its fallback, not skipped. Also `GET /auth/details` with the admin credential (P26, account field present).
@@ -184,7 +194,7 @@ in research.md with the fallback; they never pass silently.
   - Evidence: `evidence/T065.md`; PR; initial status `not-run`.
 
 - [ ] T010 Owner session: run create→destroy probes P1–P3, P7–P9, P12–P15, P26 and optional P25 from tests/live/probes/ through `lz-live probe`
-  - Requirements: FR-004, FR-008, FR-010, FR-011; ADRs: 0008, 0009, 0018. Depends on: T009, T055, T065, T076, T078, T080.
+  - Requirements: FR-004, FR-008, FR-010, FR-011; ADRs: 0008, 0009, 0018. Depends on: T009, T055, T065, T076, T078, T080, T082.
   - Verify: Owner session in the dedicated owner clone `~/Projects/PlatformRelay/lz-live` (D92; `live.env`: `LZ_OWNER_CHECKOUT` its canonical absolute path, `LZ_AGENT_WORKTREE_ROOT` the existing agent worktree root, `/home/koni/Projects/PlatformRelay/worktrees` on the maintainer's workstation; quickstart *Owner session*), per run sheet, each probe through `task live:probe` (deadline, retained-resource guard, inventory, destroy-on-exit, redaction, leftover check active): versioned probe bucket as S3 backend with `use_lockfile` and encryption — the second plan starts only after the first one's lock object is listed and is refused with a lock error; state object not plaintext; probe OAuth2 client and IAM policy created and usable as identity; the P9 allowlist creates and destroys a probe network, subnet and bucket and is denied an IAM write (each extra action needed is recorded with its denial); P26: the P9-allowlist probe identity reads its account from `GET /auth/details` and is denied `GET /me`; private network + subnet in GRA11; tags with `:` on bucket and project URN; optional P25 tag-conditioned policy on two probe buckets; destroy all; leftover check over the matrix shows no `lzprobe-` leftover. A failed destroy is finished with `lz-live probe --cleanup <run-id>` in the same session. Record approximate cost.
   - Evidence: `evidence/T010.md`; PR (run id, cost, observations); initial status `not-run`.
 
