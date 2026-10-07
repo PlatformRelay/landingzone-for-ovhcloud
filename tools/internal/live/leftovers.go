@@ -132,6 +132,25 @@ type apiLister struct {
 	api  API
 	cred Credential
 	tok  string
+	// tokErr is the first token failure: a rejected credential is not sent again per listing.
+	tokErr error
+}
+
+// quiet is a failed request's error without what Go quotes from the answer (an unparseable
+// Location header, which a hostile endpoint can fill with the token or the secret): only the
+// kind of failure remains. Errors that are not transport errors (a status, a decode error of
+// binding.go) carry no answer text and pass unchanged.
+func quiet(what string, err error) error {
+	var ue *url.Error
+	switch {
+	case !errors.As(err, &ue):
+		return err
+	case ue.Timeout():
+		return fmt.Errorf("%s: timed out", what)
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("%s: cancelled", what)
+	}
+	return fmt.Errorf("%s: request failed", what)
 }
 
 // maxListing bounds one listing answer; a longer one is an error, never cut short.
@@ -152,10 +171,14 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 	if l.api.BaseURL == "" || l.api.TokenURL == "" || !strings.HasSuffix(l.api.BaseURL, "/v1") {
 		return nil, "", errors.New("read-only API client: no API endpoint")
 	}
+	if l.tokErr != nil {
+		return nil, "", l.tokErr
+	}
 	if l.tok == "" {
 		tok, err := l.api.token(ctx, l.cred)
 		if err != nil {
-			return nil, "", err
+			l.tokErr = quiet("token endpoint", err)
+			return nil, "", l.tokErr
 		}
 		l.tok = tok
 	}
@@ -174,12 +197,12 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 	}
 	resp, err := l.api.client().Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("GET %s: %w", path, err)
+		return nil, "", quiet("GET "+path, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListing+1))
 	if err != nil {
-		return nil, "", fmt.Errorf("GET %s: reading the answer: %w", path, err)
+		return nil, "", fmt.Errorf("GET %s: reading the answer failed", path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, "", fmt.Errorf("GET %s answered %d", path, resp.StatusCode)

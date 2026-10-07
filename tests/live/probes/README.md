@@ -13,8 +13,8 @@ destroy-on-exit, redaction, leftover check). No agent runs anything here.
   `accounts/<account>/account.env` with `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`,
   `LZ_ADMIN_POLICY_ID`, `LZ_PROJECT_ID_STATE` (the probes' project; without it `lz-live probe`
   stops before any tofu call) and the other `LZ_PROJECT_ID_*` the leftover check lists.
-- `MISE_ENV=live mise install` (OpenTofu 1.13.0), `ovhcloud` 0.15.0 on `PATH` (without it every
-  leftover check fails closed).
+- `MISE_ENV=live mise install` (OpenTofu 1.13.0). The leftover check needs no `ovhcloud`: it lists
+  through lz-live's own API client (T084).
 - T010 only: T065 has qualified the leftover parser on T009's captured listings (research R12).
 
 ```sh
