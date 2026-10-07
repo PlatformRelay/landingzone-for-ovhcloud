@@ -343,7 +343,9 @@ var s3Services = map[string]bool{
 // not in s3Services (fail closed: a new Object Storage class counts as a bucket service until a
 // capture shows otherwise); an empty services list counts as none. Only then may the region's
 // storage listing answer 404 (first page). The rule decides only whether a 404 is acceptable: every
-// region's storage is asked, so a wrong rule turns a 404 into an error, never a 200 into nothing.
+// region's storage is asked, so a 200 is never hidden. A wrong rule either turns a 404 into an
+// error, or (a bucket service under a name outside storage-s3, e.g. Swift's "storage", or another
+// letter case) accepts a 404 from a region that offers buckets; the captured details show neither.
 func withoutBucketService(services []struct {
 	Name string `json:"name"`
 }) bool {
@@ -485,8 +487,9 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 // evidence/T087.md), which is accepted only when the region's detail shows no bucket service
 // (withoutBucketService); any other failure is an error. A region detail without
 // services is an error, and so is a project in which no region's storage listing succeeded: the
-// check assumes every project lists at least one region with Object Storage (true of the sandbox
-// project, run 20261007T125154Z-14a6; UNVERIFIED for a fresh project with no bucket yet).
+// check assumes every project lists at least one region with a bucket service (standard or
+// high-perf) whose listing succeeds; a Cold Archive region does not count (true of the sandbox
+// project, run 20261007T133803Z-aeee: ten such regions; UNVERIFIED for a fresh project).
 func (c LeftoverCheck) list(l lister) []*item {
 	var items []*item
 	add := func(it *item) *item { items = append(items, it); return it }
