@@ -52,6 +52,37 @@ run "names_carry_prefix_and_run_id" {
   }
 }
 
+# Spec 005 T016: the probe user's policy carries the state-backend users' Deny statement verbatim
+# (components/state-backend `deny_actions`, modules/object-storage-user `DenyGivenActions`), so T010
+# observes whether OVHcloud accepts a policy naming s3:DeleteObjectVersion, s3:PutBucketPolicy and
+# s3:DeleteBucketPolicy (absent from its supported-action list: UNVERIFIED until then).
+run "policy_carries_the_state_backend_deny" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.probe.policy).Statement :
+      s == {
+        Sid    = "DenyGivenActions"
+        Effect = "Deny"
+        Action = [
+          "s3:DeleteObjectVersion",
+          "s3:PutBucketVersioning",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy",
+          "s3:PutLifecycleConfiguration",
+          "s3:PutBucketCORS",
+          "s3:PutEncryptionConfiguration",
+          "s3:PutBucketAcl",
+          "s3:DeleteBucket",
+        ]
+        Resource = ["*"]
+      }
+    ])
+    error_message = "the probe policy carries the state-backend Deny statement exactly"
+  }
+}
+
 run "state_path_inside_checkout_refused" {
   command = plan
 

@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -948,6 +949,70 @@ func TestDependenciesRetainedProtected(t *testing.T) {
 	}
 }
 
+// G7 (component part, spec 005 T016): components/state-backend creates its
+// buckets only through modules/object-storage-protected, so every state bucket
+// carries the literal prevent_destroy and versioning that module pins. tofu test
+// cannot see a child module's lifecycle (spec 005 T015 gap 1), so this static
+// scan is the sensor. The component's own code declares no resource that
+// creates or changes a bucket (versioning, lifecycle), every such resource it reaches through local module calls lies in the
+// protected module, it calls no module by a non-relative source, and no module
+// it reaches calls an external one (a release or an external module cannot be
+// scanned). Data sources, the component's test
+// configuration and other components are outside the rule.
+func TestDependenciesStateBucketProtected(t *testing.T) {
+	const c = "components/state-backend"
+	base := map[string]string{
+		"modules/object-storage-protected/main.tf": "resource \"ovh_cloud_project_storage\" \"this\" {\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n",
+		"modules/object-storage/main.tf":           "resource \"ovh_cloud_project_storage\" \"this\" {}\n",
+		"modules/object-storage-user/main.tf":      "resource \"ovh_cloud_project_user\" \"this\" {}\n",
+		"modules/naming/main.tf":                   `variable "x" {}`,
+	}
+	call := func(name, source string) string {
+		return "module \"" + name + "\" {\n  source = \"" + source + "\"\n}\n"
+	}
+	composed := call("bucket", "../../modules/object-storage-protected") + call("user", "../../modules/object-storage-user") + call("name", "../../modules/naming")
+	bucket := "resource \"ovh_cloud_project_storage\" \"b\" {}\n"
+	for name, k := range map[string]struct {
+		files   map[string]string
+		subject string
+		want    []string
+	}{
+		"protected bucket, user and naming":                    {map[string]string{c + "/main.tf": composed}, "", nil},
+		"bucket data source is fine":                           {map[string]string{c + "/main.tf": composed + "data \"ovh_cloud_project_storage\" \"b\" {}\n"}, "", nil},
+		"other component may use the plain module":             {map[string]string{"components/runtime/managed-only/main.tf": call("b", "../../../modules/object-storage")}, "", nil},
+		"test helper of the component":                         {map[string]string{c + "/main.tf": composed, c + "/tests/setup/main.tf": bucket}, "", nil},
+		"direct bucket resource":                               {map[string]string{c + "/main.tf": composed + bucket}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"direct S3 bucket of another provider":                 {map[string]string{c + "/main.tf": composed + "resource \"aws_s3_bucket\" \"b\" {}\n"}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"bucket lifecycle resource":                            {map[string]string{c + "/main.tf": composed + "resource \"ovh_cloud_project_storage_object_bucket_lifecycle_configuration\" \"l\" {}\n"}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"bucket versioning of another provider":                {map[string]string{c + "/main.tf": composed + "resource \"aws_s3_bucket_versioning\" \"v\" {}\n"}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"module with a bucket lifecycle resource":              {map[string]string{c + "/main.tf": composed + call("l", "../../modules/lifecycle"), "modules/lifecycle/main.tf": "resource \"ovh_cloud_project_storage_object_bucket_lifecycle_configuration\" \"l\" {}\n"}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"direct bucket in an override file":                    {map[string]string{c + "/main.tf": composed, c + "/main_override.tf": bucket}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"plain bucket module":                                  {map[string]string{c + "/main.tf": composed + call("plain", "../../modules/object-storage")}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"plain bucket module only":                             {map[string]string{c + "/main.tf": call("plain", "../../modules/object-storage")}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"module with a bucket in its subdirectory":             {map[string]string{c + "/main.tf": composed + call("w", "../../modules/wrap"), "modules/wrap/main.tf": call("i", "./inner"), "modules/wrap/inner/main.tf": bucket}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"protected module by repository address":               {map[string]string{c + "/main.tf": call("bucket", "github.com/PlatformRelay/landingzone-for-ovhcloud//modules/object-storage-protected?ref=v0.0.1")}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"external module":                                      {map[string]string{c + "/main.tf": composed + call("x", "ovh/bucket/ovh")}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"module calling its own package by repository address": {map[string]string{c + "/main.tf": composed + call("w", "../../modules/wrap"), "modules/wrap/main.tf": call("i", "github.com/PlatformRelay/landingzone-for-ovhcloud//modules/wrap/inner?ref=v0.0.1"), "modules/wrap/inner/main.tf": `variable "x" {}`}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"module calling an external module":                    {map[string]string{c + "/main.tf": composed + call("w", "../../modules/wrap"), "modules/wrap/main.tf": call("x", "ovh/bucket/ovh")}, c, []string{"STATE_BUCKET_UNPROTECTED"}},
+		"library subdirectory with a bucket":                   {map[string]string{c + "/main.tf": composed + call("s", "./sub"), c + "/sub/main.tf": bucket}, c + "/sub", []string{"STATE_BUCKET_UNPROTECTED"}},
+		"hidden subdirectory with a bucket":                    {map[string]string{c + "/main.tf": composed + call("h", "./.b"), c + "/.b/main.tf": bucket}, c + "/.b", []string{"STATE_BUCKET_UNPROTECTED"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := maps.Clone(base)
+			maps.Copy(files, k.files)
+			_, findings := ScanDependencies(writeModules(t, files))
+			if got := ruleNames(findings); !reflect.DeepEqual(got, k.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, k.want, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != k.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, k.subject)
+				}
+			}
+		})
+	}
+}
+
 // The purity rules add negatives; they never widen the ADR-0002 edge matrix.
 func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 	want := map[string][]string{
@@ -965,7 +1030,7 @@ func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 }
 
 func TestDependenciesRulesListed(t *testing.T) {
-	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 	got := append([]string{}, DependencyRules...)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("BEHAVIORAL_RED: DependencyRules = %v, want %v", got, want)

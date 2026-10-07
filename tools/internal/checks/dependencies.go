@@ -28,7 +28,7 @@ const (
 )
 
 // DependencyRules lists every rule ScanDependencies can report.
-var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 
 // purity holds the FR-003 facts of configuration: whether it declares a state
 // backend (a backend or cloud block), configures a provider, or reads another
@@ -68,6 +68,32 @@ func purityOf(body *hclsyntax.Body) purity {
 // (contracts/checks.md G7): each resource there keeps a literal
 // prevent_destroy. modules/cloud-project joins with spec 005 T026.
 var retainedModules = []string{"modules/object-storage-protected"}
+
+// stateBackend creates the state buckets; it takes them only from
+// protectedBuckets, the retained module that pins a literal prevent_destroy
+// and versioning (G7, component part; spec 005 T016).
+const (
+	stateBackend     = "components/state-backend"
+	protectedBuckets = "modules/object-storage-protected"
+)
+
+// bucketResources are the prefixes of the resource types that create a
+// bucket or change one (versioning, lifecycle, policy, objects): OVHcloud
+// Object Storage, and the S3 and Swift resources of providers that reach the
+// same service. A lifecycle rule outside the protected module could expire
+// the state versions its versioning keeps.
+var bucketResources = []string{"ovh_cloud_project_storage", "aws_s3_bucket", "openstack_objectstorage_"}
+
+// buckets lists the bucket resources one parsed file declares.
+func buckets(body *hclsyntax.Body) []string {
+	var out []string
+	for _, block := range body.Blocks {
+		if block.Type == "resource" && len(block.Labels) > 0 && slices.ContainsFunc(bucketResources, func(p string) bool { return strings.HasPrefix(block.Labels[0], p) }) {
+			out = append(out, strings.Join(block.Labels, "."))
+		}
+	}
+	return out
+}
 
 // unprotected lists the blocks of one parsed file that leave a retained
 // module's resources destroyable: a resource whose lifecycle does not set
@@ -376,7 +402,8 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // terraform_remote_state in any configuration, and only generated *.tf files
 // under stacks/ (test files are outside these rules). In a retained module
 // (G7) every resource keeps a literal prevent_destroy and no external module
-// is called. Hidden directories are
+// is called; the state-backend component takes its buckets only from the
+// protected module. Hidden directories are
 // skipped unless a module call names one; fixture trees are skipped only under
 // tests/ and tools/.
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
@@ -531,6 +558,12 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		return generated, purityOf(body), body
 	}
 
+	// bucketDirs are the directories whose own code declares a bucket.
+	bucketDirs := map[string]bool{}
+	// remoteDirs are the directories that call a module by a non-relative
+	// source.
+	remoteDirs := map[string]bool{}
+
 	// judge parses one configuration directory, applies the FR-003 rules and
 	// records its layer and edges.
 	judge := func(dir string) {
@@ -584,6 +617,37 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 						add("RETAINED_UNPROTECTED", dir, "retained module (G7): module source %q is not a relative path, its resources cannot be checked for prevent_destroy", source)
 					}
 				}
+			}
+		}
+		// G7, component part: the state-backend component's own code
+		// declares no bucket and calls modules by relative source only.
+		var declared []string
+		for _, body := range bodies {
+			declared = append(declared, buckets(body)...)
+		}
+		if len(declared) > 0 {
+			bucketDirs[dir] = true
+		}
+		// A non-relative source (an external module, or this repository's
+		// address with a ref) is fetched code the scan does not see.
+		var remoteSources []string
+		for _, body := range bodies {
+			sources, _ := moduleSources(body)
+			for _, source := range sources {
+				if !strings.HasPrefix(source, "./") && !strings.HasPrefix(source, "../") {
+					remoteSources = append(remoteSources, source)
+				}
+			}
+		}
+		if len(remoteSources) > 0 {
+			remoteDirs[dir] = true
+		}
+		if layer == LayerLibrary && under(dir, stateBackend) {
+			for _, b := range declared {
+				add("STATE_BUCKET_UNPROTECTED", dir, "state bucket (G7): resource %s is declared here, not through %s", b, protectedBuckets)
+			}
+			for _, source := range remoteSources {
+				add("STATE_BUCKET_UNPROTECTED", dir, "state bucket (G7): module source %q is not a relative path, its buckets cannot be checked", source)
 			}
 		}
 		if layer == "" {
@@ -645,6 +709,33 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		for _, to := range g.TestUses[owner] {
 			if _, classified := g.Layers[to]; classified && !slices.Contains(mayUse[LayerTest], role(to, g.Layers[to])) {
 				add("LAYER_VIOLATION", owner, "tests of %s may not run %s (%s)", owner, to, role(to, g.Layers[to]))
+			}
+		}
+	}
+	// G7, component part: every bucket the state-backend component reaches
+	// through its local module calls lies in the protected module, and no
+	// reached module calls an external one (its code is not scanned). A
+	// directory of the component itself is judged on its own (above).
+	for _, dir := range slices.Sorted(maps.Keys(g.Layers)) {
+		if g.Layers[dir] != LayerLibrary || !under(dir, stateBackend) {
+			continue
+		}
+		seen := map[string]bool{dir: true}
+		queue := slices.Clone(g.Uses[dir])
+		for len(queue) > 0 {
+			to := queue[0]
+			queue = queue[1:]
+			if seen[to] {
+				continue
+			}
+			seen[to] = true
+			queue = append(queue, g.Uses[to]...)
+			if bucketDirs[to] && !under(to, stateBackend) && !under(to, protectedBuckets) {
+				add("STATE_BUCKET_UNPROTECTED", dir, "state bucket (G7): %s declares a bucket outside %s", to, protectedBuckets)
+			}
+			// A non-relative call below a reached module escapes the walk.
+			if remoteDirs[to] && !under(to, stateBackend) {
+				add("STATE_BUCKET_UNPROTECTED", dir, "state bucket (G7): %s calls a module by a non-relative source, its buckets cannot be checked", to)
 			}
 		}
 	}

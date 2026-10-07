@@ -136,6 +136,22 @@ run "outputs" {
   }
 }
 
+# Spec 005 T016 (T015 gap 3): the state-backend component publishes the bucket's tags and project
+# from these outputs, so they are the bucket's own attributes.
+run "outputs_tags_and_project_of_the_bucket" {
+  command = plan
+
+  assert {
+    condition     = output.tags == ovh_cloud_project_storage.this.tags && output.tags == tomap(var.tags)
+    error_message = "output tags are the bucket's tags"
+  }
+
+  assert {
+    condition     = output.project_id == ovh_cloud_project_storage.this.service_name && output.project_id == "0123456789abcdef0123456789abcdef"
+    error_message = "output project_id is the bucket's project"
+  }
+}
+
 run "tags_null_value_rejected" {
   command = plan
 
