@@ -21,10 +21,10 @@ import (
 // `fail`. It lists through lz-live's own read-only API client (T084): ovhcloud 0.15.0 has no `api`
 // command (premise P18 refuted, evidence/T009.md).
 // The parser follows the API response schemas in kb/api (synthetic listings, T054); T065 qualified
-// it on the captured listings of the plan-only run 20261007T125154Z-14a6
-// (tests/fixtures/ovhcloud/captured/; its provenance.json names the kinds still uncaptured). The
-// region details and the Object Storage service names were not captured: the per-region storage
-// handling is qualified only when a live run records them (listing ovh_cloud_project_region).
+// it on captured listings, which T087 replaced by those of the plan-only run 20261007T133803Z-aeee
+// (tests/fixtures/ovhcloud/captured/; its provenance.json names the kinds still uncaptured). That
+// run recorded the region details (listing ovh_cloud_project_region), which qualify the per-region
+// storage rule (withoutBucketService) on the project's 18 regions.
 
 // Lister returns one page of an OVHcloud API GET listing. cursor "" asks for the first page; next
 // is "" on the last page.
@@ -327,18 +327,31 @@ func (l lister) objectRaw(path string, v any) (json.RawMessage, bool) {
 	return json.RawMessage(bytes.TrimSpace(body)), true
 }
 
-// withoutObjectStorage reports whether a region detail (cloud.Region, kb/api/v1/cloud.json:67596)
-// shows that the region offers no S3-compatible Object Storage: its services (cloud.Component[],
-// cloud.json:67651, 64709) are all named and none is a storage-s3 service; an empty services list
-// counts as no Object Storage. Only then may the region's storage listing answer 404 (first page). The schema does not enumerate the service names: the
-// "storage-s3" prefix (storage-s3-standard, storage-s3-high-perf) is UNVERIFIED until a live run
-// records the region details (T065); a wrong prefix turns a 404 into an error, never a 200 into
-// nothing, because every region's storage is asked.
-func withoutObjectStorage(services []struct {
+// s3Services are the storage-s3 service names the region details of run 20261007T133803Z-aeee
+// name (evidence/T087.md), and whether a region offering one answers a bucket listing. Cold Archive
+// (RBX-ARCHIVE, whose only Object Storage service it is) answers the listing 404; its containers
+// are not a matrix kind in this slice (research R12).
+var s3Services = map[string]bool{
+	"storage-s3-standard":    true,
+	"storage-s3-high-perf":   true,
+	"storage-s3-coldarchive": false,
+}
+
+// withoutBucketService reports whether a region detail (cloud.Region, kb/api/v1/cloud.json:67596)
+// shows that the region offers no bucket service: its services (cloud.Component[], cloud.json:67651,
+// 64709) are all named and none is storage-s3-standard, storage-s3-high-perf or a storage-s3 name
+// not in s3Services (fail closed: a new Object Storage class counts as a bucket service until a
+// capture shows otherwise); an empty services list counts as none. Only then may the region's
+// storage listing answer 404 (first page). The rule decides only whether a 404 is acceptable: every
+// region's storage is asked, so a wrong rule turns a 404 into an error, never a 200 into nothing.
+func withoutBucketService(services []struct {
 	Name string `json:"name"`
 }) bool {
 	for _, s := range services {
-		if s.Name == "" || strings.HasPrefix(s.Name, "storage-s3") {
+		if s.Name == "" {
+			return false
+		}
+		if bucket, known := s3Services[s.Name]; bucket || !known && strings.HasPrefix(s.Name, "storage-s3") {
 			return false
 		}
 	}
@@ -467,9 +480,10 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 }
 
 // list lists every kind. Buckets are listed in every region of each project; the storage
-// listing of a region without Object Storage answers 404 (live run 20261007T125154Z-14a6,
-// evidence/T084.md), which is accepted only when the region's detail shows no Object Storage
-// service (withoutObjectStorage); any other failure is an error. A region detail without
+// listing of a region without a bucket service answers 404 (compute regions, live run
+// 20261007T125154Z-14a6, evidence/T084.md; the Cold Archive region, run 20261007T133803Z-aeee,
+// evidence/T087.md), which is accepted only when the region's detail shows no bucket service
+// (withoutBucketService); any other failure is an error. A region detail without
 // services is an error, and so is a project in which no region's storage listing succeeded: the
 // check assumes every project lists at least one region with Object Storage (true of the sandbox
 // project, run 20261007T125154Z-14a6; UNVERIFIED for a fresh project with no bucket yet).
@@ -503,7 +517,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 					continue
 				}
 				path := rp + "/storage"
-				raw, ok, absent := l.pages(path, withoutObjectStorage(*reg.Services))
+				raw, ok, absent := l.pages(path, withoutBucketService(*reg.Services))
 				if absent || !ok {
 					continue
 				}
