@@ -1,7 +1,6 @@
 # Inputs of the runtime/managed-only component (spec 005 T031 interface; research R8, R15, R22;
 # ADR-0017): one empty, labelled Object Storage bucket in the environment's project, named through
-# modules/naming with the instance's optional `slot`, and the runtime envelope. Stub (T031): the
-# `slot` rule the tests pin is T032's.
+# modules/naming with the instance's optional `slot`, and the runtime envelope.
 
 variable "org" {
   description = "Organisation discriminator, the first naming segment (`spec.org`, `lz`, D87)."
@@ -49,4 +48,9 @@ variable "slot" {
   description = "Runtime slot (`^[a-z][a-z0-9]{0,15}$`); null when the scope holds one runtime. A naming segment, so two slots give two bucket names."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.slot == null || can(regex("^[a-z][a-z0-9]{0,15}$", var.slot))
+    error_message = "slot must match ^[a-z][a-z0-9]{0,15}$ (data-model; schemas/outputs/runtime.schema.json)."
+  }
 }

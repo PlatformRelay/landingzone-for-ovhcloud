@@ -229,10 +229,11 @@ tasks:
         /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$work" output -json
 
-  # A stage's real plan (005 T022, T024, T028, T030): its own unit tests on a scratch copy, mocked
-  # provider, mirror-only init; stdout is the verbose JSON plan of one run (RUN, default
+  # A stage's real plan (005 T022, T024, T028, T030, T032): its own unit tests on a scratch copy,
+  # mocked provider, mirror-only init; stdout is the verbose JSON plan of one run (RUN, default
   # `published_outputs_match_the_schema`), one line. tests/fixtures/outputs/capture-stage-plan.sh
-  # records it. The project stage is captured in both modes: adopt (the default run) and reference.
+  # records it. The project stage is captured in both modes: adopt (the default run) and reference;
+  # the runtime stage without a slot (the default run) and with one.
   capture:tenant-state-plan:
     cmds: [{task: capture-stage-plan, vars: {STAGE: tenant-state}}]
   capture:account-governance-plan:
@@ -243,6 +244,10 @@ tasks:
     cmds: [{task: capture-stage-plan, vars: {STAGE: project, RUN: reference_published_outputs_with_both_toggles}}]
   capture:project-network-plan:
     cmds: [{task: capture-stage-plan, vars: {STAGE: project-network}}]
+  capture:runtime-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: runtime}}]
+  capture:runtime-slot-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: runtime, RUN: slot_blue_names_the_bucket}}]
 
   capture:p24-apply-json:
     dir: tests/fixtures/tofu-probes/p24-apply-json

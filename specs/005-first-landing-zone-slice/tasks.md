@@ -331,7 +331,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- components/runtime/managed-only; task test:unit -- stages/runtime`: one labelled bucket through the unprotected `modules/object-storage`, its name built from naming with the instance's `slot` (two slot inputs give two bucket names; a stub that drops `slot` from the naming call is red); envelope `kind = managed-only`, optional `slot`, `scope`, `readiness`, `pending_actions = []`, `capabilities` with `object-storage` and without `network`; inputs consume only `project` outputs. A stub publishing an empty `network` capability is behavioural red.
   - Evidence: `evidence/T031.md`; PR; initial status `not-run`.
 
-- [ ] T032 [US2] Implement components/runtime/managed-only and stages/runtime
+- [x] T032 [US2] Implement components/runtime/managed-only and stages/runtime — closed 2026-10-07, evidence: evidence/T032.md
   - Requirements: FR-003, FR-004, FR-005, FR-013, SC-001; ADRs: 0004, 0017. Depends on: T031, T016, T022, T024, T028, T030.
   - Verify: `task test:unit -- components/runtime/managed-only; task test:unit -- stages/runtime; task test:slice; task test:dependencies; task test:outputs`: green; `test:slice` covers every module, component and stage of the slice with nonzero test counts (V002 checkpoint).
   - Evidence: `evidence/T032.md`; PR; initial status `not-run`.

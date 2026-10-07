@@ -4,7 +4,7 @@
 # published values (`project`, the data edge; the generated stack declares the same variable from
 # schemas/outputs/project.schema.json, and the adapter has checked it against the bound reference,
 # KD-3); `runtime` does not depend on `project-network`. No backend or provider configuration: the
-# generated stack owns both. Stub (T031): the `region` and `slot` rules the tests pin are T032's.
+# generated stack owns both.
 
 variable "org" {
   description = "Organisation discriminator, the first naming segment (`spec.org`, `lz`, D87)."
@@ -16,6 +16,11 @@ variable "region" {
   description = "Region of the instance (`instances[].region`, e.g. `GRA11`); must be one of `project.regions`."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = contains(var.project.regions, var.region)
+    error_message = "region must be one of the project's regions."
+  }
 }
 
 variable "instance" {
@@ -34,6 +39,11 @@ variable "slot" {
   description = "Runtime slot of the instance (`instances[].slot`, `^[a-z][a-z0-9]{0,15}$`); null when the scope holds one runtime."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.slot == null || can(regex("^[a-z][a-z0-9]{0,15}$", var.slot))
+    error_message = "slot must match ^[a-z][a-z0-9]{0,15}$ (data-model; schemas/outputs/runtime.schema.json)."
+  }
 }
 
 variable "project" {

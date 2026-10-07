@@ -151,6 +151,22 @@ run "outputs" {
   }
 }
 
+# Spec 005 T032 (T031 interface): the runtime component publishes the bucket's tags as its labels
+# and its project as `scope.project_id` from these outputs, so they are the bucket's own attributes.
+run "outputs_tags_and_project_of_the_bucket" {
+  command = plan
+
+  assert {
+    condition     = try(output.tags, null) == ovh_cloud_project_storage.this.tags && try(output.tags, null) == tomap(var.tags)
+    error_message = "output tags are the bucket's tags"
+  }
+
+  assert {
+    condition     = try(output.project_id, null) == ovh_cloud_project_storage.this.service_name && try(output.project_id, null) == "0123456789abcdef0123456789abcdef"
+    error_message = "output project_id is the bucket's project"
+  }
+}
+
 run "tags_null_value_rejected" {
   command = plan
 

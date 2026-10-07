@@ -1264,22 +1264,29 @@ func TestDependenciesNonsensitiveFixture(t *testing.T) {
 // through exactly one, unrepeated components/network/island call (coordinator
 // decision 2026-10-07 on T029's decision request 1): a second or keyed call
 // would plan a second network and subnet that no stage test can count. Its
-// first row is T029's mutant s-call-count.
+// first row is T029's mutant s-call-count. The runtime stage reaches its one
+// bucket through exactly one, unrepeated components/runtime/managed-only call
+// (coordinator decision 2026-10-07 on T031's decision request 1): a second or
+// keyed call would plan a second bucket that no stage test can count.
 func TestDependenciesStageComposition(t *testing.T) {
 	const ts = "stages/tenant-state"
 	const ag = "stages/account-governance"
 	const pr = "stages/project"
 	const pn = "stages/project-network"
+	const rt = "stages/runtime"
 	base := map[string]string{
-		"components/network/island/main.tf":          `variable "x" {}`,
-		"components/network/island/sub/main.tf":      `variable "x" {}`,
-		"components/project-factory/main.tf":         "module \"project\" {\n  source = \"../../modules/cloud-project\"\n}\n",
-		"modules/cloud-project/main.tf":              "resource \"ovh_cloud_project\" \"this\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n",
-		"components/state-backend/main.tf":           `variable "x" {}`,
-		"components/state-backend/sub/main.tf":       `variable "x" {}`,
-		"components/identity/ovh-native/main.tf":     `variable "x" {}`,
-		"components/identity/ovh-native/sub/main.tf": `variable "x" {}`,
-		"modules/naming/main.tf":                     `variable "x" {}`,
+		"components/runtime/managed-only/main.tf":     `variable "x" {}`,
+		"components/runtime/managed-only/sub/main.tf": `variable "x" {}`,
+		"components/network/island/main.tf":           `variable "x" {}`,
+		"components/network/island/sub/main.tf":       `variable "x" {}`,
+		"components/project-factory/main.tf":          "module \"project\" {\n  source = \"../../modules/cloud-project\"\n}\n",
+		"modules/cloud-project/main.tf":               "resource \"ovh_cloud_project\" \"this\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n",
+		"components/state-backend/main.tf":            `variable "x" {}`,
+		"components/state-backend/sub/main.tf":        `variable "x" {}`,
+		"components/identity/ovh-native/main.tf":      `variable "x" {}`,
+		"components/identity/ovh-native/sub/main.tf":  `variable "x" {}`,
+		"modules/naming/main.tf":                      `variable "x" {}`,
+		"modules/object-storage/main.tf":              `variable "x" {}`,
 	}
 	call := func(name, source, extra string) string {
 		return "module \"" + name + "\" {\n  source = \"" + source + "\"\n" + extra + "}\n"
@@ -1295,6 +1302,9 @@ func TestDependenciesStageComposition(t *testing.T) {
 	island := call("island", "../../components/network/island", "")
 	// T029 mutant s-call-count: the island call keyed by count.
 	probeIslandCount := "module \"island\" {\n  source          = \"../../components/network/island\"\n  org             = var.org\n  region          = var.region\n  project_id      = var.project.project_id\n  cidr            = var.network.cidr\n  count           = 1\n}\n"
+	runtime := call("runtime", "../../components/runtime/managed-only", "")
+	// A keyed runtime call as a slotted instance might write it (spec 005 T032).
+	probeRuntimeForEach := "module \"runtime\" {\n  source     = \"../../components/runtime/managed-only\"\n  for_each   = toset([\"blue\", \"green\"])\n  org        = var.org\n  region     = var.region\n  project_id = var.project.project_id\n  slot       = each.key\n}\n"
 	for name, c := range map[string]struct {
 		files   map[string]string
 		subject string
@@ -1353,6 +1363,19 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"island call by repository address":          {map[string]string{pn + "/main.tf": call("island", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/network/island?ref=v0.0.1", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
 		"network stage calls an external module":     {map[string]string{pn + "/main.tf": island + call("x", "ovh/network/ovh", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
 		"resource in the network stage":              {map[string]string{pn + "/main.tf": island + probeBucket}, pn, []string{"STAGE_RESOURCE"}},
+		// runtime: one managed-only instance (a second instance plans a second bucket; spec 005 T032)
+		"probe: runtime call per slot":                {map[string]string{rt + "/main.tf": probeRuntimeForEach}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime call with count":                     {map[string]string{rt + "/main.tf": call("runtime", "../../components/runtime/managed-only", "  count = 1\n")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"second runtime call":                         {map[string]string{rt + "/main.tf": runtime + call("again", "../../components/runtime/managed-only", "")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"second runtime call in another file":         {map[string]string{rt + "/main.tf": runtime, rt + "/extra.tf": call("again", "../../components/runtime/managed-only", "")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime stage calls another component":       {map[string]string{rt + "/main.tf": runtime + island}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime stage calls only another component":  {map[string]string{rt + "/main.tf": one}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"only call to a runtime subdirectory":         {map[string]string{rt + "/main.tf": call("runtime", "../../components/runtime/managed-only/sub", "")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime stage subdirectory called twice":     {map[string]string{rt + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), rt + "/sub/main.tf": call("runtime", "../../../components/runtime/managed-only", "")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime call by repository address":          {map[string]string{rt + "/main.tf": call("runtime", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/runtime/managed-only?ref=v0.0.1", "")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime stage calls an external module":      {map[string]string{rt + "/main.tf": runtime + call("x", "ovh/bucket/ovh", "")}, rt, []string{"STAGE_COMPONENT_CALLS"}},
+		"runtime stage calls object-storage directly": {map[string]string{rt + "/main.tf": runtime + call("bucket", "../../modules/object-storage", "")}, rt, []string{"LAYER_VIOLATION", "STAGE_COMPONENT_CALLS"}},
+		"resource in the runtime stage":               {map[string]string{rt + "/main.tf": runtime + probeBucket}, rt, []string{"STAGE_RESOURCE"}},
 		// allowed
 		"one component call":                        {map[string]string{ts + "/main.tf": one}, "", nil},
 		"one component call through a subdirectory": {map[string]string{ts + "/main.tf": call("s", "./sub", ""), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, "", nil},
@@ -1372,6 +1395,10 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"one island call":                           {map[string]string{pn + "/main.tf": island}, "", nil},
 		"one island call through a subdirectory":    {map[string]string{pn + "/main.tf": call("s", "./sub", ""), pn + "/sub/main.tf": call("island", "../../../components/network/island", "")}, "", nil},
 		"override file merging the island call":     {map[string]string{pn + "/main.tf": island, pn + "/main_override.tf": call("island", "../../components/network/island", "")}, "", nil},
+		"one runtime call":                          {map[string]string{rt + "/main.tf": runtime}, "", nil},
+		"one runtime call through a subdirectory":   {map[string]string{rt + "/main.tf": call("s", "./sub", ""), rt + "/sub/main.tf": call("runtime", "../../../components/runtime/managed-only", "")}, "", nil},
+		"override file merging the runtime call":    {map[string]string{rt + "/main.tf": runtime, rt + "/main_override.tf": call("runtime", "../../components/runtime/managed-only", "")}, "", nil},
+		"test run calling the runtime component":    {map[string]string{rt + "/main.tf": runtime, rt + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/runtime/managed-only\"\n  }\n}\n"}, "", nil},
 		"test run calling the island component":     {map[string]string{pn + "/main.tf": island, pn + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/network/island\"\n  }\n}\n"}, "", nil},
 	} {
 		t.Run(name, func(t *testing.T) {

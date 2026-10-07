@@ -342,12 +342,12 @@ func TestUnitSliceDiscovery(t *testing.T) {
 	root := repo(t, map[string]string{
 		"modules/naming/main.tf":                 `variable "name" {}`,
 		"components/runtime/kube/main.tf":        `module "n" { source = "../../../modules/naming" }`,
-		"stages/runtime/main.tf":                 `module "k" { source = "../../components/runtime/kube" }`,
+		"stages/platform/main.tf":                `module "k" { source = "../../components/runtime/kube" }`,
 		"examples/basic/main.tf":                 `variable "z" {}`,
 		"modules/naming/tests/setup/main.tf":     `variable "x" {}`,
 		"modules/naming/tests/unit.tftest.hcl":   "",
 		"components/runtime/kube/variables.tf":   `variable "y" {}`,
-		"stages/runtime/README.md":               "# runtime\n",
+		"stages/platform/README.md":              "# platform\n",
 		"components/runtime/README.md":           "# family\n",
 		"components/runtime/kube/docs/README.md": "# kube\n",
 	})
@@ -362,7 +362,7 @@ func TestUnitSliceDiscovery(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"components/runtime/kube", "modules/naming", "stages/runtime"}
+	want := []string{"components/runtime/kube", "modules/naming", "stages/platform"}
 	if code != 1 || strings.Join(dirs, " ") != strings.Join(want, " ") || !strings.Contains(out, "SLICE_FAIL dirs=3") {
 		t.Errorf("BEHAVIORAL_RED: discovery %v, want %v (blocked tools fail the slice): code=%d\n%s", dirs, want, code, out)
 	}
