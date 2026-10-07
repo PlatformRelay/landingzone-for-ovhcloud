@@ -380,7 +380,7 @@ Independent test: V005, V006, V012.
   - Verify: `task test:stacks; task test:stack-plans`: T037 controls green; the growth and tenant-only fixtures generated into scratch plan every stack under mocks with fixture inputs (SC-002), the two growth runtime slots planning distinct bucket names (`lz-demo-dev-gra11-bkt-runtime-blue`, `…-green`) and `test:stack-plans` failing with `NAME_COLLISION` on the colliding fixture; `stacks:generate` is host-side, credential-free and unguarded; `test:stack-plans` reports zero discovery as `fail` until T039 (header exception).
   - Evidence: `evidence/T038.md`; PR; initial status `not-run`.
 
-- [ ] T039 [US3] Add stacks/deployments.yaml for demo/dev/GRA11 and the generated stacks under stacks/
+- [x] T039 [US3] Add stacks/deployments.yaml for demo/dev/GRA11 and the generated stacks under stacks/ — closed 2026-10-07, evidence: evidence/T039.md
   - Requirements: FR-003, FR-006, FR-007, FR-008, SC-002; ADRs: 0004, 0007. Depends on: T038, T022; T009 result for the project mode (adopt unless P5 was refuted, then `reference`); T010 result for the backend.
   - Verify: `task stacks:reconcile; task stacks:generate` in the task's authoring worktree, then `task stacks:check; task test:stack-plans; task test:dependencies; task lint -- stacks/tenants/demo/dev/gra11/runtime` through `lz-offline`: six stacks (`account-bootstrap`, `account-governance`, `demo-state`, `demo-dev-project`, network, runtime), `spec.sandbox.shared_state_project: true` with a comment pointing at KD-1, generated files fresh, every stack plans offline, all directories classified as generated instances; editing one generated file makes `stacks:check` fail (control, reverted).
   - Evidence: `evidence/T039.md`; PR; initial status `not-run`.
