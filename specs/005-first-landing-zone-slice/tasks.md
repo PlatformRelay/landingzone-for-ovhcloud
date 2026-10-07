@@ -198,7 +198,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T083 controls green with one killed mutant per clause; then the three T009 probes re-run plan-only from the dedicated clone at the reviewed commit end `outcome: pass` with `0 leftovers, 0 errors`, and their redacted listings (one per matrix kind) are committed under tests/fixtures/ovhcloud/ with a provenance sidecar (run id, reviewed commit, date).
   - Evidence: `evidence/T084.md`; PR (run ids, cost); initial status `not-run`.
 
-- [ ] T065 Qualify the leftover parser on T009's captured listings in tools/internal/live/leftovers_captured_test.go
+- [x] T065 Qualify the leftover parser on T009's captured listings in tools/internal/live/leftovers_captured_test.go — closed 2026-10-07 with gaps, evidence: evidence/T065.md
   - Requirements: FR-011, FR-013; ADRs: 0008, 0024. Depends on: T009, T055, T084.
   - Verify: `go -C tools test ./internal/live -run TestLeftoversCaptured -count=1`: the parser of T055 accepts T009's captured `ovhcloud` (or fallback API) listing for every matrix kind, replacing the synthetic ones of T054 as the qualifying evidence (constitution III); one seeded leftover per kind injected into the captured listing is found; the admin exemption matches the captured admin client and policy ids only; a captured listing error, a truncated capture and a kind recorded as refuted without its fallback parser reported as pass are each behavioural red. A parser change needed by a capture is made here, test first, before T010.
   - Evidence: `evidence/T065.md`; PR; initial status `not-run`.
