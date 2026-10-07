@@ -316,7 +316,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network; task test:dependencies`: green; resources `ovh_cloud_project_network_private`, `ovh_cloud_project_network_private_subnet` (docs cited).
   - Evidence: `evidence/T030.md`; PR; initial status `not-run`.
 
-- [ ] T085 Write CIDR range and output-sensitivity tests in modules/private-network/tests/, components/network/island/tests/, stages/project-network/tests/ and tools/internal/stacks/outputs_test.go
+- [x] T085 Write CIDR range and output-sensitivity tests in modules/private-network/tests/, components/network/island/tests/, stages/project-network/tests/ and tools/internal/stacks/outputs_test.go — closed 2026-10-07, evidence: evidence/T085.md
   - Requirements: FR-002, FR-005; ADRs: 0004, 0017. Depends on: T030.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network; go -C tools test ./internal/stacks -run TestOutputs -count=1`: a CIDR outside RFC 1918 (`0.0.0.0/0`, a public range) and a prefix shorter than /16 are refused at all three levels, while `10.250.0.0/24` and a /16 pass; every captured stage plan (tenant-state, account-governance, project in both modes, project-network) is refused when any output, of any type, is planned sensitive (`after_sensitive` not false) or when its output names differ from the schema's. Today the CIDR has no upper bound and the earlier pins scan string values only: behavioural red. Found in T030's review (evidence/T030.md).
   - Evidence: `evidence/T085.md`; PR; initial status `not-run`.

@@ -6,9 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"reflect"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -496,6 +500,200 @@ func TestOutputsValidateRefusesMalformed(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := ValidateEnvelope(schemas(), data, want)
 			refusal(t, err, ReasonMalformed)
+		})
+	}
+}
+
+// Stage-plan pin controls of 005 T085 (FR-005; T030 review): every captured stage plan (tenant-state,
+// account-governance, project in both modes, project-network) is refused by its pin when its root
+// outputs differ from the schema's published values plus the stage's credential outputs
+// (data-model *Sensitive outputs*), or when any other output, of any type, is planned sensitive
+// (`after_sensitive` not false). BuildEnvelope drops a sensitive output before the schema sees it
+// and the secrets scan reads only string leaves, so a pin relying on those two alone passes a
+// sensitive number, boolean, list, object or nested marker. The credential outputs themselves stay
+// sensitive: one that loses its marker, or is missing, is refused too.
+//
+// Each case runs its pin (stagePlanPins) on the captured plan, re-encoded, as the control, then on
+// one mutated copy per row; a row passes when the pin reports any failure. The plans are read with
+// stagePlanFile: whether a capture is stale is the pins' own concern (stagePlan), not the controls'.
+
+// credentialOutputs are the outputs each capture case plans sensitive by design (data-model
+// *Sensitive outputs*): never published, and the only outputs that may be sensitive.
+var credentialOutputs = map[string][]string{
+	"tenant-state":       {"platform_s3", "tenant_s3"},
+	"account-governance": {"platform_deployer_secret", "tenant_deployer_secrets"},
+}
+
+// pinRecorder stands in for the test while a pin runs on a mutated plan: it records what the pin
+// reports instead of failing the test, and a fatal report ends the pin's goroutine.
+type pinRecorder struct {
+	testing.TB
+	failures []string
+	skipped  bool
+}
+
+func (r *pinRecorder) Helper() {}
+
+func (r *pinRecorder) Error(args ...any) { r.failures = append(r.failures, fmt.Sprint(args...)) }
+
+func (r *pinRecorder) Errorf(format string, args ...any) {
+	r.failures = append(r.failures, fmt.Sprintf(format, args...))
+}
+
+func (r *pinRecorder) Fatal(args ...any) { r.Error(args...); runtime.Goexit() }
+
+func (r *pinRecorder) Fatalf(format string, args ...any) { r.Errorf(format, args...); runtime.Goexit() }
+
+func (r *pinRecorder) Fail() { r.failures = append(r.failures, "Fail") }
+
+func (r *pinRecorder) FailNow() { r.Fail(); runtime.Goexit() }
+
+func (r *pinRecorder) Failed() bool { return len(r.failures) > 0 }
+
+// A pin that skips has not refused: recorded as such, so the row cannot pass on it.
+func (r *pinRecorder) SkipNow() { r.skipped = true; runtime.Goexit() }
+
+func (r *pinRecorder) Skip(args ...any) { r.SkipNow() }
+
+func (r *pinRecorder) Skipf(format string, args ...any) { r.SkipNow() }
+
+// runPin runs a pin on a plan and returns what it reported. A pin that panics or skips fails the
+// test: neither is a refusal.
+func runPin(t *testing.T, pin func(testing.TB, []byte), data []byte) []string {
+	t.Helper()
+	r := &pinRecorder{TB: t}
+	var panicked any
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { panicked = recover() }()
+		pin(r, data)
+	}()
+	<-done
+	if panicked != nil || r.skipped {
+		t.Fatalf("pin panicked (%v) or skipped (%v) instead of reporting", panicked, r.skipped)
+	}
+	return r.failures
+}
+
+// outputChange is one root output change of a test_plan message, as tofu 1.13.0 writes it.
+func outputChange(after, afterSensitive any) map[string]any {
+	return map[string]any{"actions": []any{"create"}, "before": nil, "after": after, "after_unknown": false, "before_sensitive": false, "after_sensitive": afterSensitive}
+}
+
+// planMutation changes the root output changes of one captured plan.
+type planMutation struct {
+	name   string
+	mutate func(outputs map[string]any) error
+}
+
+func addOutput(name string, after, afterSensitive any) func(map[string]any) error {
+	return func(outputs map[string]any) error {
+		if _, ok := outputs[name]; ok {
+			return fmt.Errorf("the plan already has an output %s", name)
+		}
+		outputs[name] = outputChange(after, afterSensitive)
+		return nil
+	}
+}
+
+func markOutput(name string, afterSensitive any) func(map[string]any) error {
+	return func(outputs map[string]any) error {
+		o, ok := outputs[name].(map[string]any)
+		if !ok {
+			return fmt.Errorf("the plan has no output %s", name)
+		}
+		o["after_sensitive"] = afterSensitive
+		return nil
+	}
+}
+
+func renameOutput(name, to string) func(map[string]any) error {
+	return func(outputs map[string]any) error {
+		o, ok := outputs[name]
+		if !ok {
+			return fmt.Errorf("the plan has no output %s", name)
+		}
+		delete(outputs, name)
+		outputs[to] = o
+		return nil
+	}
+}
+
+func dropOutput(name string) func(map[string]any) error {
+	return func(outputs map[string]any) error {
+		if _, ok := outputs[name]; !ok {
+			return fmt.Errorf("the plan has no output %s", name)
+		}
+		delete(outputs, name)
+		return nil
+	}
+}
+
+// mutatePlan returns the captured test_plan message with its root output changes mutated.
+func mutatePlan(t *testing.T, data []byte, mutate func(map[string]any) error) []byte {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var msg map[string]any
+	if err := dec.Decode(&msg); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := msg["test_plan"].(map[string]any)
+	outputs, ok := plan["output_changes"].(map[string]any)
+	if !ok {
+		t.Fatal("capture has no test_plan.output_changes")
+	}
+	if err := mutate(outputs); err != nil {
+		t.Fatalf("capture layout changed: %v", err)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// stagePlanMutations are the rows every capture case's pin must refuse; `unlabelled` is published
+// by every stage (R14).
+var stagePlanMutations = []planMutation{
+	{"an extra sensitive string output", addOutput("lz_extra", "lz-t085-extra-value", true)},
+	{"an extra sensitive number output", addOutput("lz_extra", 42, true)},
+	{"an extra sensitive boolean output", addOutput("lz_extra", true, true)},
+	{"an extra sensitive list output", addOutput("lz_extra", []any{1, 2}, true)},
+	{"an extra sensitive object output", addOutput("lz_extra", map[string]any{"port": 443, "tls": true}, true)},
+	{"an extra output with a nested sensitive marker", addOutput("lz_extra", map[string]any{"port": 443}, map[string]any{"port": true})},
+	{"an extra non-sensitive output", addOutput("lz_extra", 42, false)},
+	{"unlabelled marked sensitive", markOutput("unlabelled", true)},
+	{"unlabelled with a nested sensitive marker", markOutput("unlabelled", []any{true})},
+	{"unlabelled renamed", renameOutput("unlabelled", "unlabelled_addresses")},
+	{"unlabelled missing", dropOutput("unlabelled")},
+}
+
+func TestOutputsStagePlanPinsRefuse(t *testing.T) {
+	if got, want := slices.Sorted(maps.Keys(stagePlanPins)), slices.Sorted(maps.Keys(stagePlans)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pins for %v, want one per capture case %v", got, want)
+	}
+	for _, c := range slices.Sorted(maps.Keys(stagePlans)) {
+		t.Run(c, func(t *testing.T) {
+			data, pin := stagePlanFile(t, c), stagePlanPins[c]
+			// The control: the captured plan, re-encoded like every mutant, passes its own pin.
+			if failures := runPin(t, pin, mutatePlan(t, data, func(map[string]any) error { return nil })); len(failures) != 0 {
+				t.Fatalf("the captured %s plan fails its own pin: %v", c, failures)
+			}
+			rows := slices.Clone(stagePlanMutations)
+			for _, name := range credentialOutputs[c] {
+				rows = append(rows,
+					planMutation{"credential " + name + " not marked sensitive", markOutput(name, false)},
+					planMutation{"credential " + name + " missing", dropOutput(name)})
+			}
+			for _, m := range rows {
+				t.Run(m.name, func(t *testing.T) {
+					if failures := runPin(t, pin, mutatePlan(t, data, m.mutate)); len(failures) == 0 {
+						t.Errorf("BEHAVIORAL_RED: the %s pin accepted a plan with %s", c, m.name)
+					}
+				})
+			}
 		})
 	}
 }
