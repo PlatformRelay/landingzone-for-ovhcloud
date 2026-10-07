@@ -65,6 +65,7 @@ variable "template" {
       iam_policy      = "pol"
       identity_group  = "grp"
       s3_user         = "s3u"
+      project         = "prj"
     }
   }
   nullable = false

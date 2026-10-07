@@ -164,7 +164,18 @@ func resources(body *hclsyntax.Body) []string {
 var singleComponentStages = map[string]string{
 	"stages/tenant-state":       stateBackend,
 	"stages/account-governance": "components/identity/ovh-native",
+	"stages/project":            projectFactory,
 }
+
+// projectFactory reaches its one project through exactly one call of
+// projectModule, in its root directory, to the module's root, unrepeated and
+// by relative source (G7; spec 005 T028): a second call would manage or read a
+// second project, and count or for_each would key the import target
+// module.project.ovh_cloud_project.this[0].
+const (
+	projectFactory = "components/project-factory"
+	projectModule  = "modules/cloud-project"
+)
 
 // moduleCall is one module block of a configuration file: its name, its
 // source if literal, and whether count or for_each repeats it.
@@ -507,10 +518,12 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // under stacks/ (test files are outside these rules). In a retained module
 // (G7) every resource of a kept type keeps a literal prevent_destroy, a single
 // type is declared once with a literal deletion_protection, and no removed
-// block or external module is used; the state-backend component takes its buckets only from the
-// protected module. No library, stage or instance calls nonsensitive (G2). A
-// stage declares no resource, and each stage of singleComponentStages calls
-// only one unrepeated instance of its component (G5, G6).
+// block or external module is used; the state-backend component takes its
+// buckets only from the protected module, and the project-factory component
+// calls the project module exactly once and reaches no non-relative module.
+// No library, stage or instance calls nonsensitive (G2). A stage declares no
+// resource, and each stage of singleComponentStages calls only one unrepeated
+// instance of its component (G5, G6).
 // Hidden directories are skipped unless a module call names one; fixture trees
 // are skipped only under tests/ and tools/.
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
@@ -681,6 +694,12 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	// same name is the same address) of each scanned retained package's
 	// single type.
 	singles := map[string]map[string]bool{}
+	// projectCalls are the module blocks (directory and name; an override
+	// block of the same name is the same call) of the project-factory
+	// component that call the project module; projectSeen whether the
+	// component has library code.
+	projectCalls := map[string]bool{}
+	projectSeen := false
 
 	// judge parses one configuration directory, applies the FR-003 rules and
 	// records its layer and edges.
@@ -806,6 +825,35 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		if len(remoteSources) > 0 {
 			remoteDirs[dir] = true
 		}
+		// G7, project part: the project-factory component's one project call.
+		if layer == LayerLibrary && under(dir, projectFactory) {
+			projectSeen = true
+			for _, body := range bodies {
+				for _, c := range moduleCalls(body) {
+					if !c.literal {
+						continue // UNRESOLVED_REFERENCE already
+					}
+					if !strings.HasPrefix(c.source, "./") && !strings.HasPrefix(c.source, "../") {
+						add("RETAINED_UNPROTECTED", projectFactory, "retained module (G7): %s: module %q (%s) is not a relative source; it may reach %s unseen", dir, c.name, c.source, projectModule)
+						continue
+					}
+					local, _, ok := resolve(dir, c.source, dirs)
+					if !ok || !under(local, projectModule) {
+						continue
+					}
+					projectCalls[dir+"\x00"+c.name] = true
+					if dir != projectFactory {
+						add("RETAINED_UNPROTECTED", projectFactory, "retained module (G7): %s: module %q calls %s outside the component root, where a repeated call would multiply the project", dir, c.name, projectModule)
+					}
+					if local != projectModule {
+						add("RETAINED_UNPROTECTED", projectFactory, "retained module (G7): %s: module %q (%s) is not the root of %s", dir, c.name, c.source, projectModule)
+					}
+					if c.repeated {
+						add("RETAINED_UNPROTECTED", projectFactory, "retained module (G7): %s: module %q repeats by count or for_each; the component holds one project at module.project.ovh_cloud_project.this[0]", dir, c.name)
+					}
+				}
+			}
+		}
 		if layer == LayerLibrary && under(dir, stateBackend) {
 			for _, b := range declared {
 				add("STATE_BUCKET_UNPROTECTED", dir, "state bucket (G7): resource %s is declared here, not through %s", b, protectedBuckets)
@@ -903,6 +951,28 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			}
 		}
 	}
+	// G7, project part: no module the project-factory component reaches calls
+	// one by a non-relative source, which could instantiate another project
+	// unseen (the project module itself refuses one above).
+	for _, dir := range slices.Sorted(maps.Keys(g.Layers)) {
+		if g.Layers[dir] != LayerLibrary || !under(dir, projectFactory) {
+			continue
+		}
+		seen := map[string]bool{dir: true}
+		queue := slices.Clone(g.Uses[dir])
+		for len(queue) > 0 {
+			to := queue[0]
+			queue = queue[1:]
+			if seen[to] {
+				continue
+			}
+			seen[to] = true
+			queue = append(queue, g.Uses[to]...)
+			if remoteDirs[to] && !under(to, projectFactory) && !under(to, projectModule) {
+				add("RETAINED_UNPROTECTED", projectFactory, "retained module (G7): %s calls a module by a non-relative source, which may reach %s unseen", to, projectModule)
+			}
+		}
+	}
 	// G5/G6, stage part: the tenant-state stage's one bucket and two S3 users
 	// come from one state-backend instance, the account-governance stage's
 	// deployers, policies and groups from one identity instance. Every call is
@@ -966,6 +1036,9 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 				add("RETAINED_UNPROTECTED", pkg, "retained module (G7): declares %d %s resources, want exactly one", n, single)
 			}
 		}
+	}
+	if n := len(projectCalls); projectSeen && n != 1 {
+		add("RETAINED_UNPROTECTED", projectFactory, "retained module (G7): %d module blocks call %s; the component holds exactly one project", n, projectModule)
 	}
 	if cycle := findCycle(g.Uses); cycle != nil {
 		add("CYCLE", cycle[0], "%s", strings.Join(cycle, " → "))

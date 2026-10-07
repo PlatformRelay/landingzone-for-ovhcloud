@@ -1034,6 +1034,76 @@ func TestDependenciesRetainedProject(t *testing.T) {
 	}
 }
 
+// G7 (component part, spec 005 T028; coordinator decision 2026-10-07 on T027's
+// decision request 3): components/project-factory reaches its one project
+// through exactly one modules/cloud-project call, in its root directory, to the
+// module's root, unrepeated and by relative source. A second call would manage
+// or read a second project (and order one in adopt mode without an import), a
+// count or for_each would key the import target
+// module.project.ovh_cloud_project.this[0], and a remote source is code the
+// scan cannot see. The component tests cannot count calls (T027 gap 3). The
+// first row is T027's mutant c-second-project-call, verbatim. Other components,
+// the component's tests and its other module calls are outside the rule.
+func TestDependenciesProjectFactoryCalls(t *testing.T) {
+	const pf = "components/project-factory"
+	base := map[string]string{
+		"modules/cloud-project/main.tf":     "resource \"ovh_cloud_project\" \"this\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n",
+		"modules/cloud-project/sub/main.tf": `variable "x" {}`,
+		"modules/cloud-quota/main.tf":       `variable "x" {}`,
+		"modules/naming/main.tf":            `variable "x" {}`,
+	}
+	call := func(name, source, extra string) string {
+		return "module \"" + name + "\" {\n  source = \"" + source + "\"\n" + extra + "}\n"
+	}
+	project := call("project", "../../modules/cloud-project", "")
+	others := call("labels", "../../modules/naming", "") + call("quota", "../../modules/cloud-quota", "")
+	probeSecondProject := "module \"project_extra\" {\n  source     = \"../../modules/cloud-project\"\n  mode       = \"adopt\"\n  project_id = \"fedcba9876543210fedcba9876543210\"\n  tags       = module.labels.labels\n}\n"
+	for name, c := range map[string]struct {
+		files  map[string]string
+		detail string
+	}{
+		"probe: second project call":                 {map[string]string{pf + "/main.tf": project + others + probeSecondProject}, "2 module blocks call modules/cloud-project"},
+		"second project call in another file":        {map[string]string{pf + "/main.tf": project + others, pf + "/extra.tf": probeSecondProject}, "2 module blocks call modules/cloud-project"},
+		"project call with count":                    {map[string]string{pf + "/main.tf": call("project", "../../modules/cloud-project", "  count = 1\n") + others}, "repeats by count or for_each"},
+		"project call with for_each":                 {map[string]string{pf + "/main.tf": call("project", "../../modules/cloud-project", "  for_each = toset([\"a\"])\n") + others}, "repeats by count or for_each"},
+		"no project call":                            {map[string]string{pf + "/main.tf": others}, "0 module blocks call modules/cloud-project"},
+		"project call only to a module subdirectory": {map[string]string{pf + "/main.tf": call("project", "../../modules/cloud-project/sub", "") + others}, "not the root of modules/cloud-project"},
+		"project call from a component subdirectory": {map[string]string{pf + "/main.tf": call("s", "./sub", "") + others, pf + "/sub/main.tf": call("project", "../../../modules/cloud-project", "")}, "outside the component root"},
+		"project call by repository address":         {map[string]string{pf + "/main.tf": call("project", "github.com/PlatformRelay/landingzone-for-ovhcloud//modules/cloud-project?ref=v0.0.1", "") + others}, "is not a relative source"},
+		"external module beside the project call":    {map[string]string{pf + "/main.tf": project + others + call("x", "ovh/project/ovh", "")}, "is not a relative source"},
+		"reached module calls an external module":    {map[string]string{pf + "/main.tf": project + others, "modules/cloud-quota/main.tf": call("x", "ovh/project/ovh", "")}, "modules/cloud-quota calls a module by a non-relative source"},
+		"reached module calls an external wrapper":   {map[string]string{pf + "/main.tf": project + others, "modules/naming/main.tf": call("x", "git::https://example.org/wrapper.git?ref=v1", "")}, "modules/naming calls a module by a non-relative source"},
+		// allowed
+		"one project call beside naming and quota":  {map[string]string{pf + "/main.tf": project + others}, ""},
+		"override file merging the project call":    {map[string]string{pf + "/main.tf": project + others, pf + "/main_override.tf": project}, ""},
+		"test run calling cloud-project again":      {map[string]string{pf + "/main.tf": project + others, pf + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../modules/cloud-project\"\n  }\n}\n"}, ""},
+		"other component calls cloud-project twice": {map[string]string{pf + "/main.tf": project + others, "components/identity/ovh-native/main.tf": call("project", "../../../modules/cloud-project", "") + call("again", "../../../modules/cloud-project", "")}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := maps.Clone(base)
+			maps.Copy(files, c.files)
+			_, findings := ScanDependencies(writeModules(t, files))
+			var want []string
+			if c.detail != "" {
+				want = []string{"RETAINED_UNPROTECTED"}
+			}
+			if got := ruleNames(findings); !reflect.DeepEqual(got, want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, want, findings)
+			}
+			matched := c.detail == ""
+			for _, f := range findings {
+				if f.Subject != pf {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, pf)
+				}
+				matched = matched || strings.Contains(f.Detail, c.detail)
+			}
+			if !matched {
+				t.Errorf("BEHAVIORAL_RED: no finding says %q (%+v)", c.detail, findings)
+			}
+		})
+	}
+}
+
 // G7 (component part, spec 005 T016): components/state-backend creates its
 // buckets only through modules/object-storage-protected, so every state bucket
 // carries the literal prevent_destroy and versioning that module pins. tofu test
@@ -1194,7 +1264,10 @@ func TestDependenciesNonsensitiveFixture(t *testing.T) {
 func TestDependenciesStageComposition(t *testing.T) {
 	const ts = "stages/tenant-state"
 	const ag = "stages/account-governance"
+	const pr = "stages/project"
 	base := map[string]string{
+		"components/project-factory/main.tf":         "module \"project\" {\n  source = \"../../modules/cloud-project\"\n}\n",
+		"modules/cloud-project/main.tf":              "resource \"ovh_cloud_project\" \"this\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n",
 		"components/state-backend/main.tf":           `variable "x" {}`,
 		"components/state-backend/sub/main.tf":       `variable "x" {}`,
 		"components/identity/ovh-native/main.tf":     `variable "x" {}`,
@@ -1209,6 +1282,9 @@ func TestDependenciesStageComposition(t *testing.T) {
 	probeBucket := "resource \"ovh_cloud_project_storage\" \"extra\" {\n  service_name = \"x\"\n  region_name  = \"GRA\"\n  name         = \"lz-bkt-state\"\n}\n"
 	identity := call("identity", "../../components/identity/ovh-native", "")
 	probeSecondIdentity := "module \"second\" {\n  source     = \"../../components/identity/ovh-native\"\n  org        = \"lz\"\n  instance   = \"x\"\n  managed_in = \"x\"\n  tenants    = {}\n}\n"
+	factory := call("project_factory", "../../components/project-factory", "")
+	// T027 mutant s-factory-call-count, verbatim.
+	probeFactoryCount := "module \"project_factory\" {\n  count          = 1\n  source         = \"../../components/project-factory\"\n  mode           = var.project_mode\n  project_id     = var.project_id\n}\n"
 	for name, c := range map[string]struct {
 		files   map[string]string
 		subject string
@@ -1245,6 +1321,15 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"identity stage calls an external module":        {map[string]string{ag + "/main.tf": identity + call("x", "ovh/iam/ovh", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
 		"identity stage subdirectory called twice":       {map[string]string{ag + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), ag + "/sub/main.tf": call("identity", "../../../components/identity/ovh-native", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
 		"resource in the identity stage":                 {map[string]string{ag + "/main.tf": identity + probeBucket}, ag, []string{"STAGE_RESOURCE"}},
+		// project: one project-factory instance (G7: a second instance manages or reads a second
+		// project; spec 005 T028)
+		"probe: factory call with count":             {map[string]string{pr + "/main.tf": probeFactoryCount}, pr, []string{"STAGE_COMPONENT_CALLS"}},
+		"second factory call":                        {map[string]string{pr + "/main.tf": factory + call("again", "../../components/project-factory", "")}, pr, []string{"STAGE_COMPONENT_CALLS"}},
+		"factory call with for_each":                 {map[string]string{pr + "/main.tf": call("project_factory", "../../components/project-factory", "  for_each = toset([\"a\"])\n")}, pr, []string{"STAGE_COMPONENT_CALLS"}},
+		"project stage calls another component":      {map[string]string{pr + "/main.tf": factory + one}, pr, []string{"STAGE_COMPONENT_CALLS"}},
+		"project stage subdirectory called twice":    {map[string]string{pr + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), pr + "/sub/main.tf": call("project_factory", "../../../components/project-factory", "")}, pr, []string{"STAGE_COMPONENT_CALLS"}},
+		"factory call by repository address":         {map[string]string{pr + "/main.tf": call("project_factory", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/project-factory?ref=v0.0.1", "")}, pr, []string{"STAGE_COMPONENT_CALLS"}},
+		"project stage calls cloud-project directly": {map[string]string{pr + "/main.tf": factory + call("project", "../../modules/cloud-project", "")}, pr, []string{"LAYER_VIOLATION", "STAGE_COMPONENT_CALLS"}},
 		// allowed
 		"one component call":                        {map[string]string{ts + "/main.tf": one}, "", nil},
 		"one component call through a subdirectory": {map[string]string{ts + "/main.tf": call("s", "./sub", ""), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, "", nil},
@@ -1259,6 +1344,8 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"override file merging the identity call":   {map[string]string{ag + "/main.tf": identity, ag + "/main_override.tf": call("identity", "../../components/identity/ovh-native", "")}, "", nil},
 		"both stages, one call each":                {map[string]string{ts + "/main.tf": one, ag + "/main.tf": identity}, "", nil},
 		"test run calling the identity component":   {map[string]string{ag + "/main.tf": identity, ag + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/identity/ovh-native\"\n  }\n}\n"}, "", nil},
+		"one project-factory call":                  {map[string]string{pr + "/main.tf": factory}, "", nil},
+		"override file merging the factory call":    {map[string]string{pr + "/main.tf": factory, pr + "/main_override.tf": call("project_factory", "../../components/project-factory", "")}, "", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := maps.Clone(base)

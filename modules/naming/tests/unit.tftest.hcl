@@ -169,6 +169,28 @@ run "default_s3_user" {
   }
 }
 
+# The project's name is not set by this slice (the project exists; components/project-factory reads
+# only `labels`), but naming refuses a kind without a row even for labels (spec 005 T027).
+run "default_project" {
+  command = plan
+
+  variables {
+    region = null
+    kind   = "project"
+    role   = "main"
+  }
+
+  assert {
+    condition     = output.name == "lz-demo-dev-prj-main"
+    error_message = "default template: project name must be lz-demo-dev-prj-main"
+  }
+
+  assert {
+    condition     = output.labels["lz:tenant"] == "demo" && output.labels["lz:instance"] == "demo-dev-gra11-runtime"
+    error_message = "the project kind gets the mandatory labels of its scope"
+  }
+}
+
 # --- Optional slot: absent, and two slots in one scope.
 
 run "slot_blue" {

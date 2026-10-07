@@ -15,12 +15,22 @@ variable "tenant" {
   description = "Tenant of the environment (`spec.tenants[].name`); the `lz:tenant` label and the published `tenant`."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.tenant) != ""
+    error_message = "tenant must not be blank."
+  }
 }
 
 variable "environment" {
   description = "Environment (`spec.tenants[].environments[].name`); the published `environment`."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.environment) != ""
+    error_message = "environment must not be blank."
+  }
 }
 
 variable "instance" {
@@ -39,12 +49,22 @@ variable "project_mode" {
   description = "`adopt` or `reference` (`spec.tenants[].environments[].project.mode`, research R7)."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = contains(["adopt", "reference"], var.project_mode)
+    error_message = "project_mode must be adopt or reference."
+  }
 }
 
 variable "project_id" {
   description = "Project id resolved from the environment's reference (`LZ_PROJECT_ID_<REF>`, data-model *Resolved-reference input*)."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.project_id) != ""
+    error_message = "project_id must not be blank."
+  }
 }
 
 variable "project_ovh_subsidiary" {
@@ -73,6 +93,11 @@ variable "regions" {
   description = "Region names of the environment (`spec.tenants[].environments[].regions[].name`, e.g. `GRA11`), published as given."
   type        = list(string)
   nullable    = false
+
+  validation {
+    condition     = alltrue([for r in var.regions : trimspace(r) != ""]) && length(distinct(var.regions)) == length(var.regions)
+    error_message = "regions: no blank or repeated region name."
+  }
 }
 
 variable "budget_alert" {

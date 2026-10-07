@@ -14,12 +14,22 @@ variable "tenant" {
   description = "Tenant that owns the project (`spec.tenants[].name`); the `lz:tenant` label."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.tenant) != ""
+    error_message = "tenant must not be blank."
+  }
 }
 
 variable "environment" {
   description = "Environment of the project (`spec.tenants[].environments[].name`)."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.environment) != ""
+    error_message = "environment must not be blank."
+  }
 }
 
 variable "instance" {

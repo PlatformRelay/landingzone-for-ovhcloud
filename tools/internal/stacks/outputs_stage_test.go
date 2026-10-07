@@ -31,21 +31,38 @@ import (
 
 const repoRoot = "../../.."
 
-// stagePlans are the directories each captured stage plan is made from; test configuration counts
-// only for the stage itself (its mocks give the values). Keep in step with capture-stage-plan.sh.
+// stagePlans are the directories each captured case's plan is made from, by capture case (a stage,
+// or a stage and one of its other runs, planCases); test configuration counts only for the stage
+// itself (its mocks give the values). Keep in step with capture-stage-plan.sh.
 var stagePlans = map[string][]string{
 	"tenant-state":       {"stages/tenant-state", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user"},
 	"account-governance": {"stages/account-governance", "components/identity/ovh-native", "modules/naming", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group"},
+	"project":            {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
+	"project-reference":  {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
+}
+
+// planCases are the capture cases that are not a stage's default run: their stage and run.
+var planCases = map[string]struct{ stage, run string }{
+	"project-reference": {"project", "reference_published_outputs_with_both_toggles"},
+}
+
+// planCase returns a capture case's stage and run.
+func planCase(c string) (stage, run string) {
+	if pc, ok := planCases[c]; ok {
+		return pc.stage, pc.run
+	}
+	return c, "published_outputs_match_the_schema"
 }
 
 // stagePlanInputsDigest is the sha256 of `<sha256>  <path>` lines, in byte order of path, over
-// every file of the stage's plan inputs a plan can read: configuration, data files such as
+// every file of the case's plan inputs a plan can read: configuration, data files such as
 // naming's kinds.yaml and the dependency lock files; not Markdown, state files or hidden
 // directories (sha256sum's format, so the capture script computes the same digest).
-func stagePlanInputsDigest(t *testing.T, stage string) string {
+func stagePlanInputsDigest(t *testing.T, planCaseName string) string {
 	t.Helper()
+	stage, _ := planCase(planCaseName)
 	var paths []string
-	for _, dir := range stagePlans[stage] {
+	for _, dir := range stagePlans[planCaseName] {
 		err := filepath.WalkDir(filepath.Join(repoRoot, dir), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -79,15 +96,17 @@ func stagePlanInputsDigest(t *testing.T, stage string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// stagePlan returns the stage's captured plan after checking that its sidecar vouches for exactly
+// stagePlan returns a capture case's plan after checking that its sidecar vouches for exactly
 // this file, made from the current configuration by the pinned OpenTofu through the isolated entry.
 func stagePlan(t *testing.T, stage string) []byte {
 	t.Helper()
+	stageDir, run := planCase(stage)
 	file := stage + "-plan.json"
 	data := readFile(t, fixtureDir+"/captures/"+file)
 	var meta struct {
 		File         string `json:"file"`
 		Command      string `json:"command"`
+		Inner        string `json:"inner_command"`
 		Toolchain    string `json:"toolchain"`
 		Tool         string `json:"tool"`
 		ToolVersion  string `json:"tool_version"`
@@ -99,7 +118,7 @@ func stagePlan(t *testing.T, stage string) []byte {
 		t.Fatal(err)
 	}
 	if meta.File != file || meta.SHA256 != digest(data) || meta.EntryExit != 0 ||
-		!strings.Contains(meta.Command, "capture:"+stage+"-plan") || meta.Tool != "tofu" || meta.ToolVersion != "1.13.0" ||
+		!strings.Contains(meta.Command, "capture:"+stage+"-plan") || !strings.HasSuffix(meta.Inner, "(stages/"+stageDir+"); run "+run) || meta.Tool != "tofu" || meta.ToolVersion != "1.13.0" ||
 		!strings.Contains(meta.Toolchain, " tofu=1.13.0 ") || !strings.HasSuffix(meta.Toolchain, " network=none") {
 		t.Fatalf("capture sidecar does not vouch for %s from the pinned tofu: %+v", file, meta)
 	}
@@ -135,15 +154,15 @@ type plannedResource struct {
 	} `json:"change"`
 }
 
-// decodePlan decodes one captured test_plan message of run published_outputs_match_the_schema.
-func decodePlan(t *testing.T, data []byte) testPlan {
+// decodePlan decodes one captured test_plan message of the given run.
+func decodePlan(t *testing.T, data []byte, run string) testPlan {
 	t.Helper()
 	var msg testPlan
 	if err := json.Unmarshal(data, &msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.Type != "test_plan" || msg.Run != "published_outputs_match_the_schema" || msg.Plan.Errored || len(msg.Plan.Outputs) == 0 {
-		t.Fatalf("capture is not the plan of run published_outputs_match_the_schema: type %q run %q errored %v outputs %d", msg.Type, msg.Run, msg.Plan.Errored, len(msg.Plan.Outputs))
+	if msg.Type != "test_plan" || msg.Run != run || msg.Plan.Errored || len(msg.Plan.Outputs) == 0 {
+		t.Fatalf("capture is not the plan of run %s: type %q run %q errored %v outputs %d", run, msg.Type, msg.Run, msg.Plan.Errored, len(msg.Plan.Outputs))
 	}
 	return msg
 }
@@ -204,10 +223,11 @@ func leaves(v any) []string {
 }
 
 // publishedEnvelope builds the stage's envelope from the plan's outputs, validates it under the
-// stage's schema, and checks it publishes exactly the schema's values and none of the secrets.
-func publishedEnvelope(t *testing.T, stage, instance string, doc []byte, secrets, want []string) {
+// stage's schema against the consumer's expectation, and checks it publishes exactly the schema's
+// values and none of the secrets.
+func publishedEnvelope(t *testing.T, exp Expectation, doc []byte, secrets, want []string) {
 	t.Helper()
-	env, err := BuildEnvelope(doc, Producer{InstanceID: instance, Stage: stage, SourceRevision: testRev})
+	env, err := BuildEnvelope(doc, Producer{InstanceID: exp.InstanceID, Stage: exp.Stage, SourceRevision: testRev})
 	if err != nil {
 		t.Fatalf("builder refused the stage's outputs: %v", err)
 	}
@@ -215,7 +235,7 @@ func publishedEnvelope(t *testing.T, stage, instance string, doc []byte, secrets
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ValidateEnvelope(schemas(), published, expectation(stage, instance))
+	got, err := ValidateEnvelope(schemas(), published, exp)
 	if err != nil {
 		t.Fatalf("envelope built from the stage's plan does not validate: %v", err)
 	}
@@ -230,12 +250,12 @@ func publishedEnvelope(t *testing.T, stage, instance string, doc []byte, secrets
 }
 
 func TestOutputsTenantStateStagePlan(t *testing.T) {
-	doc, secrets := planOutputs(t, decodePlan(t, stagePlan(t, "tenant-state")), "tenant_s3", "platform_s3")
+	doc, secrets := planOutputs(t, decodePlan(t, stagePlan(t, "tenant-state"), "published_outputs_match_the_schema"), "tenant_s3", "platform_s3")
 	// The two credentials, two fields each: the control that the secrets scan below can fail.
 	if len(secrets) != 4 {
 		t.Fatalf("want the four credential strings of tenant_s3 and platform_s3, got %d", len(secrets))
 	}
-	publishedEnvelope(t, "tenant-state", "demo-state", doc, secrets,
+	publishedEnvelope(t, expectation("tenant-state", "demo-state"), doc, secrets,
 		[]string{"platform_s3_user_id", "state_bucket", "tenant", "tenant_s3_user_id", "unlabelled"})
 }
 
@@ -291,13 +311,13 @@ const (
 )
 
 func TestOutputsAccountGovernanceStagePlan(t *testing.T) {
-	msg := decodePlan(t, stagePlan(t, "account-governance"))
+	msg := decodePlan(t, stagePlan(t, "account-governance"), "published_outputs_match_the_schema")
 	doc, secrets := planOutputs(t, msg, "platform_deployer_secret", "tenant_deployer_secrets")
 	// The platform secret and one per tenant: the control that the secrets scan can fail.
 	if len(secrets) != 3 {
 		t.Fatalf("want the three deployer secrets (platform, alpha, demo), got %d", len(secrets))
 	}
-	publishedEnvelope(t, "account-governance", "account-governance", doc, secrets,
+	publishedEnvelope(t, expectation("account-governance", "account-governance"), doc, secrets,
 		[]string{"platform_deployer", "tenants", "unlabelled"})
 
 	// Inventory: one platform client and policy, and per tenant one client, policy and group
@@ -412,4 +432,132 @@ func TestOutputsAccountGovernanceStagePlan(t *testing.T) {
 			t.Errorf("tenant %s group role %v, want NONE", tenant, role)
 		}
 	}
+}
+
+// The fixtures of the project stage's captured runs (stages/project/tests): adopt mode with both
+// toggles and the order arguments (unit.tftest.hcl, published_outputs_match_the_schema), and
+// reference mode with both toggles (reference.tftest.hcl,
+// reference_published_outputs_with_both_toggles). Both bind the same project; its URN carries the
+// `ca` region part the mocks give it.
+const (
+	pfModule       = "module.project_factory.module."
+	pfProjectID    = "0123456789abcdef0123456789abcdef"
+	pfProjectURN   = "urn:v1:ca:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+	pfImportTarget = pfModule + "project.ovh_cloud_project.this[0]"
+)
+
+// pfLabels is the label set of the captured scope (data-model *Label set*).
+var pfLabels = map[string]any{
+	"lz:managed-by": "opentofu",
+	"lz:managed-in": "github.com/platformrelay/landingzone-for-ovhcloud//stacks/tenants/demo/dev/project",
+	"lz:instance":   "demo-dev-project",
+	"lz:tenant":     "demo",
+	"lz:release":    "unreleased",
+}
+
+// managedByAddress indexes a plan's managed resources by address and refuses any change but a
+// create (the stack's import turns the adopted project's create into an import, T037).
+func managedByAddress(t *testing.T, msg testPlan) map[string]plannedResource {
+	t.Helper()
+	out := map[string]plannedResource{}
+	for _, r := range msg.Plan.Resources {
+		if r.Mode != "managed" {
+			continue
+		}
+		if _, dup := out[r.Address]; dup {
+			t.Errorf("%s planned twice", r.Address)
+		}
+		out[r.Address] = r
+		if !reflect.DeepEqual(r.Change.Actions, []string{"create"}) {
+			t.Errorf("%s: actions %v, want [create]", r.Address, r.Change.Actions)
+		}
+	}
+	return out
+}
+
+// projectCommon pins what both modes plan beside the project: the label set on the project's own
+// URN, the alert and the quota guard with the given values, all on the bound project.
+func projectCommon(t *testing.T, byAddress map[string]plannedResource, threshold float64) {
+	t.Helper()
+	tags := byAddress[pfModule+"project.ovh_iam_resource_tags.this"].Change.After
+	if tags["urn"] != pfProjectURN {
+		t.Errorf("tags on %v, want the bound project's URN %s", tags["urn"], pfProjectURN)
+	}
+	if !reflect.DeepEqual(tags["tags"], pfLabels) {
+		t.Errorf("project tags %v, want exactly the label set %v", tags["tags"], pfLabels)
+	}
+	alert := byAddress[pfModule+"project.ovh_cloud_project_alerting.this[0]"].Change.After
+	for attr, want := range map[string]any{"service_name": pfProjectID, "monthly_threshold": threshold, "email": "finops@example.org", "delay": float64(3600)} {
+		if alert[attr] != want {
+			t.Errorf("budget alert %s %v, want %v", attr, alert[attr], want)
+		}
+	}
+	quota := byAddress[pfModule+"quota.ovh_cloud_quota.this[0]"].Change.After
+	if quota["service_name"] != pfProjectID || quota["prevent_automatic_quota_upgrade"] != true {
+		t.Errorf("quota guard on %v with prevent_automatic_quota_upgrade %v, want the bound project %s and true", quota["service_name"], quota["prevent_automatic_quota_upgrade"], pfProjectID)
+	}
+}
+
+// T028 (coordinator decision 2026-10-07 on T027's decision request 1): the project stage's real
+// plan in both modes. tofu test reads only a child module's outputs, so the component and stage
+// tests cannot see the order arguments, the alert's values or which project the alert, the quota
+// guard and the tags act on (T027 gaps 1, 2); a replacement of an adopted project orders a new one
+// (cloud_project.md), and T009 showed that the order arguments force one. The envelope built from
+// each plan validates under project.schema.json against the bound project (KD-3).
+func TestOutputsProjectStagePlan(t *testing.T) {
+	binding := Expectation{InstanceID: "demo-dev-project", Stage: "project", Project: &ProjectBinding{ProjectID: pfProjectID, ProjectURN: pfProjectURN}}
+	values := []string{"budget_alert_id", "environment", "project_id", "project_urn", "regions", "tenant", "unlabelled"}
+	plan := func(t *testing.T, c string, want []string) map[string]plannedResource {
+		t.Helper()
+		_, run := planCase(c)
+		msg := decodePlan(t, stagePlan(t, c), run)
+		doc, secrets := planOutputs(t, msg)
+		if len(secrets) != 0 {
+			t.Errorf("the project stage publishes every output; %d sensitive strings found", len(secrets))
+		}
+		publishedEnvelope(t, binding, doc, secrets, values)
+		byAddress := managedByAddress(t, msg)
+		if got := slices.Sorted(maps.Keys(byAddress)); !reflect.DeepEqual(got, want) {
+			t.Fatalf("planned resources %v, want exactly %v", got, want)
+		}
+		return byAddress
+	}
+
+	t.Run("adopt", func(t *testing.T) {
+		byAddress := plan(t, "project", []string{
+			pfImportTarget,
+			pfModule + "project.ovh_cloud_project_alerting.this[0]",
+			pfModule + "project.ovh_iam_resource_tags.this",
+			pfModule + "quota.ovh_cloud_quota.this[0]",
+		})
+		project := byAddress[pfImportTarget].Change.After
+		if project["deletion_protection"] != true || project["urn"] != pfProjectURN {
+			t.Errorf("adopted project: deletion_protection %v, urn %v, want true and %s", project["deletion_protection"], project["urn"], pfProjectURN)
+		}
+		// Order arguments as given (stages/project/tests/unit.tftest.hcl), never invented.
+		if project["ovh_subsidiary"] != "FR" || project["description"] != "demo-dev" {
+			t.Errorf("adopted project: ovh_subsidiary %v, description %v, want FR and demo-dev as given", project["ovh_subsidiary"], project["description"])
+		}
+		blocks, ok := project["plan"].([]any)
+		if !ok || len(blocks) != 1 {
+			t.Fatalf("adopted project: plan %v, want the one given plan block", project["plan"])
+		}
+		block, _ := blocks[0].(map[string]any)
+		for attr, want := range map[string]any{"duration": "P1M", "plan_code": "project.2018", "pricing_mode": "default"} {
+			if block[attr] != want {
+				t.Errorf("adopted project: plan %s %v, want %v as given", attr, block[attr], want)
+			}
+		}
+		projectCommon(t, byAddress, 100)
+	})
+
+	// Reference mode manages no project: it is only read (its tags, alert and guard still apply).
+	t.Run("reference", func(t *testing.T) {
+		byAddress := plan(t, "project-reference", []string{
+			pfModule + "project.ovh_cloud_project_alerting.this[0]",
+			pfModule + "project.ovh_iam_resource_tags.this",
+			pfModule + "quota.ovh_cloud_quota.this[0]",
+		})
+		projectCommon(t, byAddress, 50)
+	})
 }
