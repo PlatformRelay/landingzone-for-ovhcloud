@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -280,21 +281,31 @@ func TestLeftoversFailClosed(t *testing.T) {
 	}
 }
 
-// TestLeftoversMissingOvhcloud: without a lister the check runs the ovhcloud binary; a missing
-// binary is `fail`.
-func TestLeftoversMissingOvhcloud(t *testing.T) {
+// TestLeftoversNoListingSource: without a lister the check lists through its API client; with no
+// API endpoint, or a base that is not a v1 base, it is `fail` and sends nothing (T084: the
+// ovhcloud binary it used to need is gone, P18).
+func TestLeftoversNoListingSource(t *testing.T) {
 	w, _ := loadSynthetic(t)
-	for name, bin := range map[string]string{
-		"absent path": filepath.Join(t.TempDir(), "ovhcloud"),
-		"empty":       "",
+	for name, api := range map[string]API{
+		"no endpoint":     {},
+		"not a v1 base":   {TokenURL: "http://127.0.0.1:9/token", BaseURL: "http://127.0.0.1:9/api"},
+		"no token server": {BaseURL: "http://127.0.0.1:9/v1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, _, inv := worldCheck(t, w, syntheticSeed{})
 			c.Lister = nil
-			c.Ovhcloud = bin
+			var sent []string
+			api.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				sent = append(sent, r.Method+" "+r.URL.Redacted())
+				return nil, errors.New("no request expected")
+			})}
+			c.API = api
 			rep := c.Check(context.Background(), inv)
 			if rep.Outcome != "fail" || len(rep.Errors) == 0 {
 				t.Errorf("outcome %q, errors %v; want fail with an error", rep.Outcome, rep.Errors)
+			}
+			if len(sent) != 0 {
+				t.Errorf("the check sent %v", sent)
 			}
 		})
 	}

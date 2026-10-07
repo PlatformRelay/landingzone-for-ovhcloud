@@ -20,8 +20,9 @@ import (
 )
 
 // `lz-live probe` end to end (T055): the guard admits (fake git), the sandbox credential binds
-// to its account through a fake API, and the probe root runs through the run core with a fake
-// tofu and a fake ovhcloud (the test binary through symlinks, as the fake git). HOME is a
+// to its account through a fake API, the probe root runs through the run core with a fake tofu
+// (the test binary through symlinks, as the fake git), and the leftover check lists through the
+// same fake API (T084). A fake ovhcloud on PATH logs any start: none is expected (P18). HOME is a
 // temporary directory: no test reads the owner's ~/.config/ovh-lz/, calls the OVHcloud API or
 // runs a real tofu or ovhcloud.
 
@@ -149,28 +150,20 @@ func writeOK(path, content string) int {
 	return 0
 }
 
-// fakeOvhcloud answers a listing from ovhcloud.json (path -> body) next to it, else as an empty
-// account: [] for a list, an untagged resource for /iam/resource/<urn>.
+// fakeOvhcloud logs that it was started (lz-live must not start it since T084) and answers an
+// empty listing.
 func fakeOvhcloud(args []string) int {
-	bin := filepath.Dir(os.Args[0])
-	logChild(bin, "ovhcloud.log", args)
-	var bodies map[string]json.RawMessage
-	if raw, err := os.ReadFile(filepath.Join(bin, "ovhcloud.json")); err == nil {
-		_ = json.Unmarshal(raw, &bodies)
-	}
-	if len(args) > 0 {
-		if b, ok := bodies[args[len(args)-1]]; ok {
-			fmt.Println(string(b))
-			return 0
-		}
-	}
-	if len(args) > 0 && strings.HasPrefix(args[len(args)-1], "/iam/resource/") {
-		fmt.Println(`{"urn":"x","name":"p1","type":"publicCloudProject","tags":{}}`)
-		return 0
-	}
+	logChild(filepath.Dir(os.Args[0]), "ovhcloud.log", args)
 	fmt.Println("[]")
 	return 0
 }
+
+// apiListing is one leftover listing the fake API answered: its path (version included) and the
+// client id the bearer token was issued to.
+type apiListing struct{ Path, Client string }
+
+// tokenClients maps each token the fake API issues to the client id it was issued to.
+var tokenClients = map[string]string{"tok-1": "EU.sandboxadmin", "tok-identity": "EU.probeidentity", "tok-p25": "EU.probep25"}
 
 type childCall struct {
 	Args    []string `json:"args"`
@@ -251,6 +244,12 @@ type probeWorld struct {
 	// p25Account; p25Asked as identityAsked.
 	p25Account string
 	p25Asked   *[]int
+	// The leftover check's listings (T084): listings answers a path (as asked, /v1/... or
+	// /v2/iam/...), else an empty account answers ([] or an untagged resource); listed records
+	// every listing request; lookedUp every executable lz-live looked up.
+	listings map[string]string
+	listed   *[]apiListing
+	lookedUp *[]string
 }
 
 // newProbeWorld is an admitted host with a sandbox credential bound to probeAccount, one project,
@@ -258,7 +257,7 @@ type probeWorld struct {
 func newProbeWorld(t *testing.T) *probeWorld {
 	t.Helper()
 	w := &probeWorld{world: newWorld(t, true), apiAcount: probeAccount, apiCalls: new(int), identityAccount: probeAccount, identityAsked: new([]int),
-		p25Account: probeAccount, p25Asked: new([]int)}
+		p25Account: probeAccount, p25Asked: new([]int), listings: map[string]string{}, listed: new([]apiListing), lookedUp: new([]string)}
 	// As in production (os.UserHomeDir), the injected home is the process HOME, which a child
 	// must not inherit.
 	t.Setenv("HOME", w.home)
@@ -296,7 +295,7 @@ func newProbeWorld(t *testing.T) *probeWorld {
 				fmt.Fprint(rw, `{"access_token":"tok-p25","token_type":"Bearer","expires_in":3600}`)
 				return
 			}
-			if r.PostForm.Get("client_secret") != probeSecret {
+			if r.PostForm.Get("client_id") != "EU.sandboxadmin" || r.PostForm.Get("client_secret") != probeSecret {
 				rw.WriteHeader(http.StatusUnauthorized)
 				return
 			}
@@ -309,6 +308,18 @@ func newProbeWorld(t *testing.T) *probeWorld {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/details" && r.Header.Get("Authorization") == "Bearer tok-p25":
 			*w.p25Asked = append(*w.p25Asked, countLines(filepath.Join(filepath.Dir(w.git), "tofu.log")))
 			fmt.Fprintf(rw, `{"account":%q}`, w.p25Account)
+		case r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/v2/iam/")) &&
+			tokenClients[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")] != "":
+			*w.listed = append(*w.listed, apiListing{Path: r.URL.EscapedPath(), Client: tokenClients[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]})
+			rw.Header().Set("Content-Type", "application/json")
+			switch body, ok := w.listings[r.URL.EscapedPath()]; {
+			case ok:
+				fmt.Fprint(rw, body)
+			case strings.HasPrefix(r.URL.Path, "/v2/iam/resource/"):
+				fmt.Fprint(rw, `{"urn":"x","name":"p1","type":"publicCloudProject","tags":{}}`)
+			default:
+				fmt.Fprint(rw, "[]")
+			}
 		default:
 			rw.WriteHeader(http.StatusForbidden)
 		}
@@ -340,6 +351,7 @@ func (w *probeWorld) run(t *testing.T, args ...string) (int, string, string) {
 		Stderr:        &stderr,
 		Stdout:        &stdout,
 		LookPath: func(name string) (string, error) {
+			*w.lookedUp = append(*w.lookedUp, name)
 			p := filepath.Join(bin, name)
 			if _, err := os.Stat(p); err != nil {
 				return "", err
@@ -428,10 +440,10 @@ func TestProbeEntry(t *testing.T) {
 		}
 		// The leftover check lists the bound project, its tags on the project URN.
 		asked := map[string]bool{}
-		for _, c := range w.childCalls(t, "ovhcloud.log") {
-			asked[c.Args[len(c.Args)-1]] = true
+		for _, l := range *w.listed {
+			asked[l.Path] = true
 		}
-		for _, path := range []string{"/cloud/project/p1/network/private", "/iam/resource/urn:v1:eu:resource:publicCloudProject:p1"} {
+		for _, path := range []string{"/v1/cloud/project/p1/network/private", "/v2/iam/resource/urn:v1:eu:resource:publicCloudProject:p1"} {
 			if !asked[path] {
 				t.Errorf("the leftover check never listed %s (asked %v)", path, asked)
 			}
@@ -528,11 +540,7 @@ func TestProbeEntry(t *testing.T) {
 	// fails and keeps its files.
 	t.Run("leftover-by-prefix", func(t *testing.T) {
 		w := newProbeWorld(t)
-		if err := os.WriteFile(filepath.Join(filepath.Dir(w.git), "ovhcloud.json"), []byte(`{
-			"/cloud/project/p1/network/private": [{"id":"pn-old","name":"lzprobe-old","status":"ACTIVE","type":"private","vlanId":0,"regions":[]}],
-			"/cloud/project/p1/network/private/pn-old/subnet": []}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		w.listings["/v1/cloud/project/p1/network/private"] = `[{"id":"pn-old","name":"lzprobe-old","status":"ACTIVE","type":"private","vlanId":0,"regions":[]}]`
 		code, stdout, _ := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
 		if code == 0 {
 			t.Fatalf("a probe with an lzprobe- leftover exited 0:\n%s", stdout)
@@ -612,4 +620,51 @@ func writeAccount(w *probeWorld, dir, id string) {
 	path := filepath.Join(w.cfg, "accounts", dir, "account.env")
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, []byte("LZ_ACCOUNT_ID="+id+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_STATE=p1\nLZ_ADMIN_POLICY_ID=pol-admin\n"), 0o600)
+}
+
+// TestProbeLeftoversThroughAPI (T084; T083 gap "entry wiring", "which credential"): `lz-live
+// probe` lists leftovers through lz-live's own API client with the credential the run binds, the
+// sandbox.env service account: every listing carries the bearer token issued to its client id
+// (EU.sandboxadmin), both API versions are asked, no ovhcloud is looked up or started (a fake one
+// is on PATH), and a listing the API refuses fails the run instead of passing it.
+func TestProbeLeftoversThroughAPI(t *testing.T) {
+	t.Run("sandbox-credential", func(t *testing.T) {
+		w := newProbeWorld(t)
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+		if code != 0 {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		if len(*w.listed) == 0 {
+			t.Fatal("the leftover check listed nothing through the API")
+		}
+		versions := map[string]bool{}
+		for _, l := range *w.listed {
+			if l.Client != "EU.sandboxadmin" {
+				t.Errorf("listing %s with the token of %q, want the sandbox.env client EU.sandboxadmin", l.Path, l.Client)
+			}
+			versions[strings.SplitN(l.Path, "/", 3)[1]] = true
+		}
+		if !versions["v1"] || !versions["v2"] {
+			t.Errorf("listed under %v, want v1 and v2", versions)
+		}
+		if slices.Contains(*w.lookedUp, "ovhcloud") {
+			t.Errorf("lz-live looked up ovhcloud (looked up %v)", *w.lookedUp)
+		}
+		if n := len(w.childCalls(t, "ovhcloud.log")); n != 0 {
+			t.Errorf("the probe started ovhcloud %d times", n)
+		}
+		w.noSecret(t, stdout, stderr)
+	})
+	t.Run("listing-refused-fails", func(t *testing.T) {
+		w := newProbeWorld(t)
+		w.listings["/v2/iam/policy"] = "not json"
+		code, stdout, _ := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+		if code == 0 {
+			t.Fatalf("a probe whose policy listing is unreadable exited 0:\n%s", stdout)
+		}
+		raw, _ := os.ReadFile(filepath.Join(w.checkout, ".local", "live", runIDOf(t, stdout), "leftovers.json"))
+		if !strings.Contains(string(raw), "/iam/policy") {
+			t.Errorf("leftovers.json does not name the unreadable listing /iam/policy:\n%s", raw)
+		}
+	})
 }

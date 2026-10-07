@@ -92,8 +92,13 @@ Never delete them by hand while a resource may exist.
 
 The leftover check runs after every run, plan-only included, over every kind of research R12's
 matrix, and writes `listings/<type>.json` and `leftovers.json`. Pass: `leftovers.json` has
-`"outcome":"pass"`, no leftover and no error. The `ovhcloud` argv (`ovhcloud api get <path>`) and
-its pagination are UNVERIFIED until T065 (P18); a listing error is `fail`, never skipped.
+`"outcome":"pass"`, no leftover and no error. It lists through lz-live's own read-only API client
+with the bearer token of the run's bound sandbox credential (T084; ovhcloud 0.15.0 has no `api`
+command, P18 refuted): GET only, `/iam/*` on APIv2, every other path on APIv1, a listed id escaped
+as one path segment. Pagination follows the APIv2 cursor headers (`X-Pagination-Cursor`,
+`X-Pagination-Cursor-Next`); whether v1 listings paginate that way is UNVERIFIED until T084's
+captured listings. A listing error, a non-2xx answer, an answer over 8 MiB, a repeated cursor or
+more than 1000 pages is `fail`, never skipped.
 
 | Kind (provider type) | Listing | Probe roots that create it | A probe leftover is |
 | --- | --- | --- | --- |
@@ -112,7 +117,9 @@ its pagination are UNVERIFIED until T065 (P18); a listing error is `fail`, never
 | project (`ovh_cloud_project`) | none: retained, never destroyed | project-import (plan only, import) | — |
 
 To look again by hand after a failed check (read only, same paths), with the admin credential
-loaded only in that shell: `ovhcloud api get <path>` (argv UNVERIFIED, P18).
+loaded only in that shell: the API console of the endpoint, or the `ovhcloud` subcommand of the
+kind where one exists (e.g. `ovhcloud cloud project list`; per-kind coverage UNVERIFIED). There is
+no generic `ovhcloud api get` (P18 refuted, evidence/T009.md).
 
 ## Two-stage runs (T010)
 

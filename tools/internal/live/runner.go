@@ -33,7 +33,7 @@ import (
 // apply started, in reverse order, continuing after a failed destroy; then it runs the leftover
 // check and writes summary.json. Every child gets the environment of env.go with a per-run scratch
 // HOME (0700, removed when the run ends; never the caller's HOME, so ~/.ovh.conf,
-// ~/.aws/credentials and the like cannot reach tofu or ovhcloud) and, for tofu, a data directory
+// ~/.aws/credentials and the like cannot reach tofu) and a data directory
 // (TF_DATA_DIR) per stack inside it, and every child stream passes through redact.go.
 //
 // Stopping a child: SIGINT, SIGTERM or the deadline is forwarded to the running child (the
@@ -647,9 +647,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	if errors.Is(invErr, os.ErrNotExist) {
 		invErr = nil
 	}
-	check := r.Leftovers
-	check.child = s.child
-	rep := check.Check(dctx, entries)
+	rep := r.Leftovers.Check(dctx, entries)
 	var recErr error
 	for typ, items := range rep.Listings {
 		raw, e := json.Marshal(items)

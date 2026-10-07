@@ -200,7 +200,6 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 	if err != nil {
 		return fmt.Errorf("tofu: %w", err)
 	}
-	ovhcloud, _ := d.LookPath("ovhcloud") // missing: the leftover check fails closed
 	r := live.Runner{
 		ID:        runID,
 		Dir:       filepath.Join(checkout, ".local", "live", runID),
@@ -210,7 +209,9 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		Vars:      map[string]string{"TF_VAR_project_id": projectID},
 		Stacks:    []live.Stack{{ID: filepath.Base(root), Dir: root, Ephemeral: true}},
 		Deadline:  p.deadline,
-		Leftovers: live.LeftoverCheck{Ovhcloud: ovhcloud, Projects: projects, Prefix: probePrefix, RunID: runID, Exempt: exempt},
+		// The leftover check lists through lz-live's own read-only API client with the bound sandbox
+		// credential (T084; ovhcloud 0.15.0 has no `api` command, P18).
+		Leftovers: live.LeftoverCheck{API: api, Cred: cred, Projects: projects, Prefix: probePrefix, RunID: runID, Exempt: exempt},
 		Terminal:  d.Stdout,
 		PlanOnly:  p.planOnly,
 	}
