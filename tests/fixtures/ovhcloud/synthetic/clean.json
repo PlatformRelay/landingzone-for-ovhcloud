@@ -1,5 +1,5 @@
 {
- "_source": "synthetic, schema of kb/api v1 cloud.json/me.json and v2 iam.json (T054); qualified on captures by T065",
+ "_source": "synthetic, schema of kb/api v1 cloud.json/me.json and v2 iam.json (T054); qualified on captures by T065; region details (cloud.Region, kb/api/v1/cloud.json:67596) added by T065, every synthetic region offering Object Storage (service name UNVERIFIED)",
  "projects": [
   {
    "id": "p1",
@@ -70,6 +70,58 @@
     "GRA11",
     "SBG5"
    ]
+  ],
+  "/cloud/project/p1/region/GRA11": [
+   {
+    "name": "GRA11",
+    "type": "region",
+    "status": "UP",
+    "continentCode": "EU",
+    "datacenterLocation": "GRA",
+    "services": [
+     {
+      "name": "instance",
+      "status": "UP",
+      "endpoint": "https://compute.gra11.cloud.ovh.net/"
+     },
+     {
+      "name": "network",
+      "status": "UP",
+      "endpoint": "https://network.compute.gra11.cloud.ovh.net/"
+     },
+     {
+      "name": "storage-s3-standard",
+      "status": "UP",
+      "endpoint": "https://s3.gra11.io.cloud.ovh.net/"
+     }
+    ]
+   }
+  ],
+  "/cloud/project/p1/region/SBG5": [
+   {
+    "name": "SBG5",
+    "type": "region",
+    "status": "UP",
+    "continentCode": "EU",
+    "datacenterLocation": "SBG",
+    "services": [
+     {
+      "name": "instance",
+      "status": "UP",
+      "endpoint": "https://compute.sbg5.cloud.ovh.net/"
+     },
+     {
+      "name": "network",
+      "status": "UP",
+      "endpoint": "https://network.compute.sbg5.cloud.ovh.net/"
+     },
+     {
+      "name": "storage-s3-standard",
+      "status": "UP",
+      "endpoint": "https://s3.sbg5.io.cloud.ovh.net/"
+     }
+    ]
+   }
   ],
   "/cloud/project/p1/region/GRA11/storage": [
    [
@@ -426,6 +478,32 @@
    [
     "GRA11"
    ]
+  ],
+  "/cloud/project/p2/region/GRA11": [
+   {
+    "name": "GRA11",
+    "type": "region",
+    "status": "UP",
+    "continentCode": "EU",
+    "datacenterLocation": "GRA",
+    "services": [
+     {
+      "name": "instance",
+      "status": "UP",
+      "endpoint": "https://compute.gra11.cloud.ovh.net/"
+     },
+     {
+      "name": "network",
+      "status": "UP",
+      "endpoint": "https://network.compute.gra11.cloud.ovh.net/"
+     },
+     {
+      "name": "storage-s3-standard",
+      "status": "UP",
+      "endpoint": "https://s3.gra11.io.cloud.ovh.net/"
+     }
+    ]
+   }
   ],
   "/cloud/project/p2/region/GRA11/storage": [
    []

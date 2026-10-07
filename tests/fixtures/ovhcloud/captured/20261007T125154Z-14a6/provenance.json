@@ -1,0 +1,66 @@
+{
+ "run_id": "20261007T125154Z-14a6",
+ "reviewed_commit": "337ee08bb644acf297230575a7464cdf827b0d02",
+ "captured": "2026-10-07",
+ "source": "lz-live probe --plan-only of tests/live/probes/alerting in the owner clone at the reviewed commit (evidence/T084.md, Live re-run); the run record .local/live/<run id>/leftovers.json and listings/*.json, written through the run's redactor; plan only, nothing created, cost 0. Committed by T065.",
+ "anonymised": {
+  "method": "~/.local/share/ovh-lz/review/t065-anonymise.py <run dir> <this dir>: every UUID, 32-hex id, account handle (<letters><digits>-ovh) and e-mail replaced by a fixed fake value, the same original always by the same fake; the redactor's [REDACTED] marker becomes the fake client id; structure, field names, types and value shapes kept; the script fails if an original value survives",
+  "values": [
+   {"what": "public cloud project id (32 hex), also inside its URN and the listing paths of leftovers.json", "fake": "f0000000000000000000000000000001"},
+   {"what": "account handle (policy owner, account resource URN, identity URNs)", "fake": "xx000001-ovh"},
+   {"what": "id of the lz-sandbox-admin IAM policy (the admin exemption's policy id)", "fake": "00000000-0000-4000-8000-000000000001"},
+   {"what": "id of the ovh-default IAM policy", "fake": "00000000-0000-4000-8000-000000000002"},
+   {"what": "resource group id in the ovh-default policy", "fake": "00000000-0000-4000-8000-000000000003"},
+   {"what": "lz-sandbox-admin OAuth2 client id, already [REDACTED] by the run's redactor (clientId and the oauth2-<client id> identity URN; believed the same value)", "fake": "EU.0000000000000001"}
+  ],
+  "kept": "resource names (lz-sandbox-admin, ovh-default, ADMIN, DEFAULT, UNPRIVILEGED: names the project or OVHcloud chose, no personal data), descriptions, actions, timestamps, region names; no e-mail occurs in the committed files (the run's plan, which holds one, is not committed)"
+ },
+ "project": {"id": "f0000000000000000000000000000001", "urn": "urn:v1:eu:resource:publicCloudProject:f0000000000000000000000000000001"},
+ "exempt": {"client_id": "EU.0000000000000001", "policy_id": "00000000-0000-4000-8000-000000000001"},
+ "kinds": {
+  "ovh_cloud_project_storage": {"status": "captured", "file": "listings/ovh_cloud_project_storage.json", "note": "[]: the record is written only after a successful listing (leftovers.go record), so at least one region of the project's list answered an empty array; the eight regions named in leftovers.json answered 404"},
+  "ovh_cloud_project_network_private": {"status": "captured", "file": "listings/ovh_cloud_project_network_private.json", "note": "no private network"},
+  "ovh_cloud_project_network_private_subnet": {"status": "not-captured", "note": "child of a network; the project has none, so no subnet listing was asked; owed from the first resource-creating run (T010)"},
+  "ovh_cloud_project_user": {"status": "captured", "file": "listings/ovh_cloud_project_user.json", "note": "no cloud project user"},
+  "ovh_cloud_project_user_s3_credential": {"status": "not-captured", "note": "child of a user; none exists; owed from T010"},
+  "ovh_cloud_project_user_s3_policy": {"status": "not-captured", "note": "child of a user; none exists; owed from T010"},
+  "ovh_me_api_oauth2_client": {"status": "captured", "file": "listings/ovh_me_api_oauth2_client.json", "note": "one client, the admin; the record holds clientId and name only (what the parser reads)"},
+  "ovh_iam_policy": {"status": "captured", "file": "listings/ovh_iam_policy.json", "note": "the APIv2 elements as answered"},
+  "ovh_me_identity_group": {"status": "captured", "file": "listings/ovh_me_identity_group.json", "note": "three default groups; the record holds name only"},
+  "ovh_iam_resource_tags": {"status": "not-captured", "note": "the project's IAM resource answered without a tags field (leftovers.json), so nothing was recorded; a tagged answer is owed from T010"},
+  "ovh_cloud_project_alerting": {"status": "not-captured", "note": "the id list was empty (no file, no error), so no alert was asked; owed from T010"},
+  "ovh_cloud_quota": {"status": "not-listed", "note": "a property of the project, nothing to list"},
+  "ovh_cloud_project": {"status": "not-listed", "note": "the adopted project, exempt by id"}
+ },
+ "replay": {
+  "_note": "Answers the run asked for but did not record, derived from the record and shaped by the API schema; {p} is the project id. An entry with from is the captured listing file served as one page; the OAuth2 client and identity group records are served by the test as the id list plus one detail answer per element (TestLeftoversCaptured).",
+  "/cloud/project/{p}/region": {
+   "provenance": "derived: the eight names from leftovers.json's storage errors; S3-UNNAMED stands for the region(s) whose storage listing answered [] (name not in the record); order not recorded",
+   "pages": [["BHS5", "DE1", "GRA11", "RBX-A", "RBX-ARCHIVE", "SBG5", "UK1", "WAW1", "S3-UNNAMED"]]
+  },
+  "/cloud/project/{p}/region/BHS5": {"provenance": "not captured: cloud.Region (kb/api/v1/cloud.json:67596); services UNVERIFIED, chosen without an Object Storage service because the storage listing answered 404", "pages": [{"name": "BHS5", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/DE1": {"provenance": "as BHS5", "pages": [{"name": "DE1", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/GRA11": {"provenance": "as BHS5", "pages": [{"name": "GRA11", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/RBX-A": {"provenance": "as BHS5", "pages": [{"name": "RBX-A", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/RBX-ARCHIVE": {"provenance": "as BHS5", "pages": [{"name": "RBX-ARCHIVE", "type": "region", "status": "UP", "services": []}]},
+  "/cloud/project/{p}/region/SBG5": {"provenance": "as BHS5", "pages": [{"name": "SBG5", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/UK1": {"provenance": "as BHS5", "pages": [{"name": "UK1", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/WAW1": {"provenance": "as BHS5", "pages": [{"name": "WAW1", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/S3-UNNAMED": {"provenance": "not captured: cloud.Region shape; the service name storage-s3-standard is UNVERIFIED (the qualifying evidence is the next live run's recorded region details)", "pages": [{"name": "S3-UNNAMED", "type": "region", "status": "UP", "services": [{"name": "storage-s3-standard", "status": "UP"}]}]},
+  "/cloud/project/{p}/region/S3-UNNAMED/storage": {"provenance": "captured", "from": "listings/ovh_cloud_project_storage.json"},
+  "/cloud/project/{p}/network/private": {"provenance": "captured", "from": "listings/ovh_cloud_project_network_private.json"},
+  "/cloud/project/{p}/user": {"provenance": "captured", "from": "listings/ovh_cloud_project_user.json"},
+  "/iam/policy": {"provenance": "captured", "from": "listings/ovh_iam_policy.json"},
+  "/cloud/project/{p}/alerting": {"provenance": "derived: no alerting record and no alerting error, so the id list parsed and was empty", "pages": [[]]},
+  "/iam/resource/urn:v1:eu:resource:publicCloudProject:{p}": {"provenance": "derived: the answer parsed as an object without a tags field (leftovers.json); other fields iam.resource.Resource (kb/api/v2/iam.json:2624), values not captured", "pages": [{"urn": "urn:v1:eu:resource:publicCloudProject:{p}", "name": "{p}", "type": "publicCloudProject"}]}
+ },
+ "files": {
+  "leftovers.json": "1df51045f62112b6f67337dd54dc78d4f583579f7ae9053e9b9a809d277e554a",
+  "listings/ovh_cloud_project_network_private.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "listings/ovh_cloud_project_storage.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "listings/ovh_cloud_project_user.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "listings/ovh_iam_policy.json": "119ad2cbeeb5c500d38a98582b3781ee8acae00687fc2e08d45a7fd4aa0ae672",
+  "listings/ovh_me_api_oauth2_client.json": "10e2668f9c9981e710320508abbca6e7b1f47f23b2a545bfa6a87ae08af5999c",
+  "listings/ovh_me_identity_group.json": "4f7aa75ea01568afb514e2787ef18e823bcdf04f3c00b02b7bbad69950540358"
+ }
+}
