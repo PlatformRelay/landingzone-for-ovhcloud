@@ -489,13 +489,22 @@ func TestProtectFixturesRefuseHostCapture(t *testing.T) {
 	}
 }
 
-// TestProtectOnlyPlanReader: protect.go is the one reader of a plan's resource changes (T064
-// row 9, coordinator decision for T055): no other non-test Go file of the tools module names
-// `resource_changes`, so no verb can judge a plan with a second, weaker reading of its own. The
-// scan must see protect.go itself, or it scans nothing.
+// TestProtectOnlyPlanReader: internal/planjson is the one reader of a plan's resource changes
+// (T064 row 9, coordinator decision for T055; T088 moved the decoding there, T038 decision 1b
+// option A): no other non-test Go file of the tools module names `resource_changes`, so no verb
+// can judge a plan with a second, weaker reading of its own, and the two plan readers,
+// live.Protect (protect.go) and stacks.PlannedBucketNames (generate.go), import it and decode
+// their `plan` argument with it (a spelling check: that the decoded value is what they judge is
+// pinned by planjson's TestCallersRefuseIdentically). The scan must see the package itself, or it
+// scans nothing.
 func TestProtectOnlyPlanReader(t *testing.T) {
+	const decoder = "github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/planjson"
 	root := filepath.Join("..", "..")
-	own := filepath.Join(root, "internal", "live", "protect.go")
+	own := filepath.Join(root, "internal", "planjson")
+	callers := map[string]bool{
+		filepath.Join(root, "internal", "live", "protect.go"):    false,
+		filepath.Join(root, "internal", "stacks", "generate.go"): false,
+	}
 	sawOwn := false
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -511,14 +520,17 @@ func TestProtectOnlyPlanReader(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		if _, ok := callers[p]; ok {
+			callers[p] = strings.Contains(string(raw), `"`+decoder+`"`) && strings.Contains(string(raw), "planjson.Decode(plan)")
+		}
 		if !strings.Contains(string(raw), "resource_changes") {
 			return nil
 		}
-		if p == own {
+		if filepath.Dir(p) == own {
 			sawOwn = true
 			return nil
 		}
-		t.Errorf("%s reads `resource_changes`: plans are judged by live.Protect (protect.go) only", p)
+		t.Errorf("%s reads `resource_changes`: plans are decoded by internal/planjson only", p)
 		return nil
 	})
 	if err != nil {
@@ -526,5 +538,10 @@ func TestProtectOnlyPlanReader(t *testing.T) {
 	}
 	if !sawOwn {
 		t.Errorf("the scan never saw %s reading `resource_changes`", own)
+	}
+	for p, imports := range callers {
+		if !imports {
+			t.Errorf("%s does not read plans through %s", p, decoder)
+		}
 	}
 }

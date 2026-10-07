@@ -142,7 +142,7 @@ tasks:
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
-      - go -C tools test -count=1 ./internal/live ./cmd/lz-live
+      - go -C tools test -count=1 ./internal/planjson ./internal/live ./cmd/lz-live
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/alerting
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/iam
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/network
