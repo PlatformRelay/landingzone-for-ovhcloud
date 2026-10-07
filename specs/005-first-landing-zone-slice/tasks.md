@@ -173,7 +173,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T079 controls green with one killed mutant per clause.
   - Evidence: `evidence/T080.md`; PR; initial status `not-run`.
 
-- [ ] T081 Write reserved-name tests for published companion variables in tools/internal/live/probe_identity_test.go
+- [x] T081 Write reserved-name tests for published companion variables in tools/internal/live/probe_identity_test.go — closed 2026-10-07, evidence: evidence/T081.md
   - Requirements: FR-010, FR-011; ADRs: 0008, 0009. Depends on: T080.
   - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: a root that publishes in `companion_env` any name the run itself sets for the companion (`OVH_ENDPOINT`, `TF_VAR_state_passphrase`, `TF_VAR_run_id`, `TF_VAR_project_id`, `TF_DATA_DIR`, `HOME`, `TMPDIR`, `PATH`, any `TF_CLI_*`, in any case) is refused before the companion starts, the root is still destroyed and no value leaks; today such a name overrides the run's value for the companion: behavioural red. Found in T080's review (evidence/T080.md).
   - Evidence: `evidence/T081.md`; PR; initial status `not-run`.
