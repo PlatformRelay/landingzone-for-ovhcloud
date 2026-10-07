@@ -1,0 +1,29 @@
+{
+  "comment": "Hand-written expectations for deployments.yaml (005 T033): data-model *Derived instance fields* and *Stage table*, research R2 and R5. Tags and edges compare as sets.",
+  "instances": [
+    {"id": "account-bootstrap", "scope": "account", "path": "stacks/account/bootstrap",
+     "backend": "local", "state_bucket": "", "state_key": "",
+     "tags": ["lz-stage-bootstrap", "lz-scope-account"],
+     "data": [], "authority": []},
+    {"id": "account-governance", "scope": "account", "path": "stacks/account/account-governance",
+     "backend": "s3", "state_bucket": "lz-bkt-state", "state_key": "account/account-governance/terraform.tfstate",
+     "tags": ["lz-stage-account-governance", "lz-scope-account"],
+     "data": [], "authority": ["account-bootstrap"]},
+    {"id": "demo-state", "scope": "account-tenant", "path": "stacks/account/tenant-state/demo",
+     "backend": "s3", "state_bucket": "lz-bkt-state", "state_key": "account/tenant-state/demo/terraform.tfstate",
+     "tags": ["lz-stage-tenant-state", "lz-scope-account-tenant", "lz-tenant-demo"],
+     "data": [], "authority": ["account-bootstrap"]},
+    {"id": "demo-dev-project", "scope": "environment", "path": "stacks/tenants/demo/dev/project",
+     "backend": "s3", "state_bucket": "lz-demo-bkt-state", "state_key": "tenants/demo/dev/project/terraform.tfstate",
+     "tags": ["lz-stage-project", "lz-scope-environment", "lz-tenant-demo", "lz-env-dev"],
+     "data": [], "authority": ["account-governance", "demo-state"]},
+    {"id": "demo-dev-gra11-network", "scope": "region", "path": "stacks/tenants/demo/dev/gra11/project-network",
+     "backend": "s3", "state_bucket": "lz-demo-bkt-state", "state_key": "tenants/demo/dev/gra11/project-network/terraform.tfstate",
+     "tags": ["lz-stage-project-network", "lz-scope-region", "lz-tenant-demo", "lz-env-dev", "lz-region-gra11"],
+     "data": ["demo-dev-project"], "authority": ["account-governance", "demo-state"]},
+    {"id": "demo-dev-gra11-runtime", "scope": "region", "path": "stacks/tenants/demo/dev/gra11/runtime",
+     "backend": "s3", "state_bucket": "lz-demo-bkt-state", "state_key": "tenants/demo/dev/gra11/runtime/terraform.tfstate",
+     "tags": ["lz-stage-runtime", "lz-scope-region", "lz-tenant-demo", "lz-env-dev", "lz-region-gra11"],
+     "data": ["demo-dev-project"], "authority": ["account-governance", "demo-state"]}
+  ]
+}
