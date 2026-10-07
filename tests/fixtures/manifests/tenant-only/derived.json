@@ -1,0 +1,17 @@
+{
+  "comment": "Hand-written expectations for deployments.yaml (005 T033): the same derivation as a platform manifest; authority edges point at the external entries.",
+  "instances": [
+    {"id": "demo-dev-project", "scope": "environment", "path": "stacks/tenants/demo/dev/project",
+     "backend": "s3", "state_bucket": "lz-demo-bkt-state", "state_key": "tenants/demo/dev/project/terraform.tfstate",
+     "tags": ["lz-stage-project", "lz-scope-environment", "lz-tenant-demo", "lz-env-dev"],
+     "data": [], "authority": ["account-governance", "demo-state"]},
+    {"id": "demo-dev-gra11-network", "scope": "region", "path": "stacks/tenants/demo/dev/gra11/project-network",
+     "backend": "s3", "state_bucket": "lz-demo-bkt-state", "state_key": "tenants/demo/dev/gra11/project-network/terraform.tfstate",
+     "tags": ["lz-stage-project-network", "lz-scope-region", "lz-tenant-demo", "lz-env-dev", "lz-region-gra11"],
+     "data": ["demo-dev-project"], "authority": ["account-governance", "demo-state"]},
+    {"id": "demo-dev-gra11-runtime", "scope": "region", "path": "stacks/tenants/demo/dev/gra11/runtime",
+     "backend": "s3", "state_bucket": "lz-demo-bkt-state", "state_key": "tenants/demo/dev/gra11/runtime/terraform.tfstate",
+     "tags": ["lz-stage-runtime", "lz-scope-region", "lz-tenant-demo", "lz-env-dev", "lz-region-gra11"],
+     "data": ["demo-dev-project"], "authority": ["account-governance", "demo-state"]}
+  ]
+}

@@ -1,0 +1,45 @@
+# Invalid manifest (005 T033), from sandbox/deployments.yaml: a two-character id.
+# Expected refusal: INVALID_VALUE.
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "Deployments",
+  "metadata": {"name": "sandbox"},
+  "spec": {
+    "scope": "platform",
+    "org": "lz",
+    "forge": "example.org/platformrelay/landingzone-for-ovhcloud",
+    "stage_source": {"kind": "local"},
+    # KD-1 (D88): the sandbox has one project; the state buckets share it with demo/dev.
+    "sandbox": {"shared_state_project": true},
+    "state": {
+      "project": {"ref": "SANDBOX"},
+      "region": "gra",
+      "endpoint": "https://s3.gra.io.cloud.ovh.net"
+    },
+    "tenants": [
+      {
+        "name": "demo",
+        "environments": [
+          {
+            "name": "dev",
+            # T009 (D94): P5 refuted, so the sandbox project is referenced, not adopted (research R7).
+            "project": {"mode": "reference", "ref": "SANDBOX"},
+            "regions": [
+              {"name": "GRA11", "network": {"cidr": "10.20.0.0/24", "vlan_id": 0}}
+            ],
+            "budget_alert": {"enabled": false},
+            "quota_guard": {"enabled": false}
+          }
+        ]
+      }
+    ],
+    "instances": [
+      {"id": "account-bootstrap", "stage": "bootstrap"},
+      {"id": "account-governance", "stage": "account-governance"},
+      {"id": "demo-state", "stage": "tenant-state", "tenant": "demo"},
+      {"id": "dp", "stage": "project", "tenant": "demo", "environment": "dev"},
+      {"id": "demo-dev-gra11-network", "stage": "project-network", "tenant": "demo", "environment": "dev", "region": "GRA11"},
+      {"id": "demo-dev-gra11-runtime", "stage": "runtime", "tenant": "demo", "environment": "dev", "region": "GRA11"}
+    ]
+  }
+}
