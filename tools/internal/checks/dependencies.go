@@ -28,7 +28,7 @@ const (
 )
 
 // DependencyRules lists every rule ScanDependencies can report.
-var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "NONSENSITIVE_CALL", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "NONSENSITIVE_CALL", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STAGE_COMPONENT_CALLS", "STAGE_RESOURCE", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 
 // purity holds the FR-003 facts of configuration: whether it declares a state
 // backend (a backend or cloud block), configures a provider, or reads another
@@ -105,6 +105,45 @@ func buckets(body *hclsyntax.Body) []string {
 		if block.Type == "resource" && len(block.Labels) > 0 && slices.ContainsFunc(bucketResources, func(p string) bool { return strings.HasPrefix(block.Labels[0], p) }) {
 			out = append(out, strings.Join(block.Labels, "."))
 		}
+	}
+	return out
+}
+
+// resources lists the resource blocks one parsed file declares. A stage
+// composes components and declares none (ADR-0002); data sources are not
+// resources.
+func resources(body *hclsyntax.Body) []string {
+	var out []string
+	for _, block := range body.Blocks {
+		if block.Type == "resource" {
+			out = append(out, strings.Join(block.Labels, "."))
+		}
+	}
+	return out
+}
+
+// tenantState reaches its one tenant bucket through exactly one, unrepeated
+// state-backend call and calls no other module (G6; T021 decision request 1).
+const tenantState = "stages/tenant-state"
+
+// moduleCall is one module block of a configuration file: its name, its
+// source if literal, and whether count or for_each repeats it.
+type moduleCall struct {
+	name, source      string
+	literal, repeated bool
+}
+
+// moduleCalls lists the module blocks of one parsed configuration file.
+func moduleCalls(body *hclsyntax.Body) []moduleCall {
+	var out []moduleCall
+	for _, block := range body.Blocks {
+		if block.Type != "module" || len(block.Labels) == 0 {
+			continue
+		}
+		source, literal := literalSource(block.Body)
+		_, count := block.Body.Attributes["count"]
+		_, forEach := block.Body.Attributes["for_each"]
+		out = append(out, moduleCall{name: block.Labels[0], source: source, literal: literal, repeated: count || forEach})
 	}
 	return out
 }
@@ -417,7 +456,9 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // under stacks/ (test files are outside these rules). In a retained module
 // (G7) every resource keeps a literal prevent_destroy and no external module
 // is called; the state-backend component takes its buckets only from the
-// protected module. No library, stage or instance calls nonsensitive (G2).
+// protected module. No library, stage or instance calls nonsensitive (G2). A
+// stage declares no resource, and the tenant-state stage calls only one
+// unrepeated state-backend component (G6).
 // Hidden directories are skipped unless a module call names one; fixture trees
 // are skipped only under tests/ and tools/.
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
@@ -577,6 +618,13 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	// remoteDirs are the directories that call a module by a non-relative
 	// source.
 	remoteDirs := map[string]bool{}
+	// tenantCalls are the module calls of the tenant-state stage's own
+	// directories, by calling directory.
+	type stageCall struct {
+		dir  string
+		call moduleCall
+	}
+	var tenantCalls []stageCall
 
 	// judge parses one configuration directory, applies the FR-003 rules and
 	// records its layer and edges.
@@ -620,6 +668,20 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 				if unmarks(body) {
 					add("NONSENSITIVE_CALL", dir, "a %s calls nonsensitive(): a secret it unmarks is published as a plain output (G2)", role(dir, layer))
 					break
+				}
+			}
+		}
+		// ADR-0002: a stage composes components; a resource of its own would
+		// escape every component rule and test (T022).
+		if layer == LayerStage {
+			for _, body := range bodies {
+				for _, r := range resources(body) {
+					add("STAGE_RESOURCE", dir, "a stage declares resource %s; stages compose components, declare it in one", r)
+				}
+				if under(dir, tenantState) {
+					for _, c := range moduleCalls(body) {
+						tenantCalls = append(tenantCalls, stageCall{dir, c})
+					}
 				}
 			}
 		}
@@ -762,6 +824,44 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			if remoteDirs[to] && !under(to, stateBackend) {
 				add("STATE_BUCKET_UNPROTECTED", dir, "state bucket (G7): %s calls a module by a non-relative source, its buckets cannot be checked", to)
 			}
+		}
+	}
+	// G6, stage part: the tenant-state stage's one bucket and two S3 users
+	// come from one state-backend instance. Every call is relative (fetched
+	// code is not scanned), unrepeated, and reaches the component's root (a
+	// subdirectory of it skips its naming, protection and policies) or the
+	// stage's own directories; each target is called by at most one module
+	// block, so it is instantiated at most once.
+	// A block of the same name in the same directory (an override file) is
+	// the same call.
+	callers := map[string]map[string]bool{}
+	for _, sc := range tenantCalls {
+		if !sc.call.literal {
+			continue // UNRESOLVED_REFERENCE already
+		}
+		if !strings.HasPrefix(sc.call.source, "./") && !strings.HasPrefix(sc.call.source, "../") {
+			add("STAGE_COMPONENT_CALLS", tenantState, "%s: module %q (%s) is not a relative source; its code cannot be checked", sc.dir, sc.call.name, sc.call.source)
+			continue
+		}
+		local, _, ok := resolve(sc.dir, sc.call.source, dirs)
+		if !ok {
+			continue // UNRESOLVED_REFERENCE already
+		}
+		if sc.call.repeated {
+			add("STAGE_COMPONENT_CALLS", tenantState, "%s: module %q repeats by count or for_each; the stage holds one bucket", sc.dir, sc.call.name)
+		}
+		if local != stateBackend && !under(local, tenantState) {
+			add("STAGE_COMPONENT_CALLS", tenantState, "%s: module %q (%s) is not %s, the only module this stage calls", sc.dir, sc.call.name, sc.call.source, stateBackend)
+			continue
+		}
+		if callers[local] == nil {
+			callers[local] = map[string]bool{}
+		}
+		callers[local][sc.dir+"\x00"+sc.call.name] = true
+	}
+	for _, target := range slices.Sorted(maps.Keys(callers)) {
+		if n := len(callers[target]); n > 1 {
+			add("STAGE_COMPONENT_CALLS", tenantState, "%d module blocks call %s; the stage takes its one bucket through one instance", n, target)
 		}
 	}
 	if cycle := findCycle(g.Uses); cycle != nil {

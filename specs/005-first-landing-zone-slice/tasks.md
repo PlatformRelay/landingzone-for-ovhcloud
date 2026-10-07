@@ -261,7 +261,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- stages/tenant-state`: through `components/state-backend`, one protected, versioned tenant bucket named from naming (`org`, tenant, kind bucket, role state) in `state_project_id`; a tenant S3 user and a platform S3 user, each with a policy covering only that bucket; mandatory labels with `lz:tenant`; outputs match the tenant-state schema, list `unlabelled[]`, secrets only sensitive. Guard G6: a mutant granting the tenant S3 user the account bucket, another tenant's bucket or `*` is red. Stubs are behavioural red.
   - Evidence: `evidence/T021.md`; PR; initial status `not-run`.
 
-- [ ] T022 [US2] Implement stages/tenant-state
+- [x] T022 [US2] Implement stages/tenant-state — closed 2026-10-07, evidence: evidence/T022.md
   - Requirements: FR-002, FR-003, FR-004, FR-008, FR-013; ADRs: 0004, 0009. Depends on: T021.
   - Verify: `task test:unit -- stages/tenant-state; task test:unit -- components/state-backend; task test:dependencies`: T021 controls green with the G6 mutant killed; the stage calls only `components/state-backend`.
   - Evidence: `evidence/T022.md`; PR; initial status `not-run`.

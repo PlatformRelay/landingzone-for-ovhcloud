@@ -1092,6 +1092,79 @@ func TestDependenciesNonsensitiveFixture(t *testing.T) {
 	}
 }
 
+// Stages compose components (ADR-0002; coordinator decision 2026-10-07 on
+// T021's decision request 1): a resource block anywhere in a stage's own
+// configuration is refused (STAGE_RESOURCE), data sources stay allowed. The
+// tenant-state stage reaches its one bucket through exactly one, unrepeated
+// components/state-backend call and calls nothing else (STAGE_COMPONENT_CALLS,
+// G6): a second call, a count or for_each, or another module would add
+// buckets or users no stage test can count. The first two rows are T021's
+// probes, verbatim. Test configuration, other layers and other stages'
+// component calls are outside the rules.
+func TestDependenciesStageComposition(t *testing.T) {
+	const ts = "stages/tenant-state"
+	base := map[string]string{
+		"components/state-backend/main.tf":       `variable "x" {}`,
+		"components/state-backend/sub/main.tf":   `variable "x" {}`,
+		"components/identity/ovh-native/main.tf": `variable "x" {}`,
+		"modules/naming/main.tf":                 `variable "x" {}`,
+	}
+	call := func(name, source, extra string) string {
+		return "module \"" + name + "\" {\n  source = \"" + source + "\"\n" + extra + "}\n"
+	}
+	one := call("state_backend", "../../components/state-backend", "")
+	probeSecondCall := "module \"second\" {\n  source     = \"../../components/state-backend\"\n  project_id = \"x\"\n  region     = \"GRA\"\n  org        = \"lz\"\n  instance   = \"x\"\n  managed_in = \"x\"\n  s3_users   = []\n}\n"
+	probeBucket := "resource \"ovh_cloud_project_storage\" \"extra\" {\n  service_name = \"x\"\n  region_name  = \"GRA\"\n  name         = \"lz-bkt-state\"\n}\n"
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		want    []string
+	}{
+		"probe: second component call":                 {map[string]string{ts + "/main.tf": one, ts + "/extra.tf": probeSecondCall}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"probe: direct bucket resource":                {map[string]string{ts + "/main.tf": one, ts + "/extra.tf": probeBucket}, ts, []string{"STAGE_RESOURCE"}},
+		"resource in another stage":                    {map[string]string{"stages/platform/main.tf": "resource \"terraform_data\" \"x\" {}\n"}, "stages/platform", []string{"STAGE_RESOURCE"}},
+		"resource in a stage's override file":          {map[string]string{ts + "/main.tf": one, ts + "/main_override.tf": probeBucket}, ts, []string{"STAGE_RESOURCE"}},
+		"resource in a stage subdirectory":             {map[string]string{"stages/platform/main.tf": call("s", "./sub", ""), "stages/platform/sub/main.tf": probeBucket}, "stages/platform/sub", []string{"STAGE_RESOURCE"}},
+		"resource in a hidden directory a stage calls": {map[string]string{"stages/platform/main.tf": call("h", "./.h", ""), "stages/platform/.h/main.tf": probeBucket}, "stages/platform/.h", []string{"STAGE_RESOURCE"}},
+		"second call in the same file":                 {map[string]string{ts + "/main.tf": one + call("again", "../../components/state-backend", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"second call by repository address":            {map[string]string{ts + "/main.tf": one + call("again", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/state-backend?ref=v0.0.1", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"only call to a component subdirectory":        {map[string]string{ts + "/main.tf": call("state_backend", "../../components/state-backend/sub", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"second call to a component subdirectory":      {map[string]string{ts + "/main.tf": one + call("again", "../../components/state-backend/sub", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"second call from a stage subdirectory":        {map[string]string{ts + "/main.tf": one + call("s", "./sub", ""), ts + "/sub/main.tf": call("again", "../../../components/state-backend", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"call with count":                              {map[string]string{ts + "/main.tf": call("state_backend", "../../components/state-backend", "  count = 2\n")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"call with for_each":                           {map[string]string{ts + "/main.tf": call("state_backend", "../../components/state-backend", "  for_each = toset([\"a\"])\n")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"repeated call to a stage subdirectory":        {map[string]string{ts + "/main.tf": call("s", "./sub", "  count = 1\n"), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"call to another component":                    {map[string]string{ts + "/main.tf": one + call("identity", "../../components/identity/ovh-native", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"stage subdirectory called twice":              {map[string]string{ts + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"two stage subdirectories each calling it":     {map[string]string{ts + "/main.tf": call("a", "./a", "") + call("b", "./b", ""), ts + "/a/main.tf": call("s", "../../../components/state-backend", ""), ts + "/b/main.tf": call("s", "../../../components/state-backend", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"only call by repository address":              {map[string]string{ts + "/main.tf": call("state_backend", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/state-backend?ref=v0.0.1", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		"call to an external module":                   {map[string]string{ts + "/main.tf": one + call("x", "ovh/bucket/ovh", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		// allowed
+		"one component call":                        {map[string]string{ts + "/main.tf": one}, "", nil},
+		"one component call through a subdirectory": {map[string]string{ts + "/main.tf": call("s", "./sub", ""), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, "", nil},
+		"override file merging the one call":        {map[string]string{ts + "/main.tf": one, ts + "/main_override.tf": call("state_backend", "../../components/state-backend", "")}, "", nil},
+		"data source in a stage":                    {map[string]string{ts + "/main.tf": one + "data \"ovh_cloud_project_storage\" \"b\" {}\n"}, "", nil},
+		"resource in a stage's test helper":         {map[string]string{ts + "/main.tf": one, ts + "/tests/setup/main.tf": probeBucket}, "", nil},
+		"test run calling the component again":      {map[string]string{ts + "/main.tf": one, ts + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/state-backend\"\n  }\n}\n"}, "", nil},
+		"resource in a component":                   {map[string]string{ts + "/main.tf": one, "components/identity/ovh-native/main.tf": probeBucket}, "", nil},
+		"other stage calls a component twice":       {map[string]string{"stages/platform/main.tf": call("a", "../../components/state-backend", "") + call("b", "../../components/state-backend", "")}, "", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := maps.Clone(base)
+			maps.Copy(files, c.files)
+			_, findings := ScanDependencies(writeModules(t, files))
+			if got := ruleNames(findings); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+			}
+		})
+	}
+}
+
 // The purity rules add negatives; they never widen the ADR-0002 edge matrix.
 func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 	want := map[string][]string{
@@ -1109,7 +1182,7 @@ func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 }
 
 func TestDependenciesRulesListed(t *testing.T) {
-	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "NONSENSITIVE_CALL", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "NONSENSITIVE_CALL", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STAGE_COMPONENT_CALLS", "STAGE_RESOURCE", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 	got := append([]string{}, DependencyRules...)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("BEHAVIORAL_RED: DependencyRules = %v, want %v", got, want)
