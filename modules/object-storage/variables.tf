@@ -1,4 +1,4 @@
-# Inputs of the plain bucket module (spec 005 T013 stub; T014 implements). The name and the tags
+# Inputs of the plain bucket module. The name and the tags
 # come from modules/naming; this module applies them unchanged.
 
 variable "project_id" {
@@ -30,4 +30,9 @@ variable "tags" {
   description = "Bucket tags, exactly as given: the labels output of modules/naming. A null value is refused."
   type        = map(string)
   nullable    = false
+
+  validation {
+    condition     = alltrue([for k, v in var.tags : v != null])
+    error_message = "tags: a null value is refused."
+  }
 }

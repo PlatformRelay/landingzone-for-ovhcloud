@@ -1,4 +1,4 @@
-# Inputs of the protected bucket module for state buckets (spec 005 T013 stub; T014 implements).
+# Inputs of the protected bucket module for state buckets.
 # Versioning is always on and is not an input; the name and the tags come from modules/naming.
 
 variable "project_id" {
@@ -23,4 +23,9 @@ variable "tags" {
   description = "Bucket tags, exactly as given: the labels output of modules/naming. A null value is refused."
   type        = map(string)
   nullable    = false
+
+  validation {
+    condition     = alltrue([for k, v in var.tags : v != null])
+    error_message = "tags: a null value is refused."
+  }
 }

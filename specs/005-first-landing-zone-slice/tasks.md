@@ -217,7 +217,7 @@ Independent test: V001, V002 on the US1 directories, V003.
   - Verify: `task test:unit -- modules/object-storage; task test:unit -- modules/object-storage-protected; task test:unit -- modules/object-storage-user`: with `mock_provider "ovh"` the bucket gets the given name, region, `versioning` when requested and exactly the given tags; the protected variant always enables versioning and carries a literal `prevent_destroy` (asserted by the lifecycle scan of T026); the S3 user has `objectstore_operator`, the policy JSON allows only the given bucket ARNs; the credential secret is only a sensitive output. Stubs are behavioural red.
   - Evidence: `evidence/T013.md`; PR; initial status `not-run`.
 
-- [ ] T014 [US1] Implement modules/object-storage, modules/object-storage-protected and modules/object-storage-user
+- [x] T014 [US1] Implement modules/object-storage, modules/object-storage-protected and modules/object-storage-user — closed 2026-10-07, evidence: evidence/T014.md
   - Requirements: FR-002, FR-004, FR-013; ADRs: 0003, 0009. Depends on: T013.
   - Verify: `task test:unit -- modules/object-storage; task test:unit -- modules/object-storage-protected; task test:unit -- modules/object-storage-user; task lint -- modules/object-storage; task lint -- modules/object-storage-protected; task lint -- modules/object-storage-user`: green; resources `ovh_cloud_project_storage`, `ovh_cloud_project_user`, `ovh_cloud_project_user_s3_credential`, `ovh_cloud_project_user_s3_policy` (provider docs cited in README); no attribute absent from 2.21.0 (P20).
   - Evidence: `evidence/T014.md`; PR; initial status `not-run`.

@@ -143,6 +143,27 @@ run "policy_actions_state_backend_no_wildcard" {
   }
 }
 
+# Every S3 user may list all buckets of the account by default; an explicit Deny refuses it
+# (s3-identity-and-access-management.mdx:145, example :150-158). Unconditioned, on every resource.
+run "policy_denies_listing_all_buckets" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement :
+      lookup(s, "Effect", "") == "Deny" && contains(flatten([lookup(s, "Action", [])]), "s3:ListAllMyBuckets") && contains(flatten([lookup(s, "Resource", [])]), "*") && !contains(keys(s), "Condition")
+    ])
+    error_message = "an unconditioned Deny statement refuses s3:ListAllMyBuckets on every resource"
+  }
+
+  assert {
+    condition = !contains(flatten([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : flatten([lookup(s, "Action", [])]) if lookup(s, "Effect", "") == "Allow"
+    ]), "s3:ListAllMyBuckets")
+    error_message = "no Allow statement grants s3:ListAllMyBuckets"
+  }
+}
+
 run "secret_only_a_sensitive_output" {
   command = apply
 
