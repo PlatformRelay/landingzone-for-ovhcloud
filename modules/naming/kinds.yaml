@@ -1,0 +1,97 @@
+# Per-kind name limits for modules/naming (research R15, ADR-0003, D87). A kind without a row here
+# is refused, even when the template has an abbreviation for it.
+#
+# Every row says where its limits come from:
+#   verified: true   the limits are quoted from the cited source;
+#   verified: false  UNVERIFIED: the source gives no length or character rule, so the row carries a
+#                    provisional limit that only narrows what the default template produces. Widen a
+#                    provisional row only with a cited source or a recorded live probe.
+#
+# Fields: min_length, max_length (characters); charset (a regular expression the whole name must
+# match); alphanumeric_ends (first and last character in [a-z0-9]); no_doubled_punctuation (no two of
+# `.`/`-` in a row); not_ip_address (refuse a dotted-quad name).
+
+bucket:
+  verified: true
+  source: >-
+    docs.ovhcloud.com storage-and-backup/object-storage/s3-limitations.mdx:49-54;
+    terraform-provider-ovh docs/resources/cloud_storage_object_bucket.md:58
+  min_length: 3
+  max_length: 63
+  charset: "^[a-z0-9.-]+$"
+  alphanumeric_ends: true
+  no_doubled_punctuation: true
+  not_ip_address: true
+
+private_network:
+  verified: false
+  source: >-
+    UNVERIFIED: terraform-provider-ovh docs/resources/cloud_project_network_private.md:25
+    states no length or character rule
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false
+
+subnet:
+  verified: false
+  source: >-
+    UNVERIFIED: terraform-provider-ovh docs/resources/cloud_project_network_private_subnet_v2.md:37
+    states no length or character rule
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false
+
+service_account:
+  verified: false
+  source: >-
+    UNVERIFIED: terraform-provider-ovh docs/resources/me_api_oauth2_client.md:45
+    states no length or character rule
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false
+
+iam_policy:
+  verified: false
+  source: >-
+    UNVERIFIED for length and characters: terraform-provider-ovh docs/resources/iam_policy.md:86
+    (must be unique); docs.ovhcloud.com account-and-service-management/account-information/iam-policy-ui.mdx:76
+    (unique, no spaces)
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false
+
+identity_group:
+  verified: false
+  source: >-
+    UNVERIFIED: terraform-provider-ovh docs/resources/me_identity_group.md:21
+    states no length or character rule
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false
+
+s3_user:
+  verified: false
+  source: >-
+    UNVERIFIED: terraform-provider-ovh docs/resources/cloud_project_user.md:33 has a description,
+    no name argument; no length or character rule
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false
