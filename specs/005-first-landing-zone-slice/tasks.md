@@ -212,7 +212,7 @@ Independent test: V001, V002 on the US1 directories, V003.
   - Verify: `task test:unit -- modules/naming; task lint -- modules/naming; task test:dependencies`: T011 controls green; provider-free module; each `kinds.yaml` row cites its source or is marked UNVERIFIED and refused for cloud kinds without a limit. Guard G4: a mutant letting extra labels override `lz:tenant` fails.
   - Evidence: `evidence/T012.md`; PR; initial status `not-run`.
 
-- [ ] T013 [US1] Write object storage module tests in modules/{object-storage,object-storage-protected,object-storage-user}/tests/
+- [x] T013 [US1] Write object storage module tests in modules/{object-storage,object-storage-protected,object-storage-user}/tests/ — closed 2026-10-07, evidence: evidence/T013.md
   - Requirements: FR-002, FR-004, FR-013; ADRs: 0003, 0008, 0009. Depends on: T012.
   - Verify: `task test:unit -- modules/object-storage; task test:unit -- modules/object-storage-protected; task test:unit -- modules/object-storage-user`: with `mock_provider "ovh"` the bucket gets the given name, region, `versioning` when requested and exactly the given tags; the protected variant always enables versioning and carries a literal `prevent_destroy` (asserted by the lifecycle scan of T026); the S3 user has `objectstore_operator`, the policy JSON allows only the given bucket ARNs; the credential secret is only a sensitive output. Stubs are behavioural red.
   - Evidence: `evidence/T013.md`; PR; initial status `not-run`.
