@@ -240,6 +240,10 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 	killGroup(ctx, cmd)
 	if fired {
 		cerr = errors.Join(cerr, <-second)
+	} else if second != nil {
+		// No resource operation, so no lock to contend for: the record says so (T010 reads it).
+		fmt.Fprintf(&s.writerLog, "\nsecond writer never started: the apply reported no resource operation\n")
+		cerr = errors.Join(cerr, writeRecord(filepath.Join(s.r.Dir, "second-writer-"+st.ID+".txt"), []byte(s.red.Redact(s.writerLog.String()))))
 	}
 	// P24 fallback, also (above all) after a failed apply: the state holds what the stream missed.
 	var ferr error
@@ -260,18 +264,27 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 }
 
 // applyStartWatch calls fire once, when the apply stream reports its first resource operation:
-// tofu holds the state lock from before that line until the apply ends.
+// tofu holds the state lock from before that line until the apply ends. The event name may fall
+// across two reads (review r1), so the end of each read is kept for the next.
 type applyStartWatch struct {
 	r    io.Reader
 	fire func()
 	done bool
+	tail []byte
 }
+
+var applyStartToken = []byte(`"apply_start"`)
 
 func (a *applyStartWatch) Read(p []byte) (int, error) {
 	n, err := a.r.Read(p)
-	if !a.done && bytes.Contains(p[:n], []byte(`"apply_start"`)) {
-		a.done = true
-		a.fire()
+	if !a.done && n > 0 {
+		seen := append(a.tail, p[:n]...)
+		if bytes.Contains(seen, applyStartToken) {
+			a.done, a.tail = true, nil
+			a.fire()
+		} else {
+			a.tail = bytes.Clone(seen[max(0, len(seen)-len(applyStartToken)+1):])
+		}
 	}
 	return n, err
 }

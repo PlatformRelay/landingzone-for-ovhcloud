@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -401,6 +403,49 @@ func TestProbeIdentities(t *testing.T) {
 	} {
 		if got, err := identities(env, "ovh-eu"); err == nil {
 			t.Errorf("%s: identities = %v, want a refusal", name, got)
+		}
+	}
+}
+
+// TestApplyStartWatch (T076 review r1): the second writer starts at the apply stream's first
+// apply_start event however the stream is cut into reads — ConsumeApply reads through a 4096-byte
+// buffer, so the event name can fall across two reads — and only once.
+func TestApplyStartWatch(t *testing.T) {
+	stream := strings.Repeat(`{"type":"version"}`+"\n", 300) + `{"type":"apply_start"}` + "\n" + `{"type":"apply_start"}` + "\n"
+	for name, r := range map[string]io.Reader{
+		"one byte per read": iotest.OneByteReader(strings.NewReader(stream)),
+		"half reads":        iotest.HalfReader(strings.NewReader(stream)),
+		"whole":             strings.NewReader(stream),
+	} {
+		fired := 0
+		w := &applyStartWatch{r: r, fire: func() { fired++ }}
+		if _, err := io.Copy(io.Discard, w); err != nil {
+			t.Fatal(err)
+		}
+		if fired != 1 {
+			t.Errorf("%s: the watch fired %d times, want once", name, fired)
+		}
+	}
+}
+
+// TestProbeIdentityWriterNeverStarted (T076 review r1): a companion apply whose stream reports no
+// resource operation starts no second writer; the run record says so, so T010 does not read a
+// missing record as anything else.
+func TestProbeIdentityWriterNeverStarted(t *testing.T) {
+	withUmask(t)
+	root := tempPrivate(t)
+	w := newRunWorld(t)
+	p := w.identityProbe(t, root, tofuStack{ApplyStream: w.stream(t, "companion-empty")})
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v\n%s", err, w.term)
+	}
+	raw, err := os.ReadFile(filepath.Join(w.runDir, "second-writer-p-companion.txt"))
+	if err != nil || !strings.Contains(string(raw), "never started") {
+		t.Errorf("the run record does not say the second writer never started (%v): %q", err, raw)
+	}
+	for _, c := range w.calls(t, "tofu.log") {
+		if c.Stack == "companion" && c.Cmd == "plan" && c.Plan == "" {
+			t.Error("a second writer ran although the companion's apply reported no resource operation")
 		}
 	}
 }
