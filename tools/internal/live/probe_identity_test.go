@@ -320,6 +320,10 @@ func TestProbeIdentity(t *testing.T) {
 		if !recorded {
 			t.Error("the second writer's lock error is not in the run record")
 		}
+		// Review r2: the writer's init output (stderr included) is in its record, not on the terminal.
+		if raw, _ := os.ReadFile(filepath.Join(w.runDir, "second-writer-p-companion.txt")); !bytes.Contains(raw, []byte("fake-tofu-init-stderr")) {
+			t.Error("the second writer's init stderr is not in its record")
+		}
 	})
 
 	t.Run("companion-apply-fails", func(t *testing.T) {
@@ -431,17 +435,35 @@ func TestApplyStartWatch(t *testing.T) {
 // TestProbeIdentityWriterNeverStarted (T076 review r1): a companion apply whose stream reports no
 // resource operation starts no second writer; the run record says so, so T010 does not read a
 // missing record as anything else.
+// Review r2: the same when the companion stops before its apply (here its plan fails).
 func TestProbeIdentityWriterNeverStarted(t *testing.T) {
-	withUmask(t)
-	root := tempPrivate(t)
-	w := newRunWorld(t)
-	p := w.identityProbe(t, root, tofuStack{ApplyStream: w.stream(t, "companion-empty")})
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v\n%s", err, w.term)
-	}
+	t.Run("no-resource-operation", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.identityProbe(t, root, tofuStack{ApplyStream: w.stream(t, "companion-empty")})
+		if err := p.Start(context.Background()); err != nil {
+			t.Fatalf("Start: %v\n%s", err, w.term)
+		}
+		checkNeverStarted(t, w, "the apply reported no resource operation")
+	})
+	t.Run("companion-plan-fails", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.identityProbe(t, root, tofuStack{PlanExit: 1})
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Error("a probe whose companion plan failed exited 0")
+		}
+		checkNeverStarted(t, w, "the companion stopped before its apply")
+	})
+}
+
+func checkNeverStarted(t *testing.T, w *runWorld, why string) {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(w.runDir, "second-writer-p-companion.txt"))
-	if err != nil || !strings.Contains(string(raw), "never started") {
-		t.Errorf("the run record does not say the second writer never started (%v): %q", err, raw)
+	if err != nil || !strings.Contains(string(raw), "never started: "+why) {
+		t.Errorf("the run record does not say the second writer never started because %s (%v): %q", why, err, raw)
 	}
 	for _, c := range w.calls(t, "tofu.log") {
 		if c.Stack == "companion" && c.Cmd == "plan" && c.Plan == "" {

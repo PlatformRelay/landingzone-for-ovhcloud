@@ -139,8 +139,9 @@ type session struct {
 	stackVars map[string]map[string]string
 	credFile  string // the companion credential file, once written
 	// The second writer's log and init outcome (prepareSecondWriter, secondWriter).
-	writerLog  bytes.Buffer
-	writerInit error
+	writerLog      bytes.Buffer
+	writerInit     error
+	writerRecorded bool
 }
 
 // tofuCmd is tofu on st's root with st's data directory (TF_DATA_DIR: backend configuration,
@@ -243,7 +244,7 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 	} else if second != nil {
 		// No resource operation, so no lock to contend for: the record says so (T010 reads it).
 		fmt.Fprintf(&s.writerLog, "\nsecond writer never started: the apply reported no resource operation\n")
-		cerr = errors.Join(cerr, writeRecord(filepath.Join(s.r.Dir, "second-writer-"+st.ID+".txt"), []byte(s.red.Redact(s.writerLog.String()))))
+		cerr = errors.Join(cerr, s.writerRecord(st))
 	}
 	// P24 fallback, also (above all) after a failed apply: the state holds what the stream missed.
 	var ferr error
@@ -296,7 +297,16 @@ func secondWriterStack(st Stack) Stack { return Stack{ID: st.ID + "-second-write
 // that live the writer reaches its plan while a short apply still holds the lock (T076). Its
 // output and an init failure go to the writer's record, not to the run's outcome.
 func (s *session) prepareSecondWriter(ctx context.Context, st Stack) {
-	s.writerInit = s.tofu(ctx, secondWriterStack(st), &s.writerLog, initArgs...)
+	cmd := s.tofuCmd(ctx, secondWriterStack(st), initArgs...)
+	cmd.Stdout, cmd.Stderr = &s.writerLog, &s.writerLog
+	s.writerInit = cmd.Run()
+	killGroup(ctx, cmd)
+}
+
+// writerRecord writes the second writer's log to the run record (redacted), once per run.
+func (s *session) writerRecord(st Stack) error {
+	s.writerRecorded = true
+	return writeRecord(filepath.Join(s.r.Dir, "second-writer-"+st.ID+".txt"), []byte(s.red.Redact(s.writerLog.String())))
 }
 
 // secondWriter is a second writer of st's state while st's apply holds the lock (P1–P3): a plan
@@ -313,7 +323,7 @@ func (s *session) secondWriter(ctx context.Context, st Stack) error {
 		killGroup(ctx, cmd)
 	}
 	fmt.Fprintf(buf, "\nsecond writer exit: %v\n", err)
-	return writeRecord(filepath.Join(s.r.Dir, "second-writer-"+st.ID+".txt"), []byte(s.red.Redact(buf.String())))
+	return s.writerRecord(st)
 }
 
 // identities returns the identities in a published environment: every <prefix>CLIENT_ID (or
@@ -423,7 +433,14 @@ func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error)
 
 // companion runs the companion root after the stage's apply, under the published identity, with
 // the second writer's data directory initialised before the companion's apply.
-func (s *session) companion(ctx context.Context) error {
+func (s *session) companion(ctx context.Context) (err error) {
+	// A companion that stops before its apply starts no writer: the record says so (review r2).
+	defer func() {
+		if !s.writerRecorded {
+			fmt.Fprintf(&s.writerLog, "\nsecond writer never started: the companion stopped before its apply: %v\n", err)
+			err = errors.Join(err, s.writerRecord(s.r.companion.stack))
+		}
+	}()
 	if _, err := s.companionEnv(ctx, false); err != nil {
 		return err
 	}

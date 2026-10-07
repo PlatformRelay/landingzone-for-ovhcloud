@@ -145,8 +145,9 @@ destroyed, so no probe identity outlives the session. That also removes the iden
 `lzprobe-p1-<run-id>` bucket that held the companion's state: a further `--cleanup` cannot reach
 what the companion left. The leftover check lists it (`lzprobe-p9-<run-id>` network, subnet,
 bucket); remove it as the admin in the same session (`ovhcloud`, or the Control Panel) and record
-it in T010's evidence. A second writer that never started (the companion's apply reported no
-resource operation) is written as `second writer never started` in its record.
+it in T010's evidence. The second writer's record always exists once the companion stage began: its init output, then
+`second writer exit: …`, or `second writer never started: …` with the reason (the companion's
+apply reported no resource operation, or the companion stopped before its apply).
 
 | # | Root (stage) | Premises | Task | Command | Expected observation (pass) | Refuted when | Destroy step |
 | --- | --- | --- | --- | --- | --- | --- | --- |
