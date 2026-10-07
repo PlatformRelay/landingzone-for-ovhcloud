@@ -163,7 +163,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T077 controls green with one killed mutant per clause.
   - Evidence: `evidence/T078.md`; PR; initial status `not-run`.
 
-- [ ] T079 Write identity-pairing tests for published companion credentials in tools/internal/live/probe_identity_test.go
+- [x] T079 Write identity-pairing tests for published companion credentials in tools/internal/live/probe_identity_test.go — closed 2026-10-07, evidence: evidence/T079.md
   - Requirements: FR-010, FR-011; ADRs: 0008, 0009. Depends on: T076.
   - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: every identity the root publishes in `companion_env` is paired and bound before the companion runs, whatever the case of its key names (`…_CLIENT_ID`/`…_Client_Id`/`…_client_id`), and a key that looks like a credential but pairs with no identity is refused before the companion starts; today a mixed-case identity reaches the companion unbound: behavioural red. Found in T076 (evidence/T076.md gaps).
   - Evidence: `evidence/T079.md`; PR; initial status `not-run`.
