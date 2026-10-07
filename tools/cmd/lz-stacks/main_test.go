@@ -331,8 +331,108 @@ func TestStacksPinnedTerramate(t *testing.T) {
 	unchanged(t, "refused runs", before, root)
 }
 
+// stacks:generate (005 T038, host, credential-free, unguarded): generates the reconciled stacks
+// in the checkout and prints one `generated <path>` line per file it wrote, sorted; a repeat run
+// prints nothing. Without a manifest it reports `fail: no manifest`; a `git` stage source is
+// refused with nothing written.
+func TestStacksGenerate(t *testing.T) {
+	pinned(t)
+	root := candidate(t, true)
+	if code, lines := lzStacks(t, root, "reconcile"); code != 0 || len(lines) != 6 {
+		t.Fatalf("reconcile: exit %d, %q", code, lines)
+	}
+	var want []string
+	for _, p := range sandboxPaths(t) {
+		want = append(want, "generated "+p+"/_lz_main.tf")
+	}
+	slices.Sort(want)
+	code, lines := lzStacks(t, root, "generate")
+	if code != 0 || !slices.Equal(lines, want) {
+		t.Fatalf("generate: exit %d, %q; want 0 and %q", code, lines, want)
+	}
+	for _, p := range sandboxPaths(t) {
+		if _, err := os.Stat(filepath.Join(root, p, "_lz_main.tf")); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	if code, lines := lzStacks(t, root, "generate"); code != 0 || len(lines) != 0 {
+		t.Errorf("repeat generate: exit %d, %q; want 0 and no output", code, lines)
+	}
+
+	empty := candidate(t, false)
+	before := snapshot(t, empty)
+	if code, lines := lzStacks(t, empty, "generate"); code != 1 || !slices.Equal(lines, []string{"fail: no manifest"}) {
+		t.Errorf("generate without a manifest: exit %d, %q", code, lines)
+	}
+	unchanged(t, "generate without a manifest", before, empty)
+
+	git := candidate(t, true)
+	manifest := filepath.Join(git, "stacks/deployments.yaml")
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, manifest, []byte(strings.Replace(string(data), `"stage_source": {"kind": "local"}`, `"stage_source": {"kind": "git"}`, 1)))
+	if code, lines := lzStacks(t, git, "reconcile"); code != 0 || len(lines) != 6 {
+		t.Fatalf("reconcile (git source): exit %d, %q", code, lines)
+	}
+	before = snapshot(t, git)
+	if code, lines := lzStacks(t, git, "generate"); code != 1 || len(lines) != 1 || !strings.HasPrefix(lines[0], "fail: "+stacks.CodeStageSourceNotImplemented) {
+		t.Errorf("generate with a git stage source: exit %d, %q", code, lines)
+	}
+	unchanged(t, "generate with a git stage source", before, git)
+}
+
+// test:stack-plans reports `fail: no manifest` until the repository has one (T039): zero
+// discovery is never a pass.
+func TestStacksPlansNoManifest(t *testing.T) {
+	root := candidate(t, false)
+	before := snapshot(t, root)
+	if code, lines := lzStacks(t, root, "plans"); code != 1 || !slices.Equal(lines, []string{"fail: no manifest"}) {
+		t.Fatalf("plans without a manifest: exit %d, %q; want 1, [fail: no manifest]", code, lines)
+	}
+	unchanged(t, "plans", before, root)
+}
+
+// fakeTofu installs a tofu that reports version and answers everything else with exit 3, as
+// LZ_TOFU.
+func fakeTofu(t *testing.T, version string) {
+	t.Helper()
+	fake := filepath.Join(t.TempDir(), "tofu")
+	writeFile(t, fake, []byte("#!/bin/sh\nif [ \"$1\" = version ]; then echo '{\"terraform_version\":\""+version+"\"}'; exit 0; fi\necho \"fake tofu $*\" >&2; exit 3\n"))
+	if err := os.Chmod(fake, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LZ_TOFU", fake)
+}
+
+// plans fails, naming each stack, when the stacks are not generated; a tofu other than the
+// pinned one is refused before anything is planned; neither writes to the candidate.
+func TestStacksPlansFail(t *testing.T) {
+	pinned(t)
+	root := candidate(t, true)
+	if code, lines := lzStacks(t, root, "reconcile"); code != 0 || len(lines) != 6 {
+		t.Fatalf("reconcile: exit %d, %q", code, lines)
+	}
+	before := snapshot(t, root)
+	fakeTofu(t, "1.13.0")
+	code, lines := lzStacks(t, root, "plans")
+	var want []string
+	for _, p := range sandboxPaths(t) {
+		want = append(want, "fail: "+p+": not generated: no tests/_lz_offline.tftest.hcl (run stacks:generate)")
+	}
+	if code != 1 || !slices.Equal(lines, want) {
+		t.Errorf("plans of ungenerated stacks: exit %d, %q; want 1 and %q", code, lines, want)
+	}
+	fakeTofu(t, "1.10.3")
+	if code, lines := lzStacks(t, root, "plans"); code != 1 || len(lines) != 1 || !strings.Contains(lines[0], `"1.10.3"`) || !strings.Contains(lines[0], "1.13.0") {
+		t.Errorf("plans with tofu 1.10.3: exit %d, %q; want 1 and one fail line naming both versions", code, lines)
+	}
+	unchanged(t, "plans", before, root)
+}
+
 func TestStacksUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"order"}, {"check", "extra"}, {"reconcile", "extra"}, {"-bogus", "check"}} {
+	for _, args := range [][]string{nil, {"order"}, {"check", "extra"}, {"reconcile", "extra"}, {"-bogus", "check"}, {"generate", "extra"}, {"plans", "extra"}} {
 		var out strings.Builder
 		if code := run(args, &out); code != 2 {
 			t.Errorf("%q: exit %d, want 2", args, code)

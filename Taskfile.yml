@@ -83,14 +83,29 @@ tasks:
       - go -C tools test -count=1 -run 'TestOutputs' ./internal/stacks
 
   # Stack-model controls (005 T034, extended by T036, T038, T041): every test of
-  # ./internal/stacks except the output contract (test:outputs) — manifest
-  # decoding and refusals, schemas/deployments.schema.json agreeing with the
-  # decoder's types and value rules, the stage table agreeing with data-model.md,
-  # the reconciler against the pinned Terramate — and lz-stacks.
+  # ./internal/stacks except the output contract (test:outputs) and the stack
+  # plans (test:stack-plans) — manifest decoding and refusals,
+  # schemas/deployments.schema.json agreeing with the decoder's types and value
+  # rules, the stage table agreeing with data-model.md, the reconciler and
+  # generation against the pinned Terramate — and lz-stacks.
   test:stacks:
-    desc: Deployment manifest decoder, schema/type agreement, stage table, reconciler and lz-stacks (005 V005)
+    desc: Deployment manifest decoder, schema/type agreement, stage table, reconciler, generation and lz-stacks (005 V005)
     cmds:
-      - go -C tools test -count=1 -skip '^TestOutputs' ./internal/stacks ./cmd/lz-stacks
+      - go -C tools test -count=1 -skip '^(TestOutputs|TestStackPlans)' ./internal/stacks ./cmd/lz-stacks
+
+  # Offline (005 T038): the plan controls on the growth, tenant-only and
+  # colliding fixtures generated into scratch, then every stack of this
+  # repository planned under its generated mocked test with the fixture
+  # envelopes of tests/fixtures/outputs/envelopes, on a scratch copy. It plans
+  # the committed generated files as they are: their freshness is stacks:check's,
+  # so run both. Reports
+  # `fail: no manifest` until stacks/deployments.yaml exists (005 T039); that
+  # red is the expected result, never a pass.
+  test:stack-plans:
+    desc: Every generated stack planned offline under its mocked test with fixture inputs; NAME_COLLISION on planned bucket names (005 V005, V006)
+    cmds:
+      - go -C tools test -count=1 -run '^TestStackPlans' ./internal/stacks
+      - go -C tools run ./cmd/lz-stacks -root .. plans
 
   # Host-side, credential-free, no host guard: runs in any checkout, including
   # an authoring worktree with the uncommitted manifest edit (005 FR-007). The
@@ -102,6 +117,15 @@ tasks:
     desc: Create the stacks stacks/deployments.yaml names and the tree lacks; refuse every other mismatch (005 FR-007)
     cmds:
       - go -C tools run ./cmd/lz-stacks -root .. reconcile {{.CLI_ARGS}}
+
+  # Host-side, credential-free, no host guard, like stacks:reconcile (005
+  # FR-007, T038): renders every reconciled stack's generated files with the
+  # pinned `terramate generate` after the strict manifest decode, and prints
+  # each file it wrote. Commit the result; stacks:check compares it offline.
+  stacks:generate:
+    desc: Generate the backend, provider, stage call, variables, outputs, import and offline test of every stack (005 FR-007)
+    cmds:
+      - go -C tools run ./cmd/lz-stacks -root .. generate
 
   # Offline: the entry mounts the candidate read-only, so the comparison runs
   # on a scratch copy. Reports `fail: no manifest` until stacks/deployments.yaml
@@ -258,11 +282,13 @@ tasks:
         /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$work" output -json
 
-  # A stage's real plan (005 T022, T024, T028, T030, T032): its own unit tests on a scratch copy,
+  # A stage's real plan (005 T022, T024, T028, T030, T032, T038 bootstrap): its own unit tests on a scratch copy,
   # mocked provider, mirror-only init; stdout is the verbose JSON plan of one run (RUN, default
   # `published_outputs_match_the_schema`), one line. tests/fixtures/outputs/capture-stage-plan.sh
   # records it. The project stage is captured in both modes: adopt (the default run) and reference;
   # the runtime stage without a slot (the default run) and with one.
+  capture:bootstrap-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: bootstrap}}]
   capture:tenant-state-plan:
     cmds: [{task: capture-stage-plan, vars: {STAGE: tenant-state}}]
   capture:account-governance-plan:

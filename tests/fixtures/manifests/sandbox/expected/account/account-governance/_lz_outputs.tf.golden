@@ -1,0 +1,25 @@
+// Expectation (005 T038), written from stages/account-governance/outputs.tf: every stage output, re-exported, in name order (Terramate renders the map sorted); compared as HCL.
+output "platform_deployer" {
+  value     = module.account_governance.platform_deployer
+  sensitive = false
+}
+
+output "platform_deployer_secret" {
+  value     = module.account_governance.platform_deployer_secret
+  sensitive = true
+}
+
+output "tenant_deployer_secrets" {
+  value     = module.account_governance.tenant_deployer_secrets
+  sensitive = true
+}
+
+output "tenants" {
+  value     = module.account_governance.tenants
+  sensitive = false
+}
+
+output "unlabelled" {
+  value     = module.account_governance.unlabelled
+  sensitive = false
+}

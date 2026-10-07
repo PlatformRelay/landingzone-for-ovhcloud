@@ -1,0 +1,35 @@
+// Expectation (005 T038), written from stages/tenant-state/outputs.tf: every stage output, re-exported, in name order (Terramate renders the map sorted); compared as HCL.
+output "platform_s3" {
+  value     = module.tenant_state.platform_s3
+  sensitive = true
+}
+
+output "platform_s3_user_id" {
+  value     = module.tenant_state.platform_s3_user_id
+  sensitive = false
+}
+
+output "state_bucket" {
+  value     = module.tenant_state.state_bucket
+  sensitive = false
+}
+
+output "tenant" {
+  value     = module.tenant_state.tenant
+  sensitive = false
+}
+
+output "tenant_s3" {
+  value     = module.tenant_state.tenant_s3
+  sensitive = true
+}
+
+output "tenant_s3_user_id" {
+  value     = module.tenant_state.tenant_s3_user_id
+  sensitive = false
+}
+
+output "unlabelled" {
+  value     = module.tenant_state.unlabelled
+  sensitive = false
+}

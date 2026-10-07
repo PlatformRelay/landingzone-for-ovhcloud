@@ -1,5 +1,5 @@
 #!/bin/sh
-# Capture a stage's real plan for the output-contract pins of 005 T022 (tenant-state), T024
+# Capture a stage's real plan for the output-contract pins of 005 T038 (bootstrap), T022 (tenant-state), T024
 # (account-governance), T028 (project, adopt and reference mode), T030 (project-network) and T032
 # (runtime, without and with a slot) through the installed offline entry:
 #
@@ -26,6 +26,7 @@ run() { env -i PATH=/usr/bin:/bin "$entry" --candidate "$checkout" -- task "$1";
 # stage, its run and the directories the stage's plan is made from.
 testrun=published_outputs_match_the_schema
 case "$capture_case" in
+  bootstrap) stage=bootstrap; dirs="stages/bootstrap components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
   tenant-state) stage=tenant-state; dirs="stages/tenant-state components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
   account-governance) stage=account-governance; dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group" ;;
   project | project-reference) stage=project; dirs="stages/project components/project-factory modules/naming modules/cloud-project modules/cloud-quota" ;;

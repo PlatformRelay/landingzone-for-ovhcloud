@@ -1,0 +1,25 @@
+// Expectation (005 T038), written from stages/project-network/outputs.tf: every stage output, re-exported, in name order (Terramate renders the map sorted); compared as HCL.
+output "cidr" {
+  value     = module.project_network.cidr
+  sensitive = false
+}
+
+output "network_id" {
+  value     = module.project_network.network_id
+  sensitive = false
+}
+
+output "regions_openstack_ids" {
+  value     = module.project_network.regions_openstack_ids
+  sensitive = false
+}
+
+output "subnet_id" {
+  value     = module.project_network.subnet_id
+  sensitive = false
+}
+
+output "unlabelled" {
+  value     = module.project_network.unlabelled
+  sensitive = false
+}

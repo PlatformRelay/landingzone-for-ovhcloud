@@ -363,7 +363,14 @@ landing-zone config under `stacks/_lz/*.tm.hcl` imported by `stacks/`. Stack met
 `terramate create --id --name --tags --after` (P17). Tags: `lz-stage-<stage>`, `lz-tenant-<tenant>`,
 `lz-env-<env>`, `lz-region-<region>`, `lz-scope-<scope>`, `lz-slot-<slot>`. `after` uses tag filters
 derived from data and authority edges. `generate_hcl` renders `_lz_backend.tf`, `_lz_providers.tf`,
-`_lz_main.tf`, `_lz_variables.tf`, `_lz_import.tf` (adopt only) and `tests/_lz_offline.tftest.hcl`.
+`_lz_main.tf`, `_lz_variables.tf`, `_lz_outputs.tf`, `_lz_import.tf` (adopt only) and `tests/_lz_offline.tftest.hcl`
+(plus `_lz_tenants.auto.tfvars.json` for `account-governance`). `_lz_outputs.tf` re-exports every
+output of the stage under its own name and sensitivity, so the root's `tofu output -json` is the
+envelope builder's input (R4; T038, T037 decision 3). A project stack's offline test also sets its
+resolved project id and that project's URN on the mocked project (KD-3), since a mock's URN is
+never the bound project's; `test:stack-plans` plans an adopted project without `_lz_import.tf`
+(P6). The shared configuration is imported by `stacks/lz.tm.hcl`, so it applies below `stacks/`
+only; the root `terramate.tm.hcl` sets `required_version` (P17: the project root without git).
 Generated files are committed; the dependency checker sees their header and classifies the
 directory as a generated instance. Fixture manifests generate into scratch directories, never under
 the repository (Terramate would treat committed fixture stacks as real stacks).

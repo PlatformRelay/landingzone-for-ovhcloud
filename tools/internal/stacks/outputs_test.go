@@ -520,6 +520,7 @@ func TestOutputsValidateRefusesMalformed(t *testing.T) {
 // credentialOutputs are the outputs each capture case plans sensitive by design (data-model
 // *Sensitive outputs*): never published, and the only outputs that may be sensitive.
 var credentialOutputs = map[string][]string{
+	"bootstrap":          {"platform_s3"},
 	"tenant-state":       {"platform_s3", "tenant_s3"},
 	"account-governance": {"platform_deployer_secret", "tenant_deployer_secrets"},
 }

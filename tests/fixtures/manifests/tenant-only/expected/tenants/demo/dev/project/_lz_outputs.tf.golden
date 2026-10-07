@@ -1,0 +1,35 @@
+// Expectation (005 T038), written from stages/project/outputs.tf: every stage output, re-exported, in name order (Terramate renders the map sorted); compared as HCL.
+output "budget_alert_id" {
+  value     = module.project.budget_alert_id
+  sensitive = false
+}
+
+output "environment" {
+  value     = module.project.environment
+  sensitive = false
+}
+
+output "project_id" {
+  value     = module.project.project_id
+  sensitive = false
+}
+
+output "project_urn" {
+  value     = module.project.project_urn
+  sensitive = false
+}
+
+output "regions" {
+  value     = module.project.regions
+  sensitive = false
+}
+
+output "tenant" {
+  value     = module.project.tenant
+  sensitive = false
+}
+
+output "unlabelled" {
+  value     = module.project.unlabelled
+  sensitive = false
+}

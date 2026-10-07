@@ -182,3 +182,29 @@ run "platform_credential_only_sensitive" {
     error_message = "neither the secret nor the access key id is in a published output"
   }
 }
+
+# The plan the output-contract pin reads (005 T038; tests/fixtures/outputs/captures/bootstrap-plan.json,
+# `task capture:bootstrap-plan`): the published values as the schema has them.
+run "published_outputs_match_the_schema" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for o in [output.state_bucket, output.state_project_id, output.state_region, output.state_endpoint, output.platform_s3_user_id] : o != ""
+    ])
+    error_message = "state_bucket, state_project_id, state_region, state_endpoint and platform_s3_user_id are non-empty strings (schema minLength 1)"
+  }
+
+  assert {
+    condition     = startswith(jsonencode(output.unlabelled), "[") && length(output.unlabelled) > 0 && alltrue([for a in output.unlabelled : a != ""])
+    error_message = "unlabelled is a list (not a map or object) of non-empty strings"
+  }
+
+  assert {
+    condition = !anytrue([
+      issensitive(output.state_bucket), issensitive(output.state_project_id), issensitive(output.state_region),
+      issensitive(output.state_endpoint), issensitive(output.platform_s3_user_id), issensitive(output.unlabelled),
+    ])
+    error_message = "the published outputs are not sensitive (a sensitive one is left out of the envelope and fails the schema's required list)"
+  }
+}

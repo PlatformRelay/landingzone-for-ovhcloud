@@ -649,6 +649,25 @@ func stageVariableType(t *testing.T, stage, name string) string {
 	return ""
 }
 
+// stageOutputs are the outputs stages/<stage>/outputs.tf declares, true where sensitive.
+func stageOutputs(t *testing.T, stage string) map[string]bool {
+	t.Helper()
+	f, diags := hclsyntax.ParseConfig(readFile(t, filepath.Join(repositoryRoot, "stages", stage, "outputs.tf")), stage, hcl.InitialPos)
+	if diags.HasErrors() {
+		t.Fatal(diags)
+	}
+	out := map[string]bool{}
+	for _, b := range f.Body.(*hclsyntax.Body).Blocks {
+		if b.Type == "output" && len(b.Labels) == 1 {
+			out[b.Labels[0]] = attr(b.Body, "sensitive") == "true"
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("stages/%s declares no output", stage)
+	}
+	return out
+}
+
 // checkStackInvariants holds every generated stack of a manifest to the rules that do not need a
 // hand-written expectation, with the decoder's derived fields as the oracle.
 func checkStackInvariants(t *testing.T, fixture string, m *Manifest, raw rawSpec, all map[string][]byte) {
@@ -677,7 +696,7 @@ func checkStackInvariants(t *testing.T, fixture string, m *Manifest, raw rawSpec
 		adopt := in.Stage == "project" && modeOf[[2]string{in.Tenant, in.Environment}] == "adopt"
 
 		// File set.
-		want := []string{"_lz_backend.tf", "_lz_main.tf", "_lz_providers.tf", "_lz_variables.tf", "tests/_lz_offline.tftest.hcl"}
+		want := []string{"_lz_backend.tf", "_lz_main.tf", "_lz_outputs.tf", "_lz_providers.tf", "_lz_variables.tf", "tests/_lz_offline.tftest.hcl"}
 		if adopt {
 			want = append(want, "_lz_import.tf")
 		}
@@ -840,6 +859,37 @@ func checkStackInvariants(t *testing.T, fixture string, m *Manifest, raw rawSpec
 		slices.Sort(gotVars)
 		if !slices.Equal(gotVars, wantVars) {
 			t.Errorf("%s: root variables %q, want %q", label, gotVars, wantVars)
+		}
+
+		// Root outputs (005 T038, research R4, T037 decision 3): exactly the stage's outputs, in
+		// _lz_outputs.tf, each re-exporting the stage output of its name with the stage's
+		// sensitivity, so `tofu output -json` of the root is the envelope builder's input.
+		wantOutputs := stageOutputs(t, in.Stage)
+		outputs, ofiles := ps.blocks("output")
+		gotOutputs := map[string]bool{}
+		for i, o := range outputs {
+			if ofiles[i] != "_lz_outputs.tf" || len(o.Labels) != 1 {
+				t.Errorf("%s: output %q in %s, want outputs in _lz_outputs.tf", label, o.Labels, ofiles[i])
+				continue
+			}
+			name := o.Labels[0]
+			gotOutputs[name] = true
+			sensitive, declared := wantOutputs[name]
+			if !declared {
+				t.Errorf("%s: output %s is not an output of stages/%s", label, name, in.Stage)
+				continue
+			}
+			if v := attr(o.Body, "value"); v != "module."+mod.Labels[0]+"."+name {
+				t.Errorf("%s: output %s = %s, want module.%s.%s", label, name, v, mod.Labels[0], name)
+			}
+			if s := attr(o.Body, "sensitive"); s != strconv.FormatBool(sensitive) {
+				t.Errorf("%s: output %s sensitive = %q, want %v as the stage declares it", label, name, s, sensitive)
+			}
+		}
+		for name := range wantOutputs {
+			if !gotOutputs[name] {
+				t.Errorf("%s: stage output %s is not re-exported", label, name)
+			}
 		}
 
 		// Import only for an adopted project, at the stage's address of the project.

@@ -1,8 +1,17 @@
-// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+// Hand-written expectation (005 T037; T038: the resolved project and its URN on the adopted
+// project, KD-3); compared as HCL, not byte for byte.
 mock_provider "ovh" {}
 
 variables {
   state_passphrase = "lz-offline-test-passphrase"
+  project_id       = "0123456789abcdef0123456789abcdef"
+}
+
+override_resource {
+  target = module.project.module.project_factory.module.project.ovh_cloud_project.this[0]
+  values = {
+    urn = "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+  }
 }
 
 run "plan" {
