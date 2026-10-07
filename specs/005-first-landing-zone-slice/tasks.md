@@ -321,7 +321,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network; go -C tools test ./internal/stacks -run TestOutputs -count=1`: a CIDR outside RFC 1918 (`0.0.0.0/0`, a public range) and a prefix shorter than /16 are refused at all three levels, while `10.250.0.0/24` and a /16 pass; every captured stage plan (tenant-state, account-governance, project in both modes, project-network) is refused when any output, of any type, is planned sensitive (`after_sensitive` not false) or when its output names differ from the schema's. Today the CIDR has no upper bound and the earlier pins scan string values only: behavioural red. Found in T030's review (evidence/T030.md).
   - Evidence: `evidence/T085.md`; PR; initial status `not-run`.
 
-- [ ] T086 Bound the network CIDR and pin output sensitivity in every stage-plan test in modules/private-network/, components/network/island/, stages/project-network/ and tools/internal/stacks/
+- [x] T086 Bound the network CIDR and pin output sensitivity in every stage-plan test in modules/private-network/, components/network/island/, stages/project-network/ and tools/internal/stacks/ — closed 2026-10-07, evidence: evidence/T086.md
   - Requirements: FR-002, FR-005; ADRs: 0004, 0017. Depends on: T085.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network; task test:outputs`: T085 controls green with one killed mutant per clause; the CIDR limits are cited or marked UNVERIFIED until T010 shows what the API accepts.
   - Evidence: `evidence/T086.md`; PR; initial status `not-run`.
