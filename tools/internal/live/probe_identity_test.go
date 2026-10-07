@@ -277,6 +277,32 @@ func TestProbeIdentity(t *testing.T) {
 		if locked == 0 {
 			t.Error("no second writer of the companion's state was refused by the lock the companion's apply held (P1–P3)")
 		}
+		// T076 (coordinator, T075 gap "live timing"): the second writer's data directory is
+		// initialised before the companion's apply starts, so live it reaches its plan while a short
+		// apply still holds the lock instead of initialising a fresh directory first.
+		writerInit, companionApply := -1, -1
+		for i, c := range calls {
+			if c.Stack == "companion" && c.Cmd == "apply" && !c.Locked && companionApply < 0 {
+				companionApply = i
+			}
+		}
+		for _, c := range calls {
+			if c.Stack != "companion" || !c.Locked || companionApply < 0 {
+				continue
+			}
+			for i, d := range calls[:companionApply+1] {
+				if d.Stack == "companion" && d.Cmd == "init" && d.DataDir == c.DataDir {
+					writerInit = i
+					break
+				}
+			}
+			if c.DataDir == calls[companionApply].DataDir {
+				t.Error("the second writer used the companion's own data directory: want one of its own")
+			}
+		}
+		if locked > 0 && writerInit < 0 {
+			t.Error("the second writer's data directory was not initialised before the companion's apply started")
+		}
 		if applies != 1 {
 			t.Errorf("the companion applied %d times, want once", applies)
 		}
@@ -352,6 +378,198 @@ func TestProbeIdentity(t *testing.T) {
 		calls := checkIdentityRun(t, w, root)
 		if got := signals(calls, "companion"); !slices.Equal(got, []string{"interrupt"}) {
 			t.Errorf("the companion's apply received %v, want the interrupt forwarded once", got)
+		}
+	})
+}
+
+// TestProbeIdentities (T076): every published identity — a <prefix>CLIENT_ID or <prefix>client_id
+// with its secret — is one to bind; the default one is required and half an identity is refused,
+// so no identity reaches the companion unbound.
+func TestProbeIdentities(t *testing.T) {
+	got, err := identities(identityEnv, "ovh-eu")
+	want := []Credential{{Endpoint: "ovh-eu", ClientID: identityClientID, ClientSecret: identityClient},
+		{Endpoint: "ovh-eu", ClientID: identityP25ID, ClientSecret: identityP25Secret}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("identities(published) = %v, %v; want the tenant and the P25 identity", got, err)
+	}
+	for name, env := range map[string]map[string]string{
+		"p25 id without its secret": {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_p25_client_id": "c"},
+		"p25 secret without its id": {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_p25_client_secret": "d"},
+		"empty p25 secret":          {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_p25_client_id": "c", "TF_VAR_p25_client_secret": ""},
+		"no default identity":       {"TF_VAR_p25_client_id": "c", "TF_VAR_p25_client_secret": "d"},
+		"default id only":           {"OVH_CLIENT_ID": "a"},
+	} {
+		if got, err := identities(env, "ovh-eu"); err == nil {
+			t.Errorf("%s: identities = %v, want a refusal", name, got)
+		}
+	}
+}
+
+// TestProbeIdentityPlanOnly (T076, coordinator): `--plan-only` on a root with a companion plans the
+// root only. Nothing is applied, so no identity exists: the companion never runs, the published
+// output is never read and no credential file is written.
+func TestProbeIdentityPlanOnly(t *testing.T) {
+	withUmask(t)
+	root := tempPrivate(t)
+	w := newRunWorld(t)
+	p := w.identityProbe(t, root, tofuStack{})
+	p.Run.PlanOnly = true
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatalf("plan-only Start: %v\n%s", err, w.term)
+	}
+	calls := w.calls(t, "tofu.log")
+	for _, c := range calls {
+		switch {
+		case c.Stack == "companion" && childCall(c):
+			t.Errorf("a plan-only run ran tofu %s in the companion root", c.Cmd)
+		case c.Cmd == "output":
+			t.Errorf("a plan-only run read the published identity (tofu output in %s)", c.Stack)
+		case c.Cmd == "apply" || c.Cmd == "destroy":
+			t.Errorf("a plan-only run ran tofu %s in %s", c.Cmd, c.Stack)
+		}
+	}
+	if got := sequence(calls, "plan"); !slices.Equal(got, []string{"p"}) {
+		t.Errorf("plans %v, want [p]: the root only", got)
+	}
+	for _, dir := range []string{root, w.runDir, w.stacks} {
+		if left := holders([]string{dir}, identitySecrets); len(left) > 0 {
+			t.Errorf("a plan-only run left %v holding a probe secret", left)
+		}
+	}
+}
+
+// TestProbeIdentityCleanup (T076, coordinator): `lz-live probe --cleanup` of a run whose root has a
+// companion re-reads the published identity from the root's retained state (under the admin
+// credential), has files.go write it to the run's probe directory, destroys the companion under
+// that identity first, then the root, and removes the credential; it plans and applies nothing.
+// A run whose root published no identity (it failed before) has no companion to destroy.
+func TestProbeIdentityCleanup(t *testing.T) {
+	failedRun := func(t *testing.T, w *runWorld, p Probe, root string, mut func(*tofuStack)) {
+		t.Helper()
+		st := w.scenario.Stacks["p"]
+		st.DestroyExit = 1
+		mut(&st)
+		w.scenario.Stacks["p"] = st
+		w.save(t)
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Fatal("a probe whose root destroy failed exited 0")
+		}
+		_, state, pass := probeFiles(t, root)
+		if !exists(state) || !exists(pass) {
+			t.Fatalf("after a failed root destroy: state kept %v, passphrase kept %v; want both", exists(state), exists(pass))
+		}
+		for _, dir := range []string{root, w.runDir, w.stacks} {
+			if left := holders([]string{dir}, identitySecrets); len(left) > 0 {
+				t.Errorf("after the failed run, %v still hold a probe secret: the credential outlives the run", left)
+			}
+		}
+		st.DestroyExit = 0
+		w.scenario.Stacks["p"] = st
+		w.save(t)
+	}
+
+	t.Run("companion-then-root", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.identityProbe(t, root, tofuStack{})
+		failedRun(t, w, p, root, func(*tofuStack) {})
+		before := len(w.calls(t, "tofu.log"))
+		if err := p.Cleanup(context.Background()); err != nil {
+			t.Fatalf("cleanup: %v\n%s", err, w.term)
+		}
+		calls := w.calls(t, "tofu.log")[before:]
+		probeDir, state, pass := probeFiles(t, root)
+		readIdentity, firstCompanion := -1, -1
+		for i, c := range calls {
+			if !childCall(c) {
+				continue
+			}
+			env := envOf(c)
+			switch c.Stack {
+			case "p":
+				if env["OVH_CLIENT_ID"] != runCreds["OVH_CLIENT_ID"] || env["OVH_CLIENT_SECRET"] != runCreds["OVH_CLIENT_SECRET"] {
+					t.Errorf("cleanup: root tofu %s without the admin credential", c.Cmd)
+				}
+				if c.Cmd == "output" && readIdentity < 0 {
+					readIdentity = i
+				}
+			case "companion":
+				if firstCompanion < 0 {
+					firstCompanion = i
+				}
+				for k, want := range identityEnv {
+					if env[k] != want {
+						t.Errorf("cleanup: companion tofu %s: %s = %q, want the probe identity's", c.Cmd, k, env[k])
+					}
+				}
+				for _, kv := range c.Env {
+					if strings.Contains(kv, runCreds["OVH_CLIENT_SECRET"]) || strings.Contains(kv, runCreds["OVH_CLIENT_ID"]) {
+						t.Errorf("cleanup: the admin credential reached companion tofu %s", c.Cmd)
+					}
+				}
+				if c.Cmd == "destroy" {
+					if len(c.Holders) == 0 {
+						t.Error("cleanup: when the companion was destroyed, no file held the probe credential")
+					}
+					for _, h := range c.Holders {
+						parts := strings.Split(h, "|")
+						if !within(parts[0], probeDir) || parts[1] != "600" || parts[2] != "700" {
+							t.Errorf("cleanup: the probe credential is in %s (mode %s, directory %s), want 600 in the run's probe directory (700)", parts[0], parts[1], parts[2])
+						}
+					}
+				}
+			}
+			if c.Cmd == "plan" || c.Cmd == "apply" {
+				t.Errorf("cleanup ran tofu %s in %s: it must only destroy", c.Cmd, c.Stack)
+			}
+		}
+		if firstCompanion < 0 {
+			t.Fatalf("cleanup never ran the companion (destroys %v)", sequence(calls, "destroy"))
+		}
+		if readIdentity < 0 || readIdentity > firstCompanion {
+			t.Error("cleanup: the identity was not read from the root's state before the companion ran")
+		}
+		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"companion", "p"}) {
+			t.Errorf("cleanup destroys %v, want [companion p]", got)
+		}
+		for _, dir := range []string{root, w.runDir, w.stacks} {
+			if left := holders([]string{dir}, identitySecrets); len(left) > 0 {
+				t.Errorf("after the cleanup, %v still hold a probe secret", left)
+			}
+		}
+		if exists(state) || exists(pass) {
+			t.Errorf("after a passing cleanup: state kept %v, passphrase kept %v", exists(state), exists(pass))
+		}
+		for _, s := range identitySecrets {
+			if strings.Contains(w.term.String(), s) {
+				t.Error("a probe secret reached the terminal during the cleanup")
+			}
+		}
+	})
+
+	t.Run("no-published-identity", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.identityProbe(t, root, tofuStack{})
+		none := filepath.Join(w.bin, "outputs-none.json")
+		if err := os.WriteFile(none, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		failedRun(t, w, p, root, func(st *tofuStack) { st.ApplyExit, st.Outputs = 1, none })
+		before := len(w.calls(t, "tofu.log"))
+		if err := p.Cleanup(context.Background()); err != nil {
+			t.Fatalf("cleanup of a root that published no identity: %v\n%s", err, w.term)
+		}
+		calls := w.calls(t, "tofu.log")[before:]
+		for _, c := range calls {
+			if c.Stack == "companion" && childCall(c) {
+				t.Errorf("cleanup ran tofu %s in the companion of a root that published no identity", c.Cmd)
+			}
+		}
+		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"p"}) {
+			t.Errorf("cleanup destroys %v, want [p]", got)
 		}
 	})
 }

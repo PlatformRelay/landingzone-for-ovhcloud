@@ -15,22 +15,34 @@ import (
 const redacted = "[REDACTED]"
 
 // Redactor replaces every occurrence of a secret; empty secrets are ignored.
-type Redactor struct{ secrets []string } // longest first, so a secret holding another goes whole
+type Redactor struct {
+	mu      sync.RWMutex
+	secrets []string // longest first, so a secret holding another goes whole
+}
 
 // NewRedactor returns a Redactor for secrets.
 func NewRedactor(secrets ...string) *Redactor {
 	r := &Redactor{}
+	r.Add(secrets...)
+	return r
+}
+
+// Add adds secrets learnt during the run (a probe identity's published credential).
+func (r *Redactor) Add(secrets ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, s := range secrets {
 		if s != "" {
 			r.secrets = append(r.secrets, s)
 		}
 	}
 	sort.Slice(r.secrets, func(i, j int) bool { return len(r.secrets[i]) > len(r.secrets[j]) })
-	return r
 }
 
 // Redact returns s with every secret replaced.
 func (r *Redactor) Redact(s string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, sec := range r.secrets {
 		s = strings.ReplaceAll(s, sec, redacted)
 	}
@@ -40,6 +52,8 @@ func (r *Redactor) Redact(s string) string {
 // held is the length of the longest suffix of s that is a proper prefix of a secret: what a
 // writer must hold back until the next write tells whether the secret follows.
 func (r *Redactor) held(s string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	n := 0
 	for _, sec := range r.secrets {
 		for k := min(len(sec)-1, len(s)); k > n; k-- {

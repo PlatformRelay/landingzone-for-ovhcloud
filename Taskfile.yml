@@ -88,6 +88,7 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/quota
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/state-backend
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam/companion
 
   # Host target: the owner on the maintainer host only, never inside lz-offline
   # and never run by an agent (it loads ~/.config/ovh-lz/ credentials and calls
