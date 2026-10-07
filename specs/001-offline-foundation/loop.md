@@ -34,6 +34,7 @@ No golangci/arch-lint config exists; `go vet`/`gofmt` are the only Go linters av
 |---|---|---|---|
 | T001–T009 | CLOSED (merged) | per-PR astra rounds | see evidence/T00*.md |
 | T023 | CLOSED-WITH-GAPS | codex + Opus, 2 rounds (Opus: CI/harness diff); r1 REQUEST_CHANGES fixed, r2 REQUEST_CHANGES on registry digest coverage → decision | owner: GitHub run of the final head + record-only commit; decision: registry scope/inputs (evidence/T023.md) |
+| T024 | CLOSED-WITH-GAPS (test task: 5 tests red until T025) | codex + Opus, 2 rounds (Opus: offline entry tests); r1 REQUEST_CHANGES (3 test-isolation/coverage findings) fixed, r2 codex APPROVE / Opus CONCERNS | no target runs `./cmd/lz-offline`; decisions: T025 Verify + CI wiring, land T024+T025 together (evidence/T024.md) |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |
