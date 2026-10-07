@@ -1,0 +1,29 @@
+{
+  "companion_env": {
+    "sensitive": true,
+    "type": [
+      "object",
+      {
+        "AWS_ACCESS_KEY_ID": "string",
+        "AWS_SECRET_ACCESS_KEY": "string",
+        "OVH_CLIENT_ID": "string",
+        "OVH_CLIENT_SECRET": "string",
+        "TF_VAR_p25_client_id": "string",
+        "TF_VAR_p25_client_secret": "string"
+      }
+    ],
+    "value": {
+      "AWS_ACCESS_KEY_ID": "@P1_ACCESS_KEY@",
+      "AWS_SECRET_ACCESS_KEY": "@P1_SECRET_KEY@",
+      "OVH_CLIENT_ID": "@PROBE_CLIENT_ID@",
+      "OVH_CLIENT_SECRET": "@PROBE_CLIENT_SECRET@",
+      "TF_VAR_p25_client_id": "@P25_CLIENT_ID@",
+      "TF_VAR_p25_client_secret": "@P25_CLIENT_SECRET@"
+    }
+  },
+  "plain": {
+    "sensitive": false,
+    "type": "string",
+    "value": "x"
+  }
+}

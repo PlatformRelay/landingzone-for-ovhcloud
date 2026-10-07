@@ -43,6 +43,17 @@ type tofuStack struct {
 	PlanExit        int          `json:"plan_exit"`
 	DestroyExit     int          `json:"destroy_exit"`
 	StateList       []string     `json:"state_list"`
+	// Outputs: file holding what `tofu output -json` prints (T075; captured format, see
+	// testdata/tofu/output-companion.json); `output -json <name>` prints that output's value.
+	Outputs string `json:"outputs"`
+	// HoldLock (T075, P1–P3): apply holds the stack's state lock from its start until another
+	// writer of that stack was refused (or 10 s passed); a writer that finds the lock held is
+	// logged Locked and fails with the lock error, as tofu does with -lock-timeout=0s.
+	HoldLock bool `json:"hold_lock"`
+	// ScanRoots/ScanFor (T075): every call lists the regular files under these roots and the
+	// child's HOME whose content holds any of ScanFor, as "<path>|<file mode>|<directory mode>".
+	ScanRoots []string `json:"scan_roots"`
+	ScanFor   []string `json:"scan_for"`
 }
 
 // planChange is one resource change the fake plan holds.
@@ -70,6 +81,8 @@ type tofuCall struct {
 	PassOK   *bool    `json:"pass_ok,omitempty"` // destroy: the state's passphrase matched
 	Pgrp     int      `json:"pgrp"`              // the child's process group
 	DataDir  string   `json:"data_dir"`          // the data directory tofu used (TF_DATA_DIR, else <root>/.terraform), symlinks resolved
+	Locked   bool     `json:"locked"`            // the stack's state lock was held by another writer (HoldLock)
+	Holders  []string `json:"holders"`           // files holding any of ScanFor at the time of the call (ScanRoots)
 }
 
 // Backend model of the fake tofu (T073), as host tofu 1.10.3 behaves offline on a provider-free
@@ -229,8 +242,63 @@ func fakeTofu(args []string) int {
 	statePath := os.Getenv("TF_VAR_state_path")
 	// Every subcommand prints the credential and the probe passphrase on stderr: the runner must
 	// redact every child stream, not only apply's.
-	fmt.Fprintf(os.Stderr, "fake-tofu-%s-stderr token=%s passphrase=%s\n", sub, secret, os.Getenv("TF_VAR_state_passphrase"))
+	fmt.Fprintf(os.Stderr, "fake-tofu-%s-stderr token=%s passphrase=%s s3=%s p25=%s\n", sub, secret, os.Getenv("TF_VAR_state_passphrase"),
+		os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("TF_VAR_p25_client_secret"))
+	if len(st.ScanRoots) > 0 {
+		call.Holders = holders(append(slices.Clone(st.ScanRoots), os.Getenv("HOME")), st.ScanFor)
+	}
+	lock := filepath.Join(bin, "lock-"+call.Stack)
+	// Only operations that take the state lock wait for it (plan, apply, destroy, refresh, import,
+	// state rm/mv/push), and none with -lock=false; init, output, show and state list do not.
+	takesLock := slices.Contains([]string{"plan", "apply", "destroy", "refresh", "import"}, sub) ||
+		(sub == "state" && len(rest) > 0 && slices.Contains([]string{"rm", "mv", "push"}, rest[0]))
+	// A writer waits for the lock as long as its -lock-timeout (tofu's default: 0s, refused at once).
+	waits := false
+	for _, a := range rest {
+		if v, ok := strings.CutPrefix(a, "-lock-timeout="); ok && v != "0s" && v != "0" {
+			waits = true
+		}
+	}
+	if takesLock && !has("-lock=false") && !waits && exists(lock) && (sub == "apply" || fakeInitialised(call.DataDir, statePath)) {
+		// Another writer holds the state lock (HoldLock): refused at once, the holder released. A
+		// writer whose data directory no init prepared fails on that first (below), not on the lock.
+		call.Cmd, call.Locked = sub, true
+		logCall(bin, "tofu.log", call)
+		_ = os.WriteFile(filepath.Join(bin, "refused-"+call.Stack), nil, 0o600)
+		fmt.Fprintln(os.Stderr, "Error: Error acquiring the state lock (fake-lock-marker)")
+		return 1
+	}
 	switch {
+	case sub == "output":
+		call.Cmd = "output"
+		logCall(bin, "tofu.log", call)
+		if !fakeInitialised(call.DataDir, statePath) {
+			return 1
+		}
+		raw, err := os.ReadFile(st.Outputs)
+		if err != nil || !has("-json") {
+			fmt.Fprintln(os.Stderr, "Error: fake output: no outputs or no -json")
+			return 1
+		}
+		if positional == "" {
+			fmt.Print(string(raw))
+			return 0
+		}
+		var all map[string]struct {
+			Value json.RawMessage `json:"value"`
+		}
+		if json.Unmarshal(raw, &all) != nil {
+			return 1
+		}
+		o, ok := all[positional]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Error: Output %q not found\n", positional)
+			return 1
+		}
+		var b bytes.Buffer
+		_ = json.Compact(&b, o.Value)
+		fmt.Println(b.String())
+		return 0
 	case sub == "init":
 		call.Cmd = "init"
 		logCall(bin, "tofu.log", call)
@@ -322,6 +390,13 @@ func fakeTofu(args []string) int {
 			return 0
 		}
 		call.Cmd = "apply"
+		var sigs chan os.Signal
+		if st.HangAfter > 0 {
+			// Trapped before the call is logged, so a signal sent once the call (or the stream) is
+			// seen is logged.
+			sigs = make(chan os.Signal, 8)
+			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		}
 		logCall(bin, "tofu.log", call)
 		if !planOK {
 			fmt.Fprintln(os.Stderr, "Error: apply without a saved plan file")
@@ -332,11 +407,10 @@ func fakeTofu(args []string) int {
 			raw, _ := json.Marshal(fakeState{PassSHA: passSHA(os.Getenv("TF_VAR_state_passphrase")), Resources: 1})
 			_ = os.WriteFile(statePath, raw, 0o600)
 		}
-		var sigs chan os.Signal
-		if st.HangAfter > 0 {
-			// Trapped before the first line, so a signal sent once the stream is seen is logged.
-			sigs = make(chan os.Signal, 8)
-			signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		if st.HoldLock {
+			if err := os.WriteFile(lock, nil, 0o600); err == nil {
+				defer os.Remove(lock)
+			}
 		}
 		if st.ApplyStream != "" {
 			raw, _ := os.ReadFile(st.ApplyStream)
@@ -344,6 +418,12 @@ func fakeTofu(args []string) int {
 				fmt.Println(l)
 				if st.HangAfter > 0 && i+1 == st.HangAfter {
 					return hang(bin, call.Stack, sigs, st.IgnoreInterrupt)
+				}
+				if st.HoldLock && i == 1 {
+					// Lock held, one resource being created: wait for the second writer.
+					if !waitFor(10*time.Second, func() bool { return exists(filepath.Join(bin, "refused-"+call.Stack)) }) {
+						logCall(bin, "tofu.log", tofuCall{Cmd: "lock-timeout", Stack: call.Stack})
+					}
 				}
 			}
 		}
