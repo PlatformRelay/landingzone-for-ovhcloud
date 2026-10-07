@@ -119,7 +119,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "stages/tenant-state", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user", "stages/account-governance", "components/identity/ovh-native", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group"]},
     {"id": "test:stacks", "requirements": ["005/FR-006", "005/FR-007", "005/FR-008", "005/FR-009", "005/FR-013", "005/SC-002"], "command": "task test:stacks", "creator": "005/T034", "kind": "behavioral",
      "scope": ["tools/internal/stacks", "tools/cmd/lz-stacks", "schemas/deployments.schema.json", "tests/fixtures/manifests"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/internal/planjson", "specs/005-first-landing-zone-slice/data-model.md"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/internal/planjson", "stacks", "stages", "specs/005-first-landing-zone-slice/data-model.md"]},
     {"id": "stacks:check", "requirements": ["005/FR-006", "005/FR-007", "005/FR-008", "005/SC-002"], "command": "task stacks:check", "creator": "005/T036", "kind": "behavioral",
      "scope": ["stacks", "terramate.tm.hcl"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/stacks", "tools/cmd/lz-stacks"]},
