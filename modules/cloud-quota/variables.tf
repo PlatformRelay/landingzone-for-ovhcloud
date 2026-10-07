@@ -1,10 +1,14 @@
-# Inputs of the cloud-quota module (spec 005 T025 stub; T026 implements). The validation the tests
-# expect is T026's; the flag and the regions are not inputs.
+# Inputs of the cloud-quota module (spec 005, P11). The flag and the regions are not inputs.
 
 variable "project_id" {
   description = "Public Cloud project id (service name) whose quota envelope is set."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.project_id) != ""
+    error_message = "project_id must not be empty."
+  }
 }
 
 variable "enabled" {

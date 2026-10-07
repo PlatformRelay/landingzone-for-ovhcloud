@@ -1,9 +1,9 @@
 output "project_id" {
   description = "Public Cloud project id (service name)."
-  value       = null
+  value       = var.project_id
 }
 
 output "urn" {
   description = "IAM URN of the project (the target of its resource tags)."
-  value       = null
+  value       = local.urn
 }

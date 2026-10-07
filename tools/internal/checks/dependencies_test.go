@@ -949,6 +949,91 @@ func TestDependenciesRetainedProtected(t *testing.T) {
 	}
 }
 
+// G7 (code part, spec 005 T026): modules/cloud-project is retained for its
+// project only. Exactly one ovh_cloud_project is declared in the package (in
+// its root directory, without for_each; a package left with only its tests
+// counts zero), and
+// every block of it carries a literal lifecycle { prevent_destroy = true } and
+// a literal deletion_protection = true; the budget alert and the IAM tags stay
+// removable by configuration (destroying the tags removes only the configured
+// keys, iam_resource_tags.md Notes). As in every retained package, a removed
+// block and a non-relative module source are refused: switching an adopted
+// project to reference mode is a runbook step, not code.
+func TestDependenciesRetainedProject(t *testing.T) {
+	const p = "modules/cloud-project"
+	projectWith := func(protection, lifecycle string) string {
+		return "resource \"ovh_cloud_project\" \"this\" {\n  count = var.adopt ? 1 : 0\n" + protection + "\n  lifecycle {\n" + lifecycle + "  }\n}\n"
+	}
+	project := projectWith("  deletion_protection = true\n", "    prevent_destroy = true\n")
+	other := "resource \"ovh_cloud_project\" \"other\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n"
+	alert := "resource \"ovh_cloud_project_alerting\" \"this\" {\n  count = var.alert ? 1 : 0\n}\n"
+	tags := "resource \"ovh_iam_resource_tags\" \"this\" {\n  urn = local.urn\n}\n"
+	read := "data \"ovh_cloud_project\" \"this\" {\n  service_name = var.project_id\n}\n"
+	module := project + read + tags + alert
+	const (
+		lacksPrevent  = "resource ovh_cloud_project.this lacks a literal lifecycle { prevent_destroy = true }"
+		lacksDeletion = "resource ovh_cloud_project.this lacks a literal deletion_protection = true"
+		removed       = "a removed block drops a retained resource"
+		external      = "is not a relative path"
+	)
+	count := func(n string) string { return "declares " + n + " ovh_cloud_project resources, want exactly one" }
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		detail  string
+	}{
+		"protected project, switchable alert and tags, data source": {map[string]string{p + "/main.tf": module}, "", ""},
+		"project with other lifecycle arguments":                    {map[string]string{p + "/main.tf": projectWith("  deletion_protection = true\n", "    prevent_destroy = true\n    ignore_changes  = [description]\n") + tags}, "", ""},
+		"override repeating the protected project is one project":   {map[string]string{p + "/main.tf": module, p + "/main_override.tf": projectWith("  deletion_protection = true\n  description = \"x\"\n", "    prevent_destroy = true\n")}, "", ""},
+		"other packages may declare projects freely":                {map[string]string{p + "/main.tf": module, "modules/other/main.tf": "resource \"ovh_cloud_project\" \"a\" {}\nresource \"ovh_cloud_project\" \"b\" {}\n"}, "", ""},
+		"test helper of the retained module":                        {map[string]string{p + "/main.tf": module, p + "/tests/setup/main.tf": "resource \"ovh_cloud_project\" \"x\" {}\n"}, "", ""},
+		"project without lifecycle":                                 {map[string]string{p + "/main.tf": "resource \"ovh_cloud_project\" \"this\" {\n  deletion_protection = true\n}\n" + tags}, p, lacksPrevent},
+		"project with prevent_destroy false":                        {map[string]string{p + "/main.tf": projectWith("  deletion_protection = true\n", "    prevent_destroy = false\n") + tags}, p, lacksPrevent},
+		"project with prevent_destroy from a variable":              {map[string]string{p + "/main.tf": projectWith("  deletion_protection = true\n", "    prevent_destroy = var.keep\n") + tags}, p, lacksPrevent},
+		"project without deletion_protection":                       {map[string]string{p + "/main.tf": projectWith("", "    prevent_destroy = true\n") + tags}, p, lacksDeletion},
+		"deletion_protection false":                                 {map[string]string{p + "/main.tf": projectWith("  deletion_protection = false\n", "    prevent_destroy = true\n") + tags}, p, lacksDeletion},
+		"deletion_protection from a variable":                       {map[string]string{p + "/main.tf": projectWith("  deletion_protection = var.protect\n", "    prevent_destroy = true\n") + tags}, p, lacksDeletion},
+		"deletion_protection conditional":                           {map[string]string{p + "/main.tf": projectWith("  deletion_protection = var.alert ? true : false\n", "    prevent_destroy = true\n") + tags}, p, lacksDeletion},
+		"deletion_protection a string":                              {map[string]string{p + "/main.tf": projectWith("  deletion_protection = \"true\"\n", "    prevent_destroy = true\n") + tags}, p, lacksDeletion},
+		"deletion_protection only inside a nested block":            {map[string]string{p + "/main.tf": projectWith("  timeouts {\n    deletion_protection = true\n  }\n", "    prevent_destroy = true\n") + tags}, p, lacksDeletion},
+		"override switches deletion protection off":                 {map[string]string{p + "/main.tf": module, p + "/main_override.tf": projectWith("  deletion_protection = false\n", "    prevent_destroy = true\n")}, p, lacksDeletion},
+		"override switches prevent_destroy off":                     {map[string]string{p + "/main.tf": module, p + "/main_override.tf": projectWith("  deletion_protection = true\n", "    prevent_destroy = false\n")}, p, lacksPrevent},
+		"no project":                                                {map[string]string{p + "/main.tf": read + tags + alert}, p, count("0")},
+		"alert type is not the project":                             {map[string]string{p + "/main.tf": read + tags + "resource \"ovh_cloud_project_alerting\" \"this\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n"}, p, count("0")},
+		"second project at another address":                         {map[string]string{p + "/main.tf": module + other}, p, count("2")},
+		"second project in another file":                            {map[string]string{p + "/main.tf": module, p + "/zz_extra.tf": other}, p, count("2")},
+		"second project in a library subdirectory":                  {map[string]string{p + "/main.tf": module + "module \"s\" {\n  source = \"./sub\"\n}\n", p + "/sub/main.tf": other}, p, count("2")},
+		"project only in a subdirectory called twice":               {map[string]string{p + "/main.tf": read + tags + "module \"a\" {\n  source = \"./sub\"\n}\nmodule \"b\" {\n  source = \"./sub\"\n}\n", p + "/sub/main.tf": project}, p, "outside the package root"},
+		"project repeated by for_each":                              {map[string]string{p + "/main.tf": strings.Replace(module, "count = var.adopt ? 1 : 0", "for_each = var.projects", 1)}, p, "repeats by for_each"},
+		"package left with only its tests":                          {map[string]string{p + "/tests/setup/main.tf": "variable \"x\" {}\n", p + "/README.md": "x"}, p, count("0")},
+		"package left with only its test file":                      {map[string]string{p + "/tests/unit.tftest.hcl": "run \"plan\" {\n  command = plan\n}\n", p + "/README.md": "x"}, p, count("0")},
+		"removed block":                                             {map[string]string{p + "/main.tf": module + "removed {\n  from = ovh_cloud_project.this\n}\n"}, p, removed},
+		"removed block keeping the remote object":                   {map[string]string{p + "/main.tf": module + "removed {\n  from = ovh_cloud_project.this\n\n  lifecycle {\n    destroy = false\n  }\n}\n"}, p, removed},
+		"external module call":                                      {map[string]string{p + "/main.tf": module + "module \"x\" {\n  source = \"ovh/project/ovh\"\n}\n"}, p, external},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			var want []string
+			if c.detail != "" {
+				want = []string{"RETAINED_UNPROTECTED"}
+			}
+			if got := ruleNames(findings); !reflect.DeepEqual(got, want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, want, findings)
+			}
+			matched := c.detail == ""
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+				matched = matched || strings.Contains(f.Detail, c.detail)
+			}
+			if !matched {
+				t.Errorf("BEHAVIORAL_RED: no finding says %q (%+v)", c.detail, findings)
+			}
+		})
+	}
+}
+
 // G7 (component part, spec 005 T016): components/state-backend creates its
 // buckets only through modules/object-storage-protected, so every state bucket
 // carries the literal prevent_destroy and versioning that module pins. tofu test
