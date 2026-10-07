@@ -140,18 +140,18 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/stacks", "tools/internal/live"]},
     {"id": "test:bootstrap", "requirements": ["005/FR-010", "005/FR-012", "005/SC-005"], "command": "task test:bootstrap", "creator": "005/T043", "kind": "behavioral",
      "scope": ["tools/internal/live", "tools/cmd/lz-live"],
-     "inputs": ["Taskfile.yml", "tools/go.mod"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"]},
     {"id": "test:live-lane", "requirements": ["005/FR-010", "005/FR-011", "005/FR-013", "005/SC-005"], "command": "task test:live-lane", "creator": "005/T055", "kind": "behavioral",
      "scope": ["tools/internal/live", "tools/internal/planjson", "tools/cmd/lz-live", "tools/internal/probes/live", "mise.live.toml"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/stacks"]},
     {"id": "live:probe", "requirements": ["005/FR-004", "005/FR-008", "005/FR-010", "005/FR-011"], "command": "task live:probe -- tests/live/probes/project-import --plan-only", "creator": "005/T009", "kind": "behavioral",
      "scope": ["tests/live/probes"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/live", "tools/cmd/lz-live"], "review": true},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson", "tools/internal/live", "tools/cmd/lz-live"], "review": true},
     {"id": "bootstrap:account", "requirements": ["005/FR-008", "005/FR-010", "005/FR-012", "005/SC-004"], "command": "task bootstrap:account", "creator": "005/T044", "kind": "behavioral",
      "scope": ["tools/internal/live", "tools/cmd/lz-live"],
-     "inputs": ["Taskfile.yml", "tools/go.mod"], "review": true},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"], "review": true},
     {"id": "live:chain", "requirements": ["005/FR-004", "005/FR-008", "005/FR-009", "005/FR-010", "005/FR-011", "005/SC-003"], "command": "task live:chain -- all", "creator": "005/T049", "kind": "behavioral",
      "scope": ["stacks", "tools/internal/live", "tools/cmd/lz-live", "tools/internal/probes/live"],
-     "inputs": ["Taskfile.yml", "tools/go.mod"], "review": true}
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"], "review": true}
   ]
 }
