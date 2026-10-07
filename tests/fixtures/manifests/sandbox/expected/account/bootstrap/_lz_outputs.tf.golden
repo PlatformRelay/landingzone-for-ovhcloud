@@ -1,0 +1,35 @@
+// Expectation (005 T038), written from stages/bootstrap/outputs.tf: every stage output, re-exported, in name order (Terramate renders the map sorted); compared as HCL.
+output "platform_s3" {
+  value     = module.bootstrap.platform_s3
+  sensitive = true
+}
+
+output "platform_s3_user_id" {
+  value     = module.bootstrap.platform_s3_user_id
+  sensitive = false
+}
+
+output "state_bucket" {
+  value     = module.bootstrap.state_bucket
+  sensitive = false
+}
+
+output "state_endpoint" {
+  value     = module.bootstrap.state_endpoint
+  sensitive = false
+}
+
+output "state_project_id" {
+  value     = module.bootstrap.state_project_id
+  sensitive = false
+}
+
+output "state_region" {
+  value     = module.bootstrap.state_region
+  sensitive = false
+}
+
+output "unlabelled" {
+  value     = module.bootstrap.unlabelled
+  sensitive = false
+}

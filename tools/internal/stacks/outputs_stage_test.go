@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-// Producer→consumer pins of 005 T022 and T024 (T018 review gap): a stage's real plan, made by its
+// Producer→consumer pins of 005 T022 and T024 (T018 review gap; bootstrap added by T038): a stage's real plan, made by its
 // own unit tests on the pinned OpenTofu (mocked provider), goes through BuildEnvelope and the result
 // validates under schemas/outputs/<stage>.schema.json with exactly the schema's published values and
 // no sensitive value. For account-governance the same plan also pins guard G5 on the planned
@@ -36,6 +36,7 @@ const repoRoot = "../../.."
 // or a stage and one of its other runs, planCases); test configuration counts only for the stage
 // itself (its mocks give the values). Keep in step with capture-stage-plan.sh.
 var stagePlans = map[string][]string{
+	"bootstrap":          {"stages/bootstrap", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user"},
 	"tenant-state":       {"stages/tenant-state", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user"},
 	"account-governance": {"stages/account-governance", "components/identity/ovh-native", "modules/naming", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group"},
 	"project":            {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
@@ -338,6 +339,7 @@ func planOutputContract(t testing.TB, msg testPlan, stage string, credentials ..
 // stagePlanPins is each capture case's pin over its plan; TestOutputsStagePlanPinsRefuse
 // (outputs_test.go, T085) runs them on mutated copies of the captured plans.
 var stagePlanPins = map[string]func(testing.TB, []byte){
+	"bootstrap":          pinBootstrapPlan,
 	"tenant-state":       pinTenantStatePlan,
 	"account-governance": pinAccountGovernancePlan,
 	"project":            func(t testing.TB, data []byte) { pinProjectPlan(t, "project", data) },
@@ -345,6 +347,25 @@ var stagePlanPins = map[string]func(testing.TB, []byte){
 	"project-network":    pinProjectNetworkPlan,
 	"runtime":            func(t testing.TB, data []byte) { pinRuntimePlan(t, "runtime", data) },
 	"runtime-slot":       func(t testing.TB, data []byte) { pinRuntimePlan(t, "runtime-slot", data) },
+}
+
+func TestOutputsBootstrapStagePlan(t *testing.T) {
+	pinBootstrapPlan(t, stagePlan(t, "bootstrap"))
+}
+
+// pinBootstrapPlan (005 T038, T086 gap 5): bootstrap's plan publishes exactly its schema's values,
+// its one credential output `platform_s3` planned sensitive and never published.
+func pinBootstrapPlan(t testing.TB, data []byte) {
+	t.Helper()
+	msg := decodePlan(t, data, "published_outputs_match_the_schema")
+	planOutputContract(t, msg, "bootstrap", "platform_s3")
+	doc, secrets := planOutputs(t, msg, "platform_s3")
+	// The credential's two fields: the control that the secrets scan below can fail.
+	if len(secrets) != 2 {
+		t.Fatalf("want the two credential strings of platform_s3, got %d", len(secrets))
+	}
+	publishedEnvelope(t, expectation("bootstrap", "account-bootstrap"), doc, secrets,
+		[]string{"platform_s3_user_id", "state_bucket", "state_endpoint", "state_project_id", "state_region", "unlabelled"})
 }
 
 func TestOutputsTenantStateStagePlan(t *testing.T) {

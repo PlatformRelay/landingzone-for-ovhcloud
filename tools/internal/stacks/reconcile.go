@@ -137,8 +137,8 @@ func Reconcile(opts ReconcileOptions) (ReconcileReport, error) {
 			for _, a := range afterFilters(in, rows) {
 				args = append(args, "--after", a)
 			}
-			if out, err := terramateCommand(opts.Terramate, append(args, in.Path)...).CombinedOutput(); err != nil {
-				return report, fmt.Errorf("terramate create %s: %v: %s", in.Path, err, bytes.TrimSpace(out))
+			if out, err := runTerramate(opts.Terramate, true, append(args, in.Path)...); err != nil {
+				return report, fmt.Errorf("terramate create %s: %v: %s", in.Path, err, out)
 			}
 		}
 		report.Created = append(report.Created, in.Path)
@@ -325,10 +325,36 @@ func stringList(v cty.Value) ([]string, error) {
 	return out, nil
 }
 
-func terramateCommand(bin string, args ...string) *exec.Cmd {
+// terramateCLIConfig is the Terramate CLI configuration every run gets through TM_CLI_CONFIG_FILE
+// (keys of Terramate 0.17.3's ui/tui/cliconfig: disable_checkpoint, disable_checkpoint_signature,
+// disable_telemetry, user_terramate_dir; 005 T038). Without it the pinned Terramate opens an
+// HTTPS connection on every run and writes ~/.terramate.d (checkpoint cache, checkpoint and
+// analytics signatures) even with TM_DISABLE_CHECKPOINT set, which 0.17.3 does not read;
+// user_terramate_dir moves the analytics signature it still writes into the run's own directory.
+const terramateCLIConfig = "disable_checkpoint = true\ndisable_checkpoint_signature = true\ndisable_telemetry = true\nuser_terramate_dir = %q\n"
+
+// runTerramate runs the pinned Terramate with its own CLI configuration in a temporary directory,
+// removed afterwards, and returns its trimmed output: stdout and stderr together when combined,
+// else stdout only.
+func runTerramate(bin string, combined bool, args ...string) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "lz-terramate-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	config := filepath.Join(dir, "terramaterc")
+	if err := os.WriteFile(config, fmt.Appendf(nil, terramateCLIConfig, filepath.Join(dir, "user")), 0o600); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(), "TM_DISABLE_CHECKPOINT=true")
-	return cmd
+	cmd.Env = append(os.Environ(), "TM_CLI_CONFIG_FILE="+config)
+	var out []byte
+	if combined {
+		out, err = cmd.CombinedOutput()
+	} else {
+		out, err = cmd.Output()
+	}
+	return bytes.TrimSpace(out), err
 }
 
 // TerramateTCB is the pinned Terramate inside the offline entry.
@@ -361,8 +387,8 @@ func resolveTerramate(root, override, tcb string) (string, error) {
 			return "", fmt.Errorf("no terramate binary (set LZ_TERRAMATE to the pinned %s): %v", pin[1], err)
 		}
 	}
-	out, err := terramateCommand(path, "version").Output()
-	if got := strings.TrimSpace(string(out)); err != nil || got != string(pin[1]) {
+	out, err := runTerramate(path, false, "version")
+	if got := string(out); err != nil || got != string(pin[1]) {
 		return "", fmt.Errorf("%s reports version %q (%v), want the pinned %s; set LZ_TERRAMATE", path, got, err, pin[1])
 	}
 	return path, nil
@@ -403,8 +429,8 @@ func CheckStacks(root, terramate string) ([]string, error) {
 	for _, p := range report.Created {
 		findings = append(findings, "missing stack "+p)
 	}
-	if out, err := terramateCommand(terramate, "-C", scratch, "generate").CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("terramate generate: %v: %s", err, bytes.TrimSpace(out))
+	if out, err := runTerramate(terramate, true, "-C", scratch, "generate"); err != nil {
+		return nil, fmt.Errorf("terramate generate: %v: %s", err, out)
 	}
 	generated, err := checkedFiles(scratch)
 	if err != nil {

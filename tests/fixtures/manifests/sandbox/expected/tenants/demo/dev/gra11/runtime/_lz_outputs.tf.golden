@@ -1,0 +1,35 @@
+// Expectation (005 T038), written from stages/runtime/outputs.tf: every stage output, re-exported, in name order (Terramate renders the map sorted); compared as HCL.
+output "capabilities" {
+  value     = module.runtime.capabilities
+  sensitive = false
+}
+
+output "kind" {
+  value     = module.runtime.kind
+  sensitive = false
+}
+
+output "pending_actions" {
+  value     = module.runtime.pending_actions
+  sensitive = false
+}
+
+output "readiness" {
+  value     = module.runtime.readiness
+  sensitive = false
+}
+
+output "scope" {
+  value     = module.runtime.scope
+  sensitive = false
+}
+
+output "slot" {
+  value     = module.runtime.slot
+  sensitive = false
+}
+
+output "unlabelled" {
+  value     = module.runtime.unlabelled
+  sensitive = false
+}
