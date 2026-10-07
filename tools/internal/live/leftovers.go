@@ -138,8 +138,8 @@ type apiLister struct {
 
 // quiet is a failed request's error without what Go quotes from the answer (an unparseable
 // Location header, which a hostile endpoint can fill with the token or the secret): only the
-// kind of failure remains. Errors that are not transport errors (a status, a decode error of
-// binding.go) carry no answer text and pass unchanged.
+// kind of failure remains. An error that is not a transport error passes unchanged (a listing's
+// Do fails only with one; the token request goes through quietToken).
 func quiet(what string, err error) error {
 	var ue *url.Error
 	switch {
@@ -151,6 +151,21 @@ func quiet(what string, err error) error {
 		return fmt.Errorf("%s: cancelled", what)
 	}
 	return fmt.Errorf("%s: request failed", what)
+}
+
+// quietToken is a failed token request's error with nothing the answer chose: a transport error
+// as quiet, binding.go's status error ("token endpoint answered <code>") kept, anything else (a
+// body that cannot be read or decoded, whose error may quote the answer) only named.
+func quietToken(err error) error {
+	var ue *url.Error
+	var code int
+	if errors.As(err, &ue) {
+		return quiet("token endpoint", err)
+	}
+	if n, _ := fmt.Sscanf(err.Error(), "token endpoint answered %d", &code); n == 1 && err.Error() == fmt.Sprintf("token endpoint answered %d", code) {
+		return err
+	}
+	return errors.New("token endpoint: no usable token in the answer")
 }
 
 // maxListing bounds one listing answer; a longer one is an error, never cut short.
@@ -177,7 +192,7 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 	if l.tok == "" {
 		tok, err := l.api.token(ctx, l.cred)
 		if err != nil {
-			l.tokErr = quiet("token endpoint", err)
+			l.tokErr = quietToken(err)
 			return nil, "", l.tokErr
 		}
 		l.tok = tok

@@ -238,7 +238,7 @@ func TestLeftoversAPINoEchoInErrors(t *testing.T) {
 	for name, c := range map[string]struct{ path, loc, listing string }{
 		"listing-location-echoes-token":  {"/v1/me/identity/group", "/%ZZ" + listToken, "/me/identity/group"},
 		"listing-location-echoes-secret": {"/v2/iam/policy", "/%ZZ" + listSecret, "/iam/policy"},
-		"token-location-echoes-secret":   {"/token", "/%ZZ" + listSecret + listClientID, ""},
+		"token-location-echoes-secret":   {"/token", "/%ZZ" + listSecret + listClientID, "token endpoint"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := newBoundsAPI(t)
@@ -248,6 +248,46 @@ func TestLeftoversAPINoEchoInErrors(t *testing.T) {
 				t.Errorf("outcome %q, errors %v; want fail naming %q", rep.Outcome, rep.Errors, c.listing)
 			}
 			assertNoCredentialIn(t, "report errors", rep.Errors...)
+		})
+	}
+}
+
+// TestLeftoversAPITokenAnswerNoEcho (T084 review r2): a token answer whose body cannot be read —
+// a chunked body cut short, followed by a malformed trailer line echoing the secret, which Go
+// quotes in its error — fails the check with an error naming the token endpoint and no
+// credential; the token endpoint's status stays in the error.
+func TestLeftoversAPITokenAnswerNoEcho(t *testing.T) {
+	for name, raw := range map[string]string{
+		"malformed-trailer": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n" +
+			"1\r\n{\r\n0\r\n" + listSecret + " " + listClientID + "\r\n\r\n",
+		"status": "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBoundsAPI(t)
+			tok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, buf, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					panic(err)
+				}
+				buf.WriteString(raw)
+				buf.Flush()
+				conn.Close()
+			}))
+			t.Cleanup(tok.Close)
+			c := b.check()
+			c.API.TokenURL = tok.URL + "/token"
+			rep := c.Check(context.Background(), nil)
+			joined := strings.Join(rep.Errors, "\n")
+			if rep.Outcome != "fail" || !strings.Contains(joined, "token endpoint") {
+				t.Errorf("outcome %q, errors %v; want fail naming the token endpoint", rep.Outcome, rep.Errors)
+			}
+			if name == "status" && !strings.Contains(joined, "503") {
+				t.Errorf("errors %v lost the token endpoint's status 503", rep.Errors)
+			}
+			assertNoCredentialIn(t, "report errors", rep.Errors...)
+			if strings.Contains(joined, listClientID) {
+				t.Errorf("report errors carry the answer's text: %v", rep.Errors)
+			}
 		})
 	}
 }
