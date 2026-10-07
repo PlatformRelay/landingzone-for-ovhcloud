@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/planjson"
 )
 
 // Refusal codes of generation.
@@ -76,29 +78,36 @@ func Generate(opts GenerateOptions) error {
 }
 
 // PlannedBucketNames returns the bucket names (ovh_cloud_project_storage `name`) a plan creates
-// or keeps, sorted. A bucket whose name is not known at plan time is an error: uniqueness cannot
-// be judged on it.
+// or keeps, sorted, read through the shared plan decoder (planjson: a document that is not a
+// complete plan, or is marked errored, is an error). A bucket whose actions are not known, or
+// whose name is not known at plan time, is an error: uniqueness cannot be judged on it.
 func PlannedBucketNames(plan []byte) ([]string, error) {
-	var doc struct {
-		Changes []struct {
-			Address string `json:"address"`
-			Mode    string `json:"mode"`
-			Type    string `json:"type"`
-			Change  struct {
-				Actions []string       `json:"actions"`
-				After   map[string]any `json:"after"`
-			} `json:"change"`
-		} `json:"resource_changes"`
-	}
-	if err := json.Unmarshal(plan, &doc); err != nil {
+	p, err := planjson.Decode(plan)
+	if err != nil {
 		return nil, fmt.Errorf("reading the plan: %w", err)
 	}
 	var names []string
-	for _, c := range doc.Changes {
-		if c.Mode != "managed" || c.Type != "ovh_cloud_project_storage" || slices.Equal(c.Change.Actions, []string{"delete"}) {
+	for _, c := range p.Changes {
+		mode, typ, err := c.Resource()
+		if err != nil {
+			return nil, fmt.Errorf("reading the plan: %w", err)
+		}
+		if mode != "managed" || typ != "ovh_cloud_project_storage" {
 			continue
 		}
-		name, ok := c.Change.After["name"].(string)
+		if !planjson.KnownActions(c.Actions) {
+			return nil, fmt.Errorf("%s: plan actions %q not known", c.Address, c.Actions)
+		}
+		if slices.Equal(c.Actions, []string{"delete"}) {
+			continue
+		}
+		var after map[string]any
+		if len(c.After) > 0 {
+			if err := json.Unmarshal(c.After, &after); err != nil {
+				return nil, fmt.Errorf("%s: planned object: %w", c.Address, err)
+			}
+		}
+		name, ok := after["name"].(string)
 		if !ok || name == "" {
 			return nil, fmt.Errorf("%s: bucket name not known at plan time", c.Address)
 		}

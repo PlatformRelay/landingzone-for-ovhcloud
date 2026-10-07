@@ -10,10 +10,12 @@ package live
 // it cannot read as a plan.
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/planjson"
 )
 
 // CondRetained is the condition of a retained-resource refusal.
@@ -33,23 +35,6 @@ type Retained struct {
 // address is admitted only when it has at least one action and every action is harmless; delete,
 // forget, an action this guard does not know, or no action at all is refused (fail closed).
 var harmless = []string{"no-op", "create", "read", "update"}
-
-// showPlan is the part of `tofu show -json` the guard reads: addresses and actions only, so no
-// attribute value of the plan can reach a refusal. PlannedValues is kept raw and only checked for
-// presence: a plan has it, the state (`tofu show -json` without a plan file) does not.
-type showPlan struct {
-	FormatVersion   string          `json:"format_version"`
-	Errored         bool            `json:"errored"`
-	PlannedValues   json.RawMessage `json:"planned_values"`
-	ResourceChanges []struct {
-		Address         string `json:"address"`
-		PreviousAddress string `json:"previous_address"`
-		Deposed         string `json:"deposed"`
-		Change          struct {
-			Actions []string `json:"actions"`
-		} `json:"change"`
-	} `json:"resource_changes"`
-}
 
 // covers reports whether retained address r covers resource address a: a itself, an instance of
 // it (`r[`) or something under it (`r.`), never a sibling sharing a prefix.
@@ -75,17 +60,18 @@ func owner(retained []Retained, a string) (string, bool) {
 // The refusal names each address verbatim (unquoted), the previous address, the actions as the
 // plan spells them and the instance; never an attribute value of the plan.
 func Protect(plan []byte, retained []Retained) error {
-	var p showPlan
-	if err := json.Unmarshal(plan, &p); err != nil || !strings.HasPrefix(p.FormatVersion, "1.") ||
-		len(p.PlannedValues) == 0 || string(p.PlannedValues) == "null" {
-		return refuse(CondRetained, "plan is not a complete `tofu show -json` plan")
-	}
-	if p.Errored {
+	// The guard reads addresses and actions only (never Change.After), so no attribute value of
+	// the plan can reach a refusal.
+	p, err := planjson.Decode(plan)
+	if errors.Is(err, planjson.ErrErrored) {
 		return refuse(CondRetained, "plan is marked errored: what it would change is unknown")
 	}
+	if err != nil {
+		return refuse(CondRetained, "plan is not a complete `tofu show -json` plan")
+	}
 	var hits []string
-	for _, rc := range p.ResourceChanges {
-		acts := rc.Change.Actions
+	for _, rc := range p.Changes {
+		acts := rc.Actions
 		inst, covered := owner(retained, rc.Address)
 		addr := rc.Address
 		if rc.PreviousAddress != "" && rc.PreviousAddress != rc.Address {
