@@ -74,11 +74,11 @@ tasks:
       - go -C tools test -count=1 -tags offlinetools -run 'TestUnit' ./internal/checks ./cmd/lz-check
       - go -C tools run ./cmd/lz-check -root .. slice
 
-  # Output-contract controls (005 T017): the envelope builder on the captured
-  # `tofu output -json`, the per-stage fixture envelopes and their refusals.
-  # Red until T018 implements the builder, the validator and schemas/outputs/.
+  # Output-contract controls (005 T017, T018): the envelope builder on the
+  # captured `tofu output -json`, the per-stage fixture envelopes and their
+  # refusals, and schemas/outputs/ agreeing with the validator's Go types.
   test:outputs:
-    desc: Envelope builder and outputs.json validator against captured tofu output and fixture envelopes (005 V004)
+    desc: Envelope builder and outputs.json validator against captured tofu output and fixture envelopes, and schemas/outputs agreeing with the validator types (005 V004)
     cmds:
       - go -C tools test -count=1 -run 'TestOutputs' ./internal/stacks
 

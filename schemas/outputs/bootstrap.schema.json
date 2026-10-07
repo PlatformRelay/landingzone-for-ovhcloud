@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/outputs/bootstrap.schema.json",
+  "title": "bootstrap outputs",
+  "description": "`values` of the bootstrap stage's outputs envelope (005 data-model *Per-stage values*). The S3 credentials stay sensitive and are never published.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state_bucket", "state_project_id", "state_region", "state_endpoint", "platform_s3_user_id", "unlabelled"],
+  "properties": {
+    "state_bucket": { "type": "string", "minLength": 1 },
+    "state_project_id": { "type": "string", "minLength": 1 },
+    "state_region": { "type": "string", "minLength": 1 },
+    "state_endpoint": { "type": "string", "minLength": 1 },
+    "platform_s3_user_id": { "type": "string", "minLength": 1 },
+    "unlabelled": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

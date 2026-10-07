@@ -241,7 +241,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `go -C tools test ./internal/stacks -run TestOutputs -count=1`: from a captured pinned `tofu output -json` of a provider-free fixture root (sensitive and plain outputs; command recorded) the envelope builder keeps plain values and drops sensitive ones; fixture envelopes per stage (bootstrap, tenant-state, account-governance, project, project-network, runtime) validate. Kept sensitive entry, secret-pattern key, unknown field, missing value, `null`/`""` capability and wrong `stage` are behavioural red against a pass-through stub.
   - Evidence: `evidence/T017.md`; PR; initial status `not-run`.
 
-- [ ] T018 [US2] Implement the envelope builder and validator in tools/internal/stacks/outputs.go, schemas/outputs/*.schema.json and Taskfile.yml
+- [x] T018 [US2] Implement the envelope builder and validator in tools/internal/stacks/outputs.go, schemas/outputs/*.schema.json and Taskfile.yml — closed 2026-10-07, evidence: evidence/T018.md
   - Requirements: FR-005, SC-005; ADRs: 0004, 0017. Depends on: T017.
   - Verify: `task test:outputs`: T017 controls green; one schema per in-scope stage plus the envelope; guard G2 (envelope part): removing the sensitive filter fails. Creates `test:outputs`.
   - Evidence: `evidence/T018.md`; PR; initial status `not-run`.

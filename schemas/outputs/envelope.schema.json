@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/outputs/envelope.schema.json",
+  "title": "Stage outputs envelope",
+  "description": "A published outputs.json (005 FR-005, ADR-0004). `values` is checked against `<stage>.schema.json`. Rules beyond this schema, enforced by tools/internal/stacks: no object key anywhere in `values` matching `(?i)secret|password|token|private_key|access_key`; no null or empty string anywhere in `values`; no entry that `tofu output -json` marked sensitive; object keys match exactly (no case variants) and appear once.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "instance_id", "stage", "source_revision", "values"],
+  "properties": {
+    "apiVersion": { "type": "string", "const": "lz.platformrelay.dev/v1alpha1" },
+    "kind": { "type": "string", "const": "StageOutputs" },
+    "instance_id": { "type": "string", "minLength": 1 },
+    "stage": { "type": "string", "minLength": 1 },
+    "source_revision": { "type": "string", "minLength": 1, "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+    "values": { "type": "object" }
+  }
+}
