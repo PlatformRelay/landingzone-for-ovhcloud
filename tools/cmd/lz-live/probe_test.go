@@ -626,7 +626,7 @@ func writeAccount(w *probeWorld, dir, id string) {
 // probe` lists leftovers through lz-live's own API client with the credential the run binds, the
 // sandbox.env service account: every listing carries the bearer token issued to its client id
 // (EU.sandboxadmin), both API versions are asked, no ovhcloud is looked up or started (a fake one
-// is on PATH), and a listing the API refuses fails the run instead of passing it.
+// is on PATH), and a listing that cannot be read fails the run instead of passing it.
 func TestProbeLeftoversThroughAPI(t *testing.T) {
 	t.Run("sandbox-credential", func(t *testing.T) {
 		w := newProbeWorld(t)
@@ -655,7 +655,7 @@ func TestProbeLeftoversThroughAPI(t *testing.T) {
 		}
 		w.noSecret(t, stdout, stderr)
 	})
-	t.Run("listing-refused-fails", func(t *testing.T) {
+	t.Run("listing-unreadable-fails", func(t *testing.T) {
 		w := newProbeWorld(t)
 		w.listings["/v2/iam/policy"] = "not json"
 		code, stdout, _ := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")

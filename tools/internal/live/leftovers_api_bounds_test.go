@@ -23,12 +23,26 @@ type boundsAPI struct {
 	mu      sync.Mutex
 	answers map[string]func(cursor string) (body, next string)
 	sent    []string // escaped paths as received, version included
+	tokens  int      // token requests
+	// redirect answers a path (as received, "/token" included) with a 302 to this Location.
+	redirect map[string]string
 }
 
 func newBoundsAPI(t *testing.T) *boundsAPI {
 	t.Helper()
-	b := &boundsAPI{answers: map[string]func(string) (string, string){}}
+	b := &boundsAPI{answers: map[string]func(string) (string, string){}, redirect: map[string]string{}}
 	b.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		loc, redirect := b.redirect[r.URL.EscapedPath()]
+		if r.URL.Path == "/token" {
+			b.tokens++
+		}
+		b.mu.Unlock()
+		if redirect {
+			w.Header().Set("Location", loc)
+			w.WriteHeader(http.StatusFound)
+			return
+		}
 		if r.URL.Path == "/token" {
 			_ = r.ParseForm()
 			if r.Method != http.MethodPost || r.PostForm.Get("client_id") != listClientID || r.PostForm.Get("client_secret") != listSecret {
@@ -158,8 +172,8 @@ func TestLeftoversAPIEndlessCursor(t *testing.T) {
 					asked++
 				}
 			}
-			if asked > maxListingPages+1 {
-				t.Errorf("asked %s %d times, want at most %d", pol, asked, maxListingPages+1)
+			if name == "new-cursor-again" && asked != maxListingPages || asked > maxListingPages {
+				t.Errorf("asked %s %d times, want %d pages at most (exactly that many for ever-new cursors)", pol, asked, maxListingPages)
 			}
 			if rep.Outcome != "fail" || !strings.Contains(strings.Join(rep.Errors, "\n"), "/iam/policy") {
 				t.Errorf("outcome %q, errors %v; want fail naming /iam/policy", rep.Outcome, rep.Errors)
@@ -177,18 +191,18 @@ func TestLeftoversAPIEndlessCursor(t *testing.T) {
 			t.Errorf("a repeated cursor was followed %d times, want it refused on its first repeat", n)
 		}
 	})
-	t.Run("many-pages-pass", func(t *testing.T) { // bound control: a long but finite listing passes
+	t.Run("bound-pages-pass", func(t *testing.T) { // bound control: exactly maxListingPages pages pass
 		b := newBoundsAPI(t)
 		b.answers[pol] = func(cursor string) (string, string) {
 			var k int
 			fmt.Sscanf(cursor, "opaque-%d", &k)
-			if k+1 >= 50 {
+			if k+1 >= maxListingPages {
 				return "[]", ""
 			}
 			return "[]", fmt.Sprintf("opaque-%d", k+1)
 		}
 		if rep := b.check().Check(context.Background(), nil); rep.Outcome != "pass" {
-			t.Errorf("a 50-page listing: outcome %q, errors %v; want pass", rep.Outcome, rep.Errors)
+			t.Errorf("a %d-page listing: outcome %q, errors %v; want pass", maxListingPages, rep.Outcome, rep.Errors)
 		}
 	})
 }
@@ -214,4 +228,40 @@ func TestLeftoversAPIOversize(t *testing.T) {
 			t.Errorf("an answer of exactly %d bytes: outcome %q, errors %v; want pass", maxListing, rep.Outcome, rep.Errors)
 		}
 	})
+}
+
+// TestLeftoversAPINoEchoInErrors (T084 review r1): an answer the client cannot follow — a
+// redirect whose Location header echoes the bearer token or the client secret (Go quotes an
+// unparseable Location in its error) — fails the listing with an error naming it, and no error
+// carries the credential.
+func TestLeftoversAPINoEchoInErrors(t *testing.T) {
+	for name, c := range map[string]struct{ path, loc, listing string }{
+		"listing-location-echoes-token":  {"/v1/me/identity/group", "/%ZZ" + listToken, "/me/identity/group"},
+		"listing-location-echoes-secret": {"/v2/iam/policy", "/%ZZ" + listSecret, "/iam/policy"},
+		"token-location-echoes-secret":   {"/token", "/%ZZ" + listSecret + listClientID, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBoundsAPI(t)
+			b.redirect[c.path] = c.loc
+			rep := b.check().Check(context.Background(), nil)
+			if rep.Outcome != "fail" || len(rep.Errors) == 0 || !strings.Contains(strings.Join(rep.Errors, "\n"), c.listing) {
+				t.Errorf("outcome %q, errors %v; want fail naming %q", rep.Outcome, rep.Errors, c.listing)
+			}
+			assertNoCredentialIn(t, "report errors", rep.Errors...)
+		})
+	}
+}
+
+// TestLeftoversAPITokenAskedOnce (T084 review r1): a rejected credential is sent to the token
+// endpoint once per check, not once per listing (each request carries the client secret).
+func TestLeftoversAPITokenAskedOnce(t *testing.T) {
+	b := newBoundsAPI(t)
+	c := b.check()
+	c.Cred.ClientSecret = "not-the-secret"
+	if rep := c.Check(context.Background(), nil); rep.Outcome != "fail" || len(rep.Errors) == 0 {
+		t.Errorf("outcome %q, errors %v; want fail", rep.Outcome, rep.Errors)
+	}
+	if b.tokens != 1 {
+		t.Errorf("%d token requests for one rejected credential, want 1", b.tokens)
+	}
 }
