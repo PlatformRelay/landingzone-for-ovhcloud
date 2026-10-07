@@ -1,0 +1,39 @@
+{
+  "_comment": "Fake OVHcloud accounts for the bootstrap tests (T042). Account xx000001-ovh is the current sandbox: its client and its two IAM policies are the T087 capture tests/fixtures/ovhcloud/captured/20261007T133803Z-aeee/listings/{ovh_me_api_oauth2_client,ovh_iam_policy}.json (anonymised ids kept verbatim), the client's remaining fields (description, flow, callbackUrls, identity, createdAt) follow kb/api/v1/me.json oauth2.client and the identity URN form of the manage-service-account guide. Account xx000002-ovh is a fresh account: two projects, a default policy shaped like the captured ovh-default, and root application credentials (AK/AS/CK, kb first-steps guide); 4711 and 4713 are the operator's two bootstrap keys, 4712 is an unrelated credential that must survive. Every secret is fake and distinctive so a leak search cannot miss it.",
+  "accounts": [
+    {
+      "account": "xx000001-ovh",
+      "projects": ["f0000000000000000000000000000001"],
+      "clients": [
+        {
+          "clientId": "EU.0000000000000001",
+          "name": "lz-sandbox-admin",
+          "description": "Landing-zone sandbox service account: IAM, me, Public Cloud",
+          "flow": "CLIENT_CREDENTIALS",
+          "callbackUrls": [],
+          "identity": "urn:v1:eu:identity:credential:xx000001-ovh/oauth2-EU.0000000000000001",
+          "createdAt": "2026-10-01T20:02:43.912034Z",
+          "secret": "fakeOldAdminSecret9Kq3vW"
+        }
+      ],
+      "policies": [
+        {"id":"00000000-0000-4000-8000-000000000001","owner":"xx000001-ovh","name":"lz-sandbox-admin","readOnly":false,"description":"Landing-zone sandbox service account: IAM, me, Public Cloud","identities":["urn:v1:eu:identity:credential:xx000001-ovh/oauth2-EU.0000000000000001"],"resources":[{"urn":"urn:v1:eu:resource:account:xx000001-ovh"},{"urn":"urn:v1:eu:resource:publicCloudProject:*"}],"permissions":{"allow":[{"action":"account:apiovh:iam/*"},{"action":"account:apiovh:me/*"},{"action":"publicCloudProject:apiovh:*"}]},"permissionsGroups":[],"createdAt":"2026-10-01T20:02:44.305461Z"},
+        {"id":"00000000-0000-4000-8000-000000000002","owner":"xx000001-ovh","name":"ovh-default","readOnly":true,"identities":["urn:v1:eu:identity:account:xx000001-ovh"],"resources":[{"urn":"urn:v1:eu:resourceGroup:00000000-0000-4000-8000-000000000003"}],"permissions":{},"permissionsGroups":[{"urn":"urn:v1:eu:permissionsGroup:ovhLegacy:ovh-default-owner"}],"createdAt":"2026-09-14T08:23:32.579207Z"}
+      ],
+      "credentials": []
+    },
+    {
+      "account": "xx000002-ovh",
+      "projects": ["f0000000000000000000000000000002", "f0000000000000000000000000000003"],
+      "clients": [],
+      "policies": [
+        {"id":"00000000-0000-4000-8000-000000000012","owner":"xx000002-ovh","name":"ovh-default","readOnly":true,"identities":["urn:v1:eu:identity:account:xx000002-ovh"],"resources":[{"urn":"urn:v1:eu:resourceGroup:00000000-0000-4000-8000-000000000013"}],"permissions":{},"permissionsGroups":[{"urn":"urn:v1:eu:permissionsGroup:ovhLegacy:ovh-default-owner"}],"createdAt":"2026-10-08T07:00:00.000000Z"}
+      ],
+      "credentials": [
+        {"credentialId": 4711, "applicationId": 301, "applicationKey": "fakeRootAKone7kbG", "applicationSecret": "fakeRootASoneEXEgWIz07", "consumerKey": "fakeRootCKoneMtSwSrPp"},
+        {"credentialId": 4712, "applicationId": 302, "applicationKey": "fakeOtherAKtwo3Lp", "applicationSecret": "fakeOtherAStwoQ8nVx", "consumerKey": "fakeOtherCKtwoR5mTy"},
+        {"credentialId": 4713, "applicationId": 303, "applicationKey": "fakeRootAKthree9Hc", "applicationSecret": "fakeRootASthreeW2pLz", "consumerKey": "fakeRootCKthreeD7qNs"}
+      ]
+    }
+  ]
+}
