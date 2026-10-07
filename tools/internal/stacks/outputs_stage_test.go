@@ -102,30 +102,50 @@ func stagePlanInputsDigest(t *testing.T, planCaseName string) string {
 // this file, made from the current configuration by the pinned OpenTofu through the isolated entry.
 func stagePlan(t *testing.T, stage string) []byte {
 	t.Helper()
+	data := stagePlanFile(t, stage)
+	if digest := stagePlanInputsDigest(t, stage); stagePlanMeta(t, stage).InputsSHA256 != digest {
+		t.Fatalf("capture is stale: the %s configuration changed since it was captured; rerun tests/fixtures/outputs/capture-stage-plan.sh <entry> <checkout> %s on a clean tree", stage, stage)
+	}
+	return data
+}
+
+// stagePlanMeta is the part of a capture's .meta.json sidecar the checks read.
+type stagePlanMetaDoc struct {
+	File         string `json:"file"`
+	Command      string `json:"command"`
+	Inner        string `json:"inner_command"`
+	Toolchain    string `json:"toolchain"`
+	Tool         string `json:"tool"`
+	ToolVersion  string `json:"tool_version"`
+	EntryExit    int    `json:"entry_exit"`
+	SHA256       string `json:"sha256"`
+	InputsSHA256 string `json:"inputs_sha256"`
+}
+
+// stagePlanMeta decodes a capture case's sidecar.
+func stagePlanMeta(t *testing.T, stage string) stagePlanMetaDoc {
+	t.Helper()
+	var meta stagePlanMetaDoc
+	if err := json.Unmarshal(readFile(t, fixtureDir+"/captures/"+stage+"-plan.json.meta.json"), &meta); err != nil {
+		t.Fatal(err)
+	}
+	return meta
+}
+
+// stagePlanFile returns a capture case's plan after checking that its sidecar vouches for exactly
+// this file, made by the pinned OpenTofu through the isolated entry, whether or not the
+// configuration changed since (the pin controls of T085 mutate the plan, so its freshness is not
+// theirs to judge; stagePlan judges it for the pins themselves).
+func stagePlanFile(t *testing.T, stage string) []byte {
+	t.Helper()
 	stageDir, run := planCase(stage)
 	file := stage + "-plan.json"
 	data := readFile(t, fixtureDir+"/captures/"+file)
-	var meta struct {
-		File         string `json:"file"`
-		Command      string `json:"command"`
-		Inner        string `json:"inner_command"`
-		Toolchain    string `json:"toolchain"`
-		Tool         string `json:"tool"`
-		ToolVersion  string `json:"tool_version"`
-		EntryExit    int    `json:"entry_exit"`
-		SHA256       string `json:"sha256"`
-		InputsSHA256 string `json:"inputs_sha256"`
-	}
-	if err := json.Unmarshal(readFile(t, fixtureDir+"/captures/"+file+".meta.json"), &meta); err != nil {
-		t.Fatal(err)
-	}
+	meta := stagePlanMeta(t, stage)
 	if meta.File != file || meta.SHA256 != digest(data) || meta.EntryExit != 0 ||
 		!strings.Contains(meta.Command, "capture:"+stage+"-plan") || !strings.HasSuffix(meta.Inner, "(stages/"+stageDir+"); run "+run) || meta.Tool != "tofu" || meta.ToolVersion != "1.13.0" ||
 		!strings.Contains(meta.Toolchain, " tofu=1.13.0 ") || !strings.HasSuffix(meta.Toolchain, " network=none") {
 		t.Fatalf("capture sidecar does not vouch for %s from the pinned tofu: %+v", file, meta)
-	}
-	if meta.InputsSHA256 != stagePlanInputsDigest(t, stage) {
-		t.Fatalf("capture is stale: the %s configuration changed since it was captured; rerun tests/fixtures/outputs/capture-stage-plan.sh <entry> <checkout> %s on a clean tree", stage, stage)
 	}
 	return data
 }
@@ -161,7 +181,7 @@ type plannedResource struct {
 }
 
 // decodePlan decodes one captured test_plan message of the given run.
-func decodePlan(t *testing.T, data []byte, run string) testPlan {
+func decodePlan(t testing.TB, data []byte, run string) testPlan {
 	t.Helper()
 	var msg testPlan
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -177,7 +197,7 @@ func decodePlan(t *testing.T, data []byte, run string) testPlan {
 // document, and returns the string leaves of the sensitive entries and of the named credential
 // outputs (data-model *Sensitive outputs*: their values are collected whatever marker the plan
 // gives them, so a lost marker shows as a leak).
-func planOutputs(t *testing.T, msg testPlan, credentialOutputs ...string) (doc []byte, secrets []string) {
+func planOutputs(t testing.TB, msg testPlan, credentialOutputs ...string) (doc []byte, secrets []string) {
 	t.Helper()
 	type entry struct {
 		Sensitive bool            `json:"sensitive"`
@@ -231,7 +251,7 @@ func leaves(v any) []string {
 // publishedEnvelope builds the stage's envelope from the plan's outputs, validates it under the
 // stage's schema against the consumer's expectation, and checks it publishes exactly the schema's
 // values and none of the secrets.
-func publishedEnvelope(t *testing.T, exp Expectation, doc []byte, secrets, want []string) {
+func publishedEnvelope(t testing.TB, exp Expectation, doc []byte, secrets, want []string) {
 	t.Helper()
 	env, err := BuildEnvelope(doc, Producer{InstanceID: exp.InstanceID, Stage: exp.Stage, SourceRevision: testRev})
 	if err != nil {
@@ -255,8 +275,23 @@ func publishedEnvelope(t *testing.T, exp Expectation, doc []byte, secrets, want 
 	}
 }
 
+// stagePlanPins is each capture case's pin over its plan; TestOutputsStagePlanPinsRefuse
+// (outputs_test.go, T085) runs them on mutated copies of the captured plans.
+var stagePlanPins = map[string]func(testing.TB, []byte){
+	"tenant-state":       pinTenantStatePlan,
+	"account-governance": pinAccountGovernancePlan,
+	"project":            func(t testing.TB, data []byte) { pinProjectPlan(t, "project", data) },
+	"project-reference":  func(t testing.TB, data []byte) { pinProjectPlan(t, "project-reference", data) },
+	"project-network":    pinProjectNetworkPlan,
+}
+
 func TestOutputsTenantStateStagePlan(t *testing.T) {
-	doc, secrets := planOutputs(t, decodePlan(t, stagePlan(t, "tenant-state"), "published_outputs_match_the_schema"), "tenant_s3", "platform_s3")
+	pinTenantStatePlan(t, stagePlan(t, "tenant-state"))
+}
+
+func pinTenantStatePlan(t testing.TB, data []byte) {
+	t.Helper()
+	doc, secrets := planOutputs(t, decodePlan(t, data, "published_outputs_match_the_schema"), "tenant_s3", "platform_s3")
 	// The two credentials, two fields each: the control that the secrets scan below can fail.
 	if len(secrets) != 4 {
 		t.Fatalf("want the four credential strings of tenant_s3 and platform_s3, got %d", len(secrets))
@@ -283,7 +318,7 @@ var p9Allowlist = []string{
 }
 
 // strs returns a planned list or set attribute as sorted strings; anything else fails the test.
-func strs(t *testing.T, r plannedResource, attr string) []string {
+func strs(t testing.TB, r plannedResource, attr string) []string {
 	t.Helper()
 	raw, ok := r.Change.After[attr].([]any)
 	if !ok {
@@ -317,7 +352,12 @@ const (
 )
 
 func TestOutputsAccountGovernanceStagePlan(t *testing.T) {
-	msg := decodePlan(t, stagePlan(t, "account-governance"), "published_outputs_match_the_schema")
+	pinAccountGovernancePlan(t, stagePlan(t, "account-governance"))
+}
+
+func pinAccountGovernancePlan(t testing.TB, data []byte) {
+	t.Helper()
+	msg := decodePlan(t, data, "published_outputs_match_the_schema")
 	doc, secrets := planOutputs(t, msg, "platform_deployer_secret", "tenant_deployer_secrets")
 	// The platform secret and one per tenant: the control that the secrets scan can fail.
 	if len(secrets) != 3 {
@@ -463,7 +503,7 @@ var pfLabels = map[string]any{
 
 // managedByAddress indexes a plan's managed resources by address and refuses any change but a
 // create (the stack's import turns the adopted project's create into an import, T037).
-func managedByAddress(t *testing.T, msg testPlan) map[string]plannedResource {
+func managedByAddress(t testing.TB, msg testPlan) map[string]plannedResource {
 	t.Helper()
 	out := map[string]plannedResource{}
 	for _, r := range msg.Plan.Resources {
@@ -483,7 +523,7 @@ func managedByAddress(t *testing.T, msg testPlan) map[string]plannedResource {
 
 // projectCommon pins what both modes plan beside the project: the label set on the project's own
 // URN, the alert and the quota guard with the given values, all on the bound project.
-func projectCommon(t *testing.T, byAddress map[string]plannedResource, threshold float64) {
+func projectCommon(t testing.TB, byAddress map[string]plannedResource, threshold float64) {
 	t.Helper()
 	tags := byAddress[pfModule+"project.ovh_iam_resource_tags.this"].Change.After
 	if tags["urn"] != pfProjectURN {
@@ -511,61 +551,61 @@ func projectCommon(t *testing.T, byAddress map[string]plannedResource, threshold
 // (cloud_project.md), and T009 showed that the order arguments force one. The envelope built from
 // each plan validates under project.schema.json against the bound project (KD-3).
 func TestOutputsProjectStagePlan(t *testing.T) {
+	t.Run("adopt", func(t *testing.T) { pinProjectPlan(t, "project", stagePlan(t, "project")) })
+	// Reference mode manages no project: it is only read (its tags, alert and guard still apply).
+	t.Run("reference", func(t *testing.T) { pinProjectPlan(t, "project-reference", stagePlan(t, "project-reference")) })
+}
+
+// pinProjectPlan pins one capture case of the project stage: `project` (adopt mode) or
+// `project-reference`.
+func pinProjectPlan(t testing.TB, c string, data []byte) {
+	t.Helper()
 	binding := Expectation{InstanceID: "demo-dev-project", Stage: "project", Project: &ProjectBinding{ProjectID: pfProjectID, ProjectURN: pfProjectURN}}
 	values := []string{"budget_alert_id", "environment", "project_id", "project_urn", "regions", "tenant", "unlabelled"}
-	plan := func(t *testing.T, c string, want []string) map[string]plannedResource {
-		t.Helper()
-		_, run := planCase(c)
-		msg := decodePlan(t, stagePlan(t, c), run)
-		doc, secrets := planOutputs(t, msg)
-		if len(secrets) != 0 {
-			t.Errorf("the project stage publishes every output; %d sensitive strings found", len(secrets))
-		}
-		publishedEnvelope(t, binding, doc, secrets, values)
-		byAddress := managedByAddress(t, msg)
-		if got := slices.Sorted(maps.Keys(byAddress)); !reflect.DeepEqual(got, want) {
-			t.Fatalf("planned resources %v, want exactly %v", got, want)
-		}
-		return byAddress
+	want := []string{
+		pfModule + "project.ovh_cloud_project_alerting.this[0]",
+		pfModule + "project.ovh_iam_resource_tags.this",
+		pfModule + "quota.ovh_cloud_quota.this[0]",
+	}
+	adopt := c == "project"
+	if adopt {
+		want = append([]string{pfImportTarget}, want...)
+	}
+	_, run := planCase(c)
+	msg := decodePlan(t, data, run)
+	doc, secrets := planOutputs(t, msg)
+	if len(secrets) != 0 {
+		t.Errorf("the project stage publishes every output; %d sensitive strings found", len(secrets))
+	}
+	publishedEnvelope(t, binding, doc, secrets, values)
+	byAddress := managedByAddress(t, msg)
+	if got := slices.Sorted(maps.Keys(byAddress)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("planned resources %v, want exactly %v", got, want)
+	}
+	if !adopt {
+		projectCommon(t, byAddress, 50)
+		return
 	}
 
-	t.Run("adopt", func(t *testing.T) {
-		byAddress := plan(t, "project", []string{
-			pfImportTarget,
-			pfModule + "project.ovh_cloud_project_alerting.this[0]",
-			pfModule + "project.ovh_iam_resource_tags.this",
-			pfModule + "quota.ovh_cloud_quota.this[0]",
-		})
-		project := byAddress[pfImportTarget].Change.After
-		if project["deletion_protection"] != true || project["urn"] != pfProjectURN {
-			t.Errorf("adopted project: deletion_protection %v, urn %v, want true and %s", project["deletion_protection"], project["urn"], pfProjectURN)
+	project := byAddress[pfImportTarget].Change.After
+	if project["deletion_protection"] != true || project["urn"] != pfProjectURN {
+		t.Errorf("adopted project: deletion_protection %v, urn %v, want true and %s", project["deletion_protection"], project["urn"], pfProjectURN)
+	}
+	// Order arguments as given (stages/project/tests/unit.tftest.hcl), never invented.
+	if project["ovh_subsidiary"] != "FR" || project["description"] != "demo-dev" {
+		t.Errorf("adopted project: ovh_subsidiary %v, description %v, want FR and demo-dev as given", project["ovh_subsidiary"], project["description"])
+	}
+	blocks, ok := project["plan"].([]any)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("adopted project: plan %v, want the one given plan block", project["plan"])
+	}
+	block, _ := blocks[0].(map[string]any)
+	for attr, want := range map[string]any{"duration": "P1M", "plan_code": "project.2018", "pricing_mode": "default"} {
+		if block[attr] != want {
+			t.Errorf("adopted project: plan %s %v, want %v as given", attr, block[attr], want)
 		}
-		// Order arguments as given (stages/project/tests/unit.tftest.hcl), never invented.
-		if project["ovh_subsidiary"] != "FR" || project["description"] != "demo-dev" {
-			t.Errorf("adopted project: ovh_subsidiary %v, description %v, want FR and demo-dev as given", project["ovh_subsidiary"], project["description"])
-		}
-		blocks, ok := project["plan"].([]any)
-		if !ok || len(blocks) != 1 {
-			t.Fatalf("adopted project: plan %v, want the one given plan block", project["plan"])
-		}
-		block, _ := blocks[0].(map[string]any)
-		for attr, want := range map[string]any{"duration": "P1M", "plan_code": "project.2018", "pricing_mode": "default"} {
-			if block[attr] != want {
-				t.Errorf("adopted project: plan %s %v, want %v as given", attr, block[attr], want)
-			}
-		}
-		projectCommon(t, byAddress, 100)
-	})
-
-	// Reference mode manages no project: it is only read (its tags, alert and guard still apply).
-	t.Run("reference", func(t *testing.T) {
-		byAddress := plan(t, "project-reference", []string{
-			pfModule + "project.ovh_cloud_project_alerting.this[0]",
-			pfModule + "project.ovh_iam_resource_tags.this",
-			pfModule + "quota.ovh_cloud_quota.this[0]",
-		})
-		projectCommon(t, byAddress, 50)
-	})
+	}
+	projectCommon(t, byAddress, 100)
 }
 
 // The fixture of run published_outputs_match_the_schema (stages/project-network/tests/unit.tftest.hcl):
@@ -589,8 +629,13 @@ const (
 // check against the bound project, and the envelope built from it validates under
 // project-network.schema.json.
 func TestOutputsProjectNetworkStagePlan(t *testing.T) {
+	pinProjectNetworkPlan(t, stagePlan(t, "project-network"))
+}
+
+func pinProjectNetworkPlan(t testing.TB, data []byte) {
+	t.Helper()
 	binding := &ProjectBinding{ProjectID: pnProjectID, ProjectURN: pnProjectURN}
-	msg := decodePlan(t, stagePlan(t, "project-network"), "published_outputs_match_the_schema")
+	msg := decodePlan(t, data, "published_outputs_match_the_schema")
 
 	// KD-3 on the plan's own input: the `project` values are a project envelope's values for the
 	// bound reference (the adapter refuses any other before the plan).

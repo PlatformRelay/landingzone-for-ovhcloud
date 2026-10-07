@@ -192,6 +192,75 @@ run "every_input_reaches_the_component" {
   }
 }
 
+# CIDR range (T085; T030 review): the stage's own rule on the network row admits only a network
+# inside an RFC 1918 block (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and no larger than a /16. Each
+# admitted run sits at an edge of that range.
+
+run "cidr_private_slash24_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.250.0.0/24" }
+  }
+
+  assert {
+    condition     = output.cidr == "10.250.0.0/24" && try(module.island.cidr, null) == "10.250.0.0/24"
+    error_message = "a /24 inside 10.0.0.0/8 is admitted and reaches the component"
+  }
+}
+
+run "cidr_private_slash16_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.250.0.0/16" }
+  }
+
+  assert {
+    condition     = output.cidr == "10.250.0.0/16" && try(module.island.cidr, null) == "10.250.0.0/16"
+    error_message = "a /16 inside 10.0.0.0/8 is admitted (the largest network admitted)"
+  }
+}
+
+run "cidr_first_slash16_of_172_16_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "172.16.0.0/16" }
+  }
+
+  assert {
+    condition     = output.cidr == "172.16.0.0/16" && try(module.island.cidr, null) == "172.16.0.0/16"
+    error_message = "172.16.0.0/16 is the first /16 of 172.16.0.0/12 and is admitted"
+  }
+}
+
+run "cidr_last_slash16_of_172_16_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "172.31.0.0/16" }
+  }
+
+  assert {
+    condition     = output.cidr == "172.31.0.0/16" && try(module.island.cidr, null) == "172.31.0.0/16"
+    error_message = "172.31.0.0/16 lies inside 172.16.0.0/12 and is admitted"
+  }
+}
+
+run "cidr_whole_192_168_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "192.168.0.0/16" }
+  }
+
+  assert {
+    condition     = output.cidr == "192.168.0.0/16" && try(module.island.cidr, null) == "192.168.0.0/16"
+    error_message = "192.168.0.0/16 is the whole RFC 1918 block and is admitted"
+  }
+}
+
 # Refusals, last.
 
 run "region_outside_the_project_regions_rejected" {
@@ -259,6 +328,89 @@ run "cidr_too_small_for_a_pool_rejected" {
 
   variables {
     network = { cidr = "10.20.0.0/30" }
+  }
+
+  expect_failures = [var.network]
+}
+
+# CIDR range refusals (T085). `0.0.0.0/0` is named by the task and fails both limits; every other
+# input fails exactly one: outside RFC 1918 at /16 or /24, or inside it but larger than a /16.
+
+run "cidr_whole_address_space_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "0.0.0.0/0" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_public_range_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "8.8.8.0/24" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_just_past_10_slash8_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "11.0.0.0/16" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_just_before_172_16_slash12_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "172.15.0.0/16" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_just_past_172_16_slash12_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "172.32.0.0/16" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_just_past_192_168_slash16_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "192.169.0.0/16" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_private_but_larger_than_slash16_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.0.0.0/15" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "cidr_whole_10_slash8_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.0.0.0/8" }
   }
 
   expect_failures = [var.network]
