@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"maps"
+	"net/netip"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -39,6 +40,7 @@ var stagePlans = map[string][]string{
 	"account-governance": {"stages/account-governance", "components/identity/ovh-native", "modules/naming", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group"},
 	"project":            {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
 	"project-reference":  {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
+	"project-network":    {"stages/project-network", "components/network/island", "modules/naming", "modules/private-network"},
 }
 
 // planCases are the capture cases that are not a stage's default run: their stage and run.
@@ -140,6 +142,10 @@ type testPlan struct {
 			AfterUnknown   json.RawMessage `json:"after_unknown"`
 		} `json:"output_changes"`
 		Resources []plannedResource `json:"resource_changes"`
+		// Variables are the root input values the plan was made with.
+		Variables map[string]struct {
+			Value json.RawMessage `json:"value"`
+		} `json:"variables"`
 	} `json:"test_plan"`
 }
 
@@ -560,4 +566,145 @@ func TestOutputsProjectStagePlan(t *testing.T) {
 		})
 		projectCommon(t, byAddress, 50)
 	})
+}
+
+// The fixture of run published_outputs_match_the_schema (stages/project-network/tests/unit.tftest.hcl):
+// the demo/dev project's published values (its URN with the `eu` part the run gives), region GRA11,
+// the network row 10.20.0.0/24 without a vlan_id, and the ids the run's overrides give.
+const (
+	pnModule     = "module.island.module.network."
+	pnNetwork    = pnModule + "ovh_cloud_project_network_private.this"
+	pnSubnet     = pnModule + "ovh_cloud_project_network_private_subnet.this"
+	pnProjectID  = "0123456789abcdef0123456789abcdef"
+	pnProjectURN = "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+	pnRegion     = "GRA11"
+	pnCIDR       = "10.20.0.0/24"
+)
+
+// T030 (coordinator decision 2026-10-07 on T029's decision request 1, option A): the project-network
+// stage's real plan. tofu test cannot enumerate resources and reads only a child module's outputs,
+// so the stage and component tests see neither a second network or subnet at another address nor
+// DHCP, no_gateway and the pool below the module (T029 gap 1). The plan holds exactly the one network
+// and the one subnet, nothing else; the project values it was made from pass the adapter's KD-3
+// check against the bound project, and the envelope built from it validates under
+// project-network.schema.json.
+func TestOutputsProjectNetworkStagePlan(t *testing.T) {
+	binding := &ProjectBinding{ProjectID: pnProjectID, ProjectURN: pnProjectURN}
+	msg := decodePlan(t, stagePlan(t, "project-network"), "published_outputs_match_the_schema")
+
+	// KD-3 on the plan's own input: the `project` values are a project envelope's values for the
+	// bound reference (the adapter refuses any other before the plan).
+	raw, ok := msg.Plan.Variables["project"]
+	if !ok {
+		t.Fatal("the plan has no `project` input")
+	}
+	var project map[string]any
+	if err := json.Unmarshal(raw.Value, &project); err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]any{}
+	for name, v := range project {
+		if v != nil { // an absent optional value (budget_alert_id) is not published
+			entries[name] = map[string]any{"sensitive": false, "value": v}
+		}
+	}
+	projectDoc, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishedEnvelope(t, Expectation{InstanceID: "demo-dev-project", Stage: "project", Project: binding}, projectDoc, nil, slices.Sorted(maps.Keys(entries)))
+
+	doc, secrets := planOutputs(t, msg)
+	if len(secrets) != 0 {
+		t.Errorf("the project-network stage publishes every output; %d sensitive strings found", len(secrets))
+	}
+	publishedEnvelope(t, Expectation{InstanceID: "demo-dev-gra11-network", Stage: "project-network", Project: binding}, doc, secrets,
+		[]string{"cidr", "network_id", "regions_openstack_ids", "subnet_id", "unlabelled"})
+	// The builder drops sensitive outputs before the schema sees them, and the secrets scan reads
+	// only string leaves: the plan's own root outputs are exactly the five, none marked sensitive
+	// (review r1).
+	published := []string{"cidr", "network_id", "regions_openstack_ids", "subnet_id", "unlabelled"}
+	if names := slices.Sorted(maps.Keys(msg.Plan.Outputs)); !reflect.DeepEqual(names, published) {
+		t.Errorf("root outputs %v, want exactly %v", names, published)
+	}
+	for name, o := range msg.Plan.Outputs {
+		if string(o.AfterSensitive) != "false" {
+			t.Errorf("output %s is marked sensitive (%s); the stage publishes every output", name, o.AfterSensitive)
+		}
+	}
+
+	// Exactly one network and one subnet, at the module's unkeyed addresses; nothing else, managed
+	// or read.
+	var all []string
+	for _, r := range msg.Plan.Resources {
+		all = append(all, r.Mode+" "+r.Address)
+	}
+	sort.Strings(all)
+	if want := []string{"managed " + pnNetwork, "managed " + pnSubnet}; !reflect.DeepEqual(all, want) {
+		t.Fatalf("planned resources %v, want exactly %v", all, want)
+	}
+	byAddress := managedByAddress(t, msg)
+
+	network := byAddress[pnNetwork].Change.After
+	if network["service_name"] != pnProjectID {
+		t.Errorf("network in project %v, want the bound project %s", network["service_name"], pnProjectID)
+	}
+	if got := strs(t, byAddress[pnNetwork], "regions"); !reflect.DeepEqual(got, []string{pnRegion}) {
+		t.Errorf("network regions %v, want exactly [%s]", got, pnRegion)
+	}
+	if network["name"] != "lz-demo-dev-gra11-pn-main" || network["vlan_id"] != float64(0) {
+		t.Errorf("network name %v, vlan_id %v, want lz-demo-dev-gra11-pn-main and 0", network["name"], network["vlan_id"])
+	}
+
+	subnet := byAddress[pnSubnet].Change.After
+	for attr, want := range map[string]any{"service_name": pnProjectID, "region": pnRegion, "network": pnCIDR, "network_id": network["id"], "dhcp": true, "no_gateway": true} {
+		if subnet[attr] != want {
+			t.Errorf("subnet %s %v, want %v", attr, subnet[attr], want)
+		}
+	}
+	// The DHCP pool lies inside the CIDR, after its network and first host addresses (the first host
+	// is kept free, modules/private-network) and before its broadcast address, in order.
+	prefix := netip.MustParsePrefix(pnCIDR)
+	start, errStart := netip.ParseAddr(fmtAny(subnet["start"]))
+	end, errEnd := netip.ParseAddr(fmtAny(subnet["end"]))
+	if errStart != nil || errEnd != nil {
+		t.Fatalf("subnet pool %v–%v is not two addresses", subnet["start"], subnet["end"])
+	}
+	if !prefix.Contains(start) || !prefix.Contains(end) || start.Compare(prefix.Addr().Next()) <= 0 || end.Compare(lastAddr(prefix)) >= 0 || start.Compare(end) > 0 {
+		t.Errorf("subnet pool %s–%s, want an ordered pool inside %s after its first host and before its broadcast address", start, end, pnCIDR)
+	}
+
+	// `unlabelled` lists exactly the planned resources (review r1): a renamed resource cannot drift
+	// from the hand-written addresses.
+	var unlabelled []string
+	if err := json.Unmarshal(msg.Plan.Outputs["unlabelled"].After, &unlabelled); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(unlabelled)
+	if want := []string{pnNetwork, pnSubnet}; !reflect.DeepEqual(unlabelled, want) {
+		t.Errorf("unlabelled %v, want exactly the planned resources %v", unlabelled, want)
+	}
+
+	// The published ids are the planned resources' own.
+	for name, want := range map[string]any{"network_id": network["id"], "subnet_id": subnet["id"], "cidr": pnCIDR} {
+		var got any
+		if err := json.Unmarshal(msg.Plan.Outputs[name].After, &got); err != nil || got != want {
+			t.Errorf("output %s %v, want %v", name, got, want)
+		}
+	}
+}
+
+// fmtAny returns a planned string attribute, or "" for anything else.
+func fmtAny(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// lastAddr is the broadcast address of an IPv4 prefix.
+func lastAddr(p netip.Prefix) netip.Addr {
+	a := p.Masked().Addr().As4()
+	for i := p.Bits(); i < 32; i++ {
+		a[i/8] |= 0x80 >> (i % 8)
+	}
+	return netip.AddrFrom4(a)
 }

@@ -16,6 +16,11 @@ variable "region" {
   description = "Region of the instance (`instances[].region`, e.g. `GRA11`); must be one of `project.regions`."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = contains(var.project.regions, var.region)
+    error_message = "region must be one of the project's regions."
+  }
 }
 
 variable "instance" {
@@ -51,4 +56,9 @@ variable "network" {
     vlan_id = optional(number, 0)
   })
   nullable = false
+
+  validation {
+    condition     = can(cidrnetmask(var.network.cidr)) && try(cidrsubnet(var.network.cidr, 0, 0) == var.network.cidr, false) && try(tonumber(split("/", var.network.cidr)[1]) <= 29, false)
+    error_message = "network.cidr must be an IPv4 network in CIDR form without host bits, /29 or larger."
+  }
 }

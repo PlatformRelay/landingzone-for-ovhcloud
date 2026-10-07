@@ -1,10 +1,24 @@
-# Stub (spec 005 T029): the module call the tests pin, no behaviour. T030 names the network through
-# modules/naming (kind `private_network`) and calls modules/private-network once, unkeyed, at
-# `module.network` with the given project, region, CIDR and VLAN id.
+# Network/island component (spec 005 T030; research R9, R14): one private network and one subnet in
+# one region of the environment's project, named through modules/naming (kind `private_network`,
+# role `main`), through exactly one unkeyed modules/private-network call at `module.network`. The
+# region must be one of the project's regions; DHCP on and no gateway are the module's.
+module "network_name" {
+  source      = "../../../modules/naming"
+  org         = var.org
+  tenant      = var.tenant
+  environment = var.environment
+  region      = var.region
+  kind        = "private_network"
+  role        = "main"
+  instance    = var.instance
+  managed_in  = var.managed_in
+}
+
 module "network" {
   source     = "../../../modules/private-network"
-  project_id = "not-implemented"
-  name       = "not-implemented"
-  region     = "NOT-IMPLEMENTED"
-  cidr       = "192.0.2.0/24"
+  project_id = var.project_id
+  name       = module.network_name.name
+  region     = var.region
+  cidr       = var.cidr
+  vlan_id    = var.vlan_id
 }

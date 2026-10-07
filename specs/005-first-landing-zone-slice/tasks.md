@@ -311,7 +311,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network`: one network in the given region, one subnet with the given CIDR, DHCP on, no gateway resource; invalid CIDR and region outside the project's regions are rejected; outputs match schema and list the network and subnet as `unlabelled`. Stubs are behavioural red.
   - Evidence: `evidence/T029.md`; PR; initial status `not-run`.
 
-- [ ] T030 [US2] Implement modules/private-network, components/network/island and stages/project-network
+- [x] T030 [US2] Implement modules/private-network, components/network/island and stages/project-network — closed 2026-10-07, evidence: evidence/T030.md
   - Requirements: FR-003, FR-004, FR-005; ADRs: 0004, 0017. Depends on: T029.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network; task test:dependencies`: green; resources `ovh_cloud_project_network_private`, `ovh_cloud_project_network_private_subnet` (docs cited).
   - Evidence: `evidence/T030.md`; PR; initial status `not-run`.
