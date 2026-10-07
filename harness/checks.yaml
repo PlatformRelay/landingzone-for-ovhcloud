@@ -116,7 +116,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/report", "tools/internal/checks/dependencies.go", "tools/cmd/lz-check", "tests/fixtures/tofu/streams"]},
     {"id": "test:outputs", "requirements": ["005/FR-005", "005/SC-005"], "command": "task test:outputs", "creator": "005/T018", "kind": "behavioral",
      "scope": ["tools/internal/stacks/outputs.go", "tools/internal/stacks/outputs_test.go", "tools/internal/stacks/outputs_schema_test.go", "tools/internal/stacks/outputs_stage_test.go", "schemas/outputs", "tests/fixtures/outputs"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "stages/tenant-state", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "stages/tenant-state", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user", "stages/account-governance", "components/identity/ovh-native", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group"]},
     {"id": "test:stacks", "requirements": ["005/FR-006", "005/FR-007", "005/FR-008", "005/FR-009", "005/FR-013", "005/SC-002"], "command": "task test:stacks", "creator": "005/T034", "kind": "behavioral",
      "scope": ["tools/internal/stacks", "tools/cmd/lz-stacks", "schemas/deployments.schema.json", "tests/fixtures/manifests"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks"]},

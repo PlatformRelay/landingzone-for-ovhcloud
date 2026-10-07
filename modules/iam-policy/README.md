@@ -41,6 +41,7 @@ UNVERIFIED offline (P25).
 |---|---|
 | `id` | Id of the policy. |
 | `name` | Name of the policy. |
+| `identities`, `resources`, `allow` | The policy's identities, resources and allowed actions as the resource carries them (sets), so a caller can publish what was planned, not what it passed. |
 
 ## Resources
 

@@ -229,22 +229,13 @@ tasks:
         /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$work" output -json
 
-  # The tenant-state stage's real plan (005 T022): its own unit tests on a scratch copy, mocked
-  # provider, mirror-only init; stdout is the verbose JSON plan of the run
-  # `published_outputs_match_the_schema`, one line. tests/fixtures/outputs/capture-tenant-state.sh
-  # records it.
+  # A stage's real plan (005 T022, T024): its own unit tests on a scratch copy, mocked provider,
+  # mirror-only init; stdout is the verbose JSON plan of the run `published_outputs_match_the_schema`,
+  # one line. tests/fixtures/outputs/capture-stage-plan.sh records it.
   capture:tenant-state-plan:
-    cmds:
-      - |
-        set -e
-        work=$(mktemp -d /tmp/lz-tenant-state.XXXXXX)
-        trap 'rm -rf "$work"' EXIT
-        cp -r modules components stages "$work/"
-        find "$work" -name .terraform -type d -prune -exec rm -rf {} +
-        dir="$work/stages/tenant-state"
-        /tcb/tofu -chdir="$dir" init -backend=false -lockfile=readonly -input=false -no-color > /dev/null
-        /tcb/tofu -chdir="$dir" test -json -verbose -no-color > "$work/test.jsonl"
-        grep '"type":"test_plan"' "$work/test.jsonl" | grep '"@testrun":"published_outputs_match_the_schema"'
+    cmds: [{task: capture-stage-plan, vars: {STAGE: tenant-state}}]
+  capture:account-governance-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: account-governance}}]
 
   capture:p24-apply-json:
     dir: tests/fixtures/tofu-probes/p24-apply-json
@@ -341,6 +332,20 @@ tasks:
     dir: tests/fixtures/tofu-probes/protect
     cmds:
       - sh roots.sh /tcb/tofu {{.CASE}}
+
+  capture-stage-plan:
+    internal: true
+    cmds:
+      - |
+        set -e
+        work=$(mktemp -d /tmp/lz-{{.STAGE}}.XXXXXX)
+        trap 'rm -rf "$work"' EXIT
+        cp -r modules components stages "$work/"
+        find "$work" -name .terraform -type d -prune -exec rm -rf {} +
+        dir="$work/stages/{{.STAGE}}"
+        /tcb/tofu -chdir="$dir" init -backend=false -lockfile=readonly -input=false -no-color > /dev/null
+        /tcb/tofu -chdir="$dir" test -json -verbose -no-color > "$work/test.jsonl"
+        grep '"type":"test_plan"' "$work/test.jsonl" | grep '"@testrun":"published_outputs_match_the_schema"'
 
   capture-tofu:
     internal: true

@@ -254,4 +254,21 @@ run "outputs" {
     condition     = output.name == ovh_iam_policy.this.name && output.name == "lz-demo-dev-pol-deployer"
     error_message = "the name output is the policy's name"
   }
+
+  # T024 (T023 decision request 1): the identity component publishes a policy's contents from these
+  # outputs, so they carry the resource's attributes, not the inputs.
+  assert {
+    condition     = output.identities == ovh_iam_policy.this.identities && output.identities == toset(var.identities)
+    error_message = "the identities output is the policy's identities"
+  }
+
+  assert {
+    condition     = output.resources == ovh_iam_policy.this.resources && output.resources == toset(var.resources)
+    error_message = "the resources output is the policy's resources"
+  }
+
+  assert {
+    condition     = output.allow == ovh_iam_policy.this.allow && output.allow == toset(var.allow)
+    error_message = "the allow output is the policy's allowed actions"
+  }
 }

@@ -29,4 +29,17 @@ variable "tenants" {
     project_urn = string
   }))
   nullable = false
+
+  validation {
+    condition     = length(var.tenants) > 0
+    error_message = "tenants: at least one tenant."
+  }
+
+  # Defence in depth for G5 at the resolved-reference input (coordinator decision 2026-10-07): the
+  # URN a tenant policy is scoped to is exactly the project of the same entry (form: research R6;
+  # `ca` region part, manage-and-operate/iam/authenticate-api-openstack-with-service-account.mdx).
+  validation {
+    condition     = alltrue([for t in var.tenants : can(regex("^urn:v1:(eu|ca):resource:publicCloudProject:[0-9a-f]+$", t.project_urn)) && endswith(t.project_urn, ":${t.project_id}")])
+    error_message = "tenants: project_urn must be urn:v1:<eu|ca>:resource:publicCloudProject:<project_id> of the same entry."
+  }
 }
