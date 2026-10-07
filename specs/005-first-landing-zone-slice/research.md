@@ -237,6 +237,13 @@ check (G9). *Retained* rows are exempt when the resource is in a retained instan
 | `ovh_cloud_quota` (optional, P11) | quota setting (a property of the project, no object to leave behind) | read through the project's quota (`api/v2/publicCloud.json:5530`) | project when `quota_guard.enabled`, quota probe (plan only) | retained with the project; nothing to list as a leftover | — |
 | `ovh_cloud_project` | the adopted project | — | project (adopt; `reference` mode creates none) | retained, never destroyed | exempt by id |
 
+Bucket listing per region (T065, T087): every region of the project is asked; a 404 is accepted only
+where the region detail lists no bucket service. Bucket services are `storage-s3-standard` and
+`storage-s3-high-perf`; any other `storage-s3*` name counts as one until a capture shows otherwise
+(fail closed). **Cold Archive containers are not a matrix kind in this slice**: no stage or probe
+creates them, and a region whose only Object Storage service is `storage-s3-coldarchive`
+(RBX-ARCHIVE) answers the bucket listing 404 (run `20261007T133803Z-aeee`), which is accepted.
+
 A resource of a matrix kind that matches the slice prefix or the run id is a leftover unless it is in
 a retained instance's state (read with `tofu state list`/`show -json`), is the retained adopted
 project, or is covered by the **admin exemption**: exactly the client id in `sandbox.env`
