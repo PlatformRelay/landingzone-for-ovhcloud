@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,6 +71,10 @@ type LeftoverCheck struct {
 	RunID    string              // the run id; a name, id or tag value holding it matches
 	Retained map[string][]string // provider type -> ids held in retained instances' states
 	Exempt   Exemption
+	// API and Cred are lz-live's own API client and the credential the run binds: when Lister is
+	// nil the check lists through them, GET only (T083 pins it, T084 implements it).
+	API  API
+	Cred Credential
 
 	child *childEnv // set by the runner: the environment ovhcloud runs with
 }
@@ -137,6 +142,24 @@ func (o ovhcloudLister) Get(ctx context.Context, path, cursor string) ([]byte, s
 		return nil, "", fmt.Errorf("ovhcloud %s: %v", path, err)
 	}
 	return out.Bytes(), "", nil
+}
+
+// apiLister is the leftover check's read-only client of the OVHcloud API (T083 pins it; stub
+// until T084).
+type apiLister struct {
+	api  API
+	cred Credential
+}
+
+func newAPILister(a API, c Credential) *apiLister { return &apiLister{api: a, cred: c} }
+
+func (l *apiLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
+	return l.request(ctx, http.MethodGet, path, cursor)
+}
+
+// request sends one API request; any method but GET is refused before a request.
+func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([]byte, string, error) {
+	return nil, "", errors.New("read-only API lister: not implemented")
 }
 
 type lister struct {
