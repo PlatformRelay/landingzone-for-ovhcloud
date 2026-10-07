@@ -222,7 +222,7 @@ Independent test: V001, V002 on the US1 directories, V003.
   - Verify: `task test:unit -- modules/object-storage; task test:unit -- modules/object-storage-protected; task test:unit -- modules/object-storage-user; task lint -- modules/object-storage; task lint -- modules/object-storage-protected; task lint -- modules/object-storage-user`: green; resources `ovh_cloud_project_storage`, `ovh_cloud_project_user`, `ovh_cloud_project_user_s3_credential`, `ovh_cloud_project_user_s3_policy` (provider docs cited in README); no attribute absent from 2.21.0 (P20).
   - Evidence: `evidence/T014.md`; PR; initial status `not-run`.
 
-- [ ] T015 [US1] Write state-backend component and bootstrap stage tests in components/state-backend/tests/ and stages/bootstrap/tests/
+- [x] T015 [US1] Write state-backend component and bootstrap stage tests in components/state-backend/tests/ and stages/bootstrap/tests/ — closed 2026-10-07, evidence: evidence/T015.md
   - Requirements: FR-002, FR-004, FR-005, FR-008; ADRs: 0004, 0009. Depends on: T006, T014.
   - Verify: `task test:unit -- components/state-backend; task test:unit -- stages/bootstrap`: the component creates one protected, versioned bucket and the S3 users it is given, each with a policy limited to that bucket; the bootstrap stage creates only the account bucket (name from naming: `org`, kind bucket, role state) in `state_project_id` plus the platform S3 user; mandatory labels; outputs `state_bucket`, `state_project_id`, `state_region`, `state_endpoint`, `platform_s3_user_id`, `unlabelled[]` (S3 user, credential, policy) and only-sensitive credentials; no tenant bucket; stage has no backend/provider configuration. Stubs are behavioural red.
   - Evidence: `evidence/T015.md`; PR; initial status `not-run`.
