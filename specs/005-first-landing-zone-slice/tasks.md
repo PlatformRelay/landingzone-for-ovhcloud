@@ -276,7 +276,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- components/identity/ovh-native; task test:unit -- stages/account-governance; task test:dependencies`: T023 controls green and the G5 mutants red as specified.
   - Evidence: `evidence/T024.md`; PR; initial status `not-run`.
 
-- [ ] T025 [US2] Write cloud-project and cloud-quota module tests in modules/{cloud-project,cloud-quota}/tests/
+- [x] T025 [US2] Write cloud-project and cloud-quota module tests in modules/{cloud-project,cloud-quota}/tests/ — closed 2026-10-07, evidence: evidence/T025.md
   - Requirements: FR-002, FR-004; ADRs: 0003, 0005, 0006. Depends on: T012. Premise waiver (research R23): P5 is unqualified until T009; both modes are tested offline, no cloud contact.
   - Verify: `task test:unit -- modules/cloud-project; task test:unit -- modules/cloud-quota`: `adopt` mode manages `ovh_cloud_project` with `prevent_destroy` and `deletion_protection = true`; `reference` mode reads `data.ovh_cloud_project` and manages no project; both tag the project URN through `ovh_iam_resource_tags`; alerting only when enabled; quota resource only when enabled with `prevent_automatic_quota_upgrade = true`. Stubs are behavioural red.
   - Evidence: `evidence/T025.md`; PR; initial status `not-run`.
