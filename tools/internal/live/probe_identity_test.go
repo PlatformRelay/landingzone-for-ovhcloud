@@ -1035,17 +1035,19 @@ func TestProbeIdentityPairing(t *testing.T) {
 // TF_CLI_* name (tofu's own arguments and CLI configuration).
 // A root that publishes any of them in companion_env, in any case, is refused before the companion
 // starts: the run fails, no companion child runs, the root is still destroyed and no file, terminal
-// or returned error keeps the published value. Today companionEnv copies the published map over the
-// run's values (maps.Copy), so such a name overrides the run's value for the companion. A name that
-// only begins or ends like a reserved one (OVH_ENDPOINT_URL, HOMEPAGE, TF_VAR_tf_cli_args) is no
-// reserved name: it passes under its own name and the companion keeps the run's own values. Not
-// pinned: whether the refusal comes before or after the identities are bound.
+// or returned error keeps the published value. Before T082 companionEnv copied the published map over
+// the run's values (maps.Copy), so such a name overrode the run's value for the companion. A name
+// that only begins or ends like a reserved one (OVH_ENDPOINT_URL, HOMEPAGE, TF_VAR_tf_cli_args) is
+// no reserved name: it passes under its own name and the companion keeps the run's own values.
+// T082 (coordinator decision): every other TF_* name but TF_VAR_* (tofu's own settings: TF_LOG,
+// TF_LOG_PATH, TF_PLUGIN_CACHE_DIR, future ones) and TF_VAR_state_path are reserved too, in any
+// case, and the refusal comes before any identity is bound.
 
 // pairReservedValue is what a root publishes under a reserved name: scanned like a secret.
 const pairReservedValue = "pair-SECRET-reserved-7f3a2c18"
 
 var reservedNames = []string{"OVH_ENDPOINT", "TF_VAR_state_passphrase", "TF_VAR_run_id", "TF_VAR_project_id",
-	"TF_DATA_DIR", "HOME", "TMPDIR", "PATH"}
+	"TF_DATA_DIR", "HOME", "TMPDIR", "PATH", "TF_VAR_state_path"}
 
 // oddCase alternates the case of the letters of name, starting in lower case.
 func oddCase(name string) string {
@@ -1081,6 +1083,12 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 		if strings.Contains(w.term.String(), pairReservedValue) {
 			t.Error("the value published under a reserved name reached the terminal")
 		}
+		// Used as a relative path (TF_VAR_state_path, TF_LOG_PATH, HOME …) the value would name a
+		// file in the test's working directory, outside the scanned roots (T082 review r1).
+		if _, err := os.Lstat(pairReservedValue); err == nil {
+			t.Error("a file named after the value published under a reserved name was written in the working directory")
+			_ = os.RemoveAll(pairReservedValue)
+		}
 		if err != nil && strings.Contains(err.Error(), pairReservedValue) {
 			t.Error("the refusal's error holds the value published under a reserved name (lz-live prints it)")
 		}
@@ -1088,13 +1096,20 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 	checkReserved := func(t *testing.T, name string, err error, calls []tofuCall) {
 		t.Helper()
 		if ExitCode(err) == 0 {
-			t.Errorf("the run exited 0: %s, a name the run sets for the companion, was published and not refused", name)
+			t.Errorf("the run exited 0: %s, a name reserved for the run, was published and not refused", name)
 		}
 		if comp := companionChildren(calls); len(comp) > 0 {
 			t.Errorf("the companion ran %d tofu calls (first: %s) although the root published %s (the published value reached it: %t)", len(comp), calls[comp[0]].Cmd, name, envOf(calls[comp[0]])[name] == pairReservedValue)
 		}
 		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"p"}) {
 			t.Errorf("destroys %v, want [p]: the root is destroyed after the refusal", got)
+		}
+	}
+	// T082: refused before any identity is bound, so no published identity is bound or used.
+	checkUnbound := func(t *testing.T, name string, binds []bindCall) {
+		t.Helper()
+		if len(binds) > 0 {
+			t.Errorf("%d published identities were bound although the root published %s: the refusal comes before Bind", len(binds), name)
 		}
 	}
 
@@ -1105,6 +1120,12 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 	// Any TF_CLI_* name, not only the families tofu documents today (review r1).
 	for _, n := range []string{"TF_CLI_ARGS", "TF_CLI_ARGS_apply", "TF_CLI_ARGS_destroy", "TF_CLI_CONFIG_FILE", "tf_cli_args_plan", "Tf_Cli_Config_File", "tF_cLi_aRgS_InIt",
 		"TF_CLI_", "TF_CLI_ANY_FUTURE", "tf_cli_other", "Tf_Cli_X"} {
+		cases[n] = true
+	}
+	// Any other TF_* name but TF_VAR_*, any case, documented or not (T082, coordinator decision);
+	// TF_CLIX and TF_DATA_DIRECTORY were T081 neighbours.
+	for _, n := range []string{"TF_LOG", "tf_log", "TF_LOG_PATH", "Tf_Log_Path", "TF_LOG_CORE", "TF_PLUGIN_CACHE_DIR", "tF_pLuGiN_cAcHe_DiR",
+		"TF_WORKSPACE", "TF_IN_AUTOMATION", "TF_INPUT", "TF_", "TF_ANY_FUTURE", "tf_other", "TF_CLIX", "TF_DATA_DIRECTORY", "TF_VAR"} {
 		cases[n] = true
 	}
 	for _, name := range slices.Sorted(maps.Keys(cases)) {
@@ -1118,6 +1139,7 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 			err := p.Start(context.Background())
 			calls := w.calls(t, "tofu.log")
 			checkReserved(t, name, err, calls)
+			checkUnbound(t, name, binds)
 			checkNoUnbound(t, calls, env, binds)
 			checkNoPairSecret(t, w, root)
 			checkNoReserved(t, w, root, err)
@@ -1133,7 +1155,10 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 		var binds []bindCall
 		extra := map[string]string{}
 		for _, n := range []string{"OVH_ENDPOINT_URL", "ovh_endpoint_url", "MY_OVH_ENDPOINT", "TF_VAR_run_id_suffix", "TF_VAR_project_ids",
-			"TF_VAR_state_passphrase_hint", "TF_DATA_DIRECTORY", "HOMEPAGE", "XPATH", "TMPDIRS", "TF_CLIX", "MY_TF_CLI_ARGS", "TF_VAR_tf_cli_args"} {
+			"TF_VAR_state_passphrase_hint", "HOMEPAGE", "XPATH", "TMPDIRS", "MY_TF_CLI_ARGS", "TF_VAR_tf_cli_args",
+			// T082: TF_VAR_* in any case, and names that only contain or nearly begin with TF_.
+			"TF_VAR_tf_log_path", "tf_var_tf_plugin_cache_dir", "Tf_Var_Tf_Log", "TF_VAR_state_path_hint", "TF_VAR_state",
+			"MY_TF_LOG", "XTF_LOG_PATH", "TFLOG", "TF"} {
 			extra[n] = "fake-neighbour-" + strings.ToLower(n)
 		}
 		p, env := w.pairingProbe(t, root, extra, &binds)
@@ -1167,43 +1192,52 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 			if want := filepath.Join("tofu-data", "p-companion"); !strings.Contains(ce["TF_DATA_DIR"], want) {
 				t.Errorf("companion tofu %s: TF_DATA_DIR %q is not the run's per-stack data directory", calls[i].Cmd, ce["TF_DATA_DIR"])
 			}
+			if _, ok := ce["TF_VAR_state_path"]; ok {
+				t.Errorf("companion tofu %s: TF_VAR_state_path is set; the companion's state is its own backend's", calls[i].Cmd)
+			}
 		}
 		checkNoUnbound(t, calls, env, binds)
 		checkNoPairSecret(t, w, root)
 	})
 
-	// `--cleanup` re-reads companion_env from the root's retained state: the same refusal applies.
-	t.Run("cleanup/refused", func(t *testing.T) {
-		withUmask(t)
-		root := tempPrivate(t)
-		w := newRunWorld(t)
-		var binds []bindCall
-		p, env := w.pairingProbe(t, root, map[string]string{"Ovh_Endpoint": pairReservedValue}, &binds)
-		st := w.scenario.Stacks["p"]
-		st.DestroyExit = 1
-		w.scenario.Stacks["p"] = st
-		scanned(t, w)
-		startErr := p.Start(context.Background())
-		if ExitCode(startErr) == 0 {
-			t.Fatal("a probe whose root destroy failed exited 0")
-		}
-		// The failed run's error (a refusal joined to the failed destroy, review r1) is printed too.
-		if strings.Contains(startErr.Error(), pairReservedValue) {
-			t.Error("the failed run's error holds the value published under a reserved name")
-		}
-		st.DestroyExit = 0
-		w.scenario.Stacks["p"] = st
-		w.save(t)
-		before := len(w.calls(t, "tofu.log"))
-		binds = binds[:0]
-		err := p.Cleanup(context.Background())
-		calls := w.calls(t, "tofu.log")[before:]
-		for i := range binds {
-			binds[i].at -= before
-		}
-		checkReserved(t, "Ovh_Endpoint", err, calls)
-		checkNoUnbound(t, calls, env, binds)
-		checkNoPairSecret(t, w, root)
-		checkNoReserved(t, w, root, err)
-	})
+	// `--cleanup` re-reads companion_env from the root's retained state: the same refusal applies, to
+	// a listed name and to a TF_* one (T082; T081 pinned the first only).
+	for _, row := range [][2]string{{"cleanup/refused", "Ovh_Endpoint"}, {"cleanup/refused-tf", "tf_Log_Path"}} {
+		name := row[1]
+		t.Run(row[0], func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p, env := w.pairingProbe(t, root, map[string]string{name: pairReservedValue}, &binds)
+			st := w.scenario.Stacks["p"]
+			st.DestroyExit = 1
+			w.scenario.Stacks["p"] = st
+			scanned(t, w)
+			startErr := p.Start(context.Background())
+			if ExitCode(startErr) == 0 {
+				t.Fatal("a probe whose root destroy failed exited 0")
+			}
+			// The failed run's error (a refusal joined to the failed destroy, review r1) is printed too.
+			if strings.Contains(startErr.Error(), pairReservedValue) {
+				t.Error("the failed run's error holds the value published under a reserved name")
+			}
+			checkUnbound(t, name, binds)
+			st.DestroyExit = 0
+			w.scenario.Stacks["p"] = st
+			w.save(t)
+			before := len(w.calls(t, "tofu.log"))
+			binds = binds[:0]
+			err := p.Cleanup(context.Background())
+			calls := w.calls(t, "tofu.log")[before:]
+			for i := range binds {
+				binds[i].at -= before
+			}
+			checkReserved(t, name, err, calls)
+			checkUnbound(t, name, binds)
+			checkNoUnbound(t, calls, env, binds)
+			checkNoPairSecret(t, w, root)
+			checkNoReserved(t, w, root, err)
+		})
+	}
 }
