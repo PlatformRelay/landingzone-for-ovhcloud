@@ -236,7 +236,7 @@ Independent test: V001, V002 on the US1 directories, V003.
 
 Independent test: V002 for all slice directories, V003, V004.
 
-- [ ] T017 [US2] Write output-contract tests in tools/internal/stacks/outputs_test.go and tests/fixtures/outputs/
+- [x] T017 [US2] Write output-contract tests in tools/internal/stacks/outputs_test.go and tests/fixtures/outputs/ — closed 2026-10-07, evidence: evidence/T017.md
   - Requirements: FR-005, SC-005; ADRs: 0004, 0017. Depends on: T016; 001/T003 capture admission.
   - Verify: `go -C tools test ./internal/stacks -run TestOutputs -count=1`: from a captured pinned `tofu output -json` of a provider-free fixture root (sensitive and plain outputs; command recorded) the envelope builder keeps plain values and drops sensitive ones; fixture envelopes per stage (bootstrap, tenant-state, account-governance, project, project-network, runtime) validate. Kept sensitive entry, secret-pattern key, unknown field, missing value, `null`/`""` capability and wrong `stage` are behavioural red against a pass-through stub.
   - Evidence: `evidence/T017.md`; PR; initial status `not-run`.

@@ -1,0 +1,24 @@
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "StageOutputs",
+  "instance_id": "account-governance",
+  "stage": "account-governance",
+  "source_revision": "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a",
+  "values": {
+    "platform_deployer": {
+      "client_id": "EU.lzplatformdeployer01",
+      "identity_urn": "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-EU.lzplatformdeployer01"
+    },
+    "tenants": {
+      "demo": {
+        "deployer_client_id": "EU.lzdemodeployer01",
+        "deployer_identity_urn": "urn:v1:eu:identity:credential:ab12345-ovh/oauth2-EU.lzdemodeployer01",
+        "group_urn": "urn:v1:eu:identity:group:ab12345-ovh/lz-demo-deployers"
+      }
+    },
+    "unlabelled": [
+      "module.identity.ovh_me_api_oauth2_client.platform_deployer",
+      "module.identity.ovh_iam_policy.platform_deployer"
+    ]
+  }
+}

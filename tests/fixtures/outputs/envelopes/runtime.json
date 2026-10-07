@@ -1,0 +1,26 @@
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "StageOutputs",
+  "instance_id": "demo-dev-gra11-runtime-blue",
+  "stage": "runtime",
+  "source_revision": "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a",
+  "values": {
+    "kind": "managed-only",
+    "slot": "blue",
+    "scope": {
+      "instance": "demo-dev-gra11-runtime-blue",
+      "project_id": "fedcba9876543210fedcba9876543210",
+      "region": "GRA11"
+    },
+    "readiness": "ready",
+    "pending_actions": [],
+    "capabilities": {
+      "object-storage": {
+        "bucket": "lz-demo-dev-gra11-bkt-runtime-blue",
+        "endpoint": "https://s3.gra.io.cloud.ovh.net",
+        "region": "GRA"
+      }
+    },
+    "unlabelled": []
+  }
+}

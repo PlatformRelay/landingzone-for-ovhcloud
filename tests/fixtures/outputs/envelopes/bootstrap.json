@@ -1,0 +1,19 @@
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "StageOutputs",
+  "instance_id": "account-bootstrap",
+  "stage": "bootstrap",
+  "source_revision": "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a",
+  "values": {
+    "state_bucket": "lz-bkt-state",
+    "state_project_id": "0123456789abcdef0123456789abcdef",
+    "state_region": "GRA",
+    "state_endpoint": "https://s3.gra.io.cloud.ovh.net",
+    "platform_s3_user_id": "4711",
+    "unlabelled": [
+      "module.state_backend.ovh_cloud_project_user.s3[\"platform\"]",
+      "module.state_backend.ovh_cloud_project_user_s3_credential.s3[\"platform\"]",
+      "module.state_backend.ovh_cloud_project_user_s3_policy.s3[\"platform\"]"
+    ]
+  }
+}
