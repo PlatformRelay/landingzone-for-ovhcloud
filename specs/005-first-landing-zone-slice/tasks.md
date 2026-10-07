@@ -183,13 +183,23 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T081 controls green with one killed mutant per clause.
   - Evidence: `evidence/T082.md`; PR; initial status `not-run`.
 
-- [ ] T009 Owner session: run read-only and plan-only probes P5, P10, P11, P18 and capture `ovhcloud` listings for every leftover kind in tests/fixtures/ovhcloud/
+- [x] T009 Owner session: run read-only and plan-only probes P5, P10, P11, P18 and capture `ovhcloud` listings for every leftover kind in tests/fixtures/ovhcloud/ — closed 2026-10-07 with gaps, evidence: evidence/T009.md
   - Requirements: FR-004, FR-011; ADRs: 0005, 0008, 0024. Depends on: T008, T055, T072, T074; owner, `sandbox.env`, `ovhcloud` 0.15.0.
   - Verify: Owner session in the dedicated owner clone `~/Projects/PlatformRelay/lz-live` (D92; `live.env`: `LZ_OWNER_CHECKOUT` its canonical absolute path, `LZ_AGENT_WORKTREE_ROOT` the existing agent worktree root, `/home/koni/Projects/PlatformRelay/worktrees` on the maintainer's workstation; quickstart *Owner session*), through `task live:probe -- <root> --plan-only` (guard and child environment active): `tofu plan -generate-config-out` with an import block for the sandbox project (no apply) — pass when no replacement or order is planned, refute otherwise (→ `reference` mode in T039); `tofu plan` of alerting and quota roots; read-only `ovhcloud` (or fallback API) listings, each with version and command and ids sanitised, for every kind of the research R12 matrix: buckets per region, private networks, subnets per network, cloud project users, S3 credentials and S3 policies per user, OAuth2 clients, IAM policies, identity groups, project alerts, IAM resource tags on the project URN — and a paginated listing where the account has enough entries, else recorded as not observed. A failed listing is recorded as refuted for that kind with its fallback, not skipped. Also `GET /auth/details` with the admin credential (P26, account field present).
   - Evidence: `evidence/T009.md`; PR (commands, outcomes); initial status `not-run`.
 
-- [ ] T065 Qualify the leftover parser on T009's captured listings in tools/internal/live/leftovers_captured_test.go
+- [ ] T083 Write read-only API-client leftover-listing tests in tools/internal/live/leftovers_api_test.go
   - Requirements: FR-011, FR-013; ADRs: 0008, 0024. Depends on: T009, T055.
+  - Verify: `go -C tools test ./internal/live -run TestLeftoversAPI -count=1`: the leftover check lists every matrix kind through lz-live's own signed API client (the credential the run already binds), GET only — any other method is refused before a request; pagination followed; a listing error, a non-2xx status and a truncated body are reported as errors, never as zero leftovers; no `ovhcloud` process is started. Today the check shells out to `ovhcloud api get`, which ovhcloud 0.15.0 does not have (P18 refuted, evidence/T009.md): behavioural red.
+  - Evidence: `evidence/T083.md`; PR; initial status `not-run`.
+
+- [ ] T084 Implement the API-client leftover listing in tools/internal/live/leftovers.go and re-run the T009 plan-only probes to capture listings in tests/fixtures/ovhcloud/
+  - Requirements: FR-011, FR-013; ADRs: 0008, 0024. Depends on: T083.
+  - Verify: `task test:live-lane`: T083 controls green with one killed mutant per clause; then the three T009 probes re-run plan-only from the dedicated clone at the reviewed commit end `outcome: pass` with `0 leftovers, 0 errors`, and their redacted listings (one per matrix kind) are committed under tests/fixtures/ovhcloud/ with a provenance sidecar (run id, reviewed commit, date).
+  - Evidence: `evidence/T084.md`; PR (run ids, cost); initial status `not-run`.
+
+- [ ] T065 Qualify the leftover parser on T009's captured listings in tools/internal/live/leftovers_captured_test.go
+  - Requirements: FR-011, FR-013; ADRs: 0008, 0024. Depends on: T009, T055, T084.
   - Verify: `go -C tools test ./internal/live -run TestLeftoversCaptured -count=1`: the parser of T055 accepts T009's captured `ovhcloud` (or fallback API) listing for every matrix kind, replacing the synthetic ones of T054 as the qualifying evidence (constitution III); one seeded leftover per kind injected into the captured listing is found; the admin exemption matches the captured admin client and policy ids only; a captured listing error, a truncated capture and a kind recorded as refuted without its fallback parser reported as pass are each behavioural red. A parser change needed by a capture is made here, test first, before T010.
   - Evidence: `evidence/T065.md`; PR; initial status `not-run`.
 
