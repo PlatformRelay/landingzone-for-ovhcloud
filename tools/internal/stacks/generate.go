@@ -53,8 +53,9 @@ type StackPlan struct {
 }
 
 // Generate decodes Root/stacks/deployments.yaml strictly, refuses a `git` stage source before
-// writing anything, and runs the pinned `terramate generate` in Root. It reads no credential and
-// calls no host guard: it runs in any checkout, including an authoring worktree with a dirty tree.
+// writing anything, and runs the pinned `terramate generate` in Root/stacks. It reads no
+// credential and calls no host guard: it runs in any checkout, including an authoring worktree
+// with a dirty tree.
 func Generate(opts GenerateOptions) error {
 	data, err := os.ReadFile(filepath.Join(opts.Root, ManifestPath))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -71,7 +72,10 @@ func Generate(opts GenerateOptions) error {
 		return &GenerateError{Code: CodeStageSourceNotImplemented,
 			Detail: fmt.Sprintf("spec.stage_source.kind %q: only local stage sources generate", m.StageSource)}
 	}
-	if out, err := runTerramate(opts.Terramate, true, "-C", opts.Root, "generate"); err != nil {
+	// Run from stacks/: Terramate generates only below its working directory, and a whole-project
+	// run deletes every other file carrying its generated header as an orphan, such as the
+	// dependency-check fixtures under tests/ (005 T039). Orphans below stacks/ are stacks:check's.
+	if out, err := runTerramate(opts.Terramate, true, "-C", filepath.Join(opts.Root, "stacks"), "generate"); err != nil {
 		return fmt.Errorf("terramate generate: %v: %s", err, out)
 	}
 	return nil

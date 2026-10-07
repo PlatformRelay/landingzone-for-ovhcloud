@@ -954,6 +954,58 @@ func TestGenerateStackInvariants(t *testing.T) {
 	}
 }
 
+// Generate renders stacks/ only (005 T039): a file outside stacks/ carrying Terramate's generated
+// header (the dependency-check fixtures under tests/ do) is neither deleted nor changed. Whole
+// project `terramate generate` removes such files as orphans (observed 2026-10-07, 0.17.3).
+func TestGenerateLeavesFilesOutsideStacks(t *testing.T) {
+	root := generationRoot(t, manifestOf(t, "sandbox"))
+	outside := map[string]string{
+		"tests/check/fixtures/purity/stacks/account/bootstrap/main.tf": "// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT\n\nmodule \"x\" {\n  source = \"../x\"\n}\n",
+		"docs/examples/versions.tf":                                    "// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT\n\nterraform {\n}\n",
+	}
+	for rel, content := range outside {
+		writeFile(t, filepath.Join(root, rel), []byte(content))
+	}
+	if err := generateIn(t, root); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if len(generatedFiles(t, root)) == 0 {
+		t.Fatal("nothing generated under stacks/")
+	}
+	for rel, content := range outside {
+		got, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Errorf("%s outside stacks/ was removed: %v", rel, err)
+		} else if string(got) != content {
+			t.Errorf("%s outside stacks/ was changed", rel)
+		}
+	}
+}
+
+// Every stack of the repository's own manifest carries its stage's dependency lock file byte for
+// byte (005 T039): `task lint` and the live runner initialise the stack root with
+// -lockfile=readonly, and nothing generates the lock, so a new row without it, or a stage lock
+// changed without its stacks, fails here.
+func TestRepositoryStackLocksMatchStages(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repositoryRoot, ManifestPath))
+	if err != nil {
+		t.Fatalf("the repository manifest (T039): %v", err)
+	}
+	m, err := DecodeManifest(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, in := range m.Instances {
+		want := readFile(t, filepath.Join(repositoryRoot, "stages", in.Stage, ".terraform.lock.hcl"))
+		got, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(in.Path), ".terraform.lock.hcl"))
+		if err != nil {
+			t.Errorf("%s: no dependency lock file; copy stages/%s/.terraform.lock.hcl: %v", in.Path, in.Stage, err)
+		} else if !bytes.Equal(got, want) {
+			t.Errorf("%s/.terraform.lock.hcl differs from stages/%s/.terraform.lock.hcl", in.Path, in.Stage)
+		}
+	}
+}
+
 // A `git` stage source is the schema's seam: Generate refuses it before writing anything, and the
 // stacks:check comparison refuses it too instead of rendering it silently.
 func TestGenerateRefusesGitStageSource(t *testing.T) {
