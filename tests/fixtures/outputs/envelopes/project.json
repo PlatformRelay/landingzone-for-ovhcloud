@@ -1,0 +1,15 @@
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "StageOutputs",
+  "instance_id": "demo-dev-project",
+  "stage": "project",
+  "source_revision": "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a",
+  "values": {
+    "tenant": "demo",
+    "environment": "dev",
+    "project_id": "fedcba9876543210fedcba9876543210",
+    "project_urn": "urn:v1:eu:resource:publicCloudProject:fedcba9876543210fedcba9876543210",
+    "regions": ["GRA11"],
+    "unlabelled": []
+  }
+}

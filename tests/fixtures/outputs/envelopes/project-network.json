@@ -1,0 +1,19 @@
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "StageOutputs",
+  "instance_id": "demo-dev-gra11-project-network",
+  "stage": "project-network",
+  "source_revision": "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a",
+  "values": {
+    "network_id": "pn-1234567_0",
+    "regions_openstack_ids": {
+      "GRA11": "5d8a6b2e-1f0c-4c3a-9e7d-0a1b2c3d4e5f"
+    },
+    "subnet_id": "8f7e6d5c-4b3a-4291-8a7b-6c5d4e3f2a10",
+    "cidr": "10.20.0.0/24",
+    "unlabelled": [
+      "module.network.ovh_cloud_project_network_private.this",
+      "module.network.ovh_cloud_project_network_private_subnet.this"
+    ]
+  }
+}

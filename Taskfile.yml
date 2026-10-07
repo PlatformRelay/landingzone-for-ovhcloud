@@ -74,6 +74,14 @@ tasks:
       - go -C tools test -count=1 -tags offlinetools -run 'TestUnit' ./internal/checks ./cmd/lz-check
       - go -C tools run ./cmd/lz-check -root .. slice
 
+  # Output-contract controls (005 T017): the envelope builder on the captured
+  # `tofu output -json`, the per-stage fixture envelopes and their refusals.
+  # Red until T018 implements the builder, the validator and schemas/outputs/.
+  test:outputs:
+    desc: Envelope builder and outputs.json validator against captured tofu output and fixture envelopes (005 V004)
+    cmds:
+      - go -C tools test -count=1 -run 'TestOutputs' ./internal/stacks
+
   # The live lane's offline controls: fakes only, no credential, no API call.
   # The host guard, child environment, account binding and credential files
   # (T053), the run core, redaction, leftover check and `lz-live probe`
@@ -209,6 +217,17 @@ tasks:
     cmds:
       - /tcb/tofu init -input=false -no-color > /dev/null
       - /tcb/tofu test -json
+
+  # Output-contract root (005 T017); tests/fixtures/outputs/capture.sh records its stdout, the
+  # pinned `tofu output -json` document. State stays in a scratch directory under /tmp.
+  capture:outputs-root:
+    cmds:
+      - |
+        work=$(mktemp -d /tmp/lz-outputs.XXXXXX)
+        cp tests/fixtures/outputs/root/main.tf "$work/"
+        /tcb/tofu -chdir="$work" init -input=false -no-color > /dev/null
+        /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
+        /tcb/tofu -chdir="$work" output -json
 
   capture:p24-apply-json:
     dir: tests/fixtures/tofu-probes/p24-apply-json

@@ -1,0 +1,81 @@
+{
+  "bootstrap_handle": {
+    "sensitive": true,
+    "type": "string",
+    "value": "lz-seed-t017-neutral-handle"
+  },
+  "platform_deployer_secret": {
+    "sensitive": true,
+    "type": "string",
+    "value": "lz-seed-t017-deployer-secret"
+  },
+  "platform_s3": {
+    "sensitive": true,
+    "type": [
+      "object",
+      {
+        "access_key_id": "string",
+        "secret_access_key": "string"
+      }
+    ],
+    "value": {
+      "access_key_id": "LZSEEDT017ACCESSKEY",
+      "secret_access_key": "lz-seed-t017-secret-access-key"
+    }
+  },
+  "regions": {
+    "sensitive": false,
+    "type": [
+      "tuple",
+      [
+        "string"
+      ]
+    ],
+    "value": [
+      "GRA11"
+    ]
+  },
+  "replicas": {
+    "sensitive": false,
+    "type": "number",
+    "value": 3
+  },
+  "scope": {
+    "sensitive": false,
+    "type": [
+      "object",
+      {
+        "instance": "string",
+        "project_id": "string",
+        "region": "string"
+      }
+    ],
+    "value": {
+      "instance": "demo-dev-gra11-runtime",
+      "project_id": "0123456789abcdef0123456789abcdef",
+      "region": "GRA11"
+    }
+  },
+  "state_bucket": {
+    "sensitive": false,
+    "type": "string",
+    "value": "lz-bkt-state"
+  },
+  "unlabelled": {
+    "sensitive": false,
+    "type": [
+      "tuple",
+      [
+        "string"
+      ]
+    ],
+    "value": [
+      "module.state_backend.ovh_cloud_project_user.s3[\"platform\"]"
+    ]
+  },
+  "versioned": {
+    "sensitive": false,
+    "type": "bool",
+    "value": true
+  }
+}
