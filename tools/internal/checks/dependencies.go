@@ -160,11 +160,15 @@ func resources(body *hclsyntax.Body) []string {
 // once and unrepeated, and calls no other module: tenant-state reaches its one
 // tenant bucket through the state-backend component (G6; T021 decision request
 // 1), account-governance its deployers, policies and groups through the
-// identity component (G5; T023 decision request 2).
+// identity component (G5; T023 decision request 2), project its one project
+// through the project-factory component (G7; T027 decision request 3), and
+// project-network its one network and subnet through the island component
+// (T029 decision request 1).
 var singleComponentStages = map[string]string{
 	"stages/tenant-state":       stateBackend,
 	"stages/account-governance": "components/identity/ovh-native",
 	"stages/project":            projectFactory,
+	"stages/project-network":    "components/network/island",
 }
 
 // projectFactory reaches its one project through exactly one call of

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Capture a stage's real plan for the output-contract pins of 005 T022 (tenant-state), T024
-# (account-governance) and T028 (project, adopt and reference mode) through the installed offline
-# entry:
+# (account-governance), T028 (project, adopt and reference mode) and T030 (project-network) through
+# the installed offline entry:
 #
 #   tests/fixtures/outputs/capture-stage-plan.sh <absolute entry> <absolute checkout> <case>
 #
@@ -28,6 +28,7 @@ case "$capture_case" in
   tenant-state) stage=tenant-state; dirs="stages/tenant-state components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
   account-governance) stage=account-governance; dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group" ;;
   project | project-reference) stage=project; dirs="stages/project components/project-factory modules/naming modules/cloud-project modules/cloud-quota" ;;
+  project-network) stage=project-network; dirs="stages/project-network components/network/island modules/naming modules/private-network" ;;
   *) echo "capture-stage-plan.sh: unknown case: $capture_case" >&2; exit 2 ;;
 esac
 if [ "$capture_case" = project-reference ]; then testrun=reference_published_outputs_with_both_toggles; fi

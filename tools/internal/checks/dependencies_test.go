@@ -1260,12 +1260,19 @@ func TestDependenciesNonsensitiveFixture(t *testing.T) {
 // T023's decision request 2): a second call would plan deployers and policies
 // outside every stage test. Its first row is T023's probe, verbatim. Test
 // configuration, other layers and other stages' component calls are outside
-// the rules.
+// the rules. The project-network stage reaches its one network and subnet
+// through exactly one, unrepeated components/network/island call (coordinator
+// decision 2026-10-07 on T029's decision request 1): a second or keyed call
+// would plan a second network and subnet that no stage test can count. Its
+// first row is T029's mutant s-call-count.
 func TestDependenciesStageComposition(t *testing.T) {
 	const ts = "stages/tenant-state"
 	const ag = "stages/account-governance"
 	const pr = "stages/project"
+	const pn = "stages/project-network"
 	base := map[string]string{
+		"components/network/island/main.tf":          `variable "x" {}`,
+		"components/network/island/sub/main.tf":      `variable "x" {}`,
 		"components/project-factory/main.tf":         "module \"project\" {\n  source = \"../../modules/cloud-project\"\n}\n",
 		"modules/cloud-project/main.tf":              "resource \"ovh_cloud_project\" \"this\" {\n  deletion_protection = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n",
 		"components/state-backend/main.tf":           `variable "x" {}`,
@@ -1285,6 +1292,9 @@ func TestDependenciesStageComposition(t *testing.T) {
 	factory := call("project_factory", "../../components/project-factory", "")
 	// T027 mutant s-factory-call-count, verbatim.
 	probeFactoryCount := "module \"project_factory\" {\n  count          = 1\n  source         = \"../../components/project-factory\"\n  mode           = var.project_mode\n  project_id     = var.project_id\n}\n"
+	island := call("island", "../../components/network/island", "")
+	// T029 mutant s-call-count: the island call keyed by count.
+	probeIslandCount := "module \"island\" {\n  source          = \"../../components/network/island\"\n  org             = var.org\n  region          = var.region\n  project_id      = var.project.project_id\n  cidr            = var.network.cidr\n  count           = 1\n}\n"
 	for name, c := range map[string]struct {
 		files   map[string]string
 		subject string
@@ -1330,6 +1340,19 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"project stage subdirectory called twice":    {map[string]string{pr + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), pr + "/sub/main.tf": call("project_factory", "../../../components/project-factory", "")}, pr, []string{"STAGE_COMPONENT_CALLS"}},
 		"factory call by repository address":         {map[string]string{pr + "/main.tf": call("project_factory", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/project-factory?ref=v0.0.1", "")}, pr, []string{"STAGE_COMPONENT_CALLS"}},
 		"project stage calls cloud-project directly": {map[string]string{pr + "/main.tf": factory + call("project", "../../modules/cloud-project", "")}, pr, []string{"LAYER_VIOLATION", "STAGE_COMPONENT_CALLS"}},
+		// project-network: one island instance (a second instance plans a second network and
+		// subnet; spec 005 T030)
+		"probe: island call with count":              {map[string]string{pn + "/main.tf": probeIslandCount}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"second island call":                         {map[string]string{pn + "/main.tf": island + call("again", "../../components/network/island", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"second island call in another file":         {map[string]string{pn + "/main.tf": island, pn + "/extra.tf": call("again", "../../components/network/island", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"island call with for_each":                  {map[string]string{pn + "/main.tf": call("island", "../../components/network/island", "  for_each = toset([\"GRA11\"])\n")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"network stage calls another component":      {map[string]string{pn + "/main.tf": island + factory}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"network stage calls only another component": {map[string]string{pn + "/main.tf": one}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"only call to an island subdirectory":        {map[string]string{pn + "/main.tf": call("island", "../../components/network/island/sub", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"network stage subdirectory called twice":    {map[string]string{pn + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), pn + "/sub/main.tf": call("island", "../../../components/network/island", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"island call by repository address":          {map[string]string{pn + "/main.tf": call("island", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/network/island?ref=v0.0.1", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"network stage calls an external module":     {map[string]string{pn + "/main.tf": island + call("x", "ovh/network/ovh", "")}, pn, []string{"STAGE_COMPONENT_CALLS"}},
+		"resource in the network stage":              {map[string]string{pn + "/main.tf": island + probeBucket}, pn, []string{"STAGE_RESOURCE"}},
 		// allowed
 		"one component call":                        {map[string]string{ts + "/main.tf": one}, "", nil},
 		"one component call through a subdirectory": {map[string]string{ts + "/main.tf": call("s", "./sub", ""), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, "", nil},
@@ -1346,6 +1369,10 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"test run calling the identity component":   {map[string]string{ag + "/main.tf": identity, ag + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/identity/ovh-native\"\n  }\n}\n"}, "", nil},
 		"one project-factory call":                  {map[string]string{pr + "/main.tf": factory}, "", nil},
 		"override file merging the factory call":    {map[string]string{pr + "/main.tf": factory, pr + "/main_override.tf": call("project_factory", "../../components/project-factory", "")}, "", nil},
+		"one island call":                           {map[string]string{pn + "/main.tf": island}, "", nil},
+		"one island call through a subdirectory":    {map[string]string{pn + "/main.tf": call("s", "./sub", ""), pn + "/sub/main.tf": call("island", "../../../components/network/island", "")}, "", nil},
+		"override file merging the island call":     {map[string]string{pn + "/main.tf": island, pn + "/main_override.tf": call("island", "../../components/network/island", "")}, "", nil},
+		"test run calling the island component":     {map[string]string{pn + "/main.tf": island, pn + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/network/island\"\n  }\n}\n"}, "", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := maps.Clone(base)

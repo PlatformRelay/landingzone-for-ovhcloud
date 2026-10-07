@@ -229,7 +229,7 @@ tasks:
         /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$work" output -json
 
-  # A stage's real plan (005 T022, T024, T028): its own unit tests on a scratch copy, mocked
+  # A stage's real plan (005 T022, T024, T028, T030): its own unit tests on a scratch copy, mocked
   # provider, mirror-only init; stdout is the verbose JSON plan of one run (RUN, default
   # `published_outputs_match_the_schema`), one line. tests/fixtures/outputs/capture-stage-plan.sh
   # records it. The project stage is captured in both modes: adopt (the default run) and reference.
@@ -241,6 +241,8 @@ tasks:
     cmds: [{task: capture-stage-plan, vars: {STAGE: project}}]
   capture:project-reference-plan:
     cmds: [{task: capture-stage-plan, vars: {STAGE: project, RUN: reference_published_outputs_with_both_toggles}}]
+  capture:project-network-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: project-network}}]
 
   capture:p24-apply-json:
     dir: tests/fixtures/tofu-probes/p24-apply-json

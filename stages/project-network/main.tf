@@ -1,15 +1,19 @@
-# Stub (spec 005 T029): the component call the tests pin, no behaviour. T030 calls
-# components/network/island once, unkeyed, at `module.island` with the project's id, tenant,
-# environment and regions from `var.project` and the instance's region and network row.
+# Project-network stage (spec 005 T030; FR-002, FR-004, FR-005; research R9): one private network
+# and one subnet in the instance's region of the environment's project through its one
+# components/network/island call, the only module this stage calls (`task test:dependencies`,
+# STAGE_COMPONENT_CALLS). Tenant, environment, project id and regions come only from the `project`
+# stage's published values (`var.project`). No backend, provider or resource here: the generated
+# stack owns the first two, components own resources (ADR-0002).
 module "island" {
   source          = "../../components/network/island"
-  org             = "not-implemented"
-  tenant          = "not-implemented"
-  environment     = "not-implemented"
-  region          = "NOT-IMPLEMENTED"
-  instance        = "not-implemented"
-  managed_in      = "not-implemented"
-  project_id      = "not-implemented"
-  project_regions = []
-  cidr            = "192.0.2.0/24"
+  org             = var.org
+  tenant          = var.project.tenant
+  environment     = var.project.environment
+  region          = var.region
+  instance        = var.instance
+  managed_in      = var.managed_in
+  project_id      = var.project.project_id
+  project_regions = var.project.regions
+  cidr            = var.network.cidr
+  vlan_id         = var.network.vlan_id
 }
