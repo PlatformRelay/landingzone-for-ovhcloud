@@ -144,14 +144,9 @@ func BoundAccountFromEnv(env map[string]string) (stacks.BoundAccount, error) {
 }
 
 // Record is an instance's last-applied record, `records/<id>.json` (data-model *Live run record*,
-// FR-009): what selection compares the next run against.
-type Record struct {
-	AppliedAt      string            `json:"applied_at"`
-	SourceRevision string            `json:"source_revision"`
-	CodeDigest     string            `json:"code_digest"`
-	Consumed       map[string]string `json:"consumed"`           // producer instance id → sha256 of its outputs.json
-	Resolved       string            `json:"resolved,omitempty"` // sha256 of the resolved-reference input
-}
+// FR-009): what selection compares the next run against. It is selection's own type, so the file
+// the lane writes is the file stacks.ReadRecords reads (T041; stacks never imports live).
+type Record = stacks.Record
 
 // WriteRecord writes r as <dir>/<id>.json (0600), replacing an earlier record; an id that is not an
 // instance id is refused before anything is written, so a record never lands outside dir.

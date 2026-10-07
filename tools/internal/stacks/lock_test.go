@@ -24,8 +24,9 @@ import (
 // that line does the test start the second run. Nothing here calls OVHcloud or reads a credential:
 // lock directories and apply directories are temporary.
 //
-// Readings this file pins (evidence/T040.md): account and account-tenant stacks take the
-// `account` lock, environment and region stacks their tenant's `tenant-<t>` lock; locks are taken
+// Readings this file pins (evidence/T040.md; T041 decision 1): account and account-tenant stacks
+// take the `account` lock, account-tenant, environment and region stacks their tenant's
+// `tenant-<t>` lock; locks are taken
 // account first, then tenants sorted; a refusal is immediate; a refused run holds nothing
 // afterwards; an id that is not a row of the manifest takes no lock at all; a lock whose holder
 // died is free.
@@ -228,10 +229,20 @@ func TestLockRunLocks(t *testing.T) {
 			t.Errorf("RunLocks(%q) = %q, %v; want %q", c.ids, got, err, c.want)
 		}
 	}
-	// An account-tenant stack touches account state: it takes the account lock, first.
-	got, err := RunLocks(m, []string{"demo-state"})
-	if err != nil || len(got) == 0 || got[0] != "account" {
-		t.Errorf("RunLocks(demo-state) = %q, %v; want the account lock first", got, err)
+	// An account-tenant stack touches account state and writes the bucket its tenant's runs use: it
+	// takes the account lock, first, and its tenant's lock (coordinator decision 1, 2026-10-07).
+	for _, c := range []struct {
+		ids  []string
+		want []string
+	}{
+		{[]string{"demo-state"}, []string{"account", "tenant-demo"}},
+		{[]string{"demo-state", "ops-dev-project"}, []string{"account", "tenant-demo", "tenant-ops"}},
+		{[]string{"demo-state", "demo-dev-project"}, []string{"account", "tenant-demo"}},
+	} {
+		got, err := RunLocks(m, c.ids)
+		if err != nil || !slices.Equal(got, c.want) {
+			t.Errorf("RunLocks(%q) = %q, %v; want %q", c.ids, got, err, c.want)
+		}
 	}
 	for _, ids := range [][]string{{"unknown"}, {"demo-dev-project", ""}} {
 		if got, err := RunLocks(m, ids); err == nil {
@@ -425,4 +436,31 @@ func TestLockSecondHolderSameProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAdmitted(t, m, locks, "demo-dev-gra11-runtime")
+}
+
+// A lock name is `account` or `tenant-<t>`, never a path: DirLocks refuses any other name before
+// it creates anything, so no lock file lands outside the lock directory; a release is idempotent
+// (005 T041).
+func TestLockNameStaysInDir(t *testing.T) {
+	parent := t.TempDir()
+	store := DirLocks(filepath.Join(parent, "locks"))
+	for _, name := range []string{"../escape", "a/b", "", ".hidden", "Account", "tenant-demo/../../x"} {
+		if release, err := store.TryLock(name); err == nil {
+			_ = release()
+			t.Errorf("TryLock(%q) admitted", name)
+		}
+	}
+	if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+		t.Errorf("refused lock names created %d entries under the parent", len(entries))
+	}
+	release, err := store.TryLock("tenant-demo")
+	if err != nil {
+		t.Fatalf("TryLock(tenant-demo): %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := release(); err != nil {
+		t.Errorf("second release: %v, want the first result again", err)
+	}
 }

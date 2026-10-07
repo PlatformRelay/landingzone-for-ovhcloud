@@ -400,7 +400,7 @@ Independent test: V005, V006, V012.
   - Verify: `go -C tools test ./internal/stacks -run "TestSelection|TestLock" -count=1`: order equals the topological order of derived data and authority edges and the captured `terramate list --run-order`; selection per research R21: an upstream-only code change selects the producer and its transitive data consumers; an intermediate-only change selects it and its consumers but not its producers; a changed producer digest selects its data consumers; an authority-only edge orders but does not select; a missing record selects; a producer without an artefact makes its consumer `blocked`; an unrelated tenant is excluded; a new tenant row selects `account-governance` (its generated `tenants` map changed its code digest) and the new `tenant-state`, and leaves the existing tenant's stacks unselected; a changed `LZ_PROJECT_ID_<REF>` in `account.env` selects `account-governance` and that tenant's `project` through their recorded resolved-reference digest. Guard G14: with the first lock held (the test acquires it and signals before starting the second holder), a second run for the same tenant, and a second run touching account stacks, are refused; when two tenants' runs both touch account stacks, the second is refused and neither run changes the other's resources. An `after`-only stub and a stub without locks are behavioural red.
   - Evidence: `evidence/T040.md`; PR; initial status `not-run`.
 
-- [ ] T041 [US3] Implement selection and the account and tenant locks in tools/internal/stacks/{selection,lock}.go with `task stacks:order`
+- [x] T041 [US3] Implement selection and the account and tenant locks in tools/internal/stacks/{selection,lock}.go with `task stacks:order` — closed 2026-10-08, evidence: evidence/T041.md
   - Requirements: FR-009, FR-013; ADRs: 0004, 0007. Depends on: T040, T039.
   - Verify: `task test:stacks; task stacks:order -- all`: T040 controls green with the G14 mutant (skip the account lock) killed; prints the sandbox order `account-bootstrap → {account-governance, demo-state} → demo-dev-project → {network, runtime}` with the reason for each selected stack.
   - Evidence: `evidence/T041.md`; PR; initial status `not-run`.
@@ -450,7 +450,7 @@ Independent test: V007 offline; V010 owner session.
 
 - [ ] T059 [US5] Implement `lz-live plan|apply` in tools/internal/live/{apply,credentials}.go and the `live:plan` and `live:apply` Taskfile targets
   - Requirements: FR-009, FR-010, FR-011, SC-005; ADRs: 0004, 0008, 0009. Depends on: T058.
-  - Verify: `task test:live-lane`: T058 controls green with the G1, G2, G7 mutants killed. Creates host targets `live:plan`, `live:apply`.
+  - Verify: `task test:live-lane`: T058 controls green with the G1, G2, G7 mutants killed. The runner holds the run locks (`stacks.HoldRun` over the run's instances, `accounts/<account>/locks/`) before any plan or apply, and a run refused on a lock (exit 3) applies nothing (T040 gap 3, T041). Creates host targets `live:plan`, `live:apply`.
   - Evidence: `evidence/T059.md`; PR; initial status `not-run`.
 
 - [ ] T046 [US5] Write chain and destroy tests in tools/internal/live/chain_test.go using fakes and the captured listings in tests/fixtures/ovhcloud/

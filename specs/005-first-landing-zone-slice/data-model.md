@@ -250,6 +250,13 @@ disagrees with the credential or the manifest.
 | `accounts/<account>/state/<id>.tfstate` | encrypted local state (`bootstrap`) | `bootstrap` |
 | `accounts/<account>/state/probes/<run-id>/<probe>.tfstate` and `…/<run-id>/passphrase.env` | encrypted probe state and its per-run passphrase, kept until destroy and leftover check pass (`lz-live probe --cleanup <run-id>` resumes) | `lz-live probe` |
 | `accounts/<account>/locks/{account,tenant-<t>}.lock` | run locks | `lz-live` |
+The run locks are workstation-local by design (T041, coordinator decision 2026-10-07): a lock is an
+exclusive `flock` on its file, held while its holder lives, and excludes only runs sharing that
+`locks/` directory. Two workstations are not excluded by it; what serialises their writes is the S3
+backend's state lockfile per state key (premise P2; UNVERIFIED until the owner's probe session T010
+closes it live). It serialises writes to one state key, not a run over several. No remote run lock
+is built.
+An account-tenant stack (`tenant-state`) takes both `account` and its `tenant-<t>`.
 Root AK/AS/CK have no file: typed at a no-echo prompt during `--fresh-account` and revoked before the
 run ends. All files mode 600, directories 700; the lane refuses group/world-readable files. Only
 `tools/internal/live/files.go` writes credential files.
@@ -259,5 +266,7 @@ run ends. All files mode 600, directories 700; the lane refuses group/world-read
 `<run-id>/inventory.jsonl` (one line per created resource, appended as `apply_complete` arrives),
 `<run-id>/listings/<kind>.json`, `<run-id>/leftovers.json`, `<run-id>/observations.json`,
 `<run-id>/summary.json` (outcome, deadline, known deviations observed), `records/<id>.json`
-(`applied_at`, `source_revision`, `code_digest`, consumed `{producer: sha256}`).
+(`applied_at`, `source_revision`, `code_digest`, consumed `{producer: sha256}`, `resolved` sha256 of
+the resolved-reference input when the stage takes one; one type, `stacks.Record`, written by the lane
+and read by selection).
 Run id: `YYYYMMDDThhmmssZ-<4 hex>`.
