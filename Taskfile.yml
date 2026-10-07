@@ -229,6 +229,23 @@ tasks:
         /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$work" output -json
 
+  # The tenant-state stage's real plan (005 T022): its own unit tests on a scratch copy, mocked
+  # provider, mirror-only init; stdout is the verbose JSON plan of the run
+  # `published_outputs_match_the_schema`, one line. tests/fixtures/outputs/capture-tenant-state.sh
+  # records it.
+  capture:tenant-state-plan:
+    cmds:
+      - |
+        set -e
+        work=$(mktemp -d /tmp/lz-tenant-state.XXXXXX)
+        trap 'rm -rf "$work"' EXIT
+        cp -r modules components stages "$work/"
+        find "$work" -name .terraform -type d -prune -exec rm -rf {} +
+        dir="$work/stages/tenant-state"
+        /tcb/tofu -chdir="$dir" init -backend=false -lockfile=readonly -input=false -no-color > /dev/null
+        /tcb/tofu -chdir="$dir" test -json -verbose -no-color > "$work/test.jsonl"
+        grep '"type":"test_plan"' "$work/test.jsonl" | grep '"@testrun":"published_outputs_match_the_schema"'
+
   capture:p24-apply-json:
     dir: tests/fixtures/tofu-probes/p24-apply-json
     cmds:
