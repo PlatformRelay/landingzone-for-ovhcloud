@@ -143,7 +143,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `task test:live-lane`: T073 controls green with one killed mutant per clause; the run sheet in tests/live/probes/README.md drops the `.terraform` removal workaround and the probe roots read `run_id`/`project_id` from variables where T008 derived them.
   - Evidence: `evidence/T074.md`; PR; initial status `not-run`.
 
-- [ ] T075 Write second-identity probe tests in tools/internal/live/probe_identity_test.go and a companion root under tests/live/probes/storage-iam/
+- [x] T075 Write second-identity probe tests in tools/internal/live/probe_identity_test.go and a companion root under tests/live/probes/storage-iam/ — closed 2026-10-07, evidence: evidence/T075.md
   - Requirements: FR-010, FR-011, FR-013; ADRs: 0008, 0009, 0018. Depends on: T074.
   - Verify: `go -C tools test ./internal/live -run TestProbeIdentity -count=1`: a probe stage creates a probe identity under the admin credential, `files.go` writes its credential to a 0600 file under the run directory, a companion root then runs under that identity alone (P9 allowlist usage, P25 tag-conditioned access, P26 tenant binding) and a second state writer exercises the lock (P1–P3); the probe credential is removed and the identity destroyed on exit, including after an interrupt; the admin credential never reaches the companion child. Today a probe runs one root under the admin credential only: behavioural red. Found in T008 (evidence/T008.md decision 1).
   - Evidence: `evidence/T075.md`; PR; initial status `not-run`.

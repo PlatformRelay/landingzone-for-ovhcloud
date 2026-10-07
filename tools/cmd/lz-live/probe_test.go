@@ -82,6 +82,14 @@ func fakeTofu(args []string) int {
 		}
 	}
 	switch sub {
+	case "output":
+		// T075: what a root publishes for its companion (companion-env.json next to the fake).
+		raw, err := os.ReadFile(filepath.Join(bin, "companion-env.json"))
+		if err != nil || positional != "companion_env" {
+			return 1
+		}
+		fmt.Println(string(raw))
+		return 0
 	case "plan":
 		return writeOK(out, "fake plan")
 	case "show":
@@ -229,13 +237,19 @@ type probeWorld struct {
 	stdout    *bytes.Buffer
 	apiAcount string    // the account GET /auth/details answers
 	now       time.Time // the clock run ids are made from (zero: 2026-10-06 12:00 UTC)
+	// The probe identity a root publishes (T075, probe_identity_test.go): its token is refused
+	// when identityRefused, else GET /auth/details answers identityAccount; identityAsked holds
+	// the number of tofu calls made before each such answer.
+	identityAccount string
+	identityRefused bool
+	identityAsked   *[]int
 }
 
 // newProbeWorld is an admitted host with a sandbox credential bound to probeAccount, one project,
 // the admin exemption and a probe root tests/live/probes/net in the checkout.
 func newProbeWorld(t *testing.T) *probeWorld {
 	t.Helper()
-	w := &probeWorld{world: newWorld(t, true), apiAcount: probeAccount, apiCalls: new(int)}
+	w := &probeWorld{world: newWorld(t, true), apiAcount: probeAccount, apiCalls: new(int), identityAccount: probeAccount, identityAsked: new([]int)}
 	// As in production (os.UserHomeDir), the injected home is the process HOME, which a child
 	// must not inherit.
 	t.Setenv("HOME", w.home)
@@ -265,6 +279,10 @@ func newProbeWorld(t *testing.T) *probeWorld {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/token":
 			_ = r.ParseForm()
+			if r.PostForm.Get("client_id") == "EU.probeidentity" && r.PostForm.Get("client_secret") == identitySecret && !w.identityRefused {
+				fmt.Fprint(rw, `{"access_token":"tok-identity","token_type":"Bearer","expires_in":3600}`)
+				return
+			}
 			if r.PostForm.Get("client_secret") != probeSecret {
 				rw.WriteHeader(http.StatusUnauthorized)
 				return
@@ -272,6 +290,9 @@ func newProbeWorld(t *testing.T) *probeWorld {
 			fmt.Fprint(rw, `{"access_token":"tok-1","token_type":"Bearer","expires_in":3600}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/details" && r.Header.Get("Authorization") == "Bearer tok-1":
 			fmt.Fprintf(rw, `{"account":%q}`, w.apiAcount)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/details" && r.Header.Get("Authorization") == "Bearer tok-identity":
+			*w.identityAsked = append(*w.identityAsked, countLines(filepath.Join(filepath.Dir(w.git), "tofu.log")))
+			fmt.Fprintf(rw, `{"account":%q}`, w.identityAccount)
 		default:
 			rw.WriteHeader(http.StatusForbidden)
 		}

@@ -90,6 +90,64 @@ run "tenant_allowlist_is_p9_exactly" {
   }
 }
 
+# T075: the companion's state bucket and S3 user (P1–P3), scoped to that bucket, and the variables
+# this root publishes for its companion: the probe identities only.
+run "companion_state_and_published_identity" {
+  command = plan
+
+  assert {
+    condition     = ovh_cloud_project_storage.p1.name == "lzprobe-p1-20261006t120000z-ab12" && ovh_cloud_project_storage.p1.tags == tomap({ "lz:run-id" = "20261006T120000Z-ab12" }) && ovh_cloud_project_user.p1.description == "lzprobe-p1-20261006T120000Z-ab12"
+    error_message = "the companion's state bucket lzprobe-p1-<run-id> (lowercased, lz:run-id) and its S3 user lzprobe-p1-<run-id>"
+  }
+
+  assert {
+    condition     = jsondecode(ovh_cloud_project_user_s3_policy.p1.policy).Statement[0].Resource == ["arn:aws:s3:::lzprobe-p1-20261006t120000z-ab12", "arn:aws:s3:::lzprobe-p1-20261006t120000z-ab12/*"] && length(jsondecode(ovh_cloud_project_user_s3_policy.p1.policy).Statement) == 1
+    error_message = "the S3 user's policy covers the companion's state bucket only"
+  }
+
+  assert {
+    condition     = toset(keys(output.companion_env)) == toset(["OVH_CLIENT_ID", "OVH_CLIENT_SECRET", "TF_VAR_p25_client_id", "TF_VAR_p25_client_secret", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+    error_message = "companion_env publishes the two probe identities and the S3 keys, nothing else"
+  }
+}
+
+# Each published variable comes from its own identity (mocked apply, offline; distinct values per
+# identity, since the mock gives every computed string the same value).
+run "companion_env_maps_each_identity" {
+  command = apply
+
+  override_resource {
+    target = ovh_me_api_oauth2_client.tenant
+    values = { client_id = "offline-tenant-id", client_secret = "offline-tenant-secret" }
+  }
+
+  override_resource {
+    target = ovh_me_api_oauth2_client.p25
+    values = { client_id = "offline-p25-id", client_secret = "offline-p25-secret" }
+  }
+
+  override_resource {
+    target = ovh_cloud_project_user_s3_credential.p1
+    values = { access_key_id = "offline-s3-access", secret_access_key = "offline-s3-secret" }
+  }
+
+  assert {
+    condition     = output.companion_env.OVH_CLIENT_ID == "offline-tenant-id" && output.companion_env.OVH_CLIENT_SECRET == "offline-tenant-secret"
+    error_message = "OVH_CLIENT_ID/OVH_CLIENT_SECRET are the P9 tenant identity's"
+  }
+
+  assert {
+    condition     = output.companion_env.TF_VAR_p25_client_id == "offline-p25-id" && output.companion_env.TF_VAR_p25_client_secret == "offline-p25-secret"
+    error_message = "TF_VAR_p25_client_id/_secret are the P25 identity's"
+  }
+
+  assert {
+    condition     = output.companion_env.AWS_ACCESS_KEY_ID == "offline-s3-access" && output.companion_env.AWS_SECRET_ACCESS_KEY == "offline-s3-secret"
+    error_message = "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY are the P1 S3 user's"
+  }
+
+}
+
 run "state_path_inside_checkout_refused" {
   command = plan
 
