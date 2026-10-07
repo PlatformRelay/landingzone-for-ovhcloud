@@ -329,8 +329,8 @@ func (l lister) objectRaw(path string, v any) (json.RawMessage, bool) {
 
 // withoutObjectStorage reports whether a region detail (cloud.Region, kb/api/v1/cloud.json:67596)
 // shows that the region offers no S3-compatible Object Storage: its services (cloud.Component[],
-// cloud.json:67651, 64709) are all named and none is a storage-s3 service. Only then may the
-// region's storage listing answer 404. The schema does not enumerate the service names: the
+// cloud.json:67651, 64709) are all named and none is a storage-s3 service; an empty services list
+// counts as no Object Storage. Only then may the region's storage listing answer 404 (first page). The schema does not enumerate the service names: the
 // "storage-s3" prefix (storage-s3-standard, storage-s3-high-perf) is UNVERIFIED until a live run
 // records the region details (T065); a wrong prefix turns a 404 into an error, never a 200 into
 // nothing, because every region's storage is asked.
@@ -470,8 +470,9 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 // listing of a region without Object Storage answers 404 (live run 20261007T125154Z-14a6,
 // evidence/T084.md), which is accepted only when the region's detail shows no Object Storage
 // service (withoutObjectStorage); any other failure is an error. A region detail without
-// services is an error, and so is a project in which no region's storage listing succeeded:
-// every project of the slice holds buckets (state, runtime).
+// services is an error, and so is a project in which no region's storage listing succeeded: the
+// check assumes every project lists at least one region with Object Storage (true of the sandbox
+// project, run 20261007T125154Z-14a6; UNVERIFIED for a fresh project with no bucket yet).
 func (c LeftoverCheck) list(l lister) []*item {
 	var items []*item
 	add := func(it *item) *item { items = append(items, it); return it }
@@ -518,7 +519,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 				}
 			}
 			if listed == 0 {
-				l.fail("listing %s: no region's bucket listing succeeded (no Object Storage region)", base+"/region")
+				l.fail("listing %s: no region's bucket listing succeeded", base+"/region")
 			}
 		}
 		type named struct {

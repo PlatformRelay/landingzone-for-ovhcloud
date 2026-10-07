@@ -42,7 +42,7 @@
   "/cloud/project/{p}/region/DE1": {"provenance": "as BHS5", "pages": [{"name": "DE1", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
   "/cloud/project/{p}/region/GRA11": {"provenance": "as BHS5", "pages": [{"name": "GRA11", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
   "/cloud/project/{p}/region/RBX-A": {"provenance": "as BHS5", "pages": [{"name": "RBX-A", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}]}]},
-  "/cloud/project/{p}/region/RBX-ARCHIVE": {"provenance": "as BHS5", "pages": [{"name": "RBX-ARCHIVE", "type": "region", "status": "UP", "services": []}]},
+  "/cloud/project/{p}/region/RBX-ARCHIVE": {"provenance": "as BHS5, but with an empty services list (chosen: exercises the accepted empty list)", "pages": [{"name": "RBX-ARCHIVE", "type": "region", "status": "UP", "services": []}]},
   "/cloud/project/{p}/region/SBG5": {"provenance": "as BHS5", "pages": [{"name": "SBG5", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
   "/cloud/project/{p}/region/UK1": {"provenance": "as BHS5", "pages": [{"name": "UK1", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
   "/cloud/project/{p}/region/WAW1": {"provenance": "as BHS5", "pages": [{"name": "WAW1", "type": "region", "status": "UP", "services": [{"name": "instance", "status": "UP"}, {"name": "network", "status": "UP"}]}]},
