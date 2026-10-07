@@ -250,32 +250,64 @@ func TestOfflineBoundaryControls(t *testing.T) {
 }
 
 // The qualification targets run trusted code only. A candidate that redefines
-// them must neither run its own commands nor turn them into no-ops.
+// them must neither run its own commands nor turn them into no-ops: neither in
+// its root Taskfile nor in a stacks/Taskfile.yml (stacks/ is snapshotted since
+// 001/T025) that the root Taskfile includes without a namespace.
 func TestTrustedTargetsIgnoreCandidate(t *testing.T) {
 	entry, probe := prepared(t)
-	for target, verdict := range map[string]string{"test:offline-boundary": "BOUNDARY_QUALIFIED", "verify:toolchain": "TOOLCHAIN_QUALIFIED"} {
-		t.Run(target, func(t *testing.T) {
-			f := newFixture(t, probe, "")
-			hostile := "version: '3'\ntasks:\n  " + target + ":\n    cmds:\n      - echo LZ_OBSERVATION candidate-definition-ran\n"
-			if err := os.WriteFile(filepath.Join(f.candidate, "Taskfile.yml"), []byte(hostile), 0600); err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, entry, "--candidate", f.candidate, "--", "task", target)
-			cmd.Dir, cmd.Env = f.candidate, f.env
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("HARNESS_SETUP: trusted target failed: %v %s", err, out)
-			}
-			if strings.Contains(string(out), "LZ_OBSERVATION") || !strings.Contains(string(out), verdict) {
-				t.Errorf("BEHAVIORAL_RED: candidate definition of %s ran or qualification missing: %s", target, out)
-			}
-			if _, err := os.Stat(filepath.Join(f.host, "marker")); err == nil {
-				t.Errorf("BEHAVIORAL_RED: candidate definition of %s reached the host", target)
-			}
-		})
+	for _, placement := range []string{"root", "stacks"} {
+		for target, verdict := range map[string]string{"test:offline-boundary": "BOUNDARY_QUALIFIED", "verify:toolchain": "TOOLCHAIN_QUALIFIED"} {
+			t.Run(placement+"/"+target, func(t *testing.T) {
+				trustedTargetIgnoresCandidate(t, entry, probe, placement, target, verdict)
+			})
+		}
 	}
+}
+
+func trustedTargetIgnoresCandidate(t *testing.T, entry, probe, placement, target, verdict string) {
+	f := newFixture(t, probe, "")
+	hostile := "version: '3'\ntasks:\n  " + target + ":\n    cmds:\n      - echo LZ_OBSERVATION candidate-definition-ran\n"
+	taskfile := filepath.Join(f.candidate, "Taskfile.yml")
+	if placement == "stacks" {
+		if err := os.Mkdir(filepath.Join(f.candidate, "stacks"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		root := "version: '3'\nincludes:\n  stacks:\n    taskfile: ./stacks/Taskfile.yml\n    flatten: true\n"
+		if err := os.WriteFile(taskfile, []byte(root), 0600); err != nil {
+			t.Fatal(err)
+		}
+		taskfile = filepath.Join(f.candidate, "stacks", "Taskfile.yml")
+		// A candidate target from the same file proves it reaches the child:
+		// otherwise the trusted target's verdict below would prove nothing.
+		hostile += "  stacks-control:\n    cmds:\n      - echo LZ_STACKS_CONTROL ran\n"
+	}
+	if err := os.WriteFile(taskfile, []byte(hostile), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if placement == "stacks" {
+		if out, err := runEntry(t, f, entry, "stacks-control"); err != nil || !strings.Contains(string(out), "LZ_STACKS_CONTROL ran") {
+			t.Fatalf("BEHAVIORAL_RED: stacks/Taskfile.yml did not reach the candidate child: %v %s", err, out)
+		}
+	}
+	out, err := runEntry(t, f, entry, target)
+	if err != nil {
+		t.Fatalf("HARNESS_SETUP: trusted target failed: %v %s", err, out)
+	}
+	if strings.Contains(string(out), "LZ_OBSERVATION") || !strings.Contains(string(out), verdict) {
+		t.Errorf("BEHAVIORAL_RED: candidate definition of %s ran or qualification missing: %s", target, out)
+	}
+	if _, err := os.Stat(filepath.Join(f.host, "marker")); err == nil {
+		t.Errorf("BEHAVIORAL_RED: candidate definition of %s reached the host", target)
+	}
+}
+
+func runEntry(t *testing.T, f fixture, entry, target string) ([]byte, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, entry, "--candidate", f.candidate, "--", "task", target)
+	cmd.Dir, cmd.Env = f.candidate, f.env
+	return cmd.CombinedOutput()
 }
 
 func TestOfflineBoundary(t *testing.T) {

@@ -67,7 +67,7 @@ func Write(t testing.TB, extra func(dir string)) Bundle {
 		t.Fatal(err)
 	}
 	manifest, err := json.Marshal(bundle.Resources{
-		Prepared: checks.Prepared{Versions: checks.Versions, Artifacts: checks.Artifacts, Image: checks.Image},
+		Prepared: checks.Prepared{Versions: checks.Versions, Artifacts: checks.Artifacts, Image: checks.Image, Packages: checks.Packages},
 		Files:    files, Bwrap: bundle.Launcher, BwrapSHA: bundle.Hash([]byte("launcher")),
 	})
 	if err != nil {

@@ -4,6 +4,7 @@
 This source is data in the candidate. The fixed reviewed build driver copies it
 outside the checkout before execution. It never runs candidate Task/config/code.
 """
+import gzip
 import hashlib
 import json
 import os
@@ -23,6 +24,16 @@ ARCHIVES = {
     'go1.27.1.linux-amd64.tar.gz': '63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445',
     'tofu_1.13.0_linux_amd64.tar.gz': '1f0cb37fc85dea4e7633a72aca2332b801f72650a32be911b8b9b32907f214fb',
     'terramate_0.17.3_linux_x86_64.tar.gz': '303fd597a76af00c728b3eb626493dc2a71585dcd679c5e07a338da44d24a060',
+}
+# Wolfi packages unpacked over the image root, as checks.Packages pins them.
+# Each digest was taken once from a package whose control checksum matched the
+# APKINDEX signed by the image's own /etc/apk/keys/wolfi-signing.rsa.pub and
+# whose data hash matched its control (evidence/T025.md). git's HTTP helpers
+# need libcurl, which is deliberately left out: the runtime has no network.
+PACKAGE_URL = 'https://packages.wolfi.dev/os/x86_64/'
+PACKAGES = {
+    'git-2.56.0-r0.apk': '33bc6d38714d6a65e412b87e7ef9392a27b4f2ca71f3506bd8e9eaa42d59c10d',
+    'libpcre2-8-0-10.49-r1.apk': 'c2e8dacd8fe2f1c3de9eabd274532f74fcbbd3e919301fc95453ab3af850c38c',
 }
 def required_path(name):
     value = os.environ.get(name, '')
@@ -171,52 +182,87 @@ def export_image(environment, private):
         process.stderr.close()
 
 def unpack_image(archive, destination):
-    # No archive path/link/device can escape staging. Links are created last so
-    # extraction never traverses one. Hardlinks/devices/whiteouts are rejected.
     with tarfile.open(archive, mode='r|', stream=True) as tar:
-        seen, links, directories = set(), [], []
-        count, expanded = 0, 0
-        for member in tar:
-            count += 1
-            expanded += member.size
-            if count > 50000 or member.size < 0 or expanded > 256 * 1024 * 1024 or len(member.name) > 4096 or len(member.linkname) > 4096:
-                raise RuntimeError('image archive limits exceeded')
-            name = PurePosixPath(member.name)
-            if name.is_absolute() or '..' in name.parts or not name.parts:
-                raise RuntimeError('unrooted image member')
-            normalized = name.as_posix()
-            if normalized in seen:
-                raise RuntimeError('duplicate image member')
-            seen.add(normalized)
-            # The runtime always creates a private /dev with bwrap. Preserve
-            # signed export provenance, but omit image /dev from this projection;
-            # never materialize archived devices, sockets or FIFOs on the host.
-            # Path normalization and every resource counter precede exclusion.
-            if name.parts[0] == 'dev':
-                continue
-            target = destination / normalized
-            if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-                directories.append((target, (member.mode & 0o755) | 0o500))
-            elif member.isfile():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with tar.extractfile(member) as source, target.open('xb') as output:
-                    shutil.copyfileobj(source, output)
-                target.chmod((member.mode & 0o755) | 0o400)
-            elif member.issym():
-                resolved = Path(os.path.normpath(str(destination / member.linkname.lstrip('/')) if member.linkname.startswith('/') else str(target.parent / member.linkname)))
-                if not resolved.is_relative_to(destination):
-                    raise RuntimeError('escaping image link')
-                links.append((target, member.linkname))
-            else:
-                raise RuntimeError('non-file image member: name='+repr(member.name)+' type='+repr(member.type)+' link='+repr(member.linkname))
-        for target, link in links:
+        # The runtime always creates a private /dev with bwrap. Preserve
+        # signed export provenance, but omit image /dev from this projection;
+        # never materialize archived devices, sockets or FIFOs on the host.
+        unpack(tar, destination, lambda name: name.parts[0] == 'dev')
+
+def package_control(name):
+    # An apk is its control segment (.PKGINFO, .melange.yaml, an optional
+    # signature) followed by its data. Install scripts are never run, so a
+    # package that has one is refused rather than installed incompletely.
+    if len(name.parts) != 1 or not name.parts[0].startswith('.'):
+        return False
+    if name.parts[0] in ('.PKGINFO', '.melange.yaml') or name.parts[0].startswith('.SIGN.'):
+        return True
+    raise RuntimeError('package control member refused: ' + name.as_posix())
+
+def unpack_package(package, destination):
+    # Concatenated gzip members read as one tar stream; the data segment lands
+    # over the unpacked image under the same rules, and may not replace or
+    # traverse anything the image (or an earlier package) put there.
+    with gzip.open(package) as stream, tarfile.open(fileobj=stream, mode='r|') as tar:
+        unpack(tar, destination, package_control)
+
+def refuse_links(destination, target):
+    # Nothing is written through or over a link: target and every ancestor
+    # below destination must not be one.
+    for path in [target, *target.parents]:
+        if path == destination:
+            return
+        if path.is_symlink():
+            raise RuntimeError('member through or over a link: ' + str(target.relative_to(destination)))
+
+def unpack(tar, destination, skip):
+    # No archive path/link/device can escape staging. Links are created last so
+    # extraction never traverses one; no member, and no deferred link, may pass
+    # through or land on a link already present. Hardlinks/devices/whiteouts
+    # are rejected.
+    seen, links, directories = set(), [], []
+    count, expanded = 0, 0
+    for member in tar:
+        count += 1
+        expanded += member.size
+        if count > 50000 or member.size < 0 or expanded > 256 * 1024 * 1024 or len(member.name) > 4096 or len(member.linkname) > 4096:
+            raise RuntimeError('image archive limits exceeded')
+        name = PurePosixPath(member.name)
+        if name.is_absolute() or '..' in name.parts or not name.parts:
+            raise RuntimeError('unrooted image member')
+        normalized = name.as_posix()
+        if normalized in seen:
+            raise RuntimeError('duplicate image member')
+        seen.add(normalized)
+        # Path normalization and every resource counter precede exclusion.
+        if skip(name):
+            continue
+        target = destination / normalized
+        refuse_links(destination, target)
+        if member.isdir():
+            # An existing non-directory makes mkdir fail; a link was refused above.
+            target.mkdir(parents=True, exist_ok=True)
+            directories.append((target, (member.mode & 0o755) | 0o500))
+        elif member.isfile():
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.symlink_to(link)
-        # Materialize children while private directories remain owner-writable.
-        # Apply final signed-image projection modes only after every file/link.
-        for target, mode in sorted(directories, key=lambda item: len(item[0].parts), reverse=True):
-            target.chmod(mode)
+            with tar.extractfile(member) as source, target.open('xb') as output:
+                shutil.copyfileobj(source, output)
+            target.chmod((member.mode & 0o755) | 0o400)
+        elif member.issym():
+            resolved = Path(os.path.normpath(str(destination / member.linkname.lstrip('/')) if member.linkname.startswith('/') else str(target.parent / member.linkname)))
+            if not resolved.is_relative_to(destination):
+                raise RuntimeError('escaping image link')
+            links.append((target, member.linkname))
+        else:
+            raise RuntimeError('non-file image member: name='+repr(member.name)+' type='+repr(member.type)+' link='+repr(member.linkname))
+    for target, link in links:
+        # An earlier link of this archive may now sit on the path: check again.
+        refuse_links(destination, target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(link)
+    # Materialize children while private directories remain owner-writable.
+    # Apply final signed-image projection modes only after every file/link.
+    for target, mode in sorted(directories, key=lambda item: len(item[0].parts), reverse=True):
+        target.chmod(mode)
 
 def remove_staging(stage):
     if stage != ROOT / 'staging' or not stat.S_ISDIR(stage.lstat().st_mode):
@@ -262,6 +308,12 @@ def prepare():
         image = resources / 'rootfs'
         image.mkdir()
         unpack_image(private / 'image.tar', image)
+        for name, expected in PACKAGES.items():
+            source = private / name
+            subprocess.run(['/usr/bin/curl', '--disable', '--fail', '--silent', '--show-error', '--location', '--proto', '=https', '--max-time', '60', '--max-filesize', '16000000', '--output', str(source), PACKAGE_URL + name], env=environment, cwd=private, check=True, timeout=65)
+            if digest(source) != expected:
+                raise RuntimeError('package checksum differs: ' + name)
+            unpack_package(source, image)
         for name in ('proc', 'dev', 'tmp', 'run', 'home', 'tcb', 'tools', 'mirror', 'candidate'):
             (image / name).mkdir(exist_ok=True)
         mirror = resources / 'mirror/registry.opentofu.org/ovh/ovh'
@@ -274,10 +326,10 @@ def prepare():
         artifacts = dict(zip(('go','tofu','terramate'),ARCHIVES.values()))
         artifacts['task'] = TASK_SHA
         artifacts['tflint'] = TFLINT_SHA
-        prepared = {'Versions': {'go':'1.27.1','tofu':'1.13.0','terramate':'0.17.3','task':'3.53.1','tflint':'0.64.0'}, 'Artifacts':artifacts, 'Image':IMAGE}
+        prepared = {'Versions': {'go':'1.27.1','tofu':'1.13.0','terramate':'0.17.3','task':'3.53.1','tflint':'0.64.0'}, 'Artifacts':artifacts, 'Image':IMAGE, 'Packages':PACKAGES}
         manifest = {'prepared':prepared, 'files':inventory(stage), 'bwrap':'/usr/bin/bwrap','bwrap_sha256':digest(Path('/usr/bin/bwrap'))}
         (stage / 'resources.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
-        receipt = {'image':IMAGE,'image_export_sha256':digest(private / 'image.tar'),'image_projection':'rooted filesystem without image /dev; runtime supplies private bwrap /dev; privileged mode bits stripped; owner read added to regular files and owner read/traverse added to directories for resource admission','provider_sha256':digest(package),'resources_sha256':digest(stage / 'resources.json')}
+        receipt = {'image':IMAGE,'image_export_sha256':digest(private / 'image.tar'),'image_projection':'rooted filesystem without image /dev; runtime supplies private bwrap /dev; privileged mode bits stripped; owner read added to regular files and owner read/traverse added to directories for resource admission','provider_sha256':digest(package),'packages':PACKAGES,'resources_sha256':digest(stage / 'resources.json')}
         shutil.rmtree(private)
         stage.rename(final)
         (ROOT / 'prepared.json').write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')

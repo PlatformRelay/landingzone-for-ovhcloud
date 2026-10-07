@@ -183,14 +183,15 @@ const (
 // Snapshot an explicit input allowlist, never the repository root. Every copied
 // file is regular/single-link and bounded; secrets/cache/config are excluded.
 // specs and docs are data for the trace check; .github and pipelines are data
-// for the foundation CI check.
+// for the foundation CI check; stacks and terramate.tm.hcl are the generated
+// stacks and their Terramate root, data for the stack checks (005 T038).
 // The probe.sh, included.yml, bin and lz-offline names admit the boundary
 // suite's hostile fixtures, so the suite can show they have no effect.
 func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := bundle.RealDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "stacks", "terramate.tm.hcl", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
@@ -579,7 +580,7 @@ func run() (result error) {
 	}
 	switch target {
 	case "verify:toolchain":
-		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 tflint=0.64.0 provider=ovh/ovh@2.21.0 network=none")
+		_, err = fmt.Fprintln(os.Stdout, "TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 tflint=0.64.0 git=2.56.0 provider=ovh/ovh@2.21.0 network=none")
 	case "test:offline-boundary":
 		_, err = fmt.Fprintln(os.Stdout, "BOUNDARY_QUALIFIED process=kernel:ENETUNREACH subprocess=kernel:ENETUNREACH")
 	}
