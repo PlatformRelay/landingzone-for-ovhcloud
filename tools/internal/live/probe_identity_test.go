@@ -3,9 +3,11 @@ package live
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -638,5 +640,334 @@ func TestProbeIdentityCleanup(t *testing.T) {
 		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"p"}) {
 			t.Errorf("cleanup destroys %v, want [p]", got)
 		}
+	})
+}
+
+// Identity pairing (T079; found in T076, evidence/T076.md gaps): every identity a root publishes in
+// companion_env — a key whose name ends in client_id in any case (…_CLIENT_ID, …_Client_Id,
+// …_client_id) with the key of the same prefix ending in client_secret, in any case — is bound to
+// the run's account (Probe.Bind) with that pair's secret before the companion's first child, and
+// the companion gets every published key under its own name. A key that looks like a credential
+// but pairs with no identity — half a pair in any case, a pair with an empty half, client id or
+// secret without the separator, a client key or token — is refused before the companion starts:
+// the run fails, no companion child runs, the root is still destroyed and no file, terminal or
+// returned error keeps a published secret. The S3 keys (AWS_*) are no OVHcloud identity and pass
+// unbound (T076). Not pinned: whether two keys that differ in the case of their prefix pair (they
+// are either refused or bound, never passed on unbound), and whether another name holding
+// "client" (e.g. an identity URN) is refused.
+
+const (
+	pairDefaultID     = "fake-pair-default-client-id"
+	pairDefaultSecret = "pair-SECRET-default-5c1e09a7"
+	pairID            = "fake-pair-extra-client-id"
+	pairOtherID       = "fake-pair-other-client-id"
+	pairSecret        = "pair-SECRET-extra-83d4f62b"
+	pairOtherSecret   = "pair-SECRET-other-2a6d50f9"
+	pairS3Secret      = "pair-SECRET-s3-0b7e91c4"
+)
+
+var pairSecrets = []string{pairDefaultSecret, pairSecret, pairOtherSecret, pairS3Secret}
+
+// bindCall is one Probe.Bind call and the number of tofu calls logged before it.
+type bindCall struct {
+	cred Credential
+	at   int
+}
+
+// pairingProbe is identityProbe whose stage publishes the default identity, the S3 keys and extra,
+// with a Bind that records every identity it is given. It returns the published environment.
+func (w *runWorld) pairingProbe(t *testing.T, root string, extra map[string]string, binds *[]bindCall) (Probe, map[string]string) {
+	t.Helper()
+	p := w.identityProbe(t, root, tofuStack{})
+	env := map[string]string{"OVH_CLIENT_ID": pairDefaultID, "OVH_CLIENT_SECRET": pairDefaultSecret,
+		"AWS_ACCESS_KEY_ID": "fake-pair-s3-access-key", "AWS_SECRET_ACCESS_KEY": pairS3Secret}
+	maps.Copy(env, extra)
+	raw, err := json.Marshal(map[string]any{companionOutput: map[string]any{"sensitive": true, "value": env}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.bin, "outputs-p.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := w.scenario.Stacks["companion"]
+	st.ScanFor = pairSecrets
+	w.scenario.Stacks["companion"] = st
+	w.save(t)
+	log := filepath.Join(w.bin, "tofu.log")
+	p.Bind = func(_ context.Context, c Credential) error {
+		raw, _ := os.ReadFile(log)
+		*binds = append(*binds, bindCall{c, bytes.Count(raw, []byte("\n"))})
+		return nil
+	}
+	return p, env
+}
+
+// companionChildren returns the indexes of the companion's child calls.
+func companionChildren(calls []tofuCall) []int {
+	var out []int
+	for i, c := range calls {
+		if c.Stack == "companion" && childCall(c) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// checkNoUnbound: when the companion ran, every published key ending in client_id (any case) was
+// bound before the companion's first child with a secret published under that key's prefix.
+func checkNoUnbound(t *testing.T, calls []tofuCall, env map[string]string, binds []bindCall) {
+	t.Helper()
+	comp := companionChildren(calls)
+	if len(comp) == 0 {
+		return
+	}
+	for k, id := range env {
+		if !strings.HasSuffix(strings.ToLower(k), "client_id") {
+			continue
+		}
+		prefix := strings.ToLower(k[:len(k)-len("client_id")])
+		bound := false
+		for _, b := range binds {
+			if b.cred.ClientID != id || b.at > comp[0] {
+				continue
+			}
+			for k2, v := range env {
+				if v == b.cred.ClientSecret && strings.EqualFold(k2, prefix+"client_secret") {
+					bound = true
+				}
+			}
+		}
+		if !bound {
+			var ids []string
+			for _, b := range binds {
+				ids = append(ids, fmt.Sprintf("%s@%d", b.cred.ClientID, b.at))
+			}
+			t.Errorf("%s reached the companion unbound: no bind of its client id with its pair's secret before the companion's first call %d (binds %v)", k, comp[0], ids)
+		}
+	}
+}
+
+// checkNoPairSecret: no file under the run's directories and nothing on the terminal holds a
+// published secret after the run.
+func checkNoPairSecret(t *testing.T, w *runWorld, root string) {
+	t.Helper()
+	for _, dir := range []string{root, w.runDir, w.stacks} {
+		if left := holders([]string{dir}, pairSecrets); len(left) > 0 {
+			t.Errorf("after the run, %v still hold a published secret", left)
+		}
+	}
+	for _, s := range pairSecrets {
+		if strings.Contains(w.term.String(), s) {
+			t.Error("a published secret reached the terminal")
+		}
+	}
+}
+
+// checkRefused: the run failed before any companion child; the root was still destroyed.
+func checkRefused(t *testing.T, err error, calls []tofuCall) {
+	t.Helper()
+	if ExitCode(err) == 0 {
+		t.Error("the run exited 0: a credential-looking key that pairs with no identity was not refused")
+	} else if slices.ContainsFunc(pairSecrets, func(s string) bool { return strings.Contains(err.Error(), s) }) {
+		t.Error("the refusal's error holds a published secret (lz-live prints it)")
+	}
+	if comp := companionChildren(calls); len(comp) > 0 {
+		t.Errorf("the companion ran %d tofu calls (first: %s) with a credential that pairs with no bound identity", len(comp), calls[comp[0]].Cmd)
+	}
+	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"p"}) {
+		t.Errorf("destroys %v, want [p]: the root that holds the identities is destroyed", got)
+	}
+}
+
+func byClientID(a, b Credential) int { return strings.Compare(a.ClientID, b.ClientID) }
+
+// TestProbeIdentityPairing (T079 Verify line).
+func TestProbeIdentityPairing(t *testing.T) {
+	endpoint := runCreds["OVH_ENDPOINT"]
+	defaultID := Credential{Endpoint: endpoint, ClientID: pairDefaultID, ClientSecret: pairDefaultSecret}
+	extraID := Credential{Endpoint: endpoint, ClientID: pairID, ClientSecret: pairSecret}
+	otherID := Credential{Endpoint: endpoint, ClientID: pairOtherID, ClientSecret: pairOtherSecret}
+
+	// Paired and bound, whatever the case of the suffixes; every published identity, not only two.
+	for name, tc := range map[string]struct {
+		extra map[string]string
+		want  []Credential
+	}{
+		"lower":                {map[string]string{"TF_VAR_p25_client_id": pairID, "TF_VAR_p25_client_secret": pairSecret}, []Credential{defaultID, extraID}},
+		"upper":                {map[string]string{"TF_VAR_p25_CLIENT_ID": pairID, "TF_VAR_p25_CLIENT_SECRET": pairSecret}, []Credential{defaultID, extraID}},
+		"title":                {map[string]string{"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p25_Client_Secret": pairSecret}, []Credential{defaultID, extraID}},
+		"id title, secret up":  {map[string]string{"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p25_CLIENT_SECRET": pairSecret}, []Credential{defaultID, extraID}},
+		"id lower, secret odd": {map[string]string{"TF_VAR_p25_client_id": pairID, "TF_VAR_p25_cLiEnT_sEcReT": pairSecret}, []Credential{defaultID, extraID}},
+		"id odd, secret lower": {map[string]string{"TF_VAR_p25_cLiEnT_iD": pairID, "TF_VAR_p25_client_secret": pairSecret}, []Credential{defaultID, extraID}},
+		"three identities": {map[string]string{"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p25_Client_Secret": pairSecret,
+			"TF_VAR_p26_CLIENT_ID": pairOtherID, "TF_VAR_p26_client_secret": pairOtherSecret}, []Credential{defaultID, extraID, otherID}},
+	} {
+		t.Run("bound/"+name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p, env := w.pairingProbe(t, root, tc.extra, &binds)
+			if err := p.Start(context.Background()); err != nil {
+				t.Errorf("Start: %v\n%s", err, w.term)
+			}
+			calls := w.calls(t, "tofu.log")
+			comp := companionChildren(calls)
+			if len(comp) == 0 {
+				t.Fatalf("the companion never ran (inits %v)", sequence(calls, "init"))
+			}
+			got := make([]Credential, 0, len(binds))
+			for _, b := range binds {
+				got = append(got, b.cred)
+				if b.at > comp[0] {
+					t.Errorf("identity %s bound after %d tofu calls, but the companion's first call was call %d: bind before the companion", b.cred.ClientID, b.at, comp[0])
+				}
+			}
+			slices.SortFunc(got, byClientID)
+			want := slices.SortedFunc(slices.Values(tc.want), byClientID)
+			if !slices.Equal(got, want) {
+				var ids []string
+				for _, c := range got {
+					ids = append(ids, c.ClientID)
+				}
+				t.Errorf("bound %v, want exactly %d identities, each with its own secret and the run's endpoint", ids, len(want))
+			}
+			checkNoUnbound(t, calls, env, binds)
+			// The companion gets every published key under its own name (a TF_VAR_ name is
+			// case-sensitive), from a 0600 file in the run's probe directory (0700) only.
+			probeDir, _, _ := probeFiles(t, root)
+			for _, i := range comp {
+				ce := envOf(calls[i])
+				for k, v := range env {
+					if ce[k] != v {
+						t.Errorf("companion tofu %s: %s is not the published value under the published name", calls[i].Cmd, k)
+					}
+				}
+				for _, h := range calls[i].Holders {
+					parts := strings.Split(h, "|")
+					if !within(parts[0], probeDir) || parts[1] != "600" || parts[2] != "700" {
+						t.Errorf("companion tofu %s: a published secret is in %s (mode %s, directory %s), want 600 in the run's probe directory (700)", calls[i].Cmd, parts[0], parts[1], parts[2])
+					}
+				}
+			}
+			if len(calls[comp[0]].Holders) == 0 {
+				t.Error("when the companion started, no file held the published credential")
+			}
+			if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"companion", "p"}) {
+				t.Errorf("destroys %v, want [companion p]", got)
+			}
+			checkNoPairSecret(t, w, root)
+		})
+	}
+
+	// Credential-looking, pairs with no identity: refused before the companion starts.
+	for name, extra := range map[string]map[string]string{
+		"title id alone":           {"TF_VAR_p25_Client_Id": pairID},
+		"title secret alone":       {"TF_VAR_p25_Client_Secret": pairSecret},
+		"upper secret alone":       {"TF_VAR_p25_CLIENT_SECRET": pairSecret},
+		"title pair, empty secret": {"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p25_Client_Secret": ""},
+		"title pair, empty id":     {"TF_VAR_p25_Client_Id": "", "TF_VAR_p25_Client_Secret": pairSecret},
+		"no separator":             {"TF_VAR_p25_clientid": pairID, "TF_VAR_p25_clientsecret": pairSecret},
+		"client key":               {"TF_VAR_p25_Client_Key": pairSecret},
+		"client token":             {"TF_VAR_P25_CLIENT_TOKEN": pairSecret},
+		"secret of another prefix": {"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p26_client_secret": pairSecret},
+	} {
+		t.Run("refused/"+name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p, env := w.pairingProbe(t, root, extra, &binds)
+			err := p.Start(context.Background())
+			calls := w.calls(t, "tofu.log")
+			checkRefused(t, err, calls)
+			checkNoUnbound(t, calls, env, binds)
+			checkNoPairSecret(t, w, root)
+		})
+	}
+
+	// Not pinned which way, only that no identity passes unbound: refused, or every id bound.
+	for name, extra := range map[string]map[string]string{
+		"prefix case differs": {"TF_VAR_P25_client_id": pairID, "TF_VAR_p25_client_secret": pairSecret},
+		"two ids, one secret": {"TF_VAR_p25_CLIENT_ID": pairID, "TF_VAR_p25_client_id": pairOtherID, "TF_VAR_p25_Client_Secret": pairSecret},
+	} {
+		t.Run("refused-or-bound/"+name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p, env := w.pairingProbe(t, root, extra, &binds)
+			err := p.Start(context.Background())
+			calls := w.calls(t, "tofu.log")
+			if len(companionChildren(calls)) == 0 {
+				checkRefused(t, err, calls)
+			} else if err != nil {
+				t.Errorf("Start: %v\n%s", err, w.term)
+			}
+			checkNoUnbound(t, calls, env, binds)
+			checkNoPairSecret(t, w, root)
+		})
+	}
+
+	// `--cleanup` re-reads companion_env from the root's retained state: the same pairing applies.
+	type cleaned struct {
+		err   error
+		calls []tofuCall
+		env   map[string]string
+		binds []bindCall
+		w     *runWorld
+		root  string
+	}
+	cleanup := func(t *testing.T, extra map[string]string) cleaned {
+		t.Helper()
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds []bindCall
+		p, env := w.pairingProbe(t, root, extra, &binds)
+		st := w.scenario.Stacks["p"]
+		st.DestroyExit = 1
+		w.scenario.Stacks["p"] = st
+		w.save(t)
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Fatal("a probe whose root destroy failed exited 0")
+		}
+		st.DestroyExit = 0
+		w.scenario.Stacks["p"] = st
+		w.save(t)
+		before := len(w.calls(t, "tofu.log"))
+		binds = binds[:0]
+		err := p.Cleanup(context.Background())
+		for i := range binds {
+			binds[i].at -= before
+		}
+		return cleaned{err, w.calls(t, "tofu.log")[before:], env, binds, w, root}
+	}
+	t.Run("cleanup/bound", func(t *testing.T) {
+		c := cleanup(t, map[string]string{"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p25_Client_Secret": pairSecret})
+		if c.err != nil {
+			t.Errorf("cleanup: %v\n%s", c.err, c.w.term)
+		}
+		if len(companionChildren(c.calls)) == 0 {
+			t.Fatalf("cleanup never ran the companion (destroys %v)", sequence(c.calls, "destroy"))
+		}
+		var ids []string
+		for _, b := range c.binds {
+			ids = append(ids, b.cred.ClientID)
+		}
+		if !slices.Contains(ids, pairID) {
+			t.Errorf("cleanup bound %v: the title-case identity was not bound", ids)
+		}
+		checkNoUnbound(t, c.calls, c.env, c.binds)
+		if got := sequence(c.calls, "destroy"); !slices.Equal(got, []string{"companion", "p"}) {
+			t.Errorf("cleanup destroys %v, want [companion p]", got)
+		}
+		checkNoPairSecret(t, c.w, c.root)
+	})
+	t.Run("cleanup/refused", func(t *testing.T) {
+		c := cleanup(t, map[string]string{"TF_VAR_p25_Client_Id": pairID})
+		checkRefused(t, c.err, c.calls)
+		checkNoUnbound(t, c.calls, c.env, c.binds)
+		checkNoPairSecret(t, c.w, c.root)
 	})
 }
