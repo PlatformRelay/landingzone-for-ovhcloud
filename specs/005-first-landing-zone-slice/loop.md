@@ -2,7 +2,7 @@
 
 Repo: `landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `main` (origin/main 363b65a) · Started: 2026-10-06 · Reviewers: no opencode on this host → per review `codex exec --sandbox read-only` (astra, D62) plus `fanout.sh --legs "claude/sonnet:diff"` (Opus on the claude-review triggers)
 Task prompt: `~/.local/share/ovh-lz/review/loop-005/task-prompt.md` · Records: `~/.local/share/ovh-lz/review/loop-005/` (never committed)
-Next: L / T053 (pairs with T052), then `task.sh next`. Out-of-order items the coordinator dispatches explicitly: 001/T024 + 001/T025 (entry admits `stacks/`, runtime revision published) before 005/T038; re-record `pipelines/github/foundation-runs.json` so `ci:foundation` turns green (T023 owner sheet) at the next landing.
+Next: L / US1 offline — T011 (naming tests), dispatched explicitly: `task.sh next` returns T065, which waits for the owner's T009 listings. Course correction 2026-10-07: no further probe-lane hardening ahead of live evidence (T073–T082 were ten consecutive hardening tasks); the live track resumes from what T009/T010 show. Deferred decision: companion variables move from the reserved-name deny-list (T082) to an allow-list (`TF_VAR_*`, identity pairs, S3 keys) before any companion contract outside the probes. Out-of-order items the coordinator dispatches explicitly: 001/T024 + 001/T025 (entry admits `stacks/`, runtime revision published) before 005/T038; re-record `pipelines/github/foundation-runs.json` so `ci:foundation` turns green (T023 owner sheet); make spec 005 checks required in CI once `test:slice` is green (after T012).
 
 ## Stages
 - [x] 0 orient — spec 005 created under D85/D87 (first real OpenTofu slice; spec 001 loop paused after T023, its remaining tasks postponed).
