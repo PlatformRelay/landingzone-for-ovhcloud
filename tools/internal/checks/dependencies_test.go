@@ -1013,6 +1013,85 @@ func TestDependenciesStateBucketProtected(t *testing.T) {
 	}
 }
 
+// G2, configuration part (spec 005 T020; T013 gap 5, T019 gap 1): the
+// envelope builder drops every output tofu marked sensitive, and a module's
+// unit tests cannot enumerate its outputs, so an output added later that wraps
+// a secret in nonsensitive() is seen by neither. No call to nonsensitive, by
+// its plain or namespaced name, anywhere in the configuration of a library
+// (modules, components) or of what deploys it (stages, generated instances):
+// each one can hand an unmarked secret to the stack whose outputs are
+// published. Test configuration (test files, helper modules under tests/)
+// asserts on secrets and is not deployed; examples are not deployed either.
+// A comment, a string or a name that only contains the word is no call.
+func TestDependenciesNonsensitiveRefused(t *testing.T) {
+	none := `variable "x" {}`
+	unmark := "variable \"secret\" {\n  sensitive = true\n}\n\noutput \"leak\" {\n  value = nonsensitive(var.secret)\n}\n"
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		want    []string
+	}{
+		"module output":                   {map[string]string{"modules/a/main.tf": unmark}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"family component output":         {map[string]string{"components/identity/ovh-native/main.tf": unmark}, "components/identity/ovh-native", []string{"NONSENSITIVE_CALL"}},
+		"singleton component output":      {map[string]string{"components/state-backend/main.tf": unmark}, "components/state-backend", []string{"NONSENSITIVE_CALL"}},
+		"naming module":                   {map[string]string{"modules/naming/main.tf": unmark}, "modules/naming", []string{"NONSENSITIVE_CALL"}},
+		"nested module directory":         {map[string]string{"modules/a/main.tf": `module "s" { source = "./sub" }`, "modules/a/sub/main.tf": unmark}, "modules/a/sub", []string{"NONSENSITIVE_CALL"}},
+		"hidden directory a module calls": {map[string]string{"modules/a/main.tf": `module "h" { source = "./.h" }`, "modules/a/.h/main.tf": unmark}, "modules/a/.h", []string{"NONSENSITIVE_CALL"}},
+		"override file":                   {map[string]string{"modules/a/main.tf": none, "modules/a/main_override.tf": unmark}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"namespaced core function":        {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = core::nonsensitive(var.s)\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"provider function of that name":  {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = provider::x::nonsensitive(var.s)\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"in a local":                      {map[string]string{"modules/a/main.tf": "locals {\n  plain = nonsensitive(var.s)\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"in a resource argument":          {map[string]string{"modules/a/main.tf": "resource \"ovh_me_identity_group\" \"g\" {\n  description = nonsensitive(var.s)\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"nested in a nested block":        {map[string]string{"modules/a/main.tf": "resource \"ovh_iam_policy\" \"p\" {\n  dynamic \"conditions\" {\n    for_each = [1]\n    content {\n      values = { k = nonsensitive(var.s) }\n    }\n  }\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"inside another call":             {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = upper(try(nonsensitive(var.s), \"\"))\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"in a template interpolation":     {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = \"id-${nonsensitive(var.s)}\"\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"in a heredoc":                    {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = <<-EOT\n    ${nonsensitive(var.s)}\n  EOT\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"in a for expression":             {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = [for s in var.l : nonsensitive(s)]\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"in a check block":                {map[string]string{"modules/a/main.tf": "check \"c\" {\n  assert {\n    condition     = nonsensitive(var.s) != \"\"\n    error_message = \"x\"\n  }\n}\n"}, "modules/a", []string{"NONSENSITIVE_CALL"}},
+		"stage output":                    {map[string]string{"stages/platform/main.tf": unmark}, "stages/platform", []string{"NONSENSITIVE_CALL"}},
+		"generated instance output":       {map[string]string{"stages/platform/main.tf": none, "stacks/prod/platform/main.tf": generated + "module \"stage\" {\n  source = \"../../../stages/platform\"\n}\n\noutput \"o\" {\n  value = nonsensitive(module.stage.x)\n}\n"}, "stacks/prod/platform", []string{"NONSENSITIVE_CALL"}},
+		// out of scope or no call
+		"module test file asserts on a secret":   {map[string]string{"modules/a/main.tf": none, "modules/a/tests/unit.tftest.hcl": "run \"r\" {\n  assert {\n    condition     = nonsensitive(output.s) == \"x\"\n    error_message = \"x\"\n  }\n}\n"}, "", nil},
+		"helper module under the module's tests": {map[string]string{"modules/a/main.tf": none, "modules/a/tests/setup/main.tf": unmark}, "", nil},
+		"root test configuration":                {map[string]string{"tests/live/probes/a/main.tf": unmark}, "", nil},
+		"example":                                {map[string]string{"modules/a/main.tf": none, "examples/a/main.tf": "module \"a\" {\n  source = \"../../modules/a\"\n}\n" + unmark}, "", nil},
+		"word in a comment, string and name":     {map[string]string{"modules/a/main.tf": "# nonsensitive(var.s) is refused here\nvariable \"nonsensitive\" {\n  description = \"not nonsensitive(x)\"\n}\n\noutput \"o\" {\n  value = issensitive(var.nonsensitive)\n}\n"}, "", nil},
+		"other function with the word":           {map[string]string{"modules/a/main.tf": "output \"o\" {\n  value = provider::x::nonsensitive_name(var.s)\n}\n"}, "", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			if got := ruleNames(findings); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+			}
+		})
+	}
+}
+
+const nonsensitiveDependencies = "../../../tests/check/fixtures/dependencies/nonsensitive"
+
+// The on-disk control of the same rule: a module, a component and a stage that
+// unmark a secret are refused, each against its own directory; the module's
+// test file, its test helper and an example doing the same are not.
+func TestDependenciesNonsensitiveFixture(t *testing.T) {
+	_, findings := ScanDependencies(nonsensitiveDependencies)
+	subjects := map[string]bool{}
+	for _, f := range findings {
+		if f.Rule != "NONSENSITIVE_CALL" {
+			t.Errorf("BEHAVIORAL_RED: unexpected rule %s: %+v", f.Rule, f)
+		}
+		subjects[f.Subject] = true
+	}
+	want := []string{"components/identity/ovh-native", "modules/credential", "stages/account-governance"}
+	if got := sortedSet(subjects); !reflect.DeepEqual(got, want) {
+		t.Errorf("BEHAVIORAL_RED: NONSENSITIVE_CALL reported against %v, want %v (%+v)", got, want, findings)
+	}
+}
+
 // The purity rules add negatives; they never widen the ADR-0002 edge matrix.
 func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 	want := map[string][]string{
@@ -1030,7 +1109,7 @@ func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 }
 
 func TestDependenciesRulesListed(t *testing.T) {
-	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "NONSENSITIVE_CALL", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 	got := append([]string{}, DependencyRules...)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("BEHAVIORAL_RED: DependencyRules = %v, want %v", got, want)

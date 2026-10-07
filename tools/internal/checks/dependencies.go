@@ -28,7 +28,7 @@ const (
 )
 
 // DependencyRules lists every rule ScanDependencies can report.
-var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "NONSENSITIVE_CALL", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "STATE_BUCKET_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 
 // purity holds the FR-003 facts of configuration: whether it declares a state
 // backend (a backend or cloud block), configures a provider, or reads another
@@ -62,6 +62,20 @@ func purityOf(body *hclsyntax.Body) purity {
 		}
 	}
 	return p
+}
+
+// unmarks reports whether one parsed configuration file calls nonsensitive,
+// by its plain name or a namespaced one (core::nonsensitive, or a provider
+// function of that name), in any expression, nested block or template.
+func unmarks(body *hclsyntax.Body) bool {
+	found := false
+	hclsyntax.VisitAll(body, func(node hclsyntax.Node) hcl.Diagnostics {
+		if call, ok := node.(*hclsyntax.FunctionCallExpr); ok && (call.Name == "nonsensitive" || strings.HasSuffix(call.Name, "::nonsensitive")) {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 // retainedModules are the library packages whose resources outlive every run
@@ -403,9 +417,9 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // under stacks/ (test files are outside these rules). In a retained module
 // (G7) every resource keeps a literal prevent_destroy and no external module
 // is called; the state-backend component takes its buckets only from the
-// protected module. Hidden directories are
-// skipped unless a module call names one; fixture trees are skipped only under
-// tests/ and tools/.
+// protected module. No library, stage or instance calls nonsensitive (G2).
+// Hidden directories are skipped unless a module call names one; fixture trees
+// are skipped only under tests/ and tools/.
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	g := DependencyGraph{Layers: map[string]string{}, Uses: map[string][]string{}, TestUses: map[string][]string{}, External: map[string][]string{}, Configs: map[string][]string{}}
 	var findings []Finding
@@ -596,6 +610,17 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			}
 			if facts.provider {
 				add("LIBRARY_PROVIDER_CONFIG", dir, "a %s configures a provider", role(dir, layer))
+			}
+		}
+		// G2, configuration part: the envelope builder drops what tofu marks
+		// sensitive, and a module's tests cannot enumerate its outputs, so no
+		// code that is deployed may remove the mark (spec 005 T020).
+		if layer == LayerLibrary || layer == LayerStage || layer == LayerInstance {
+			for _, body := range bodies {
+				if unmarks(body) {
+					add("NONSENSITIVE_CALL", dir, "a %s calls nonsensitive(): a secret it unmarks is published as a plain output (G2)", role(dir, layer))
+					break
+				}
 			}
 		}
 		// G7: a retained package's library code keeps every resource.

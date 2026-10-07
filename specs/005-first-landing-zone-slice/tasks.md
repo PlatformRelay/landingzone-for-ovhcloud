@@ -251,7 +251,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/iam-service-account; task test:unit -- modules/iam-policy; task test:unit -- modules/identity-group`: OAuth2 client uses `CLIENT_CREDENTIALS`, secret only as sensitive output, `identity` URN exported; policy passes identities, resources, allow, optional conditions unchanged; group role defaults to `NONE`. Stubs are behavioural red.
   - Evidence: `evidence/T019.md`; PR; initial status `not-run`.
 
-- [ ] T020 [US2] Implement modules/iam-service-account, modules/iam-policy and modules/identity-group
+- [x] T020 [US2] Implement modules/iam-service-account, modules/iam-policy and modules/identity-group — closed 2026-10-07, evidence: evidence/T020.md
   - Requirements: FR-004, FR-010; ADRs: 0003, 0018. Depends on: T019.
   - Verify: `task test:unit -- modules/iam-service-account; task test:unit -- modules/iam-policy; task test:unit -- modules/identity-group; task lint -- modules/iam-policy`: green; resources `ovh_me_api_oauth2_client`, `ovh_iam_policy`, `ovh_me_identity_group` (docs cited); no `discard_client_secret` (2.22.0 only).
   - Evidence: `evidence/T020.md`; PR; initial status `not-run`.

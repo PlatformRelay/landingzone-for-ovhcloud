@@ -17,4 +17,9 @@ variable "role" {
   type        = string
   default     = "NONE"
   nullable    = false
+
+  validation {
+    condition     = contains(["ADMIN", "REGULAR", "UNPRIVILEGED", "NONE"], var.role)
+    error_message = "role: one of ADMIN, REGULAR, UNPRIVILEGED, NONE."
+  }
 }
