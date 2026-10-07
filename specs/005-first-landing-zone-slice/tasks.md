@@ -355,7 +355,7 @@ Independent test: V005, V006, V012.
   - Verify: `task test:stacks`: T033 controls green; strict decoding reuses `checks.DecodeStrict`; stage table matches data-model.md (including the reserved `account-admin` and the account-tenant scope). Creates `test:stacks` (extended by T036, T038, T041).
   - Evidence: `evidence/T034.md`; PR; initial status `not-run`.
 
-- [ ] T035 [US3] Write reconciler tests in tools/internal/stacks/reconcile_test.go using tests/fixtures/terramate/
+- [x] T035 [US3] Write reconciler tests in tools/internal/stacks/reconcile_test.go using tests/fixtures/terramate/ — closed 2026-10-07, evidence: evidence/T035.md
   - Requirements: FR-007; ADRs: 0004, 0007. Depends on: T034, T007.
   - Verify: `go -C tools test ./internal/stacks -run TestReconcile -count=1`: on a scratch tree a missing stack is created through the pinned `terramate create` with the derived id, tags and `after`; a repeat run is a no-op; a directory without a row, a changed id and a changed dimension yield `UNSUPPORTED_CHANGE`; `account-fabric` and `account-admin` yield `STAGE_NOT_IMPLEMENTED`; `--check` reports without writing. A stub that only creates is behavioural red.
   - Evidence: `evidence/T035.md`; PR; initial status `not-run`.

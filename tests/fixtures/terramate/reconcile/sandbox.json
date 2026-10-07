@@ -1,0 +1,23 @@
+{
+  "comment": "Hand-written stack metadata stacks:reconcile must create for tests/fixtures/manifests/sandbox (005 T035): data-model *Derived instance fields*, research R16. Order is manifest row order; tags and after compare as sets. An after filter is tag:lz-stage-<producer stage> plus the producer's tenant, env, region and slot tags.",
+  "stacks": [
+    {"path": "stacks/account/bootstrap", "id": "account-bootstrap",
+     "tags": ["lz-stage-bootstrap", "lz-scope-account"],
+     "after": []},
+    {"path": "stacks/account/account-governance", "id": "account-governance",
+     "tags": ["lz-stage-account-governance", "lz-scope-account"],
+     "after": ["tag:lz-stage-bootstrap"]},
+    {"path": "stacks/account/tenant-state/demo", "id": "demo-state",
+     "tags": ["lz-stage-tenant-state", "lz-scope-account-tenant", "lz-tenant-demo"],
+     "after": ["tag:lz-stage-bootstrap"]},
+    {"path": "stacks/tenants/demo/dev/project", "id": "demo-dev-project",
+     "tags": ["lz-stage-project", "lz-scope-environment", "lz-tenant-demo", "lz-env-dev"],
+     "after": ["tag:lz-stage-account-governance", "tag:lz-stage-tenant-state:lz-tenant-demo"]},
+    {"path": "stacks/tenants/demo/dev/gra11/project-network", "id": "demo-dev-gra11-network",
+     "tags": ["lz-stage-project-network", "lz-scope-region", "lz-tenant-demo", "lz-env-dev", "lz-region-gra11"],
+     "after": ["tag:lz-stage-project:lz-tenant-demo:lz-env-dev", "tag:lz-stage-account-governance", "tag:lz-stage-tenant-state:lz-tenant-demo"]},
+    {"path": "stacks/tenants/demo/dev/gra11/runtime", "id": "demo-dev-gra11-runtime",
+     "tags": ["lz-stage-runtime", "lz-scope-region", "lz-tenant-demo", "lz-env-dev", "lz-region-gra11"],
+     "after": ["tag:lz-stage-project:lz-tenant-demo:lz-env-dev", "tag:lz-stage-account-governance", "tag:lz-stage-tenant-state:lz-tenant-demo"]}
+  ]
+}
