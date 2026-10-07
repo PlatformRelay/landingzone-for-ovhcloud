@@ -390,9 +390,11 @@ func TestProbeIdentity(t *testing.T) {
 	})
 }
 
-// TestProbeIdentities (T076): every published identity — a <prefix>CLIENT_ID or <prefix>client_id
-// with its secret — is one to bind; the default one is required and half an identity is refused,
-// so no identity reaches the companion unbound.
+// TestProbeIdentities (T076, T080): every published identity — a <prefix>client_id with the
+// <prefix>client_secret of the same prefix, the suffixes in any case — is one to bind; the default
+// one, under exactly OVH_CLIENT_ID and OVH_CLIENT_SECRET (the provider reads only those), is
+// required; half an identity, two ids of one prefix and an unpaired credential-shaped key (ending
+// in key, token, password or secret, any case) are refused; the S3 keys and other names pass.
 func TestProbeIdentities(t *testing.T) {
 	got, err := identities(identityEnv, "ovh-eu")
 	want := []Credential{{Endpoint: "ovh-eu", ClientID: identityClientID, ClientSecret: identityClient},
@@ -406,10 +408,25 @@ func TestProbeIdentities(t *testing.T) {
 		"empty p25 secret":          {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_p25_client_id": "c", "TF_VAR_p25_client_secret": ""},
 		"no default identity":       {"TF_VAR_p25_client_id": "c", "TF_VAR_p25_client_secret": "d"},
 		"default id only":           {"OVH_CLIENT_ID": "a"},
+		// T080 (review r1): the default pair under other names leaves the companion without them.
+		"default secret in another case": {"OVH_CLIENT_ID": "a", "OVH_Client_Secret": "b"},
+		"default id in another case":     {"OVH_Client_Id": "a", "OVH_CLIENT_SECRET": "b"},
+		"two ids of one prefix":          {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_p25_CLIENT_ID": "c", "TF_VAR_p25_client_id": "e", "TF_VAR_p25_client_secret": "d"},
+		"unpaired key":                   {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_signing_Key": "d"},
+		"unpaired token":                 {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_api_TOKEN": "d"},
+		"unpaired password":              {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_db_password": "d"},
+		"unpaired secret":                {"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_api_Secret": "d"},
 	} {
 		if got, err := identities(env, "ovh-eu"); err == nil {
 			t.Errorf("%s: identities = %v, want a refusal", name, got)
 		}
+	}
+	// T080: suffixes in any case pair; the S3 keys and non-credential names pass, unbound.
+	mixed := map[string]string{"OVH_CLIENT_ID": "a", "OVH_CLIENT_SECRET": "b", "TF_VAR_p25_Client_Id": "c", "TF_VAR_p25_cLiEnT_sEcReT": "d",
+		"AWS_ACCESS_KEY_ID": "e", "AWS_SECRET_ACCESS_KEY": "f", "TF_VAR_tenant_client_identity": "urn:v1:eu:identity:credential:x"}
+	want = []Credential{{Endpoint: "ovh-eu", ClientID: "a", ClientSecret: "b"}, {Endpoint: "ovh-eu", ClientID: "c", ClientSecret: "d"}}
+	if got, err := identities(mixed, "ovh-eu"); err != nil || !slices.Equal(got, want) {
+		t.Errorf("identities(mixed case) = %v, %v; want the default and the P25 identity", got, err)
 	}
 }
 
@@ -648,13 +665,14 @@ func TestProbeIdentityCleanup(t *testing.T) {
 // …_client_id) with the key of the same prefix ending in client_secret, in any case — is bound to
 // the run's account (Probe.Bind) with that pair's secret before the companion's first child, and
 // the companion gets every published key under its own name. A key that looks like a credential
-// but pairs with no identity — half a pair in any case, a pair with an empty half, client id or
-// secret without the separator, a client key or token — is refused before the companion starts:
-// the run fails, no companion child runs, the root is still destroyed and no file, terminal or
-// returned error keeps a published secret. The S3 keys (AWS_*) are no OVHcloud identity and pass
-// unbound (T076). Not pinned: whether two keys that differ in the case of their prefix pair (they
-// are either refused or bound, never passed on unbound), and whether another name holding
-// "client" (e.g. an identity URN) is refused.
+// but pairs with no identity — half a pair in any case, a pair with an empty half, or a name
+// ending in key, token, password or secret in any case (T080, coordinator: the narrow reading) —
+// is refused before the companion starts: the run fails, no companion child runs, the root is
+// still destroyed and no file, terminal or returned error keeps a published secret. The S3 keys
+// (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are no OVHcloud identity and pass unbound (T076); so
+// does any other name, e.g. an identity URN holding "client" (T080). Not pinned: whether two keys
+// that differ in the case of their prefix pair (they are either refused or bound, never passed on
+// unbound).
 
 const (
 	pairDefaultID     = "fake-pair-default-client-id"
@@ -871,6 +889,11 @@ func TestProbeIdentityPairing(t *testing.T) {
 		"client key":               {"TF_VAR_p25_Client_Key": pairSecret},
 		"client token":             {"TF_VAR_P25_CLIENT_TOKEN": pairSecret},
 		"secret of another prefix": {"TF_VAR_p25_Client_Id": pairID, "TF_VAR_p26_client_secret": pairSecret},
+		// T080: a credential-shaped suffix without "client" (narrow reading).
+		"api key":     {"TF_VAR_signing_Key": pairSecret},
+		"api token":   {"TF_VAR_api_token": pairSecret},
+		"password":    {"TF_VAR_db_PassWord": pairSecret},
+		"bare secret": {"TF_VAR_api_SECRET": pairSecret},
 	} {
 		t.Run("refused/"+name, func(t *testing.T) {
 			withUmask(t)
@@ -881,6 +904,39 @@ func TestProbeIdentityPairing(t *testing.T) {
 			err := p.Start(context.Background())
 			calls := w.calls(t, "tofu.log")
 			checkRefused(t, err, calls)
+			checkNoUnbound(t, calls, env, binds)
+			checkNoPairSecret(t, w, root)
+		})
+	}
+
+	// Not credential-shaped (T080, coordinator: the narrow reading): passed to the companion under
+	// its own name, unbound; only the default identity is bound.
+	for name, extra := range map[string]map[string]string{
+		"identity urn holding client": {"TF_VAR_tenant_client_identity": "urn:v1:eu:identity:credential:fake-pair/oauth2-client"},
+		"secret not as suffix":        {"TF_VAR_Secret_Name": "fake-pair-secret-name"},
+	} {
+		t.Run("passed/"+name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p, env := w.pairingProbe(t, root, extra, &binds)
+			if err := p.Start(context.Background()); err != nil {
+				t.Errorf("Start: %v: a key that is not credential-shaped was refused", err)
+			}
+			calls := w.calls(t, "tofu.log")
+			comp := companionChildren(calls)
+			if len(comp) == 0 {
+				t.Fatalf("the companion never ran (inits %v)", sequence(calls, "init"))
+			}
+			if len(binds) != 1 || binds[0].cred != defaultID {
+				t.Errorf("bound %d identities, want only the default one", len(binds))
+			}
+			for k, v := range extra {
+				if envOf(calls[comp[0]])[k] != v {
+					t.Errorf("the companion did not get %s under its own name", k)
+				}
+			}
 			checkNoUnbound(t, calls, env, binds)
 			checkNoPairSecret(t, w, root)
 		})
@@ -955,8 +1011,9 @@ func TestProbeIdentityPairing(t *testing.T) {
 		for _, b := range c.binds {
 			ids = append(ids, b.cred.ClientID)
 		}
-		if !slices.Contains(ids, pairID) {
-			t.Errorf("cleanup bound %v: the title-case identity was not bound", ids)
+		// The whole credential, endpoint included (T079 review r2).
+		if !slices.ContainsFunc(c.binds, func(b bindCall) bool { return b.cred == extraID }) {
+			t.Errorf("cleanup bound %v: the title-case identity was not bound with its secret and the run's endpoint", ids)
 		}
 		checkNoUnbound(t, c.calls, c.env, c.binds)
 		if got := sequence(c.calls, "destroy"); !slices.Equal(got, []string{"companion", "p"}) {

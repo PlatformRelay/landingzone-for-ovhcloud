@@ -168,7 +168,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `go -C tools test ./internal/live ./cmd/lz-live -count=1`: every identity the root publishes in `companion_env` is paired and bound before the companion runs, whatever the case of its key names (`…_CLIENT_ID`/`…_Client_Id`/`…_client_id`), and a key that looks like a credential but pairs with no identity is refused before the companion starts; today a mixed-case identity reaches the companion unbound: behavioural red. Found in T076 (evidence/T076.md gaps).
   - Evidence: `evidence/T079.md`; PR; initial status `not-run`.
 
-- [ ] T080 Pair published identities case-insensitively and refuse unpaired credential keys in tools/internal/live/runner.go
+- [x] T080 Pair published identities case-insensitively and refuse unpaired credential keys in tools/internal/live/runner.go — closed 2026-10-07, evidence: evidence/T080.md
   - Requirements: FR-010, FR-011; ADRs: 0008, 0009. Depends on: T079.
   - Verify: `task test:live-lane`: T079 controls green with one killed mutant per clause.
   - Evidence: `evidence/T080.md`; PR; initial status `not-run`.

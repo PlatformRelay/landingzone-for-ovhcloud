@@ -326,33 +326,67 @@ func (s *session) secondWriter(ctx context.Context, st Stack) error {
 	return s.writerRecord(st)
 }
 
-// identities returns the identities in a published environment: every <prefix>CLIENT_ID (or
-// <prefix>client_id) with its <prefix>CLIENT_SECRET (client_secret), sorted by variable name. The
-// default one, OVH_CLIENT_ID/OVH_CLIENT_SECRET, is required; half an identity is refused.
+// s3Keys are the published S3 credential's names: no OVHcloud identity, passed on unbound (T076).
+var s3Keys = []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+
+// credentialSuffixes end, in any case, the name of a published key that is a credential but no half
+// of an identity (T080, the narrow reading): such a key is refused, never passed on unbound.
+var credentialSuffixes = []string{"key", "token", "password", "secret"}
+
+// identities returns the identities in a published environment: every <prefix>client_id with the
+// <prefix>client_secret of the same prefix, the suffixes in any case (T080), sorted by prefix. The
+// default one, OVH_CLIENT_ID/OVH_CLIENT_SECRET, is required. Half an identity, an empty half, two
+// ids or two secrets of one prefix, and a credential-shaped key (credentialSuffixes) other than the
+// S3 keys are refused; any other key (e.g. an identity URN holding "client") is no credential. The
+// errors name keys, never values.
 func identities(env map[string]string, endpoint string) ([]Credential, error) {
-	pair := func(k string) (string, bool) {
-		for _, sfx := range [][2]string{{"CLIENT_ID", "CLIENT_SECRET"}, {"client_id", "client_secret"}, {"CLIENT_SECRET", "CLIENT_ID"}, {"client_secret", "client_id"}} {
-			if p, ok := strings.CutSuffix(k, sfx[0]); ok {
-				return p + sfx[1], true
-			}
-		}
-		return "", false
-	}
-	keys := slices.Sorted(maps.Keys(env))
-	var out []Credential
-	for _, k := range keys {
-		other, ok := pair(k)
-		if !ok {
+	const idSfx, secretSfx = "client_id", "client_secret"
+	type pair struct{ id, secret string }
+	pairs := map[string]*pair{}
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		l := strings.ToLower(k)
+		var prefix string
+		isID := false
+		switch {
+		case strings.HasSuffix(l, idSfx):
+			prefix, isID = k[:len(k)-len(idSfx)], true
+		case strings.HasSuffix(l, secretSfx):
+			prefix = k[:len(k)-len(secretSfx)]
+		case slices.Contains(s3Keys, k):
+			continue
+		case slices.ContainsFunc(credentialSuffixes, func(sfx string) bool { return strings.HasSuffix(l, sfx) }):
+			return nil, fmt.Errorf("output %s publishes %s, which looks like a credential but pairs with no identity", companionOutput, k)
+		default:
 			continue
 		}
-		if env[k] == "" || env[other] == "" {
-			return nil, fmt.Errorf("output %s publishes %s without %s", companionOutput, k, other)
+		p := pairs[prefix]
+		if p == nil {
+			p = &pair{}
+			pairs[prefix] = p
 		}
-		if strings.HasSuffix(strings.ToUpper(k), "CLIENT_ID") {
-			out = append(out, Credential{Endpoint: endpoint, ClientID: env[k], ClientSecret: env[other]})
+		half := &p.secret
+		if isID {
+			half = &p.id
 		}
+		if *half != "" {
+			return nil, fmt.Errorf("output %s publishes %s and %s for one identity", companionOutput, *half, k)
+		}
+		*half = k
 	}
-	if env["OVH_CLIENT_ID"] == "" {
+	var out []Credential
+	for _, prefix := range slices.Sorted(maps.Keys(pairs)) {
+		p := pairs[prefix]
+		if p.id == "" || p.secret == "" {
+			return nil, fmt.Errorf("output %s publishes half an identity (%s%s)", companionOutput, p.id, p.secret)
+		}
+		if env[p.id] == "" || env[p.secret] == "" {
+			return nil, fmt.Errorf("output %s publishes %s with an empty half", companionOutput, p.id)
+		}
+		out = append(out, Credential{Endpoint: endpoint, ClientID: env[p.id], ClientSecret: env[p.secret]})
+	}
+	// The provider reads only these names: a default pair in another case leaves the companion
+	// without its credential (review r1).
+	if env["OVH_CLIENT_ID"] == "" || env["OVH_CLIENT_SECRET"] == "" {
 		return nil, fmt.Errorf("output %s holds no OVH_CLIENT_ID and OVH_CLIENT_SECRET", companionOutput)
 	}
 	return out, nil

@@ -244,6 +244,13 @@ func fakeTofu(args []string) int {
 	// redact every child stream, not only apply's.
 	fmt.Fprintf(os.Stderr, "fake-tofu-%s-stderr token=%s passphrase=%s s3=%s p25=%s\n", sub, secret, os.Getenv("TF_VAR_state_passphrase"),
 		os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("TF_VAR_p25_client_secret"))
+	// ... and every scanned secret (ScanFor) it holds in its environment, under whatever name
+	// (T080): the terminal checks then cover published keys in any case.
+	for _, kv := range os.Environ() {
+		if k, v, _ := strings.Cut(kv, "="); v != "" && slices.Contains(st.ScanFor, v) {
+			fmt.Fprintf(os.Stderr, "fake-tofu-%s-env %s=%s\n", sub, k, v)
+		}
+	}
 	if len(st.ScanRoots) > 0 {
 		call.Holders = holders(append(slices.Clone(st.ScanRoots), os.Getenv("HOME")), st.ScanFor)
 	}
