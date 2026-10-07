@@ -41,11 +41,14 @@ var stagePlans = map[string][]string{
 	"project":            {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
 	"project-reference":  {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
 	"project-network":    {"stages/project-network", "components/network/island", "modules/naming", "modules/private-network"},
+	"runtime":            {"stages/runtime", "components/runtime/managed-only", "modules/naming", "modules/object-storage"},
+	"runtime-slot":       {"stages/runtime", "components/runtime/managed-only", "modules/naming", "modules/object-storage"},
 }
 
 // planCases are the capture cases that are not a stage's default run: their stage and run.
 var planCases = map[string]struct{ stage, run string }{
 	"project-reference": {"project", "reference_published_outputs_with_both_toggles"},
+	"runtime-slot":      {"runtime", "slot_blue_names_the_bucket"},
 }
 
 // planCase returns a capture case's stage and run.
@@ -166,7 +169,33 @@ type testPlan struct {
 		Variables map[string]struct {
 			Value json.RawMessage `json:"value"`
 		} `json:"variables"`
+		// Configuration is the configuration the plan was made from: which module each call reads.
+		Configuration struct {
+			RootModule planModule `json:"root_module"`
+		} `json:"configuration"`
 	} `json:"test_plan"`
+}
+
+// planModule is one module of the plan's configuration: its own resources and its module calls.
+type planModule struct {
+	Resources []struct {
+		Address string `json:"address"`
+	} `json:"resources"`
+	ModuleCalls map[string]planModuleCall `json:"module_calls"`
+}
+
+// planModuleCall is one module call of the plan's configuration: its source as written, its
+// argument expressions and the called module.
+type planModuleCall struct {
+	Source      string                    `json:"source"`
+	Expressions map[string]planExpression `json:"expressions"`
+	Module      planModule                `json:"module"`
+}
+
+// planExpression is one argument expression: a constant, or the references it reads.
+type planExpression struct {
+	ConstantValue any      `json:"constant_value"`
+	References    []string `json:"references"`
 }
 
 // plannedResource is one entry of the plan's resource_changes.
@@ -314,6 +343,8 @@ var stagePlanPins = map[string]func(testing.TB, []byte){
 	"project":            func(t testing.TB, data []byte) { pinProjectPlan(t, "project", data) },
 	"project-reference":  func(t testing.TB, data []byte) { pinProjectPlan(t, "project-reference", data) },
 	"project-network":    pinProjectNetworkPlan,
+	"runtime":            func(t testing.TB, data []byte) { pinRuntimePlan(t, "runtime", data) },
+	"runtime-slot":       func(t testing.TB, data []byte) { pinRuntimePlan(t, "runtime-slot", data) },
 }
 
 func TestOutputsTenantStateStagePlan(t *testing.T) {
@@ -671,28 +702,7 @@ func pinProjectNetworkPlan(t testing.TB, data []byte) {
 	t.Helper()
 	binding := &ProjectBinding{ProjectID: pnProjectID, ProjectURN: pnProjectURN}
 	msg := decodePlan(t, data, "published_outputs_match_the_schema")
-
-	// KD-3 on the plan's own input: the `project` values are a project envelope's values for the
-	// bound reference (the adapter refuses any other before the plan).
-	raw, ok := msg.Plan.Variables["project"]
-	if !ok {
-		t.Fatal("the plan has no `project` input")
-	}
-	var project map[string]any
-	if err := json.Unmarshal(raw.Value, &project); err != nil {
-		t.Fatal(err)
-	}
-	entries := map[string]any{}
-	for name, v := range project {
-		if v != nil { // an absent optional value (budget_alert_id) is not published
-			entries[name] = map[string]any{"sensitive": false, "value": v}
-		}
-	}
-	projectDoc, err := json.Marshal(entries)
-	if err != nil {
-		t.Fatal(err)
-	}
-	publishedEnvelope(t, Expectation{InstanceID: "demo-dev-project", Stage: "project", Project: binding}, projectDoc, nil, slices.Sorted(maps.Keys(entries)))
+	projectInputBound(t, msg, binding)
 
 	// The plan's own root outputs are exactly the five published, none sensitive (T030 review r1).
 	planOutputContract(t, msg, "project-network")
@@ -761,6 +771,201 @@ func pinProjectNetworkPlan(t testing.TB, data []byte) {
 		if err := json.Unmarshal(msg.Plan.Outputs[name].After, &got); err != nil || got != want {
 			t.Errorf("output %s %v, want %v", name, got, want)
 		}
+	}
+}
+
+// projectInputBound is KD-3 on a plan's own `project` input: its values are a project envelope's
+// values for the bound reference (the adapter refuses any other before the plan).
+func projectInputBound(t testing.TB, msg testPlan, binding *ProjectBinding) {
+	t.Helper()
+	raw, ok := msg.Plan.Variables["project"]
+	if !ok {
+		t.Fatal("the plan has no `project` input")
+	}
+	var project map[string]any
+	if err := json.Unmarshal(raw.Value, &project); err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]any{}
+	for name, v := range project {
+		if v != nil { // an absent optional value (budget_alert_id) is not published
+			entries[name] = map[string]any{"sensitive": false, "value": v}
+		}
+	}
+	projectDoc, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishedEnvelope(t, Expectation{InstanceID: "demo-dev-project", Stage: "project", Project: binding}, projectDoc, nil, slices.Sorted(maps.Keys(entries)))
+}
+
+// The fixtures of the runtime stage's captured runs (stages/runtime/tests/unit.tftest.hcl): the
+// demo/dev project's published values, region GRA11, no slot (published_outputs_match_the_schema)
+// and slot `blue` (slot_blue_names_the_bucket).
+const (
+	rtBucket     = "module.runtime.module.bucket.ovh_cloud_project_storage.this"
+	rtProjectID  = "0123456789abcdef0123456789abcdef"
+	rtProjectURN = "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+	rtRegion     = "GRA11"
+	// rtStorageRegion is the instance region's leading letters (UNVERIFIED until T010,
+	// components/runtime/managed-only/README.md).
+	rtStorageRegion = "GRA"
+	rtManagedIn     = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/tenants/demo/dev/gra11/"
+)
+
+// rtCases are the runtime capture cases: the instance, its slot ("" when none is set) and the
+// bucket name naming gives it.
+var rtCases = map[string]struct{ instance, slot, bucket string }{
+	"runtime":      {"demo-dev-gra11-runtime", "", "lz-demo-dev-gra11-bkt-runtime"},
+	"runtime-slot": {"demo-dev-gra11-runtime-blue", "blue", "lz-demo-dev-gra11-bkt-runtime-blue"},
+}
+
+// T032 (coordinator decision 2026-10-07 on T031's decision request 1, option A): the runtime stage's
+// real plan, without and with a slot. tofu test cannot enumerate resources or see which module a
+// call reads, so the component and stage tests see neither a second bucket at another address nor
+// the protected module or a hand-written name in place of modules/naming (T031 gaps 1, 5). Each plan
+// holds exactly the one bucket, nothing else, built through modules/object-storage and named and
+// labelled through modules/naming; its project input passes the adapter's KD-3 check and the
+// envelope built from it validates under runtime.schema.json.
+func TestOutputsRuntimeStagePlan(t *testing.T) {
+	t.Run("no slot", func(t *testing.T) { pinRuntimePlan(t, "runtime", stagePlan(t, "runtime")) })
+	t.Run("slot", func(t *testing.T) { pinRuntimePlan(t, "runtime-slot", stagePlan(t, "runtime-slot")) })
+}
+
+// pinRuntimePlan pins one capture case of the runtime stage: `runtime` (no slot) or `runtime-slot`.
+func pinRuntimePlan(t testing.TB, c string, data []byte) {
+	t.Helper()
+	rc := rtCases[c]
+	binding := &ProjectBinding{ProjectID: rtProjectID, ProjectURN: rtProjectURN}
+	_, run := planCase(c)
+	msg := decodePlan(t, data, run)
+	projectInputBound(t, msg, binding)
+
+	// The slot the plan was made with: the case's, or none.
+	var slotInput any
+	if err := json.Unmarshal(msg.Plan.Variables["slot"].Value, &slotInput); err != nil {
+		t.Fatalf("the plan has no `slot` input: %v", err)
+	}
+	var wantSlot any
+	if rc.slot != "" {
+		wantSlot = rc.slot
+	}
+	if slotInput != wantSlot {
+		t.Fatalf("plan made with slot %v, want %v", slotInput, wantSlot)
+	}
+
+	// Root outputs: exactly the schema's, none sensitive. An unset slot is planned null; `tofu
+	// output -json` does not list a null root output, so it is absent from the published values.
+	planOutputContract(t, msg, "runtime")
+	doc, secrets := planOutputs(t, msg)
+	if len(secrets) != 0 {
+		t.Errorf("the runtime stage publishes every output; %d sensitive strings found", len(secrets))
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(doc, &entries); err != nil {
+		t.Fatal(err)
+	}
+	values := []string{"capabilities", "kind", "pending_actions", "readiness", "scope", "unlabelled"}
+	if rc.slot == "" {
+		if string(msg.Plan.Outputs["slot"].After) != "null" {
+			t.Errorf("slot planned %s, want null when none is set", msg.Plan.Outputs["slot"].After)
+		}
+		delete(entries, "slot")
+	} else {
+		values = append(values, "slot")
+		if string(msg.Plan.Outputs["slot"].After) != `"`+rc.slot+`"` {
+			t.Errorf("slot planned %s, want %q", msg.Plan.Outputs["slot"].After, rc.slot)
+		}
+	}
+	slices.Sort(values)
+	doc, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishedEnvelope(t, Expectation{InstanceID: rc.instance, Stage: "runtime", Project: binding}, doc, secrets, values)
+
+	// Exactly one bucket, at the plain module's unkeyed address in the one runtime call; nothing
+	// else, managed or read.
+	var all []string
+	for _, r := range msg.Plan.Resources {
+		all = append(all, r.Mode+" "+r.Address)
+	}
+	sort.Strings(all)
+	if want := []string{"managed " + rtBucket}; !reflect.DeepEqual(all, want) {
+		t.Fatalf("planned resources %v, want exactly %v", all, want)
+	}
+	bucket := managedByAddress(t, msg)[rtBucket].Change.After
+	for attr, want := range map[string]any{"service_name": rtProjectID, "region_name": rtStorageRegion, "name": rc.bucket} {
+		if bucket[attr] != want {
+			t.Errorf("bucket %s %v, want %v", attr, bucket[attr], want)
+		}
+	}
+	labels := map[string]any{
+		"lz:managed-by": "opentofu",
+		"lz:managed-in": rtManagedIn + strings.TrimPrefix(rc.instance, "demo-dev-gra11-"),
+		"lz:instance":   rc.instance,
+		"lz:tenant":     "demo",
+		"lz:release":    "unreleased",
+	}
+	if !reflect.DeepEqual(bucket["tags"], labels) {
+		t.Errorf("bucket tags %v, want exactly the label set %v", bucket["tags"], labels)
+	}
+
+	// The published values are the planned bucket's and the bound project's.
+	var published struct {
+		Scope        map[string]any `json:"scope"`
+		Capabilities map[string]any `json:"capabilities"`
+		Unlabelled   []any          `json:"unlabelled"`
+	}
+	for name, dst := range map[string]any{"scope": &published.Scope, "capabilities": &published.Capabilities, "unlabelled": &published.Unlabelled} {
+		if err := json.Unmarshal(msg.Plan.Outputs[name].After, dst); err != nil {
+			t.Fatalf("output %s: %v", name, err)
+		}
+	}
+	if want := map[string]any{"instance": rc.instance, "project_id": rtProjectID, "region": rtRegion}; !reflect.DeepEqual(published.Scope, want) {
+		t.Errorf("scope %v, want %v", published.Scope, want)
+	}
+	storage := map[string]any{"bucket": bucket["name"], "endpoint": "https://s3.gra.io.cloud.ovh.net", "region": bucket["region_name"]}
+	if want := map[string]any{"object-storage": storage}; !reflect.DeepEqual(published.Capabilities, want) {
+		t.Errorf("capabilities %v, want exactly %v", published.Capabilities, want)
+	}
+	if len(published.Unlabelled) != 0 {
+		t.Errorf("unlabelled %v, want none: the bucket carries tags", published.Unlabelled)
+	}
+	// A managed-only runtime is ready once its bucket exists; nothing is left to the operator.
+	for name, want := range map[string]string{"kind": `"managed-only"`, "readiness": `"ready"`, "pending_actions": `[]`} {
+		if got := string(msg.Plan.Outputs[name].After); got != want {
+			t.Errorf("output %s %s, want %s", name, got, want)
+		}
+	}
+
+	// Built through the plain modules/object-storage (never the protected state-bucket module) and
+	// named and labelled through modules/naming, in the stage's one runtime call; the component
+	// manages no resource of its own.
+	root := msg.Plan.Configuration.RootModule
+	if got := slices.Sorted(maps.Keys(root.ModuleCalls)); !reflect.DeepEqual(got, []string{"runtime"}) || root.ModuleCalls["runtime"].Source != "../../components/runtime/managed-only" || len(root.Resources) != 0 {
+		t.Fatalf("stage calls %v (runtime from %q) and holds %d resources, want only module.runtime from ../../components/runtime/managed-only", got, root.ModuleCalls["runtime"].Source, len(root.Resources))
+	}
+	component := root.ModuleCalls["runtime"].Module
+	sources := map[string]string{}
+	for name, call := range component.ModuleCalls {
+		sources[name] = call.Source
+	}
+	if want := map[string]string{"bucket": "../../../modules/object-storage", "bucket_name": "../../../modules/naming"}; !reflect.DeepEqual(sources, want) || len(component.Resources) != 0 {
+		t.Fatalf("component calls %v and holds %d resources, want exactly %v and none", sources, len(component.Resources), want)
+	}
+	call := component.ModuleCalls["bucket"]
+	// Each reads only the naming output (review r1): a condition beside it adds a reference. A
+	// literal fallback inside the same expression (try, a conditional on the output itself) adds
+	// none, so the references show the source, not that the value passes unchanged.
+	for arg, ref := range map[string]string{"name": "module.bucket_name.name", "tags": "module.bucket_name.labels"} {
+		if got := call.Expressions[arg].References; !reflect.DeepEqual(got, []string{ref, "module.bucket_name"}) {
+			t.Errorf("bucket %s reads %v, want only %s", arg, got, ref)
+		}
+	}
+	naming := component.ModuleCalls["bucket_name"].Expressions
+	if naming["kind"].ConstantValue != "bucket" || naming["role"].ConstantValue != "runtime" || !slices.Contains(naming["slot"].References, "var.slot") {
+		t.Errorf("naming call kind %v, role %v, slot %v, want bucket, runtime and var.slot", naming["kind"].ConstantValue, naming["role"].ConstantValue, naming["slot"].References)
 	}
 }
 

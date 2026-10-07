@@ -1,11 +1,12 @@
 #!/bin/sh
 # Capture a stage's real plan for the output-contract pins of 005 T022 (tenant-state), T024
-# (account-governance), T028 (project, adopt and reference mode) and T030 (project-network) through
-# the installed offline entry:
+# (account-governance), T028 (project, adopt and reference mode), T030 (project-network) and T032
+# (runtime, without and with a slot) through the installed offline entry:
 #
 #   tests/fixtures/outputs/capture-stage-plan.sh <absolute entry> <absolute checkout> <case>
 #
-# A case is a stage, or `project-reference` (the project stage's reference-mode run). The entry runs
+# A case is a stage, `project-reference` (the project stage's reference-mode run) or `runtime-slot`
+# (the runtime stage's run with slot `blue`). The entry runs
 # `task capture:<case>-plan` in its sandbox (no network, no credential): the pinned OpenTofu runs the
 # stage's own unit tests (mocked provider) on a scratch copy and prints the verbose JSON plan of the
 # case's run. That stdout is the fixture captures/<case>-plan.json. A .meta.json sidecar records the
@@ -29,9 +30,11 @@ case "$capture_case" in
   account-governance) stage=account-governance; dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group" ;;
   project | project-reference) stage=project; dirs="stages/project components/project-factory modules/naming modules/cloud-project modules/cloud-quota" ;;
   project-network) stage=project-network; dirs="stages/project-network components/network/island modules/naming modules/private-network" ;;
+  runtime | runtime-slot) stage=runtime; dirs="stages/runtime components/runtime/managed-only modules/naming modules/object-storage" ;;
   *) echo "capture-stage-plan.sh: unknown case: $capture_case" >&2; exit 2 ;;
 esac
 if [ "$capture_case" = project-reference ]; then testrun=reference_published_outputs_with_both_toggles; fi
+if [ "$capture_case" = runtime-slot ]; then testrun=slot_blue_names_the_bucket; fi
 # Every file a plan can read (configuration, data files, lock files), not Markdown, state files or
 # hidden directories; test files only for the stage.
 inputs() {

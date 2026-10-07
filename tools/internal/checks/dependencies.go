@@ -163,12 +163,14 @@ func resources(body *hclsyntax.Body) []string {
 // identity component (G5; T023 decision request 2), project its one project
 // through the project-factory component (G7; T027 decision request 3), and
 // project-network its one network and subnet through the island component
-// (T029 decision request 1).
+// (T029 decision request 1), and runtime its one bucket through the
+// managed-only component (T031 decision request 1).
 var singleComponentStages = map[string]string{
 	"stages/tenant-state":       stateBackend,
 	"stages/account-governance": "components/identity/ovh-native",
 	"stages/project":            projectFactory,
 	"stages/project-network":    "components/network/island",
+	"stages/runtime":            "components/runtime/managed-only",
 }
 
 // projectFactory reaches its one project through exactly one call of

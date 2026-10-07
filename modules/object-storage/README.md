@@ -31,6 +31,8 @@ module "runtime_bucket" {
 |---|---|
 | `name` | Bucket name. |
 | `region` | Object Storage region name. |
+| `project_id` | Public Cloud project id that holds the bucket. |
+| `tags` | Tags the bucket carries. |
 
 ## Resources
 
