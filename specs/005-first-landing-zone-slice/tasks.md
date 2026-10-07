@@ -246,7 +246,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:outputs`: T017 controls green; one schema per in-scope stage plus the envelope; guard G2 (envelope part): removing the sensitive filter fails. Creates `test:outputs`.
   - Evidence: `evidence/T018.md`; PR; initial status `not-run`.
 
-- [ ] T019 [US2] Write IAM primitive module tests in modules/{iam-service-account,iam-policy,identity-group}/tests/
+- [x] T019 [US2] Write IAM primitive module tests in modules/{iam-service-account,iam-policy,identity-group}/tests/ — closed 2026-10-07, evidence: evidence/T019.md
   - Requirements: FR-004, FR-010; ADRs: 0003, 0018. Depends on: T012.
   - Verify: `task test:unit -- modules/iam-service-account; task test:unit -- modules/iam-policy; task test:unit -- modules/identity-group`: OAuth2 client uses `CLIENT_CREDENTIALS`, secret only as sensitive output, `identity` URN exported; policy passes identities, resources, allow, optional conditions unchanged; group role defaults to `NONE`. Stubs are behavioural red.
   - Evidence: `evidence/T019.md`; PR; initial status `not-run`.
