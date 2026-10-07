@@ -18,7 +18,7 @@ jobs:
       LZ_LAYER: sha256:a9a5c6e0b06d5b84aebde6486e367f8f256711de50fbf55c43a313b5c64b1d6a
       LZ_ENTRY_SHA256: 249be1df5e6d92260078bddfdf47ec4032afc113a5fbff0b4e7049d6355dfbbe
       LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
-      LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks
+      LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:exchange
     steps:
       - name: Locate the work directories
         run: |
