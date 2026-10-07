@@ -193,7 +193,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `go -C tools test ./internal/live -run TestLeftoversAPI -count=1`: the leftover check lists every matrix kind through lz-live's own signed API client (the credential the run already binds), GET only — any other method is refused before a request; pagination followed; a listing error, a non-2xx status and a truncated body are reported as errors, never as zero leftovers; no `ovhcloud` process is started. Today the check shells out to `ovhcloud api get`, which ovhcloud 0.15.0 does not have (P18 refuted, evidence/T009.md): behavioural red.
   - Evidence: `evidence/T083.md`; PR; initial status `not-run`.
 
-- [ ] T084 Implement the API-client leftover listing in tools/internal/live/leftovers.go and re-run the T009 plan-only probes to capture listings in tests/fixtures/ovhcloud/
+- [x] T084 Implement the API-client leftover listing in tools/internal/live/leftovers.go and re-run the T009 plan-only probes to capture listings in tests/fixtures/ovhcloud/ — closed 2026-10-07 with gaps, evidence: evidence/T084.md
   - Requirements: FR-011, FR-013; ADRs: 0008, 0024. Depends on: T083.
   - Verify: `task test:live-lane`: T083 controls green with one killed mutant per clause; then the three T009 probes re-run plan-only from the dedicated clone at the reviewed commit end `outcome: pass` with `0 leftovers, 0 errors`, and their redacted listings (one per matrix kind) are committed under tests/fixtures/ovhcloud/ with a provenance sidecar (run id, reviewed commit, date).
   - Evidence: `evidence/T084.md`; PR (run ids, cost); initial status `not-run`.
