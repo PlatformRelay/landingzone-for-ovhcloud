@@ -8,8 +8,10 @@
 > OVHcloud. "OVHcloud" and related names are trademarks of their owner and are used only to say
 > which platform the code targets.
 
-**Status: early foundation.** The offline check tooling (pinned toolchain, sandboxed runner,
-report, traceability, dependency and static checks) exists; no landing-zone modules exist yet.
+**Status: first slice in progress.** The offline check tooling (pinned toolchain, sandboxed
+runner, report, traceability, dependency and static checks) and the guarded live lane exist; the
+first landing-zone module, `modules/naming`, is in place, and the stages and stacks of the first
+slice (spec 005) are being built.
 Each piece is merged only with its own verification evidence.
 
 ## Purpose and differentiators
