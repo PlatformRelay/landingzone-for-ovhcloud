@@ -761,6 +761,53 @@ func (r recordingStore) Put(bucket, key string, data []byte) error {
 	return r.bucketDir.Put(bucket, key, data)
 }
 
+// An instance a tenant manifest lists in spec.external is applied by the platform, never here, so
+// publishing it is refused with nothing written; the same outputs publish when it is a row
+// (T061 review round 1: the adapter reads external producers, the publisher must not write them).
+func TestPublishRefusesExternalInstance(t *testing.T) {
+	fixture := string(mustRead(t, filepath.Join(repoRoot, "tests/fixtures/manifests/tenant-only/deployments.yaml")))
+	row := `{"id": "demo-dev-project", "stage": "project", "tenant": "demo", "environment": "dev"}`
+	state := `{"id": "demo-state", "stage": "tenant-state", "tenant": "demo"}`
+	if strings.Count(fixture, "      "+row+",\n") != 1 || strings.Count(fixture, state) != 1 {
+		t.Fatal("tenant-only fixture drifted")
+	}
+	external := strings.Replace(strings.Replace(fixture, "      "+row+",\n", "", 1), state, state+",\n      "+row, 1)
+	var envelope struct {
+		Values map[string]any `json:"values"`
+	}
+	if err := json.Unmarshal(mustRead(t, filepath.Join(repoRoot, "tests/fixtures/outputs/envelopes/project.json")), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{}
+	for name, v := range envelope.Values {
+		doc[name] = outputEntry(false, v)
+	}
+	outputs, _ := json.Marshal(doc)
+	acct := stacks.BoundAccount{Endpoint: "ovh-eu", ProjectIDs: map[string]string{"STATE": exStateID, "DEMO_DEV": envelope.Values["project_id"].(string)}}
+	for name, src := range map[string]string{"row": fixture, "external": external} {
+		t.Run(name, func(t *testing.T) {
+			m, err := stacks.DecodeManifest([]byte(src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var puts []string
+			_, err = Publish(PublishOptions{Manifest: m, Instance: exProject, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: recordingStore{bucketDir{t.TempDir()}, &puts}})
+			if name == "row" {
+				if err != nil || len(puts) != 1 {
+					t.Fatalf("control: Publish of the row: %v (Put calls %v)", err, puts)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), exProject) {
+				t.Errorf("Publish of an external instance: %v, want a refusal naming %s", err, exProject)
+			}
+			if len(puts) > 0 {
+				t.Errorf("refused, but Put %v", puts)
+			}
+		})
+	}
+}
+
 // account.env → the bound account: the endpoint and every LZ_PROJECT_ID_<REF>, nothing else; a
 // missing endpoint or an empty or malformed project id is refused.
 func TestPublishBoundAccount(t *testing.T) {

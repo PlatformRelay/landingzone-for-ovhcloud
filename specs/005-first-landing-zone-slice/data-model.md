@@ -188,14 +188,16 @@ For a consumer instance, for each derived data edge to producer stage `S` (insta
    (`fail: unbound project`, KD-3);
 3. write `{"<S with - → _>": <values>}` to `.local/live/<run-id>/inputs/<consumer>/<S>.tfvars.json`;
 4. the generated `_lz_variables.tf` declares `variable "<S_snake>"` typed from `S`'s schema; the plan
-   gets `-var-file` per edge; the record stores `sha256` of each consumed file.
+   gets `-var-file` per edge; the record stores `sha256` of each consumed `outputs.json` (FR-009).
 
 ## Resolved-reference input
 Project ids are not in the manifest, so the lane writes one more input per run from `account.env`,
 next to the producer inputs: `.local/live/<run-id>/inputs/<id>/resolved.tfvars.json`.
 - `account-governance`: `tenants = {<t>: {project_id, project_urn}}`. The tenant names come from a
   generated, committed `_lz_tenants.auto.tfvars.json` in its stack (so a new tenant row changes its
-  code digest); the ids are resolved from `LZ_PROJECT_ID_<REF>`.
+  code digest); the ids are resolved from `LZ_PROJECT_ID_<REF>`. Known slice limit: one project per
+  tenant, so the adapter refuses a tenant without exactly one environment (`tenant-environments`)
+  until the stage takes a per-environment map.
 - `project`: `project_id` from its environment's reference.
 Its `sha256` is recorded with the consumed digests (FR-009), so a changed reference selects the
 stack. The same resolved ids check every `project` artefact the adapter reads (KD-3 mitigation).

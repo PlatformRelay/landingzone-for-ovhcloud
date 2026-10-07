@@ -107,6 +107,17 @@ tasks:
       - go -C tools test -count=1 -run '^TestStackPlans' ./internal/stacks
       - go -C tools run ./cmd/lz-stacks -root .. plans
 
+  # Offline (005 T060/T061): the output exchange between stacks. The sandbox
+  # fixture is generated with the pinned Terramate into scratch, `project` and
+  # `runtime` apply and plan under their mocked tests with the pinned OpenTofu,
+  # a scratch directory per bucket plays the state buckets; the publisher and
+  # the envelope-to-input adapter run on that, with every refusal. Through the
+  # entry only: a host run fetches the provider from the registry.
+  test:exchange:
+    desc: Output exchange between stacks — publisher, envelope-to-input adapter, resolved references, records (005 FR-005, FR-009, V012)
+    cmds:
+      - go -C tools test -count=1 -tags offlinetools -run '^(TestAdapter|TestPublish|TestExchange)' ./internal/stacks ./internal/live
+
   # Host-side, credential-free, no host guard: runs in any checkout, including
   # an authoring worktree with the uncommitted manifest edit (005 FR-007). The
   # pinned Terramate is LZ_TERRAMATE, else /tcb/terramate, else terramate on

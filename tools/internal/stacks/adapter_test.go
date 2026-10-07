@@ -385,6 +385,81 @@ func TestAdapterBindsTheProducersEnvironment(t *testing.T) {
 	})
 }
 
+// A project's resolved reference is its own tenant's environment, not the first environment of
+// that name: ops/dev resolves OPS_DEV although demo/dev comes first (T061 mutant
+// binding-any-tenant).
+func TestAdapterResolvesTheProjectsOwnTenant(t *testing.T) {
+	m := twoTenantManifest(t)
+	acct := BoundAccount{Endpoint: "ovh-eu", ProjectIDs: map[string]string{"SANDBOX": adaptStateID, "DEMO_DEV": boundID, "OPS_DEV": foreignID}}
+	_, dir, err := adapt(t, m, "ops-dev-project", dirStore{t.TempDir()}, acct)
+	if err != nil {
+		t.Fatalf("Adapt: %v", err)
+	}
+	if got := decodeJSON(t, readFile(t, filepath.Join(dir, "resolved.tfvars.json"))); !reflect.DeepEqual(got, any(map[string]any{"project_id": foreignID})) {
+		t.Errorf("ops-dev-project resolved %v, want {project_id: OPS_DEV's id}", got)
+	}
+}
+
+// externalProjectManifest is the tenant-only fixture with demo/dev's project moved to
+// spec.external: the tenant repository consumes a project the platform applies.
+func externalProjectManifest(t *testing.T) *Manifest {
+	t.Helper()
+	row := `{"id": "demo-dev-project", "stage": "project", "tenant": "demo", "environment": "dev"}`
+	data := edit(t, manifestOf(t, "tenant-only"), "      "+row+",\n", "", 1)
+	state := `{"id": "demo-state", "stage": "tenant-state", "tenant": "demo"}`
+	return decoded(t, edit(t, data, state, state+",\n      "+row, 1))
+}
+
+// A data producer listed in spec.external is read like a row: from its own state bucket, checked
+// against the bound project of its tenant and environment (T061 review round 1).
+func TestAdapterReadsExternalProducer(t *testing.T) {
+	m := externalProjectManifest(t)
+	if got, err := ArtifactBucket(m, adaptProjectID); err != nil || got != tenantBucket {
+		t.Errorf("ArtifactBucket(external %s) = %q, %v; want %q", adaptProjectID, got, err, tenantBucket)
+	}
+	artefact := readFile(t, fixtureDir+"/envelopes/project.json")
+	store := dirStore{t.TempDir()}
+	store.put(t, tenantBucket, ArtifactKey(adaptProjectID), artefact)
+	acct := BoundAccount{Endpoint: "ovh-eu", ProjectIDs: map[string]string{"STATE": adaptStateID, "DEMO_DEV": boundID}}
+	in, dir, err := adapt(t, m, adaptRuntimeID, store, acct)
+	if err != nil {
+		t.Fatalf("Adapt with an external project producer: %v", err)
+	}
+	if got := dirFiles(t, dir); !reflect.DeepEqual(got, []string{"project.tfvars.json"}) || in.Consumed[adaptProjectID] != sha(artefact) {
+		t.Errorf("input files %v, consumed %v; want [project.tfvars.json] and the artefact's digest", got, in.Consumed)
+	}
+	acct.ProjectIDs["DEMO_DEV"] = foreignID
+	_, dir, err = adapt(t, m, adaptRuntimeID, store, acct)
+	refusal(t, err, ReasonUnboundProject)
+	if files := dirFiles(t, dir); len(files) > 0 {
+		t.Errorf("refused, but wrote %v", files)
+	}
+	if _, _, err := adapt(t, m, adaptProjectID, store, acct); err == nil {
+		t.Errorf("Adapt of an external producer as the consumer succeeded; it is never planned here")
+	}
+}
+
+// Adapt writes into a fresh directory only: inputs left in Dir by an earlier run are never mixed
+// with this run's, and a refused run cannot leave them looking current (T061 review round 1).
+func TestAdapterRefusesUsedInputDir(t *testing.T) {
+	m := adaptManifest(t)
+	store := dirStore{t.TempDir()}
+	store.put(t, tenantBucket, ArtifactKey(adaptProjectID), readFile(t, fixtureDir+"/envelopes/project.json"))
+	dir := filepath.Join(t.TempDir(), "inputs", adaptRuntimeID)
+	stale := filepath.Join(dir, "project.tfvars.json")
+	writeFile(t, stale, []byte(`{"project": {}}`))
+	_, err := Adapt(AdaptOptions{Manifest: m, Consumer: adaptRuntimeID, Store: store, Schemas: schemas(), Account: adaptAccount(), Dir: dir})
+	if err == nil {
+		t.Fatal("Adapt into a directory holding an earlier input succeeded")
+	}
+	if got := string(readFile(t, stale)); got != `{"project": {}}` {
+		t.Errorf("the earlier file was changed to %q", got)
+	}
+	if got := dirFiles(t, filepath.Dir(dir)); !reflect.DeepEqual(got, []string{adaptRuntimeID + "/project.tfvars.json"}) {
+		t.Errorf("files beside the input directory %v, want only the earlier one", got)
+	}
+}
+
 // A consumer that is not a manifest row is refused, nothing is written.
 func TestAdapterRefusesUnknownConsumer(t *testing.T) {
 	_, dir, err := adapt(t, adaptManifest(t), "demo-prod-project", dirStore{t.TempDir()}, adaptAccount())
@@ -393,5 +468,29 @@ func TestAdapterRefusesUnknownConsumer(t *testing.T) {
 	}
 	if files := dirFiles(t, dir); len(files) > 0 {
 		t.Errorf("refused, but wrote %v", files)
+	}
+}
+
+// account-governance takes one project per tenant (`tenants = {<t>: {project_id, project_urn}}`),
+// so a tenant with more than one environment is refused with its own reason until the stage takes
+// a per-environment map (coordinator decision 2026-10-07, option A; data-model *Resolved-reference
+// input*, known slice limit). A project of such a tenant still resolves its own environment (T061).
+func TestAdapterRefusesMultiEnvironmentTenant(t *testing.T) {
+	m := decoded(t, manifestOf(t, "growth"))
+	ids := map[string]string{"STATE": adaptStateID, "DEMO_DEV": boundID, "DEMO_PROD": foreignID,
+		"SHOP_DEV": "11111111111111111111111111111111", "SHOP_PROD": "22222222222222222222222222222222"}
+	acct := BoundAccount{Endpoint: "ovh-eu", ProjectIDs: ids}
+	_, dir, err := adapt(t, m, "account-governance", dirStore{t.TempDir()}, acct)
+	refusal(t, err, ReasonTenantEnvironments, boundID, foreignID, ids["SHOP_DEV"], ids["SHOP_PROD"])
+	if files := dirFiles(t, dir); len(files) > 0 {
+		t.Errorf("refused, but wrote %v", files)
+	}
+	in, dir, err := adapt(t, m, "demo-prod-project", dirStore{t.TempDir()}, acct)
+	if err != nil {
+		t.Fatalf("control: demo-prod-project of a two-environment tenant refused: %v", err)
+	}
+	got := decodeJSON(t, readFile(t, filepath.Join(dir, "resolved.tfvars.json")))
+	if !reflect.DeepEqual(got, any(map[string]any{"project_id": foreignID})) || len(in.Files) != 1 {
+		t.Errorf("demo-prod-project resolved %v (files %v), want {project_id: DEMO_PROD's id}", got, in.Files)
 	}
 }
