@@ -844,6 +844,26 @@ func TestPublishBoundAccount(t *testing.T) {
 	}
 }
 
+// The record the lane writes is the record selection reads (T041, coordinator decision 2): a
+// record written by WriteRecord comes back from stacks.ReadRecords unchanged under the strict
+// decode, and a row without a file has none.
+func TestPublishRecordIsSelectionRecord(t *testing.T) {
+	m := exTwoTenantManifest(t)
+	dir := filepath.Join(t.TempDir(), "records")
+	rec := Record{AppliedAt: "2026-10-07T00:00:00Z", SourceRevision: exRevision, CodeDigest: sha([]byte("code")),
+		Consumed: map[string]string{exProject: sha([]byte("artefact"))}, Resolved: sha([]byte("resolved"))}
+	if err := WriteRecord(dir, exRuntime, rec); err != nil {
+		t.Fatalf("WriteRecord: %v", err)
+	}
+	got, err := stacks.ReadRecords(dir, m)
+	if err != nil {
+		t.Fatalf("ReadRecords: %v", err)
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[exRuntime], rec) {
+		t.Errorf("ReadRecords = %+v, want only %s: %+v", got, exRuntime, rec)
+	}
+}
+
 // A record is <dir>/<id>.json, private, and an id that would leave dir is refused with nothing
 // written.
 func TestPublishRecord(t *testing.T) {

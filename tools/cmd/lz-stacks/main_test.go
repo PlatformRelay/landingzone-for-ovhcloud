@@ -439,3 +439,163 @@ func TestStacksUsage(t *testing.T) {
 		}
 	}
 }
+
+// `lz-stacks order` (task stacks:order, 005 T041) on this repository's stacks: the sandbox run
+// order grouped by level and a reason per selected stack; records select by code digest, a
+// selected producer selects its data consumers, an instance argument narrows the report.
+func TestStacksOrder(t *testing.T) {
+	const wantOrder = "order account-bootstrap → {account-governance, demo-state} → demo-dev-project → {demo-dev-gra11-network, demo-dev-gra11-runtime}"
+	const offlineNote = "note: published artefacts and resolved references are compared by the live lane, not here"
+	records := filepath.Join(t.TempDir(), "records")
+	if err := os.Mkdir(records, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all")
+	want := []string{wantOrder,
+		"selected account-bootstrap no-record",
+		"selected account-governance no-record",
+		"selected demo-state no-record",
+		"selected demo-dev-project no-record",
+		"selected demo-dev-gra11-network no-record,consumer:demo-dev-project blocked-on=demo-dev-project",
+		"selected demo-dev-gra11-runtime no-record,consumer:demo-dev-project blocked-on=demo-dev-project",
+		"note: no records: every stack is selected as on a first run",
+		offlineNote}
+	if code != 0 || !slices.Equal(lines, want) {
+		t.Fatalf("order all (first run): exit %d\n%s\nwant\n%s", code, strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	// Without -records the default directory is read; a checkout without one is a first run.
+	if _, err := os.Stat(filepath.Join(repoRoot, ".local/live/records")); os.IsNotExist(err) {
+		if code, lines := lzStacks(t, repoRoot, "order", "all"); code != 0 || !slices.Equal(lines, want) {
+			t.Errorf("order all (default records, none): exit %d, %q; want the first-run report", code, lines)
+		}
+	}
+
+	// Records of an apply of this tree: nothing is selected.
+	data, err := os.ReadFile(filepath.Join(repoRoot, stacks.ManifestPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := stacks.DecodeManifest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(id string, r stacks.Record) {
+		t.Helper()
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(records, id+".json"), b)
+	}
+	recs := map[string]stacks.Record{}
+	for _, in := range m.Instances {
+		d, err := stacks.CodeDigest(repoRoot, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := stacks.Record{CodeDigest: d, Consumed: map[string]string{}}
+		for _, e := range in.Edges {
+			if e.Kind == stacks.EdgeData {
+				r.Consumed[e.Producer] = "sha-of-" + e.Producer
+			}
+		}
+		recs[in.ID] = r
+		write(in.ID, r)
+	}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all"); code != 0 || !slices.Equal(lines, []string{wantOrder, offlineNote}) {
+		t.Errorf("order all (applied, unchanged): exit %d, %q; want only the order and the note", code, lines)
+	}
+
+	// A code change recorded for the project selects it and its data consumers, not its producers.
+	r := recs["demo-dev-project"]
+	r.CodeDigest = "older"
+	write("demo-dev-project", r)
+	want = []string{wantOrder,
+		"selected demo-dev-project code",
+		"selected demo-dev-gra11-network consumer:demo-dev-project",
+		"selected demo-dev-gra11-runtime consumer:demo-dev-project",
+		offlineNote}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all"); code != 0 || !slices.Equal(lines, want) {
+		t.Errorf("order all (project code changed): exit %d\n%s\nwant\n%s", code, strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	for target, line := range map[string]string{
+		"demo-dev-gra11-runtime": "selected demo-dev-gra11-runtime consumer:demo-dev-project",
+		"account-bootstrap":      "unselected account-bootstrap",
+	} {
+		if code, lines := lzStacks(t, repoRoot, "order", "-records", records, target); code != 0 || !slices.Equal(lines, []string{wantOrder, line, offlineNote}) {
+			t.Errorf("order %s: exit %d, %q; want the order, %q and the note", target, code, lines, line)
+		}
+	}
+
+	// Consumers that recorded different digests of one producer: its artefact is unknown, so they
+	// are selected on their input.
+	n := recs["demo-dev-gra11-network"]
+	n.Consumed = map[string]string{"demo-dev-project": "another-sha"}
+	write("demo-dev-gra11-network", n)
+	write("demo-dev-project", recs["demo-dev-project"])
+	// The project has a record, so it is not reported as unpublished (review r1).
+	want = []string{wantOrder,
+		"selected demo-dev-gra11-network input:demo-dev-project",
+		"selected demo-dev-gra11-runtime input:demo-dev-project",
+		offlineNote}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all"); code != 0 || !slices.Equal(lines, want) {
+		t.Errorf("order all (disagreeing consumers): exit %d\n%s\nwant\n%s", code, strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+
+	// The same without the project's own record: the consumers recorded consuming it, so it
+	// published; they are selected (input, consumer), not blocked on it (review r2).
+	if err := os.Remove(filepath.Join(records, "demo-dev-project.json")); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{wantOrder,
+		"selected demo-dev-project no-record",
+		"selected demo-dev-gra11-network input:demo-dev-project,consumer:demo-dev-project",
+		"selected demo-dev-gra11-runtime input:demo-dev-project,consumer:demo-dev-project",
+		offlineNote}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all"); code != 0 || !slices.Equal(lines, want) {
+		t.Errorf("order all (disagreeing consumers, producer without record): exit %d\n%s\nwant\n%s", code, strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	write("demo-dev-project", recs["demo-dev-project"])
+
+	// A consumer added after its producer was applied (no record of its own, nobody else recorded
+	// the producer's digest) is selected, not blocked on the applied producer.
+	if err := os.Remove(filepath.Join(records, "demo-dev-gra11-network.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(records, "demo-dev-gra11-runtime.json")); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{wantOrder,
+		"selected demo-dev-gra11-network no-record",
+		"selected demo-dev-gra11-runtime no-record",
+		offlineNote}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all"); code != 0 || !slices.Equal(lines, want) {
+		t.Errorf("order all (new consumers of an applied project): exit %d\n%s\nwant\n%s", code, strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A relative -records is the root's, not the process directory's (tools/ under task); a
+	// -records that does not exist is refused, never read as a first run (review r1).
+	absRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(absRoot, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", rel, "all"); code != 0 || !slices.Equal(lines, want) {
+		t.Errorf("order -records %s (relative to the root): exit %d, %q; want %q", rel, code, lines, want)
+	}
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", filepath.Join(records, "absent"), "all"); code != 1 || len(lines) != 1 || !strings.HasPrefix(lines[0], "fail: ") {
+		t.Errorf("order -records <missing>: exit %d, %q; want 1 and one fail line", code, lines)
+	}
+
+	// Refusals: an id that is not a row, a malformed record.
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "unknown"); code != 1 || len(lines) != 1 || !strings.HasPrefix(lines[0], "fail: ") {
+		t.Errorf("order unknown: exit %d, %q; want 1 and one fail line", code, lines)
+	}
+	writeFile(t, filepath.Join(records, "demo-state.json"), []byte(`{"code_digest": `))
+	if code, lines := lzStacks(t, repoRoot, "order", "-records", records, "all"); code != 1 || len(lines) != 1 || !strings.Contains(lines[0], "demo-state") {
+		t.Errorf("order with a malformed record: exit %d, %q; want 1 and a fail line naming it", code, lines)
+	}
+}

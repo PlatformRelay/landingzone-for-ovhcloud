@@ -146,6 +146,16 @@ tasks:
     cmds:
       - go -C tools run ./cmd/lz-stacks -root .. check
 
+  # Offline, read-only (005 T041, research R21): the run order grouped by level
+  # and the selected set with a reason per stack, against the records in
+  # .local/live/records (none: a first run) or -records <dir> (relative to the
+  # repository root; must exist). Usage:
+  # `task stacks:order -- [-records <dir>] <instance|all>`.
+  stacks:order:
+    desc: Run order and selected set with reasons (005 FR-009, V006)
+    cmds:
+      - go -C tools run ./cmd/lz-stacks -root .. order {{.CLI_ARGS}}
+
   # The live lane's offline controls: fakes only, no credential, no API call.
   # The host guard, child environment, account binding and credential files
   # (T053), the run core, redaction, leftover check and `lz-live probe`

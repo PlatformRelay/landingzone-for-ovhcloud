@@ -613,3 +613,146 @@ func TestSelectionResolvedReference(t *testing.T) {
 		"demo-dev-gra11-network": {{Kind: ReasonConsumer, From: "demo-dev-project"}},
 		"demo-dev-gra11-runtime": {{Kind: ReasonConsumer, From: "demo-dev-project"}}})
 }
+
+// A symbolic link in a stack's closure is refused, not skipped: a skipped link would let the file
+// it points to change without changing the digest (005 T041).
+func TestSelectionCodeDigestRefusesSymlink(t *testing.T) {
+	root := t.TempDir()
+	stack := filepath.Join(root, "stacks", "x")
+	if err := os.MkdirAll(stack, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside.tf"), []byte("# outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stack, "main.tf"), []byte("# stack\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := Instance{ID: "x", Path: "stacks/x"}
+	if d, err := CodeDigest(root, in); err != nil || d == "" {
+		t.Fatalf("CodeDigest without a link = %q, %v", d, err)
+	}
+	if err := os.Symlink(filepath.Join(root, "outside.tf"), filepath.Join(stack, "linked.tf")); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := CodeDigest(root, in); err == nil {
+		t.Errorf("CodeDigest with a symbolic link = %q, want a refusal", d)
+	}
+	// A module reached through a linked ancestor directory (generated fixture roots link stages/)
+	// is digested by its content: a change behind the link changes the digest (review r2).
+	if err := os.Remove(filepath.Join(stack, "linked.tf")); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "x", "main.tf"), []byte("# outside module\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "modules")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stack, "main.tf"), []byte("module \"x\" {\n  source = \"../../modules/x\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := CodeDigest(root, in)
+	if err != nil {
+		t.Fatalf("CodeDigest through a linked directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "x", "main.tf"), []byte("# outside module v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := CodeDigest(root, in); err != nil || after == before {
+		t.Errorf("a change behind a linked directory: digest %q (%v), was %q; want a new digest", after, err, before)
+	}
+}
+
+// Module sources are read as HCL (005 T041, review r1): a one-line module block is followed, a
+// commented-out source is not, and a source that is not a literal string or a JSON configuration
+// file is refused rather than left out of the digest.
+func TestSelectionCodeDigestModuleSources(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	in := Instance{ID: "x", Path: "stacks/x"}
+	digest := func() string {
+		t.Helper()
+		d, err := CodeDigest(root, in)
+		if err != nil {
+			t.Fatalf("CodeDigest: %v", err)
+		}
+		return d
+	}
+	write("modules/child/main.tf", "# child v1\n")
+	write("modules/commented/main.tf", "# commented v1\n")
+	write("stacks/x/main.tf", "module \"child\" { source = \"../../modules/child\" }\n/*\nmodule \"old\" {\n  source = \"../../modules/commented\"\n}\n*/\n")
+	before := digest()
+	write("modules/child/main.tf", "# child v2\n")
+	if digest() == before {
+		t.Error("a change in a module called from a one-line block left the digest unchanged")
+	}
+	before = digest()
+	write("modules/commented/main.tf", "# commented v2\n")
+	if digest() != before {
+		t.Error("a change in a module named only in a comment changed the digest")
+	}
+	for name, body := range map[string]string{
+		"computed source": "variable \"v\" {}\nmodule \"c\" {\n  source = \"../../modules/${var.v}\"\n}\n",
+		"no source":       "module \"c\" {\n}\n",
+		"unparsable":      "module \"c\" {\n",
+	} {
+		write("stacks/x/main.tf", body)
+		if d, err := CodeDigest(root, in); err == nil {
+			t.Errorf("%s: CodeDigest = %q, want a refusal", name, d)
+		}
+	}
+	write("stacks/x/main.tf", "# plain\n")
+	write("stacks/x/extra.tf.json", `{"module": {"c": {"source": "../../modules/child"}}}`)
+	if d, err := CodeDigest(root, in); err == nil {
+		t.Errorf("JSON configuration: CodeDigest = %q, want a refusal", d)
+	}
+}
+
+// Records are read from <dir>/<id>.json for the manifest's rows (005 T041): a missing directory
+// is a first run (no record), a row without a file has none, and a malformed record or one with a
+// field the record does not have is refused, never read as missing.
+func TestSelectionReadRecords(t *testing.T) {
+	m := decoded(t, manifestOf(t, "sandbox"))
+	dir := t.TempDir()
+	if got, err := ReadRecords(filepath.Join(dir, "absent"), m); err != nil || len(got) != 0 {
+		t.Fatalf("ReadRecords(missing dir) = %v, %v; want no records", got, err)
+	}
+	write := func(id, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("account-bootstrap", `{"applied_at": "2026-10-07T00:00:00Z", "source_revision": "abc", "code_digest": "c1", "consumed": {}}`)
+	write("not-a-row", `{"code_digest": "c2", "consumed": {}}`)
+	got, err := ReadRecords(dir, m)
+	want := map[string]Record{"account-bootstrap": {AppliedAt: "2026-10-07T00:00:00Z", SourceRevision: "abc", CodeDigest: "c1", Consumed: map[string]string{}}}
+	if err != nil || len(got) != 1 || got["account-bootstrap"].CodeDigest != "c1" || got["account-bootstrap"].SourceRevision != want["account-bootstrap"].SourceRevision {
+		t.Errorf("ReadRecords = %+v, %v; want %+v", got, err, want)
+	}
+	for name, body := range map[string]string{
+		"malformed":     `{"code_digest": `,
+		"unknown-field": `{"code_digest": "c1", "consumed": {}, "extra": 1}`,
+		"trailing-data": `{"code_digest": "c1", "consumed": {}} garbage`,
+		"two-objects":   `{"code_digest": "c1", "consumed": {}} {"code_digest": "c2"}`,
+	} {
+		write("account-bootstrap", body)
+		if got, err := ReadRecords(dir, m); err == nil {
+			t.Errorf("%s record read as %+v, want a refusal", name, got)
+		}
+	}
+}
