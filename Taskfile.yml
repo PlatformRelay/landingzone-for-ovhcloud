@@ -82,6 +82,15 @@ tasks:
     cmds:
       - go -C tools test -count=1 -run 'TestOutputs' ./internal/stacks
 
+  # Stack-model controls (005 T034, extended by T036, T038, T041): every test of
+  # ./internal/stacks except the output contract (test:outputs) — manifest
+  # decoding and refusals, schemas/deployments.schema.json agreeing with the
+  # decoder's types and value rules, the stage table agreeing with data-model.md.
+  test:stacks:
+    desc: Deployment manifest decoder, schema/type agreement and stage table against data-model.md (005 V005)
+    cmds:
+      - go -C tools test -count=1 -skip '^TestOutputs' ./internal/stacks
+
   # The live lane's offline controls: fakes only, no credential, no API call.
   # The host guard, child environment, account binding and credential files
   # (T053), the run core, redaction, leftover check and `lz-live probe`

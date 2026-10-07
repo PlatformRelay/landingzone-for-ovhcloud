@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -516,14 +518,19 @@ func noDuplicateKeys(data []byte) error {
 // would let through: object keys must equal a field's JSON name exactly
 // (Unmarshal also accepts other letter cases), fields without omitempty must be
 // present, and no value may be null (Unmarshal reads null as the zero value).
-// Type and shape mismatches are left to Unmarshal, which rejects them.
+// Type and shape mismatches are left to Unmarshal, which rejects them. Keys are
+// walked in sorted order, so a document with several faults reports the same
+// one on every run.
 func conforms(value any, t reflect.Type, at string) error {
 	if value == nil {
 		return fmt.Errorf("%s: null", at)
 	}
 	switch t.Kind() {
 	case reflect.Struct:
-		object, _ := value.(map[string]any)
+		object, isObject := value.(map[string]any)
+		if !isObject {
+			return nil // a type mismatch: Unmarshal reports it
+		}
 		fields := map[string]reflect.Type{}
 		for i := 0; i < t.NumField(); i++ {
 			name, options, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
@@ -532,19 +539,19 @@ func conforms(value any, t reflect.Type, at string) error {
 				return fmt.Errorf("%s.%s: required", at, name)
 			}
 		}
-		for key, item := range object {
+		for _, key := range slices.Sorted(maps.Keys(object)) {
 			field, known := fields[key]
 			if !known {
 				return fmt.Errorf("%s.%s: unknown field", at, key)
 			}
-			if err := conforms(item, field, at+"."+key); err != nil {
+			if err := conforms(object[key], field, at+"."+key); err != nil {
 				return err
 			}
 		}
 	case reflect.Map:
 		object, _ := value.(map[string]any)
-		for key, item := range object {
-			if err := conforms(item, t.Elem(), at+"."+key); err != nil {
+		for _, key := range slices.Sorted(maps.Keys(object)) {
+			if err := conforms(object[key], t.Elem(), at+"."+key); err != nil {
 				return err
 			}
 		}

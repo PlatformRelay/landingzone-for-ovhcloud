@@ -2,57 +2,89 @@
 Feature: 005-first-landing-zone-slice · 2026-10-06 · Revised: 2026-10-06 (D88; round-2 review) · Status: draft
 
 ## Deployment manifest — `stacks/deployments.yaml`
-Strict decoding: unknown fields, duplicate keys, unsupported `apiVersion`/`kind` are errors.
+Syntax: YAML in its JSON-compatible flow form (as `harness/checks.yaml`), decoded strictly as JSON
+with `checks.DecodeStrict`; whole-line `#` comments are allowed, a comment after a value on the same
+line, block-style YAML and a second document are refused (`MANIFEST_SYNTAX`). Strict decoding:
+unknown fields and case variants, duplicate keys, missing or null required fields and unsupported
+`apiVersion`/`kind` are errors. The published shape is `schemas/deployments.schema.json`.
 
 ```yaml
-apiVersion: lz.platformrelay.dev/v1alpha1
-kind: Deployments
-metadata:
-  name: sandbox
-spec:
-  scope: platform              # platform (owns account stacks) | tenant (tenant-only repository)
-  org: lz                      # naming discriminator (D87); bucket names are global, override if taken
-  forge: github.com/platformrelay/landingzone-for-ovhcloud   # managed-in prefix
-  stage_source: {kind: local}  # local: relative path to stages/; git: versioned ref (schema seam, not generated yet)
-  sandbox: {shared_state_project: true}   # KD-1 (D88); absent outside the sandbox
-  state:
-    project: {ref: STATE}      # project reference resolved from account.env; must differ from tenant projects unless sandbox.shared_state_project
-    region: gra                # S3 region (GRA, D87)
-    endpoint: https://s3.gra.io.cloud.ovh.net
-  tenants:
-    - name: demo
-      environments:
-        - name: dev
-          project: {mode: adopt, ref: DEMO_DEV}   # adopt | reference (fallback, R7); order postponed
-          regions:
-            - name: GRA11
-              network: {cidr: 10.20.0.0/24, vlan_id: 0}
-          budget_alert: {enabled: false}         # optional (P10)
-          quota_guard: {enabled: false}          # optional (P11)
-  instances:
-    - {id: account-bootstrap,        stage: bootstrap}
-    - {id: account-governance,       stage: account-governance}
-    - {id: demo-state,               stage: tenant-state,    tenant: demo}
-    - {id: demo-dev-project,         stage: project,         tenant: demo, environment: dev}
-    - {id: demo-dev-gra11-network,   stage: project-network, tenant: demo, environment: dev, region: GRA11}
-    - {id: demo-dev-gra11-runtime,   stage: runtime,         tenant: demo, environment: dev, region: GRA11}
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "Deployments",
+  "metadata": {"name": "sandbox"},
+  "spec": {
+    # platform (owns account stacks) | tenant (tenant-only repository); platform when absent
+    "scope": "platform",
+    # naming discriminator (D87); bucket names are global, override if taken
+    "org": "lz",
+    # managed-in prefix
+    "forge": "github.com/platformrelay/landingzone-for-ovhcloud",
+    # local: relative path to stages/; git: versioned ref (schema seam, refused by generation)
+    "stage_source": {"kind": "local"},
+    # KD-1 (D88); absent outside the sandbox
+    "sandbox": {"shared_state_project": true},
+    "state": {
+      # resolved from account.env; must differ from tenant projects unless sandbox.shared_state_project
+      "project": {"ref": "STATE"},
+      # S3 region (GRA, D87)
+      "region": "gra",
+      "endpoint": "https://s3.gra.io.cloud.ovh.net"
+    },
+    "tenants": [
+      {
+        "name": "demo",
+        "environments": [
+          {
+            "name": "dev",
+            # adopt | reference (fallback, R7); order postponed
+            "project": {"mode": "adopt", "ref": "DEMO_DEV"},
+            "regions": [
+              {"name": "GRA11", "network": {"cidr": "10.20.0.0/24", "vlan_id": 0}}
+            ],
+            # optional (P10, P11)
+            "budget_alert": {"enabled": false},
+            "quota_guard": {"enabled": false}
+          }
+        ]
+      }
+    ],
+    "instances": [
+      {"id": "account-bootstrap",      "stage": "bootstrap"},
+      {"id": "account-governance",     "stage": "account-governance"},
+      {"id": "demo-state",             "stage": "tenant-state",    "tenant": "demo"},
+      {"id": "demo-dev-project",       "stage": "project",         "tenant": "demo", "environment": "dev"},
+      {"id": "demo-dev-gra11-network", "stage": "project-network", "tenant": "demo", "environment": "dev", "region": "GRA11"},
+      {"id": "demo-dev-gra11-runtime", "stage": "runtime",         "tenant": "demo", "environment": "dev", "region": "GRA11"}
+    ]
+  }
+}
 ```
 
-A tenant-only manifest (`spec.scope: tenant`, growth fixture) has no account rows and lists the
-platform instances it consumes:
+A tenant-only manifest (`spec.scope: tenant`, tenant-only fixture) has no account rows and lists the
+platform instances it consumes; a platform manifest has no `external` entries:
 
 ```yaml
-  external:
-    - {id: account-governance, stage: account-governance}   # read from artifacts/, never planned here
-    - {id: demo-state,         stage: tenant-state, tenant: demo}
+    # read from artifacts/, never planned here
+    "external": [
+      {"id": "account-governance", "stage": "account-governance"},
+      {"id": "demo-state",         "stage": "tenant-state", "tenant": "demo"}
+    ],
 ```
 
 Rules (FR-006):
 - `id`: `^[a-z][a-z0-9-]{2,62}$`, unique, immutable (= Terramate stack id).
 - `stage`: enum `account-admin | bootstrap | tenant-state | account-governance | account-fabric |
   project | project-network | runtime | observability`; `account-admin` (reserved: the admin is
-  created by `bootstrap:account`, D88), `account-fabric` and `observability` decode but the
-  reconciler refuses them with `STAGE_NOT_IMPLEMENTED`.
+  created by `bootstrap:account`, D88), `account-fabric` and `observability` are in the enum, and the
+  manifest decoder refuses a row or `external` entry naming one with `STAGE_NOT_IMPLEMENTED`, which
+  `stacks:reconcile` reports.
+- Names: `org`, tenant and environment names `^[a-z][a-z0-9]{0,15}$` (one naming segment: no
+  separator, so joined names cannot collide and no name leaves its directory); region names
+  `^[A-Z]+[0-9]+$` (3-AZ ids refused until handled); project refs `^[A-Z][A-Z0-9_]{0,62}$`; a
+  tenant, an environment of one tenant or a region of one environment named twice, and one project
+  ref on two environments (two `project` stacks would own one project), are `DUPLICATE_NAME`. Every other string has a pattern or an enum in the schema; the decoder applies
+  the same rules.
 - Scope per stage (table below): account stages forbid `tenant/environment/region`; account-tenant
   (`tenant-state`) requires `tenant` and forbids the others; `project` requires `tenant, environment`,
   forbids `region`; regional stages require all three. Named tenants, environments and regions must
@@ -60,7 +92,8 @@ Rules (FR-006):
 - `slot`: optional, `^[a-z][a-z0-9]{0,15}$`, allowed only on `runtime`. At most one instance per
   (stage, tenant, environment, region, slot) — one owner per scope and slot.
 - `spec.scope: platform`: exactly one `bootstrap` and one `account-governance`, at most one
-  `tenant-state` per tenant, and every tenant with a tenant-scoped row has a `tenant-state` row.
+  `tenant-state` per tenant, every tenant with a tenant-scoped row has a `tenant-state` row, and no
+  `external` entries.
   `spec.scope: tenant`: no account or account-tenant rows; every producer a row consumes is a row or
   an `external` entry.
 - `spec.state.project.ref` differs from every `tenants[].environments[].project.ref`, unless
