@@ -1,31 +1,36 @@
 #!/bin/sh
-# Capture a stage's real plan for the output-contract pins of 005 T022 (tenant-state) and T024
-# (account-governance) through the installed offline entry:
+# Capture a stage's real plan for the output-contract pins of 005 T022 (tenant-state), T024
+# (account-governance) and T028 (project, adopt and reference mode) through the installed offline
+# entry:
 #
-#   tests/fixtures/outputs/capture-stage-plan.sh <absolute entry> <absolute checkout> <stage>
+#   tests/fixtures/outputs/capture-stage-plan.sh <absolute entry> <absolute checkout> <case>
 #
-# The entry runs `task capture:<stage>-plan` in its sandbox (no network, no credential): the
-# pinned OpenTofu runs the stage's own unit tests (mocked provider) on a scratch copy and prints
-# the verbose JSON plan of the run `published_outputs_match_the_schema`. That stdout is the fixture
-# captures/<stage>-plan.json. A .meta.json sidecar records the command, the entry's exit status,
-# the pinned identities qualified by `task verify:toolchain` in the same session, the fixture's
-# digest and one digest over the configuration the plan was made from (the stage's inputs below,
-# each `<sha256>  <path>` line in byte order). The fixture is moved over the committed one only
-# when the entry exits 0. The script writes only those files and its temporary directory.
+# A case is a stage, or `project-reference` (the project stage's reference-mode run). The entry runs
+# `task capture:<case>-plan` in its sandbox (no network, no credential): the pinned OpenTofu runs the
+# stage's own unit tests (mocked provider) on a scratch copy and prints the verbose JSON plan of the
+# case's run. That stdout is the fixture captures/<case>-plan.json. A .meta.json sidecar records the
+# command, the entry's exit status, the pinned identities qualified by `task verify:toolchain` in
+# the same session, the fixture's digest and one digest over the configuration the plan was made
+# from (the stage's inputs below, each `<sha256>  <path>` line in byte order). The fixture is moved
+# over the committed one only when the entry exits 0. The script writes only those files and its
+# temporary directory.
 set -eu
 entry=$1
 checkout=$2
-stage=$3
+capture_case=$3
 here=$checkout/tests/fixtures/outputs
 digest() { sha256sum "$1" | cut -d' ' -f1; }
 run() { env -i PATH=/usr/bin:/bin "$entry" --candidate "$checkout" -- task "$1"; }
-# Keep in step with stagePlans in tools/internal/stacks/outputs_stage_test.go: the directories
-# the stage's plan is made from.
-case "$stage" in
-  tenant-state) dirs="stages/tenant-state components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
-  account-governance) dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group" ;;
-  *) echo "capture-stage-plan.sh: unknown stage: $stage" >&2; exit 2 ;;
+# Keep in step with stagePlans and planCases in tools/internal/stacks/outputs_stage_test.go: the
+# stage, its run and the directories the stage's plan is made from.
+testrun=published_outputs_match_the_schema
+case "$capture_case" in
+  tenant-state) stage=tenant-state; dirs="stages/tenant-state components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
+  account-governance) stage=account-governance; dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group" ;;
+  project | project-reference) stage=project; dirs="stages/project components/project-factory modules/naming modules/cloud-project modules/cloud-quota" ;;
+  *) echo "capture-stage-plan.sh: unknown case: $capture_case" >&2; exit 2 ;;
 esac
+if [ "$capture_case" = project-reference ]; then testrun=reference_published_outputs_with_both_toggles; fi
 # Every file a plan can read (configuration, data files, lock files), not Markdown, state files or
 # hidden directories; test files only for the stage.
 inputs() {
@@ -50,14 +55,14 @@ esac
 version=$(printf '%s\n' "$toolchain" | tr ' ' '\n' | sed -n 's/^tofu=//p')
 
 status=0
-run "capture:$stage-plan" > "$tmp/$stage-plan.json" || status=$?
-if [ "$status" -ne 0 ] || [ ! -s "$tmp/$stage-plan.json" ]; then
-  echo "$stage-plan: entry exit $status; fixture left unchanged (output in $tmp)" >&2
+run "capture:$capture_case-plan" > "$tmp/$capture_case-plan.json" || status=$?
+if [ "$status" -ne 0 ] || [ ! -s "$tmp/$capture_case-plan.json" ]; then
+  echo "$capture_case-plan: entry exit $status; fixture left unchanged (output in $tmp)" >&2
   exit 1
 fi
 mkdir -p "$here/captures"
-mv "$tmp/$stage-plan.json" "$here/captures/$stage-plan.json"
-printf '{"case":"%s-plan","file":"%s-plan.json","command":"lz-offline --candidate <checkout> -- task capture:%s-plan","inner_command":"tofu init; tofu test -json -verbose (stages/%s); run published_outputs_match_the_schema","toolchain":"%s","tool":"tofu","tool_version":"%s","entry_exit":%d,"sha256":"%s","inputs_sha256":"%s","captured_on":"%s"}\n' \
-  "$stage" "$stage" "$stage" "$stage" "$toolchain" "$version" "$status" "$(digest "$here/captures/$stage-plan.json")" \
-  "$(inputs)" "$(date -u +%Y-%m-%d)" > "$here/captures/$stage-plan.json.meta.json"
-echo "$stage-plan: entry exit $status" >&2
+mv "$tmp/$capture_case-plan.json" "$here/captures/$capture_case-plan.json"
+printf '{"case":"%s-plan","file":"%s-plan.json","command":"lz-offline --candidate <checkout> -- task capture:%s-plan","inner_command":"tofu init; tofu test -json -verbose (stages/%s); run %s","toolchain":"%s","tool":"tofu","tool_version":"%s","entry_exit":%d,"sha256":"%s","inputs_sha256":"%s","captured_on":"%s"}\n' \
+  "$capture_case" "$capture_case" "$capture_case" "$stage" "$testrun" "$toolchain" "$version" "$status" "$(digest "$here/captures/$capture_case-plan.json")" \
+  "$(inputs)" "$(date -u +%Y-%m-%d)" > "$here/captures/$capture_case-plan.json.meta.json"
+echo "$capture_case-plan: entry exit $status" >&2

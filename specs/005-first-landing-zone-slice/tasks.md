@@ -301,7 +301,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- components/project-factory; task test:unit -- stages/project`: tenant/environment labels from inputs; budget alert and quota toggles pass through; outputs `project_id`, `project_urn`, `regions` match the project schema. Stubs are behavioural red.
   - Evidence: `evidence/T027.md`; PR; initial status `not-run`.
 
-- [ ] T028 [US2] Implement components/project-factory and stages/project
+- [x] T028 [US2] Implement components/project-factory and stages/project — closed 2026-10-07, evidence: evidence/T028.md
   - Requirements: FR-002, FR-003, FR-004, FR-005; ADRs: 0004, 0005, 0006. Depends on: T027. Premise waiver as T025.
   - Verify: `task test:unit -- components/project-factory; task test:unit -- stages/project; task test:dependencies`: green.
   - Evidence: `evidence/T028.md`; PR; initial status `not-run`.

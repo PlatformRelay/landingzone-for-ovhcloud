@@ -95,3 +95,16 @@ s3_user:
   alphanumeric_ends: false
   no_doubled_punctuation: false
   not_ip_address: false
+
+project:
+  verified: false
+  source: >-
+    UNVERIFIED: terraform-provider-ovh docs/resources/cloud_project.md:104-110 has a description, no
+    name argument; no length or character rule. This slice never sets a project's name: the kind
+    exists so components/project-factory can read the label set
+  min_length: 1
+  max_length: 63
+  charset: "^[a-z0-9-]+$"
+  alphanumeric_ends: false
+  no_doubled_punctuation: false
+  not_ip_address: false

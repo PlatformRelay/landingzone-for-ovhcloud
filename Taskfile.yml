@@ -229,13 +229,18 @@ tasks:
         /tcb/tofu -chdir="$work" apply -auto-approve -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$work" output -json
 
-  # A stage's real plan (005 T022, T024): its own unit tests on a scratch copy, mocked provider,
-  # mirror-only init; stdout is the verbose JSON plan of the run `published_outputs_match_the_schema`,
-  # one line. tests/fixtures/outputs/capture-stage-plan.sh records it.
+  # A stage's real plan (005 T022, T024, T028): its own unit tests on a scratch copy, mocked
+  # provider, mirror-only init; stdout is the verbose JSON plan of one run (RUN, default
+  # `published_outputs_match_the_schema`), one line. tests/fixtures/outputs/capture-stage-plan.sh
+  # records it. The project stage is captured in both modes: adopt (the default run) and reference.
   capture:tenant-state-plan:
     cmds: [{task: capture-stage-plan, vars: {STAGE: tenant-state}}]
   capture:account-governance-plan:
     cmds: [{task: capture-stage-plan, vars: {STAGE: account-governance}}]
+  capture:project-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: project}}]
+  capture:project-reference-plan:
+    cmds: [{task: capture-stage-plan, vars: {STAGE: project, RUN: reference_published_outputs_with_both_toggles}}]
 
   capture:p24-apply-json:
     dir: tests/fixtures/tofu-probes/p24-apply-json
@@ -345,7 +350,7 @@ tasks:
         dir="$work/stages/{{.STAGE}}"
         /tcb/tofu -chdir="$dir" init -backend=false -lockfile=readonly -input=false -no-color > /dev/null
         /tcb/tofu -chdir="$dir" test -json -verbose -no-color > "$work/test.jsonl"
-        grep '"type":"test_plan"' "$work/test.jsonl" | grep '"@testrun":"published_outputs_match_the_schema"'
+        grep '"type":"test_plan"' "$work/test.jsonl" | grep '"@testrun":"{{.RUN | default "published_outputs_match_the_schema"}}"'
 
   capture-tofu:
     internal: true

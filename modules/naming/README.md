@@ -56,7 +56,8 @@ template = {
   separator = "-"
   case      = "lower"
   kinds     = { bucket = "bkt", private_network = "pn", subnet = "sn", service_account = "sa",
-                iam_policy = "pol", identity_group = "grp", s3_user = "s3u" }
+                iam_policy = "pol", identity_group = "grp", s3_user = "s3u",
+                project = "prj" }
 }
 ```
 
@@ -88,9 +89,9 @@ coordinate values are expected to be validated where they are declared (the mani
 | Kind | Status | Limits |
 |---|---|---|
 | `bucket` | verified (OVHcloud S3 limitations guide, provider bucket docs) | 3–63 characters, `[a-z0-9.-]`, alphanumeric at both ends, no doubled punctuation, not an IP address |
-| `private_network`, `subnet`, `service_account`, `iam_policy`, `identity_group`, `s3_user` | **UNVERIFIED** | provisional: 1–63 characters, `[a-z0-9-]` |
+| `private_network`, `subnet`, `service_account`, `iam_policy`, `identity_group`, `s3_user`, `project` | **UNVERIFIED** | provisional: 1–63 characters, `[a-z0-9-]` |
 
-The OVHcloud documentation and the provider docs give no length or character rule for the six
+The OVHcloud documentation and the provider docs give no length or character rule for the seven
 UNVERIFIED kinds (each row cites what was checked). Their provisional limits only narrow what the
 default template produces; they are not OVHcloud's limits and may be wider or narrower than the API's.
 Widen a row only with a cited source or a recorded live probe, and set `verified: true` then.

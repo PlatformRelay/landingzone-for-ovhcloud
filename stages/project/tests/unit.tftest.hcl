@@ -72,6 +72,19 @@ variables {
 run "published_outputs_match_the_schema" {
   command = plan
 
+  # Adopt-mode order arguments as the import plan would show them (R7). This run's plan is captured
+  # (`task capture:project-plan`) and pinned in tools/internal/stacks (TestOutputsProjectStagePlan):
+  # the order arguments reach the project unchanged (spec 005 T028, T027 gap 1).
+  variables {
+    project_ovh_subsidiary = "FR"
+    project_description    = "demo-dev"
+    project_plan = {
+      duration     = "P1M"
+      plan_code    = "project.2018"
+      pricing_mode = "default"
+    }
+  }
+
   assert {
     condition     = output.tenant == "demo" && output.environment == "dev"
     error_message = "tenant and environment are the given ones"
