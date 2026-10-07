@@ -894,6 +894,60 @@ func TestDependenciesRootTreeHelpers(t *testing.T) {
 	}
 }
 
+// G7 (code part): a retained module keeps its resources through a literal
+// `lifecycle { prevent_destroy = true }` on every resource block, in every
+// file and library subdirectory of the package, and declares no `removed`
+// block. tofu test cannot assert prevent_destroy (spec 005 T013), so this
+// static scan is the sensor. Data sources, other modules and the package's
+// test configuration are outside the rule.
+func TestDependenciesRetainedProtected(t *testing.T) {
+	const m = "modules/object-storage-protected"
+	protected := "resource \"ovh_cloud_project_storage\" \"this\" {\n  name = var.name\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n"
+	bare := "resource \"ovh_cloud_project_storage\" \"this\" {\n  name = var.name\n}\n"
+	withLifecycle := func(inner string) string {
+		return "resource \"ovh_cloud_project_storage\" \"this\" {\n  name = var.name\n\n  lifecycle {\n" + inner + "  }\n}\n"
+	}
+	for name, c := range map[string]struct {
+		files   map[string]string
+		subject string
+		want    []string
+	}{
+		"protected resource": {map[string]string{m + "/main.tf": protected}, "", nil},
+		"protected resource with other lifecycle arguments": {map[string]string{m + "/main.tf": withLifecycle("    prevent_destroy = true\n    ignore_changes  = [tags]\n")}, "", nil},
+		"module without a resource":                         {map[string]string{m + "/main.tf": `variable "x" {}`}, "", nil},
+		"data source needs no lifecycle":                    {map[string]string{m + "/main.tf": protected + "data \"ovh_me\" \"me\" {}\n"}, "", nil},
+		"plain bucket module is not retained":               {map[string]string{"modules/object-storage/main.tf": bare}, "", nil},
+		"test helper of the retained module":                {map[string]string{m + "/main.tf": protected, m + "/tests/setup/main.tf": bare}, "", nil},
+		"resource without lifecycle":                        {map[string]string{m + "/main.tf": bare}, m, []string{"RETAINED_UNPROTECTED"}},
+		"lifecycle without prevent_destroy":                 {map[string]string{m + "/main.tf": withLifecycle("    ignore_changes = [tags]\n")}, m, []string{"RETAINED_UNPROTECTED"}},
+		"prevent_destroy false":                             {map[string]string{m + "/main.tf": withLifecycle("    prevent_destroy = false\n")}, m, []string{"RETAINED_UNPROTECTED"}},
+		"prevent_destroy from a variable":                   {map[string]string{m + "/main.tf": withLifecycle("    prevent_destroy = var.keep\n")}, m, []string{"RETAINED_UNPROTECTED"}},
+		"prevent_destroy a string":                          {map[string]string{m + "/main.tf": withLifecycle("    prevent_destroy = \"true\"\n")}, m, []string{"RETAINED_UNPROTECTED"}},
+		"external module call":                              {map[string]string{m + "/main.tf": protected + "module \"x\" {\n  source = \"ovh/bucket/ovh\"\n}\n"}, m, []string{"RETAINED_UNPROTECTED"}},
+		"external module call in a subdirectory":            {map[string]string{m + "/main.tf": protected + "module \"s\" {\n  source = \"./sub\"\n}\n", m + "/sub/main.tf": "module \"x\" {\n  source = \"git::https://example.com/b.git\"\n}\n"}, m + "/sub", []string{"RETAINED_UNPROTECTED"}},
+		"own package by repository address and ref":         {map[string]string{m + "/main.tf": protected + "module \"s\" {\n  source = \"github.com/PlatformRelay/landingzone-for-ovhcloud//modules/object-storage-protected/sub?ref=v0.0.1\"\n}\n", m + "/sub/main.tf": protected}, m, []string{"RETAINED_UNPROTECTED"}},
+		"naming call is fine":                               {map[string]string{m + "/main.tf": protected + "module \"n\" {\n  source = \"../naming\"\n}\n", "modules/naming/main.tf": `variable "x" {}`}, "", nil},
+		"prevent_destroy outside lifecycle":                 {map[string]string{m + "/main.tf": "resource \"ovh_cloud_project_storage\" \"this\" {\n  timeouts {\n    prevent_destroy = true\n  }\n}\n"}, m, []string{"RETAINED_UNPROTECTED"}},
+		"second resource unprotected":                       {map[string]string{m + "/main.tf": protected + "resource \"ovh_cloud_project_user\" \"u\" {}\n"}, m, []string{"RETAINED_UNPROTECTED"}},
+		"second file unprotected":                           {map[string]string{m + "/main.tf": protected, m + "/zz_extra.tf": "resource \"ovh_cloud_project_storage\" \"b\" {}\n"}, m, []string{"RETAINED_UNPROTECTED"}},
+		"override file switches it off":                     {map[string]string{m + "/main.tf": protected, m + "/main_override.tf": withLifecycle("    prevent_destroy = false\n")}, m, []string{"RETAINED_UNPROTECTED"}},
+		"removed block":                                     {map[string]string{m + "/main.tf": protected + "removed {\n  from = ovh_cloud_project_storage.old\n}\n"}, m, []string{"RETAINED_UNPROTECTED"}},
+		"library subdirectory unprotected":                  {map[string]string{m + "/main.tf": protected + "module \"s\" {\n  source = \"./sub\"\n}\n", m + "/sub/main.tf": bare}, m + "/sub", []string{"RETAINED_UNPROTECTED"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, findings := ScanDependencies(writeModules(t, c.files))
+			if got := ruleNames(findings); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: rules %v, want %v (%+v)", got, c.want, findings)
+			}
+			for _, f := range findings {
+				if f.Subject != c.subject {
+					t.Errorf("BEHAVIORAL_RED: %s reported against %q, want %q", f.Rule, f.Subject, c.subject)
+				}
+			}
+		})
+	}
+}
+
 // The purity rules add negatives; they never widen the ADR-0002 edge matrix.
 func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 	want := map[string][]string{
@@ -911,7 +965,7 @@ func TestDependenciesLayerMatrixUnchanged(t *testing.T) {
 }
 
 func TestDependenciesRulesListed(t *testing.T) {
-	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+	want := []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 	got := append([]string{}, DependencyRules...)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("BEHAVIORAL_RED: DependencyRules = %v, want %v", got, want)

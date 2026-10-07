@@ -28,7 +28,7 @@ const (
 )
 
 // DependencyRules lists every rule ScanDependencies can report.
-var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
+var DependencyRules = []string{"CYCLE", "HANDWRITTEN_INSTANCE", "LAYER_VIOLATION", "LIBRARY_BACKEND", "LIBRARY_PROVIDER_CONFIG", "PARSE_ERROR", "REMOTE_STATE", "RETAINED_UNPROTECTED", "UNCLASSIFIED", "UNREADABLE", "UNRESOLVED_REFERENCE", "UNSUPPORTED_CONFIG"}
 
 // purity holds the FR-003 facts of configuration: whether it declares a state
 // backend (a backend or cloud block), configures a provider, or reads another
@@ -62,6 +62,37 @@ func purityOf(body *hclsyntax.Body) purity {
 		}
 	}
 	return p
+}
+
+// retainedModules are the library packages whose resources outlive every run
+// (contracts/checks.md G7): each resource there keeps a literal
+// prevent_destroy. modules/cloud-project joins with spec 005 T026.
+var retainedModules = []string{"modules/object-storage-protected"}
+
+// unprotected lists the blocks of one parsed file that leave a retained
+// module's resources destroyable: a resource whose lifecycle does not set
+// prevent_destroy to the literal true (OpenTofu admits no expression there,
+// and an override file merges its own lifecycle), and any removed block.
+func unprotected(body *hclsyntax.Body) []string {
+	var out []string
+	for _, block := range body.Blocks {
+		switch block.Type {
+		case "removed":
+			out = append(out, "a removed block drops a retained resource from the configuration")
+		case "resource":
+			kept := false
+			for _, inner := range block.Body.Blocks {
+				if attr, ok := inner.Body.Attributes["prevent_destroy"]; ok && inner.Type == "lifecycle" {
+					value, diags := attr.Expr.Value(nil)
+					kept = !diags.HasErrors() && value.Type() == cty.Bool && value.IsKnown() && !value.IsNull() && value.True()
+				}
+			}
+			if !kept {
+				out = append(out, "resource "+strings.Join(block.Labels, ".")+" lacks a literal lifecycle { prevent_destroy = true }")
+			}
+		}
+	}
+	return out
 }
 
 // DependencyGraph is the classified module graph of a repository. Keys are
@@ -343,7 +374,9 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // .tofutest configuration, parse errors and symlinks. It also enforces FR-003:
 // no backend or provider configuration in a library or stage, no
 // terraform_remote_state in any configuration, and only generated *.tf files
-// under stacks/ (test files are outside these rules). Hidden directories are
+// under stacks/ (test files are outside these rules). In a retained module
+// (G7) every resource keeps a literal prevent_destroy and no external module
+// is called. Hidden directories are
 // skipped unless a module call names one; fixture trees are skipped only under
 // tests/ and tools/.
 func ScanDependencies(root string) (DependencyGraph, []Finding) {
@@ -463,17 +496,17 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	// parse reads one configuration file, records its module sources resolved
 	// against base, and returns whether Terramate generated it and its purity
 	// facts.
-	parse := func(subject, file, base string, uses, external map[string]bool) (generated bool, facts purity) {
+	parse := func(subject, file, base string, uses, external map[string]bool) (generated bool, facts purity, body *hclsyntax.Body) {
 		src, err := os.ReadFile(file)
 		if err != nil {
 			add("UNREADABLE", subject, "%v", err)
-			return false, purity{}
+			return false, purity{}, nil
 		}
 		generated = bytes.HasPrefix(src, []byte(generatedHeader))
 		parsed, diags := hclsyntax.ParseConfig(src, file, hcl.InitialPos)
 		if diags.HasErrors() {
 			add("PARSE_ERROR", subject, "%s", diags.Error())
-			return generated, purity{}
+			return generated, purity{}, nil
 		}
 		sources, computed := moduleSources(parsed.Body.(*hclsyntax.Body))
 		if computed {
@@ -494,7 +527,8 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 				uses[local] = true
 			}
 		}
-		return generated, purityOf(parsed.Body.(*hclsyntax.Body))
+		body = parsed.Body.(*hclsyntax.Body)
+		return generated, purityOf(body), body
 	}
 
 	// judge parses one configuration directory, applies the FR-003 rules and
@@ -502,11 +536,15 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 	judge := func(dir string) {
 		generated, handwritten := false, false
 		var facts purity
+		var bodies []*hclsyntax.Body
 		uses, external := map[string]bool{}, map[string]bool{}
 		for _, file := range files[dir] {
-			fileGenerated, fileFacts := parse(dir, file, dir, uses, external)
+			fileGenerated, fileFacts, body := parse(dir, file, dir, uses, external)
 			generated, handwritten = generated || fileGenerated, handwritten || !fileGenerated
 			facts = facts.or(fileFacts)
+			if body != nil {
+				bodies = append(bodies, body)
+			}
 		}
 		// FR-003: no configuration reads another's state, and stacks hold
 		// only generated files, whatever layer the directory would get.
@@ -525,6 +563,27 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 			}
 			if facts.provider {
 				add("LIBRARY_PROVIDER_CONFIG", dir, "a %s configures a provider", role(dir, layer))
+			}
+		}
+		// G7: a retained package's library code keeps every resource.
+		if layer == LayerLibrary && slices.ContainsFunc(retainedModules, func(m string) bool { return under(dir, m) }) {
+			for _, body := range bodies {
+				for _, what := range unprotected(body) {
+					add("RETAINED_UNPROTECTED", dir, "retained module (G7): %s", what)
+				}
+			}
+			// Only a relative source is the code scanned here: a remote one,
+			// this repository's address with a ref included, is fetched from
+			// elsewhere. Relative calls reach the package's own directories
+			// (scanned) or naming (resource-free, and the only other module
+			// the layer matrix admits).
+			for _, body := range bodies {
+				sources, _ := moduleSources(body)
+				for _, source := range sources {
+					if !strings.HasPrefix(source, "./") && !strings.HasPrefix(source, "../") {
+						add("RETAINED_UNPROTECTED", dir, "retained module (G7): module source %q is not a relative path, its resources cannot be checked for prevent_destroy", source)
+					}
+				}
 			}
 		}
 		if layer == "" {

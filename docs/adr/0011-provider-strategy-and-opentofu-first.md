@@ -64,5 +64,12 @@ resources since 1.10 and write-only arguments since 1.11, but not `enabled` or s
 - Spike: for each landing-zone pillar, list the exact provider resources needed and mark covered/gap
   against provider docs for 2.21.x; verify with `tofu validate` on a skeleton.
 
+## Amendments
+- 2026-10-07 (*Pinning*): a provider-using library module commits a **test lock file**: the offline
+  entry runs its tests and lint with `init -lockfile=readonly`, which fails without one (spec 005
+  T013). The effective lock stays with the consuming root (stage, example, stack); a library's lock
+  file pins only its own tests, with hashes for the entry's platform (linux_amd64); another platform
+  is added with `tofu providers lock -platform=…`.
+
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
