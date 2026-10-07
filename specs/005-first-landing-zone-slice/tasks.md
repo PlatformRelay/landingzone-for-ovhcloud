@@ -202,7 +202,7 @@ in research.md with the fallback; they never pass silently.
 
 Independent test: V001, V002 on the US1 directories, V003.
 
-- [ ] T011 [US1] Write naming tests in modules/naming/tests/{unit,contract}.tftest.hcl (supersedes 001/T013 for the default-template scope)
+- [x] T011 [US1] Write naming tests in modules/naming/tests/{unit,contract}.tftest.hcl (supersedes 001/T013 for the default-template scope) — closed 2026-10-07, evidence: evidence/T011.md
   - Requirements: FR-001, FR-002, SC-001; ADRs: 0003, 0008. Depends on: T004.
   - Verify: `task test:unit -- modules/naming`: against a compiling stub (variables and outputs only) concrete names for every kind in the default template and in one reordered test template, names with and without the optional `slot` segment (two slots in one scope give two names), and the five mandatory labels, are behavioural red; an explicit name override (import) is passed through unchanged after validation and an invalid override is rejected; `expect_failures` cover over-limit, forbidden character, doubled bucket punctuation, empty segment, unknown kind and mandatory-key override; a label-only change keeps the name.
   - Evidence: `evidence/T011.md`; PR; initial status `not-run`.
