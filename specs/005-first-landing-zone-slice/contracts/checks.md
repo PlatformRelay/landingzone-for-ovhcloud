@@ -101,7 +101,7 @@ lz-live chain     --reviewed-sha <sha> <instance|all> [--deadline <dur>]
 ```
 The guard runs first, before any credential is read. Exit codes: 0 pass (also with recorded known
 deviations); 1 fail; 2 blocked (missing prerequisite or producer artefact); 3 refused (guard, lock,
-binding, retained-resource protection). Every verb that applies (`probe`, `bootstrap`, `apply`,
+binding, retained-resource protection, an existing admin under `bootstrap --fresh-account`). Every verb that applies (`probe`, `bootstrap`, `apply`,
 `chain`) plans to a file, passes it through `protect.go` and applies only that file. Output lines are `LZ-LIVE <phase> <instance> <status>
 <detail>`; no secret, no raw plan JSON. Every run prints its run id and, at the end,
 `LZ-LIVE summary <run-id> <outcome> known-deviations=<ids|none>` and

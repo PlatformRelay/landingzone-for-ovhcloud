@@ -283,13 +283,22 @@ passphrase protects disposable probe state for the run's lifetime only.
 4. `admin` — two separate facts: *credential works* (`sandbox.env` authenticates; `GET /auth/details` answers
    for the bound account) and *admin present as expected* (the client exists; its policy grants
    exactly `account:apiovh:iam/*`, `account:apiovh:me/*`, `publicCloudProject:apiovh:*` on the
-   account and project URNs). Both true → `unchanged`. Credential fails or admin missing without
+   account URN and `urn:v1:eu:resource:publicCloudProject:*`, with no except, deny, permissions
+   group, condition or expiry: the admin is account-wide by role, least privilege lives in the
+   per-project deployer identities; coordinator decision 1, 2026-10-08). Both true → `unchanged`.
+   Credential fails or admin missing without
    `--fresh-account` → `blocked` with the instruction. With `--fresh-account`: prompt for AK/AS/CK
    without echo, create the client and policy through the API (P23), write `sandbox.env` once.
+   When the policy cannot be created the run deletes the client it created, with the root keys
+   before revoking them; only if that delete fails is the client's id (never its secret) reported
+   for the owner (decision 2).
    Every run records the admin client id and policy id in `account.env` (`LZ_ADMIN_CLIENT_ID`,
    `LZ_ADMIN_POLICY_ID`) for the leftover exemption (R12).
-   Drift on an existing admin → `fail` naming the difference; repair is the same `--fresh-account`
-   path with root keys, never the admin editing its own policy.
+   Drift on an existing admin → `fail` naming the difference. Nothing repairs it automatically
+   (decision 3): `--fresh-account` keeps an admin whose `sandbox.env` credential works and that is
+   as expected (`unchanged`), and refuses one that has drifted, or that exists without a working
+   `sandbox.env`, with `admin-exists` (exit 3) naming the difference or the client; the owner fixes
+   or deletes it and re-runs. Never the admin editing its own policy.
 5. `state` — plan the `bootstrap` root with the bootstrap authority, pass the plan through the
    retained-resource guard (R12; the account bucket and platform S3 user are retained), then apply
    that plan file; when the account bucket

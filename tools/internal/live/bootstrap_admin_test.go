@@ -8,7 +8,8 @@ package live
 // The fake API (bootstrapAPI) serves the OAuth2 client-credentials grant and the routes the
 // phases need (kb/api/v1/auth.json, me.json, cloud.json; kb/api/v2/iam.json): GET /auth/details,
 // GET /me (which identify must never call), GET /cloud/project, GET /auth/currentCredential,
-// DELETE /me/api/credential/{id}, GET|POST /me/api/oauth2/client[/{id}], GET|POST|PUT
+// DELETE /me/api/credential/{id}, GET|POST /me/api/oauth2/client[/{id}], DELETE
+// /me/api/oauth2/client/{id} (T043), GET|POST|PUT
 // /iam/policy[/{id}]. A root-key request must carry X-Ovh-Application, X-Ovh-Consumer,
 // X-Ovh-Timestamp and X-Ovh-Signature = "$1$" + SHA1_HEX(AS+"+"+CK+"+"+METHOD+"+"+URL+"+"+BODY+
 // "+"+TSTAMP) (kb guide manage-and-operate/api/first-steps.mdx "First API Usage"); the fake
@@ -132,6 +133,8 @@ type bootstrapAPI struct {
 	policies []map[string]any // created through POST /iam/policy
 	log      func(string)
 	onAdmin  func(account string) // called before every admin client or policy request
+	pageSize int                  // > 0: GET /v2/iam/policy answers pages of this size (T043)
+	next     string               // the X-Pagination-Cursor-Next of the answer being written
 }
 
 func newBootstrapAPI(t *testing.T) *bootstrapAPI {
@@ -235,6 +238,10 @@ func (f *bootstrapAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.log(fmt.Sprintf("api %s %s %s %d", c.Method, c.Path, c.Auth, status))
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if f.next != "" {
+		w.Header().Set("X-Pagination-Cursor-Next", f.next)
+		f.next = ""
+	}
 	w.WriteHeader(status)
 	w.Write(out)
 }
@@ -385,6 +392,19 @@ func (f *bootstrapAPI) serve(r *http.Request, body []byte, c *bsCall) (int, []by
 		f.created = append(f.created, cl)
 		f.secrets = append(f.secrets, cl.Secret)
 		return ok(map[string]string{"clientId": cl.ClientID, "clientSecret": cl.Secret})
+	case method == http.MethodDelete && strings.HasPrefix(path, "/v1/me/api/oauth2/client/"):
+		// T043 (decision 2, kb/api/v1/me.json: DELETE /me/api/oauth2/client/{clientId}).
+		if !may("account:apiovh:me/api/oauth2/client/delete") {
+			return forbidden()
+		}
+		id := strings.TrimPrefix(path, "/v1/me/api/oauth2/client/")
+		for i, cl := range acct.Clients {
+			if cl.ClientID == id {
+				acct.Clients = slices.Delete(acct.Clients, i, i+1)
+				return http.StatusOK, []byte("null")
+			}
+		}
+		return notFound()
 	case method == http.MethodGet && path == "/v2/iam/policy":
 		if !may("account:apiovh:iam/policy/get") {
 			return forbidden()
@@ -395,6 +415,15 @@ func (f *bootstrapAPI) serve(r *http.Request, body []byte, c *bsCall) (int, []by
 			if len(want) == 0 || slices.ContainsFunc(bsStrings(p["identities"]), func(s string) bool { return slices.Contains(want, s) }) {
 				out = append(out, p)
 			}
+		}
+		if f.pageSize > 0 {
+			start, _ := strconv.Atoi(r.Header.Get("X-Pagination-Cursor"))
+			start = min(start, len(out))
+			end := min(start+f.pageSize, len(out))
+			if end < len(out) {
+				f.next = strconv.Itoa(end)
+			}
+			out = out[start:end]
 		}
 		return ok(out)
 	case method == http.MethodGet && strings.HasPrefix(path, "/v2/iam/policy/"):
@@ -1329,6 +1358,15 @@ func TestBootstrapAdminDrift(t *testing.T) {
 			p := admin(f)
 			p["permissionsGroups"] = []any{map[string]any{"urn": "urn:v1:eu:permissionsGroup:ovhLegacy:ovh-default-owner"}}
 		}, StatusFail, []string{"ovh-default-owner"}},
+		{"second-policy-next-page", func(f *bootstrapAPI) {
+			f.pageSize = 1
+			a := f.account(bsOldAccount)
+			a.Policies = append(a.Policies, map[string]any{"id": "00000000-0000-4000-8000-000000000009", "owner": bsOldAccount, "name": "lz-extra",
+				"readOnly": false, "identities": []any{"urn:v1:eu:identity:credential:" + bsOldAccount + "/oauth2-" + bsOldClient},
+				"resources":         []any{map[string]any{"urn": "urn:v1:eu:resource:account:" + bsOldAccount}},
+				"permissions":       map[string]any{"allow": []any{map[string]any{"action": "account:apiovh:*"}}},
+				"permissionsGroups": []any{}, "createdAt": "2026-10-02T00:00:00Z"})
+		}, StatusFail, []string{"lz-extra", "00000000-0000-4000-8000-000000000009"}},
 		{"second-policy", func(f *bootstrapAPI) {
 			a := f.account(bsOldAccount)
 			a.Policies = append(a.Policies, map[string]any{"id": "00000000-0000-4000-8000-000000000009", "owner": bsOldAccount, "name": "lz-extra",
@@ -1953,8 +1991,8 @@ func TestBootstrapAdminFreshFailureRevokes(t *testing.T) {
 					t.Error("retry left its root credential valid")
 				}
 				// The admin the retry leaves in sandbox.env is a complete one: its client is bound
-				// to exactly one policy, the expected one (an orphan from the failed run may remain;
-				// what to do with it is not specified).
+				// to exactly one policy, the expected one (the failed run deletes the client it
+				// created: TestBootstrapAdminOrphanCompensation).
 				sb := readEnvFile(t, filepath.Join(h.root, "sandbox.env"))
 				var bound []map[string]any
 				for _, p := range h.api.account(bsNewAccount).Policies {
@@ -2174,6 +2212,347 @@ func TestBootstrapAdminCredentialFiles(t *testing.T) {
 				}
 				_ = rs
 			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------- T043 additions (coordinator decisions 2 and 3, 2026-10-08)
+
+// bsCallIndex is the position of the first answered call matching method, path and auth, or -1.
+func bsCallIndex(calls []bsCall, method, path, auth string) int {
+	return slices.IndexFunc(calls, func(c bsCall) bool {
+		return c.Method == method && c.Path == path && c.Auth == auth && c.Status == http.StatusOK
+	})
+}
+
+// bsAdminClients lists the account's clients named like the admin.
+func bsAdminClients(f *bootstrapAPI, account string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, c := range f.account(account).Clients {
+		if c.Name == bsAdminName {
+			out = append(out, c.ClientID)
+		}
+	}
+	return out
+}
+
+// TestBootstrapAdminOrphanCompensation (decision 2): when the admin policy cannot be created, the
+// run deletes the client it created, with the root keys and before revoking them; only when that
+// delete fails too does the admin result name the orphan's client id (never its secret) for the
+// owner, and a later --fresh-account run refuses on it (decision 3) instead of adding a second admin.
+func TestBootstrapAdminOrphanCompensation(t *testing.T) {
+	const orphan = "EU.fakecreated0001" // the fake's first created client id
+	auth := fmt.Sprintf("root:%d", bsRootFirst)
+	t.Run("deleted", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		h.api.fail["POST /v2/iam/policy"] = http.StatusInternalServerError
+		rs, err := h.run(true)
+		bsExit(t, err, 1)
+		bsWantStatus(t, rs, PhaseAdmin, StatusFail)
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		calls := h.api.Calls(h.from)
+		del := bsCallIndex(calls, http.MethodDelete, "/v1/me/api/oauth2/client/"+orphan, auth)
+		rev := bsCallIndex(calls, http.MethodDelete, fmt.Sprintf("/v1/me/api/credential/%d", bsRootFirst), auth)
+		if del < 0 {
+			t.Errorf("the client created without its policy was not deleted with the root keys: %v", bsWrites(calls))
+		} else if rev >= 0 && del > rev {
+			t.Error("the orphan was deleted after the root credential was revoked")
+		}
+		if left := bsAdminClients(h.api, bsNewAccount); len(left) > 0 {
+			t.Errorf("admin clients left on the account: %v", left)
+		}
+		if _, err := os.Lstat(filepath.Join(h.root, "sandbox.env")); err == nil {
+			t.Error("sandbox.env written for a deleted client")
+		}
+		if acct := readEnvFile(t, filepath.Join(h.accountDir(bsNewAccount), "account.env")); acct["LZ_ADMIN_CLIENT_ID"] != "" {
+			t.Errorf("account.env records admin client %q, which no longer exists", acct["LZ_ADMIN_CLIENT_ID"])
+		}
+		created, _ := h.api.Created()
+		allowed := map[string][]string{}
+		for _, c := range created {
+			allowed[c.Secret] = nil // the orphan's secret is written nowhere
+		}
+		bsNoLeak(t, h, rs, err, allowed)
+	})
+	t.Run("delete-fails", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		h.api.fail["POST /v2/iam/policy"] = http.StatusInternalServerError
+		h.api.fail["DELETE /v1/me/api/oauth2/client/"+orphan] = http.StatusInternalServerError
+		rs, err := h.run(true)
+		bsExit(t, err, 1)
+		if r, _ := bsResult(rs, PhaseAdmin); r.Status != StatusFail || !strings.Contains(r.Detail, orphan) {
+			t.Errorf("admin %+v: a failed compensation is fail naming the orphan's client id", r)
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		if !h.api.Revoked(bsRootFirst) {
+			t.Error("root credential left valid")
+		}
+		created, _ := h.api.Created()
+		allowed := map[string][]string{}
+		for _, c := range created {
+			allowed[c.Secret] = nil
+		}
+		bsNoLeak(t, h, rs, err, allowed)
+
+		// The retry with new root keys finds the orphan and refuses (decision 3): no second admin.
+		clear(h.api.fail)
+		h.term.queueRoot(h.api.rootKey(bsRootSecond))
+		rs, err = h.run(true)
+		var r *Refusal
+		if !errors.As(err, &r) || r.Condition != CondAdminExists || !strings.Contains(r.Detail, orphan) {
+			t.Errorf("retry: err %v, want refusal %q naming %s", err, CondAdminExists, orphan)
+		}
+		bsExit(t, err, RefusalExit)
+		if c, p := h.api.Created(); len(c) != 1 || len(p) != 0 {
+			t.Errorf("retry created %d clients and %d policies in total, want only the first run's client", len(c), len(p))
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		if !h.api.Revoked(bsRootSecond) {
+			t.Error("retry left its root credential valid")
+		}
+		if rest, _ := h.Rest(); len(rest) > 0 {
+			t.Error("the state phase ran")
+		}
+		bsNoLeak(t, h, rs, err, allowed)
+	})
+}
+
+// TestBootstrapAdminFreshExistingAdmin (decision 3): --fresh-account on an account that already has
+// an admin keeps it when sandbox.env's credential works and client and policy are as expected
+// (`unchanged`, nothing created); an admin that has drifted, or one the run holds no working
+// credential for, is refused (exit 3, condition admin-exists) naming the difference or the client,
+// with nothing created, changed or repaired, and the root credential still revoked.
+func TestBootstrapAdminFreshExistingAdmin(t *testing.T) {
+	// first bootstraps the fresh account from empty and returns the created client.
+	first := func(t *testing.T, h *bsHarness) *bsClient {
+		t.Helper()
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		rs, err := h.run(true)
+		return freshDone(t, h, rs, err, bsRootFirst)
+	}
+	second := fmt.Sprintf("root:%d", bsRootSecond)
+	refused := func(t *testing.T, h *bsHarness, before map[string]string, rs []PhaseResult, err error, names string) {
+		t.Helper()
+		var r *Refusal
+		if !errors.As(err, &r) || r.Condition != CondAdminExists {
+			t.Errorf("err %v, want refusal %q", err, CondAdminExists)
+		}
+		bsExit(t, err, RefusalExit)
+		if a, _ := bsResult(rs, PhaseAdmin); !strings.Contains(a.Detail+fmt.Sprint(err), names) {
+			t.Errorf("admin %+v, err %v: the refusal names none of %q", a, err, names)
+		}
+		if a, _ := bsResult(rs, PhaseAdmin); a.Status == StatusRan || a.Status == StatusUnchanged {
+			t.Errorf("admin %s on a refused run", a.Status)
+		}
+		if c, p := h.api.Created(); len(c) != 1 || len(p) != 1 {
+			t.Errorf("%d clients and %d policies created in total, want the first run's one each (no repair)", len(c), len(p))
+		}
+		calls := h.api.Calls(h.from)
+		if w := bsWrites(calls); !slices.Equal(w, []string{fmt.Sprintf("DELETE /v1/me/api/credential/%d", bsRootSecond)}) {
+			t.Errorf("account writes %v, want only the revocation", w)
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		if !h.api.Revoked(bsRootSecond) {
+			t.Error("root credential left valid after the refusal")
+		}
+		if !bsEqual(before, treeSnapshot(t, h.root)) {
+			t.Error("files changed by a refused run")
+		}
+		if rest, _ := h.Rest(); len(rest) != 1 {
+			t.Errorf("state phase ran %d times, want only the first run's", len(rest))
+		}
+	}
+	t.Run("as-expected", func(t *testing.T) {
+		h := newBSHarness(t)
+		client := first(t, h)
+		before := treeSnapshot(t, h.root)
+		h.term.queueRoot(h.api.rootKey(bsRootSecond))
+		rs, err := h.run(true)
+		if err != nil {
+			t.Errorf("second fresh run: %v", err)
+		}
+		for _, p := range []string{PhaseIdentify, PhasePassphrase, PhaseAdmin} {
+			bsWantStatus(t, rs, p, StatusUnchanged)
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		if c, p := h.api.Created(); len(c) != 1 || len(p) != 1 {
+			t.Errorf("%d clients and %d policies created in total, want one each", len(c), len(p))
+		}
+		calls := h.api.Calls(h.from)
+		if w := bsWrites(calls); !slices.Equal(w, []string{fmt.Sprintf("DELETE /v1/me/api/credential/%d", bsRootSecond)}) {
+			t.Errorf("account writes %v, want only the revocation", w)
+		}
+		if !bsFound(calls, http.MethodDelete, fmt.Sprintf("/v1/me/api/credential/%d", bsRootSecond), second) {
+			t.Error("the second run's root credential was not revoked")
+		}
+		if !bsEqual(before, treeSnapshot(t, h.root)) {
+			t.Error("files changed by a second fresh run on an admin as expected")
+		}
+		rest, _ := h.Rest()
+		if len(rest) != 2 || rest[1].Admin.ClientID != client.ClientID {
+			t.Error("the second run did not reach the state phase as the existing admin")
+		}
+		bsNoLeak(t, h, rs, err, map[string][]string{client.Secret: {"sandbox.env"}})
+	})
+	t.Run("drifted", func(t *testing.T) {
+		h := newBSHarness(t)
+		client := first(t, h)
+		_, policies := h.api.Created()
+		p := policies[0]
+		perms := p["permissions"].(map[string]any)
+		perms["allow"] = append(perms["allow"].([]any), map[string]any{"action": "account:apiovh:*"})
+		before := treeSnapshot(t, h.root)
+		h.term.queueRoot(h.api.rootKey(bsRootSecond))
+		rs, err := h.run(true)
+		refused(t, h, before, rs, err, "account:apiovh:*")
+		bsNoLeak(t, h, rs, err, map[string][]string{client.Secret: {"sandbox.env"}})
+	})
+	t.Run("credential-lost", func(t *testing.T) {
+		h := newBSHarness(t)
+		client := first(t, h)
+		if err := os.Remove(filepath.Join(h.root, "sandbox.env")); err != nil {
+			t.Fatal(err)
+		}
+		before := treeSnapshot(t, h.root)
+		h.term.queueRoot(h.api.rootKey(bsRootSecond))
+		rs, err := h.run(true)
+		refused(t, h, before, rs, err, client.ClientID)
+		bsNoLeak(t, h, rs, err, map[string][]string{client.Secret: nil})
+	})
+}
+
+// TestBootstrapAdminFreshRevokeFailureOutranksRefusal (T043 review r1): a refusal under
+// --fresh-account whose revocation then fails exits 1 (a live root credential is left behind), not
+// 3, and the error names both the Control Panel step and the refusal.
+func TestBootstrapAdminFreshRevokeFailureOutranksRefusal(t *testing.T) {
+	h := newBSHarness(t)
+	bsMkdirPrivate(t, h.accountDir(bsNewAccount))
+	bsWrite(t, filepath.Join(h.accountDir(bsNewAccount), "account.env"),
+		"LZ_ACCOUNT_ID="+bsNewAccount+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=other\n"+bsRefState+"="+bsNewProjectA+"\n"+bsRefDemoDev+"="+bsNewProjectB+"\n")
+	h.term.queueRoot(h.api.rootKey(bsRootFirst))
+	h.api.fail[fmt.Sprintf("DELETE /v1/me/api/credential/%d", bsRootFirst)] = http.StatusInternalServerError
+	rs, err := h.run(true)
+	bsExit(t, err, 1)
+	bsWantStatus(t, rs, PhaseRevoke, StatusFail)
+	if msg := fmt.Sprint(err); !strings.Contains(msg, "Control Panel") || !strings.Contains(msg, CondOrg) {
+		t.Errorf("err %q: names the Control Panel step and the org refusal", msg)
+	}
+	bsNoLeak(t, h, rs, err, nil)
+}
+
+// TestBootstrapAdminFreshStaleSandbox (T043 review r1): under --fresh-account, a sandbox.env
+// for another endpoint is refused before its secret is sent anywhere; one whose credential is
+// rejected but whose client belongs to this account is that account's admin and is refused
+// (admin-exists, decision 3) instead of a dead end, with the root credential revoked either way.
+func TestBootstrapAdminFreshStaleSandbox(t *testing.T) {
+	t.Run("other-endpoint", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.seedPreviousAccount()
+		p := filepath.Join(h.root, "sandbox.env")
+		bsWrite(t, p, strings.Replace(bsRead(t, p), "OVH_ENDPOINT=ovh-eu", "OVH_ENDPOINT=ovh-ca", 1))
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		rs, err := h.run(true)
+		var r *Refusal
+		if !errors.As(err, &r) || r.Condition != CondEndpoint {
+			t.Errorf("err %v, want refusal %q", err, CondEndpoint)
+		}
+		for _, c := range h.api.Calls(h.from) {
+			if c.Auth == "grant:"+bsOldClient {
+				t.Error("the sandbox.env secret was sent to the token endpoint of another endpoint")
+			}
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		bsNoLeak(t, h, rs, err, map[string][]string{bsOldSecret: {"sandbox.env"}})
+	})
+	t.Run("rejected-own-client", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		rs, err := h.run(true)
+		client := freshDone(t, h, rs, err, bsRootFirst)
+		h.api.rejected[client.ClientID] = true
+		before := treeSnapshot(t, h.root)
+		h.term.queueRoot(h.api.rootKey(bsRootSecond))
+		rs, err = h.run(true)
+		var r *Refusal
+		if !errors.As(err, &r) || r.Condition != CondAdminExists || !strings.Contains(r.Detail, client.ClientID) {
+			t.Errorf("err %v, want refusal %q naming %s", err, CondAdminExists, client.ClientID)
+		}
+		if c, p := h.api.Created(); len(c) != 1 || len(p) != 1 {
+			t.Errorf("%d clients and %d policies created in total, want the first run's one each", len(c), len(p))
+		}
+		if w := bsWrites(h.api.Calls(h.from)); !slices.Equal(w, []string{fmt.Sprintf("DELETE /v1/me/api/credential/%d", bsRootSecond)}) {
+			t.Errorf("account writes %v, want only the revocation", w)
+		}
+		if !bsEqual(before, treeSnapshot(t, h.root)) {
+			t.Error("files changed by a refused run")
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		bsNoLeak(t, h, rs, err, map[string][]string{client.Secret: {"sandbox.env"}})
+	})
+}
+
+// TestBootstrapAdminFreshAdminReadErrors (T043 review r2): a stale sandbox.env client of this account
+// is refused whatever its name; an API failure while reading a healthy admin is a failure (exit 1)
+// that names no repair, never the admin-exists refusal or advice to delete the admin.
+func TestBootstrapAdminFreshAdminReadErrors(t *testing.T) {
+	first := func(t *testing.T, h *bsHarness) *bsClient {
+		t.Helper()
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		rs, err := h.run(true)
+		return freshDone(t, h, rs, err, bsRootFirst)
+	}
+	t.Run("rejected-renamed-client", func(t *testing.T) {
+		h := newBSHarness(t)
+		client := first(t, h)
+		client.Name = "renamed-by-hand"
+		h.api.rejected[client.ClientID] = true
+		before := treeSnapshot(t, h.root)
+		h.term.queueRoot(h.api.rootKey(bsRootSecond))
+		rs, err := h.run(true)
+		var r *Refusal
+		if !errors.As(err, &r) || r.Condition != CondAdminExists || !strings.Contains(r.Detail, client.ClientID) {
+			t.Errorf("err %v, want refusal %q naming %s", err, CondAdminExists, client.ClientID)
+		}
+		if c, _ := h.api.Created(); len(c) != 1 {
+			t.Errorf("%d clients created in total, want the first run's only", len(c))
+		}
+		if !bsEqual(before, treeSnapshot(t, h.root)) {
+			t.Error("files changed by a refused run")
+		}
+		bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+		bsNoLeak(t, h, rs, err, map[string][]string{client.Secret: {"sandbox.env"}})
+	})
+	for _, fresh := range []bool{true, false} {
+		t.Run(fmt.Sprintf("api-error/fresh=%v", fresh), func(t *testing.T) {
+			h := newBSHarness(t)
+			client := first(t, h)
+			h.api.fail["GET /v1/me/api/oauth2/client/"+client.ClientID] = http.StatusInternalServerError
+			if fresh {
+				h.term.queueRoot(h.api.rootKey(bsRootSecond))
+			}
+			rs, err := h.run(fresh)
+			bsExit(t, err, 1)
+			a, _ := bsResult(rs, PhaseAdmin)
+			if a.Status != StatusFail || strings.Contains(a.Detail, "delete") || strings.Contains(a.Detail, CondAdminExists) {
+				t.Errorf("admin %+v: an API failure is fail naming no repair", a)
+			}
+			if c, _ := h.api.Created(); len(c) != 1 {
+				t.Errorf("%d clients created in total, want the first run's only", len(c))
+			}
+			if fresh {
+				bsWantStatus(t, rs, PhaseRevoke, StatusRan)
+			}
+			bsNoLeak(t, h, rs, err, map[string][]string{client.Secret: {"sandbox.env"}})
 		})
 	}
 }

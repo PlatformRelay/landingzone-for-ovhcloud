@@ -1,6 +1,7 @@
 // lz-live runs the live lane on the maintainer host (spec 005 FR-010, FR-011, research R11).
 //
-//	lz-live <bootstrap|plan|apply|destroy|chain> --reviewed-sha <sha> [args...]
+//	lz-live <plan|apply|destroy|chain> --reviewed-sha <sha> [args...]
+//	lz-live bootstrap --reviewed-sha <sha> [--fresh-account]
 //	lz-live probe --reviewed-sha <sha> <probe-root> [--plan-only] [--deadline <dur>]
 //	lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--deadline <dur>]
 //
@@ -9,9 +10,11 @@
 // linked worktree, clean, and HEAD is the reviewed SHA reachable from origin/main. A refusal exits
 // 3 naming the failed condition; usage errors exit 2; any other failure exits 1.
 //
-// `probe` runs one probe root through the run core (probe.go, T055). The other verb bodies arrive
-// with the bootstrap phases (T043, T057), plan and apply (T059) and destroy and chain (T047);
-// until then an admitted run stops with exit 1 before reading any credential.
+// `probe` runs one probe root through the run core (probe.go, T055); `bootstrap` runs the
+// bootstrap phases guard, identify, passphrase, admin and revoke (bootstrap.go, T043; state,
+// publish and verify arrive with T056/T057). The other verb bodies arrive with plan and apply
+// (T059) and destroy and chain (T047); until then an admitted run stops with exit 1 before
+// reading any credential. A blocked bootstrap phase exits 2.
 package main
 
 import (
@@ -22,13 +25,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 )
 
-const usage = `usage: lz-live <bootstrap|plan|apply|destroy|chain> --reviewed-sha <sha> [args...]
+const usage = `usage: lz-live <plan|apply|destroy|chain> --reviewed-sha <sha> [args...]
+       lz-live bootstrap --reviewed-sha <sha> [--fresh-account]
        lz-live probe --reviewed-sha <sha> <probe-root> [--plan-only] [--deadline <dur>]
        lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--deadline <dur>]`
 
@@ -44,11 +50,14 @@ type deps struct {
 	LookPath      func(string) (string, error)            // tofu
 	API           func(endpoint string) (live.API, error) // the OVHcloud API of an endpoint
 	Now           func() time.Time                        // run ids
+	// Terminal opens the operator's terminal (bootstrap --fresh-account only); production reads
+	// /dev/tty, tests inject a fake.
+	Terminal func(ctx context.Context) (live.Terminal, error)
 }
 
-// parse reads the verb's flags and positional arguments in any order. Only probe takes more than
-// --reviewed-sha.
-func parse(verb string, args []string) (reviewed string, p probeArgs, positional []string, err error) {
+// parse reads the verb's flags and positional arguments in any order. Only probe and bootstrap
+// take more than --reviewed-sha.
+func parse(verb string, args []string) (reviewed string, p probeArgs, fresh bool, positional []string, err error) {
 	flags := flag.NewFlagSet("lz-live "+verb, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&reviewed, "reviewed-sha", "", "the reviewed commit the owner's checkout must be at")
@@ -56,6 +65,9 @@ func parse(verb string, args []string) (reviewed string, p probeArgs, positional
 		flags.BoolVar(&p.planOnly, "plan-only", false, "plan and judge the probe, apply nothing")
 		flags.DurationVar(&p.deadline, "deadline", 0, "run deadline (default 45m)")
 		flags.StringVar(&p.cleanup, "cleanup", "", "resume the cleanup of a probe run")
+	}
+	if verb == "bootstrap" {
+		flags.BoolVar(&fresh, "fresh-account", false, "root keys at the prompt: create the admin, then revoke them")
 	}
 	for {
 		if err = flags.Parse(args); err != nil {
@@ -80,9 +92,12 @@ func run(args []string, d deps) int {
 		return 2
 	}
 	verb := args[0]
-	reviewed, p, positional, err := parse(verb, args[1:])
+	reviewed, p, fresh, positional, err := parse(verb, args[1:])
 	if err == nil && verb == "probe" {
 		p, err = p.check(positional)
+	}
+	if err == nil && verb == "bootstrap" && len(positional) > 0 {
+		err = errors.New("bootstrap takes no positional argument")
 	}
 	if err != nil {
 		fmt.Fprintln(d.Stderr, usage)
@@ -109,6 +124,13 @@ func run(args []string, d deps) int {
 			if verb == "probe" {
 				return probe(context.Background(), d, dir, filepath.Join(home, ".config", "ovh-lz"), p)
 			}
+			if verb == "bootstrap" {
+				// SIGINT/SIGTERM cancel the run instead of killing it, so the root credential of
+				// --fresh-account is still revoked (research R13).
+				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return bootstrap(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), fresh)
+			}
 			return errors.New("lz-live " + verb + ": not implemented yet")
 		})
 	}()
@@ -134,5 +156,6 @@ func main() {
 		LookPath:      exec.LookPath,
 		API:           endpointAPI,
 		Now:           time.Now,
+		Terminal:      openTTY,
 	}))
 }

@@ -48,14 +48,30 @@ func refuse(cond, format string, a ...any) error {
 	return &Refusal{Condition: cond, Detail: fmt.Sprintf(format, a...)}
 }
 
-// ExitCode maps an error to the process exit code: 0 for nil, RefusalExit for a Refusal, else 1.
+// BlockedExit is the exit code of a missing prerequisite (contracts/checks.md `lz-live`).
+const BlockedExit = 2
+
+// Blocked is a missing prerequisite the owner supplies before a re-run (a bootstrap phase
+// `blocked`); the process exits with BlockedExit.
+type Blocked struct {
+	Phase  string
+	Detail string
+}
+
+func (b *Blocked) Error() string { return fmt.Sprintf("blocked (%s): %s", b.Phase, b.Detail) }
+
+// ExitCode maps an error to the process exit code: 0 for nil, RefusalExit for a Refusal,
+// BlockedExit for a Blocked, else 1. A refusal wins over a joined failure.
 func ExitCode(err error) int {
 	var r *Refusal
+	var b *Blocked
 	switch {
 	case err == nil:
 		return 0
 	case errors.As(err, &r):
 		return RefusalExit
+	case errors.As(err, &b):
+		return BlockedExit
 	default:
 		return 1
 	}

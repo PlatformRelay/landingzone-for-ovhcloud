@@ -172,6 +172,26 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam/companion
 
+  # The account bootstrap's offline controls (T043; T057 extends): the phases
+  # guard, identify, passphrase, admin and revoke against a fake OVHcloud API and
+  # a fake terminal, the lz-live bootstrap entry, and the no-echo prompt on a
+  # pseudo-terminal. No credential, no API call.
+  test:bootstrap:
+    desc: Account bootstrap phases and lz-live bootstrap against a fake API and fake terminal (005 V008)
+    cmds:
+      - go -C tools test -count=1 -run TestBootstrap ./internal/live ./cmd/lz-live
+
+  # Host target: the owner on the maintainer host only, never inside lz-offline
+  # and never run by an agent (it reads ~/.config/ovh-lz/, under --fresh-account
+  # prompts for the account root's keys, and calls the OVHcloud API), e.g.
+  #   task bootstrap:account -- --reviewed-sha <sha> [--fresh-account]
+  bootstrap:account:
+    desc: Bootstrap or re-check the bound account (identify, passphrase, admin; revoke under --fresh-account) (host, owner; 005 R13)
+    interactive: true
+    cmds:
+      - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
+      - .local/bin/lz-live bootstrap {{.CLI_ARGS}}
+
   # Host target: the owner on the maintainer host only, never inside lz-offline
   # and never run by an agent (it loads ~/.config/ovh-lz/ credentials and calls
   # the OVHcloud API). lz-live is built from this checkout and runs from its
