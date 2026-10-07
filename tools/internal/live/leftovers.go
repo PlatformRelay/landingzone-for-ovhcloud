@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,7 +17,9 @@ import (
 // Leftover check G9 (FR-011, research R12 *Leftover kind matrix*): after destroy, independent
 // listings of every resource type the slice or its probes create are reconciled against the
 // inventory, the retained instances' states and the admin exemption. It fails closed: a listing
-// error, a missing binary, an unparseable listing or a created type outside the matrix is `fail`.
+// error, a missing API client, an unparseable listing or a created type outside the matrix is
+// `fail`. It lists through lz-live's own read-only API client (T084): ovhcloud 0.15.0 has no `api`
+// command (premise P18 refuted, evidence/T009.md).
 // The parser follows the API response schemas in kb/api (synthetic listings, T054); T065 qualifies
 // it on T009's captured listings before the first resource-creating probe (T010).
 
@@ -64,19 +67,16 @@ func LoadExemption(configRoot, account string) (Exemption, error) {
 
 // LeftoverCheck lists every matrix kind.
 type LeftoverCheck struct {
-	Ovhcloud string // the ovhcloud executable, used when Lister is nil
-	Lister   Lister
+	Lister   Lister // tests; nil lists through API with Cred
 	Projects []Project
 	Prefix   string              // name prefix of what the run creates ("<org>-", "lzprobe-")
 	RunID    string              // the run id; a name, id or tag value holding it matches
 	Retained map[string][]string // provider type -> ids held in retained instances' states
 	Exempt   Exemption
 	// API and Cred are lz-live's own API client and the credential the run binds: when Lister is
-	// nil the check lists through them, GET only (T083 pins it, T084 implements it).
+	// nil the check lists through them, GET only (T083, T084).
 	API  API
 	Cred Credential
-
-	child *childEnv // set by the runner: the environment ovhcloud runs with
 }
 
 // Leftover is a listed resource that should not exist.
@@ -122,34 +122,20 @@ type item struct {
 	parent        *item
 }
 
-// ovhcloudLister lists through the ovhcloud CLI with the run's child environment (scratch HOME,
-// the authority's credentials). Its argv (`ovhcloud api get <path>`) and whether the CLI follows
-// pagination itself are UNVERIFIED for 0.15.0 (premise P18): a wrong argv fails closed as a
-// listing error; T065 qualifies both on T009's captures before any probe creates a resource.
-type ovhcloudLister struct {
-	bin   string
-	child *childEnv
-}
-
-func (o ovhcloudLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
-	if o.child == nil {
-		return nil, "", errors.New("ovhcloud: no child environment")
-	}
-	cmd := o.child.command(ctx, o.bin, "api", "get", path)
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("ovhcloud %s: %v", path, err)
-	}
-	return out.Bytes(), "", nil
-}
-
-// apiLister is the leftover check's read-only client of the OVHcloud API (T083 pins it; stub
-// until T084).
+// apiLister is the leftover check's read-only client of the OVHcloud API: the bearer token of the
+// run's credential (client-credentials grant, binding.go), GET only, redirects never followed.
+// /iam/* paths exist only in APIv2 (kb/api/v2/iam.json), so they go to the v2 sibling of the v1
+// base. Pagination follows apiv2.mdx *Pagination*: the cursor in X-Pagination-Cursor, the next one
+// from X-Pagination-Cursor-Next, none on the last page (for v1 listings UNVERIFIED: a v1 listing
+// without the header is one page).
 type apiLister struct {
 	api  API
 	cred Credential
+	tok  string
 }
+
+// maxListing bounds one listing answer; a longer one is an error, never cut short.
+const maxListing = 8 << 20
 
 func newAPILister(a API, c Credential) *apiLister { return &apiLister{api: a, cred: c} }
 
@@ -157,10 +143,55 @@ func (l *apiLister) Get(ctx context.Context, path, cursor string) ([]byte, strin
 	return l.request(ctx, http.MethodGet, path, cursor)
 }
 
-// request sends one API request; any method but GET is refused before a request.
+// request sends one API request; any method but GET is refused before a request (token
+// included). No error carries the answer body, the token or the credential.
 func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([]byte, string, error) {
-	return nil, "", errors.New("read-only API lister: not implemented")
+	if method != http.MethodGet {
+		return nil, "", fmt.Errorf("read-only API client: %s %s refused", method, path)
+	}
+	if l.api.BaseURL == "" || l.api.TokenURL == "" || !strings.HasSuffix(l.api.BaseURL, "/v1") {
+		return nil, "", errors.New("read-only API client: no API endpoint")
+	}
+	if l.tok == "" {
+		tok, err := l.api.token(ctx, l.cred)
+		if err != nil {
+			return nil, "", err
+		}
+		l.tok = tok
+	}
+	base := l.api.BaseURL
+	if strings.HasPrefix(path, "/iam/") {
+		base = strings.TrimSuffix(base, "/v1") + "/v2"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("GET %s: %w", path, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+l.tok)
+	req.Header.Set("Accept", "application/json")
+	if cursor != "" {
+		req.Header.Set("X-Pagination-Cursor", cursor)
+	}
+	resp, err := l.api.client().Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListing+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("GET %s: reading the answer: %w", path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, "", fmt.Errorf("GET %s answered %d", path, resp.StatusCode)
+	}
+	if len(body) > maxListing {
+		return nil, "", fmt.Errorf("GET %s: answer longer than %d bytes", path, maxListing)
+	}
+	return body, resp.Header.Get("X-Pagination-Cursor-Next"), nil
 }
+
+// maxListingPages bounds the pages of one listing: a cursor that never ends is an error.
+const maxListingPages = 1000
 
 type lister struct {
 	ctx  context.Context
@@ -171,11 +202,17 @@ type lister struct {
 
 func (l lister) fail(format string, a ...any) { *l.errs = append(*l.errs, fmt.Sprintf(format, a...)) }
 
-// all reads every page of an array listing.
+// all reads every page of an array listing; a cursor that repeats or more than maxListingPages
+// pages is an error.
 func (l lister) all(path string) ([]json.RawMessage, bool) {
 	var out []json.RawMessage
 	cursor := ""
-	for {
+	seen := map[string]bool{}
+	for pages := 1; ; pages++ {
+		if pages > maxListingPages {
+			l.fail("listing %s: more than %d pages", path, maxListingPages)
+			return nil, false
+		}
 		body, next, err := l.l.Get(l.ctx, path, cursor)
 		if err != nil {
 			l.fail("listing %s: %v", path, err)
@@ -190,8 +227,23 @@ func (l lister) all(path string) ([]json.RawMessage, bool) {
 		if next == "" {
 			return out, true
 		}
+		if seen[next] {
+			l.fail("listing %s: the next-page cursor repeats", path)
+			return nil, false
+		}
+		seen[next] = true
 		cursor = next
 	}
+}
+
+// under is parent/<id> with id escaped as one path segment, so a listed id cannot re-route the
+// GET; an empty or dot-segment id is refused with an error naming parent.
+func (l lister) under(parent, id string) (string, bool) {
+	if id == "" || id == "." || id == ".." {
+		l.fail("listing %s: id %q is not a path segment", parent, id)
+		return "", false
+	}
+	return parent + "/" + url.PathEscape(id), true
 }
 
 func (l lister) object(path string, v any) bool {
@@ -264,12 +316,10 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	}
 	var src Lister = c.Lister
 	if src == nil {
-		if c.Ovhcloud == "" {
-			fail("no ovhcloud binary")
-		} else if fi, err := os.Stat(c.Ovhcloud); err != nil || fi.IsDir() {
-			fail("ovhcloud binary %s missing", c.Ovhcloud)
+		if c.API.BaseURL == "" {
+			fail("no API client")
 		} else {
-			src = ovhcloudLister{bin: c.Ovhcloud, child: c.child}
+			src = newAPILister(c.API, c.Cred)
 		}
 	}
 	if len(c.Projects) == 0 {
@@ -334,10 +384,17 @@ func (c LeftoverCheck) list(l lister) []*item {
 	var items []*item
 	add := func(it *item) *item { items = append(items, it); return it }
 	for _, p := range c.Projects {
-		base := "/cloud/project/" + p.ID
+		base, ok := l.under("/cloud/project", p.ID)
+		if !ok {
+			continue
+		}
 		if regions, ok := l.strings(base + "/region"); ok {
 			for _, r := range regions {
-				path := base + "/region/" + r + "/storage"
+				rp, ok := l.under(base+"/region", r)
+				if !ok {
+					continue
+				}
+				path := rp + "/storage"
 				raw, ok := l.all(path)
 				if !ok {
 					continue
@@ -362,7 +419,11 @@ func (c LeftoverCheck) list(l lister) []*item {
 			nets, _ := decode(l, base+"/network/private", raw, func(n named) string { return n.ID })
 			for _, n := range nets {
 				net := add(&item{typ: tNetwork, id: n.ID, name: n.Name})
-				path := base + "/network/private/" + n.ID + "/subnet"
+				np, ok := l.under(base+"/network/private", n.ID)
+				if !ok {
+					continue
+				}
+				path := np + "/subnet"
 				if raw, ok := l.all(path); ok {
 					l.record(tSubnet, raw...)
 					subs, _ := decode(l, path, raw, func(s struct {
@@ -392,7 +453,11 @@ func (c LeftoverCheck) list(l lister) []*item {
 					name = u.Username
 				}
 				usr := add(&item{typ: tUser, id: u.ID.String(), name: name})
-				path := base + "/user/" + u.ID.String() + "/s3Credentials"
+				up, ok := l.under(base+"/user", u.ID.String())
+				if !ok {
+					continue
+				}
+				path := up + "/s3Credentials"
 				if raw, ok := l.all(path); ok {
 					l.record(tCred, raw...)
 					creds, _ := decode(l, path, raw, func(c struct {
@@ -407,7 +472,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 				var pol struct {
 					Policy *string `json:"policy"`
 				}
-				ppath := base + "/user/" + u.ID.String() + "/policy"
+				ppath := up + "/policy"
 				if l.object(ppath, &pol) {
 					if pol.Policy == nil {
 						l.fail("listing %s: no policy field", ppath)
@@ -422,7 +487,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 		if ids, ok := l.strings(base + "/alerting"); ok {
 			for _, id := range ids {
 				var a named
-				if l.object(base+"/alerting/"+id, &a) {
+				if ap, ok := l.under(base+"/alerting", id); ok && l.object(ap, &a) {
 					raw, _ := json.Marshal(a)
 					l.record(tAlert, raw)
 					add(&item{typ: tAlert, id: id, name: a.Name})
@@ -432,7 +497,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 		var res struct {
 			Tags *map[string]string `json:"tags"`
 		}
-		if l.object("/iam/resource/"+p.URN, &res) {
+		if rp, ok := l.under("/iam/resource", p.URN); ok && l.object(rp, &res) {
 			if res.Tags == nil {
 				l.fail("listing /iam/resource/%s: no tags field", p.URN)
 			} else {
@@ -450,7 +515,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 				ClientID string `json:"clientId"`
 				Name     string `json:"name"`
 			}
-			if l.object("/me/api/oauth2/client/"+id, &cl) {
+			if cp, ok := l.under("/me/api/oauth2/client", id); ok && l.object(cp, &cl) {
 				raw, _ := json.Marshal(cl)
 				l.record(tClient, raw)
 				add(&item{typ: tClient, id: id, name: cl.Name})
@@ -474,7 +539,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 			var g struct {
 				Name string `json:"name"`
 			}
-			if l.object("/me/identity/group/"+n, &g) {
+			if gp, ok := l.under("/me/identity/group", n); ok && l.object(gp, &g) {
 				raw, _ := json.Marshal(g)
 				l.record(tGroup, raw)
 				add(&item{typ: tGroup, id: n, name: g.Name})

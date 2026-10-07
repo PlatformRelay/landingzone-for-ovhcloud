@@ -1323,7 +1323,8 @@ func TestRunnerRedactsEveryOutput(t *testing.T) {
 	}
 }
 
-// TestRunnerChildHome: coordinator decision — every child (tofu and ovhcloud) runs with a
+// TestRunnerChildHome: coordinator decision — every child (tofu; since T084 the leftover check
+// starts none, P18) runs with a
 // per-run scratch HOME: not the caller's, 0700, the same for the whole run, removed when the run
 // ends; a ~/.ovh.conf or ~/.aws/credentials planted in the caller's HOME is not visible; the child
 // environment stays T053's allowlist (no ambient variable, the authority's credentials present).
@@ -1340,18 +1341,16 @@ func TestRunnerChildHome(t *testing.T) {
 	}
 	w := newRunWorld(t)
 	r := w.runner(t, w.stack(t, "a", true, tofuStack{}))
-	r.Leftovers.Lister = nil
-	r.Leftovers.Ovhcloud = w.ovhcloud
 	_, _ = execute(t, r)
 
-	calls := append(w.calls(t, "tofu.log"), w.calls(t, "ovhcloud.log")...)
+	calls := w.calls(t, "tofu.log")
 	homes := map[string]bool{}
-	sawOvhcloud := false
+	sawTofu := false
 	for _, c := range calls {
 		if c.Cmd == "protect" {
 			continue
 		}
-		sawOvhcloud = sawOvhcloud || c.Cmd == "ovhcloud"
+		sawTofu = true
 		homes[c.Home] = true
 		if c.Home == "" || c.Home == callerHome || strings.HasPrefix(c.Home, callerHome+string(filepath.Separator)) {
 			t.Errorf("%s ran with HOME %q (caller's HOME %q)", c.Cmd, c.Home, callerHome)
@@ -1382,8 +1381,8 @@ func TestRunnerChildHome(t *testing.T) {
 			}
 		}
 	}
-	if !sawOvhcloud {
-		t.Error("the leftover check never ran ovhcloud")
+	if !sawTofu {
+		t.Error("the run started no tofu child")
 	}
 	if len(homes) != 1 {
 		t.Errorf("children ran with %d different HOMEs, want one per run: %v", len(homes), homes)

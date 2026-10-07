@@ -568,7 +568,7 @@ func TestProbeScratchOutsideCheckout(t *testing.T) {
 				}
 			}
 			tmp := c.place(t, w)
-			tofuN, ovhN, apiN := len(w.childCalls(t, "tofu.log")), len(w.childCalls(t, "ovhcloud.log")), *w.apiCalls
+			tofuN, ovhN, apiN, listN := len(w.childCalls(t, "tofu.log")), len(w.childCalls(t, "ovhcloud.log")), *w.apiCalls, len(*w.listed)
 			checkout := checkoutSnapshot(t, w.checkout)
 			local := treeOf(t, filepath.Join(w.checkout, ".local"))
 			state := treeOf(t, filepath.Join(w.cfg, "accounts", probeAccount, "state"))
@@ -598,6 +598,9 @@ func TestProbeScratchOutsideCheckout(t *testing.T) {
 			}
 			if n := len(w.childCalls(t, "ovhcloud.log")) - ovhN; n != 0 {
 				t.Errorf("%d ovhcloud calls before the refusal", n)
+			}
+			if n := len(*w.listed) - listN; n != 0 {
+				t.Errorf("%d leftover listings before the refusal", n)
 			}
 			if n := *w.apiCalls - apiN; n != 0 {
 				t.Errorf("%d API calls (the credential was used) before the refusal", n)
@@ -658,7 +661,7 @@ func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
 		}
 		writePrivate(t, filepath.Join(w.cfg, "accounts", probeAccount, "account.env"),
 			"LZ_ACCOUNT_ID="+probeAccount+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_STATE=p9\nLZ_ADMIN_POLICY_ID=pol-admin\n")
-		tofuN, ovhN := len(w.childCalls(t, "tofu.log")), len(w.childCalls(t, "ovhcloud.log"))
+		tofuN, listN := len(w.childCalls(t, "tofu.log")), len(*w.listed)
 		pass := filepath.Join(w.probeDir(id), "passphrase.env")
 		opened := watchOpens(t, pass)
 		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id)
@@ -679,10 +682,10 @@ func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
 			}
 		}
 		asked := map[string]bool{}
-		for _, c := range w.childCalls(t, "ovhcloud.log")[ovhN:] {
-			asked[c.Args[len(c.Args)-1]] = true
+		for _, l := range (*w.listed)[listN:] {
+			asked[l.Path] = true
 		}
-		if !asked["/cloud/project/p1/network/private"] {
+		if !asked["/v1/cloud/project/p1/network/private"] {
 			t.Errorf("the cleanup's leftover check never listed the recorded project p1 (asked %v)", asked)
 		}
 		w.noSecret(t, stdout, stderr)

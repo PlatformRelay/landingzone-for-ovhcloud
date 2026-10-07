@@ -41,7 +41,7 @@ type deps struct {
 	OfflineMarker string // its existence means "inside lz-offline"
 	Stderr        io.Writer
 	Stdout        io.Writer                               // the run's terminal (redacted)
-	LookPath      func(string) (string, error)            // tofu, ovhcloud
+	LookPath      func(string) (string, error)            // tofu
 	API           func(endpoint string) (live.API, error) // the OVHcloud API of an endpoint
 	Now           func() time.Time                        // run ids
 }
