@@ -22,7 +22,9 @@ import (
 // command (premise P18 refuted, evidence/T009.md).
 // The parser follows the API response schemas in kb/api (synthetic listings, T054); T065 qualified
 // it on the captured listings of the plan-only run 20261007T125154Z-14a6
-// (tests/fixtures/ovhcloud/captured/; its provenance.json names the kinds still uncaptured).
+// (tests/fixtures/ovhcloud/captured/; its provenance.json names the kinds still uncaptured). The
+// region details and the Object Storage service names were not captured: the per-region storage
+// handling is qualified only when a live run records them (listing ovh_cloud_project_region).
 
 // Lister returns one page of an OVHcloud API GET listing. cursor "" asks for the first page; next
 // is "" on the last page.
@@ -224,13 +226,21 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 		return nil, "", fmt.Errorf("GET %s: reading the answer failed", path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, "", fmt.Errorf("GET %s answered %d", path, resp.StatusCode)
+		return nil, "", &statusError{path: path, code: resp.StatusCode}
 	}
 	if len(body) > maxListing {
 		return nil, "", fmt.Errorf("GET %s: answer longer than %d bytes", path, maxListing)
 	}
 	return body, resp.Header.Get("X-Pagination-Cursor-Next"), nil
 }
+
+// statusError is a non-2xx answer: its status code without the answer's text.
+type statusError struct {
+	path string
+	code int
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("GET %s answered %d", e.path, e.code) }
 
 // maxListingPages bounds the pages of one listing: a cursor that never ends is an error.
 const maxListingPages = 1000
@@ -247,31 +257,41 @@ func (l lister) fail(format string, a ...any) { *l.errs = append(*l.errs, fmt.Sp
 // all reads every page of an array listing; a cursor that repeats or more than maxListingPages
 // pages is an error.
 func (l lister) all(path string) ([]json.RawMessage, bool) {
+	out, ok, _ := l.pages(path, false)
+	return out, ok
+}
+
+// pages is all; with absentOK, a 404 to the first page is reported as absent (no error recorded).
+func (l lister) pages(path string, absentOK bool) ([]json.RawMessage, bool, bool) {
 	var out []json.RawMessage
 	cursor := ""
 	seen := map[string]bool{}
 	for pages := 1; ; pages++ {
 		if pages > maxListingPages {
 			l.fail("listing %s: more than %d pages", path, maxListingPages)
-			return nil, false
+			return nil, false, false
 		}
 		body, next, err := l.l.Get(l.ctx, path, cursor)
+		var se *statusError
+		if err != nil && absentOK && pages == 1 && errors.As(err, &se) && se.code == http.StatusNotFound {
+			return nil, false, true
+		}
 		if err != nil {
 			l.fail("listing %s: %v", path, err)
-			return nil, false
+			return nil, false, false
 		}
 		var page []json.RawMessage
 		if err := json.Unmarshal(body, &page); err != nil {
 			l.fail("listing %s: not a JSON array", path)
-			return nil, false
+			return nil, false, false
 		}
 		out = append(out, page...)
 		if next == "" {
-			return out, true
+			return out, true, false
 		}
 		if seen[next] {
 			l.fail("listing %s: the next-page cursor repeats", path)
-			return nil, false
+			return nil, false, false
 		}
 		seen[next] = true
 		cursor = next
@@ -307,20 +327,22 @@ func (l lister) objectRaw(path string, v any) (json.RawMessage, bool) {
 	return json.RawMessage(bytes.TrimSpace(body)), true
 }
 
-// offersObjectStorage reports whether a region detail (cloud.Region, kb/api/v1/cloud.json:67596)
-// lists an S3-compatible Object Storage service among its services (cloud.Component[],
-// cloud.json:67651, 64709). The schema does not enumerate the service names: the "storage-s3"
-// prefix (storage-s3-standard, storage-s3-high-perf) is UNVERIFIED until a live run records the
-// region details (T065). A service that is DOWN still counts: its listing then fails, closed.
-func offersObjectStorage(services []struct {
+// withoutObjectStorage reports whether a region detail (cloud.Region, kb/api/v1/cloud.json:67596)
+// shows that the region offers no S3-compatible Object Storage: its services (cloud.Component[],
+// cloud.json:67651, 64709) are all named and none is a storage-s3 service. Only then may the
+// region's storage listing answer 404. The schema does not enumerate the service names: the
+// "storage-s3" prefix (storage-s3-standard, storage-s3-high-perf) is UNVERIFIED until a live run
+// records the region details (T065); a wrong prefix turns a 404 into an error, never a 200 into
+// nothing, because every region's storage is asked.
+func withoutObjectStorage(services []struct {
 	Name string `json:"name"`
 }) bool {
 	for _, s := range services {
-		if strings.HasPrefix(s.Name, "storage-s3") {
-			return true
+		if s.Name == "" || strings.HasPrefix(s.Name, "storage-s3") {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (l lister) strings(path string) ([]string, bool) {
@@ -444,21 +466,22 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	return rep
 }
 
-// list lists every kind. Buckets are listed per region, and only in the regions whose detail
-// offers Object Storage: the storage listing of a compute region answers 404 (live run
-// 20261007T125154Z-14a6, evidence/T084.md). A region detail without services is an error, and so
-// is a check in which no region offers Object Storage: every project of the slice holds buckets
-// (state, runtime), and a wrong service-name rule must not silently hide every bucket.
+// list lists every kind. Buckets are listed in every region of each project; the storage
+// listing of a region without Object Storage answers 404 (live run 20261007T125154Z-14a6,
+// evidence/T084.md), which is accepted only when the region's detail shows no Object Storage
+// service (withoutObjectStorage); any other failure is an error. A region detail without
+// services is an error, and so is a project in which no region's storage listing succeeded:
+// every project of the slice holds buckets (state, runtime).
 func (c LeftoverCheck) list(l lister) []*item {
 	var items []*item
 	add := func(it *item) *item { items = append(items, it); return it }
-	storageRegions := 0
 	for _, p := range c.Projects {
 		base, ok := l.under("/cloud/project", p.ID)
 		if !ok {
 			continue
 		}
 		if regions, ok := l.strings(base + "/region"); ok {
+			listed := 0
 			for _, r := range regions {
 				rp, ok := l.under(base+"/region", r)
 				if !ok {
@@ -478,15 +501,12 @@ func (c LeftoverCheck) list(l lister) []*item {
 					l.fail("listing %s: no services field", rp)
 					continue
 				}
-				if !offersObjectStorage(*reg.Services) {
-					continue
-				}
-				storageRegions++
 				path := rp + "/storage"
-				raw, ok := l.all(path)
-				if !ok {
+				raw, ok, absent := l.pages(path, withoutObjectStorage(*reg.Services))
+				if absent || !ok {
 					continue
 				}
+				listed++
 				l.record(tStorage, raw...)
 				bs, _ := decode(l, path, raw, func(b struct {
 					Name string `json:"name"`
@@ -496,6 +516,9 @@ func (c LeftoverCheck) list(l lister) []*item {
 				for _, b := range bs {
 					add(&item{typ: tStorage, id: b.Name, name: b.Name})
 				}
+			}
+			if listed == 0 {
+				l.fail("listing %s: no region's bucket listing succeeded (no Object Storage region)", base+"/region")
 			}
 		}
 		type named struct {
@@ -598,9 +621,6 @@ func (c LeftoverCheck) list(l lister) []*item {
 				add(&item{typ: tTags, id: k, name: k, values: []string{v}})
 			}
 		}
-	}
-	if storageRegions == 0 && len(c.Projects) > 0 {
-		l.fail("listing buckets: no region of the projects offers Object Storage (a storage-s3 service)")
 	}
 	if ids, ok := l.strings("/me/api/oauth2/client"); ok {
 		for _, id := range ids {
