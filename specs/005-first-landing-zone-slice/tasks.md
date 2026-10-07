@@ -148,7 +148,7 @@ in research.md with the fallback; they never pass silently.
   - Verify: `go -C tools test ./internal/live -run TestProbeIdentity -count=1`: a probe stage creates a probe identity under the admin credential, `files.go` writes its credential to a 0600 file under the run directory, a companion root then runs under that identity alone (P9 allowlist usage, P25 tag-conditioned access, P26 tenant binding) and a second state writer exercises the lock (P1–P3); the probe credential is removed and the identity destroyed on exit, including after an interrupt; the admin credential never reaches the companion child. Today a probe runs one root under the admin credential only: behavioural red. Found in T008 (evidence/T008.md decision 1).
   - Evidence: `evidence/T075.md`; PR; initial status `not-run`.
 
-- [ ] T076 Implement the second-identity probe stage in tools/internal/live/ and the companion root
+- [x] T076 Implement the second-identity probe stage in tools/internal/live/ and the companion root — closed 2026-10-07, evidence: evidence/T076.md
   - Requirements: FR-010, FR-011, FR-013; ADRs: 0008, 0009, 0018. Depends on: T075.
   - Verify: `task test:live-lane`: T075 controls green with one killed mutant per clause; the run sheet lists the two-stage probes for T010.
   - Evidence: `evidence/T076.md`; PR; initial status `not-run`.
