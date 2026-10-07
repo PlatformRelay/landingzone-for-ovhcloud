@@ -256,7 +256,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/iam-service-account; task test:unit -- modules/iam-policy; task test:unit -- modules/identity-group; task lint -- modules/iam-policy`: green; resources `ovh_me_api_oauth2_client`, `ovh_iam_policy`, `ovh_me_identity_group` (docs cited); no `discard_client_secret` (2.22.0 only).
   - Evidence: `evidence/T020.md`; PR; initial status `not-run`.
 
-- [ ] T021 [US2] Write tenant-state stage tests in stages/tenant-state/tests/ (replaces the withdrawn account-admin stage, D88)
+- [x] T021 [US2] Write tenant-state stage tests in stages/tenant-state/tests/ (replaces the withdrawn account-admin stage, D88) — closed 2026-10-07, evidence: evidence/T021.md
   - Requirements: FR-002, FR-004, FR-008, FR-013; ADRs: 0004, 0009. Depends on: T016, T018.
   - Verify: `task test:unit -- stages/tenant-state`: through `components/state-backend`, one protected, versioned tenant bucket named from naming (`org`, tenant, kind bucket, role state) in `state_project_id`; a tenant S3 user and a platform S3 user, each with a policy covering only that bucket; mandatory labels with `lz:tenant`; outputs match the tenant-state schema, list `unlabelled[]`, secrets only sensitive. Guard G6: a mutant granting the tenant S3 user the account bucket, another tenant's bucket or `*` is red. Stubs are behavioural red.
   - Evidence: `evidence/T021.md`; PR; initial status `not-run`.
