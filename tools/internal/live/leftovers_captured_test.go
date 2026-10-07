@@ -30,8 +30,9 @@ import (
 //     region detail: GET /cloud/project/{serviceName}/region/{regionName} answers cloud.Region
 //     (kb/api/v1/cloud.json:52297), whose services are cloud.Component[] with name, status,
 //     endpoint (cloud.json:67651, 64709); the storage path answers the S3-compatible containers
-//     (cloud.json:58768). So the check asks every region's detail and lists storage in exactly the
-//     regions with an Object Storage service; a 404 there stays an error.
+//     (cloud.json:58768). So the check asks every region's detail and storage, accepts a 404 only
+//     where the detail names every service and none is an Object Storage one, and fails a
+//     project in which no region's bucket listing succeeded.
 //   - GET /iam/resource/<urn> has no tags field when the resource has none: iam.resource.Resource
 //     marks tags "required": false, "canBeNull": true (kb/api/v2/iam.json:2661-2667), so an absent
 //     or null tags field is no tags.
@@ -341,9 +342,9 @@ func TestLeftoversCapturedFixture(t *testing.T) {
 
 // TestLeftoversCapturedClean: the captured world passes with the run's prefix and with a slice
 // prefix that makes the admin client and policy candidates (the exemption by id then carries it);
-// every captured listing is re-recorded as captured; every region's detail is asked and storage is
-// listed only in the region with an Object Storage service; the untagged project resource is
-// recorded as no tags.
+// every captured listing is re-recorded as captured; every region's detail and storage are asked
+// once, the 404 of the regions without an Object Storage service accepted; the untagged project
+// resource is recorded as no tags.
 func TestLeftoversCapturedClean(t *testing.T) {
 	for _, prefix := range []string{"lzprobe-", "lz-"} {
 		t.Run(prefix, func(t *testing.T) {
@@ -375,8 +376,8 @@ func TestLeftoversCapturedClean(t *testing.T) {
 				if asked[rp] != 1 {
 					t.Errorf("region %s: detail asked %d times, want once", r, asked[rp])
 				}
-				if want := map[bool]int{true: 1, false: 0}[r == "S3-UNNAMED"]; asked[rp+"/storage"] != want {
-					t.Errorf("region %s: storage asked %d times, want %d", r, asked[rp+"/storage"], want)
+				if asked[rp+"/storage"] != 1 {
+					t.Errorf("region %s: storage asked %d times, want once (every region)", r, asked[rp+"/storage"])
 				}
 			}
 			if n := len(rep.Listings[tRegion]); n != len(regions) {
@@ -566,7 +567,22 @@ func TestLeftoversCapturedRed(t *testing.T) {
 		{name: "group-detail-truncated", faults: map[string]listFault{"/me/identity/group/ADMIN": {Kind: "truncated-chunked"}}, want: "/me/identity/group/ADMIN"},
 		{name: "no-storage-region", seed: syntheticSeed{Replace: map[string][]json.RawMessage{
 			pr + "/region/S3-UNNAMED": region("S3-UNNAMED", `,"services":[{"name":"instance","status":"UP"}]`),
-		}}, want: "offers Object Storage"},
+		}}, faults: map[string]listFault{pr + "/region/S3-UNNAMED/storage": {Kind: "status", Status: 404}},
+			want: "no region's bucket listing succeeded"},
+		{name: "unnamed-service-404", seed: syntheticSeed{Replace: map[string][]json.RawMessage{
+			pr + "/region/GRA11": region("GRA11", `,"services":[{"name":"instance","status":"UP"},{"status":"UP"}]`),
+		}}, want: pr + "/region/GRA11/storage"},
+		{name: "null-service-404", seed: syntheticSeed{Replace: map[string][]json.RawMessage{
+			pr + "/region/GRA11": region("GRA11", `,"services":[null]`),
+		}}, want: pr + "/region/GRA11/storage"},
+		{name: "compute-region-storage-later-page-404", seed: syntheticSeed{Replace: map[string][]json.RawMessage{
+			pr + "/region/GRA11/storage": {json.RawMessage(`[]`), json.RawMessage(`[]`)},
+		}}, faults: map[string]listFault{pr + "/region/GRA11/storage": {Kind: "status", Status: 404, Page: 2}},
+			want: pr + "/region/GRA11/storage"},
+		{name: "compute-region-storage-500", seed: syntheticSeed{Replace: map[string][]json.RawMessage{
+			pr + "/region/GRA11/storage": {json.RawMessage(`[]`)},
+		}}, faults: map[string]listFault{pr + "/region/GRA11/storage": {Kind: "status", Status: 500}},
+			want: pr + "/region/GRA11/storage"},
 		{name: "storage-service-down-still-listed", seed: syntheticSeed{Replace: map[string][]json.RawMessage{
 			pr + "/region/S3-UNNAMED": region("S3-UNNAMED", `,"services":[{"name":"storage-s3-standard","status":"DOWN"}]`),
 		}}, faults: map[string]listFault{pr + "/region/S3-UNNAMED/storage": {Kind: "status", Status: 503}},
@@ -593,5 +609,47 @@ func TestLeftoversCapturedRed(t *testing.T) {
 				t.Errorf("outcome %q, leftovers %v, errors %v; want fail with an error naming %q", rep.Outcome, leftoverKeys(rep.Leftovers), rep.Errors, tc.want)
 			}
 		})
+	}
+}
+
+// TestLeftoversCapturedUnrecognisedStorage: a region whose Object Storage service the name rule does
+// not recognise is still asked for its buckets, and a leftover there is found (the rule only decides
+// whether a 404 is acceptable).
+func TestLeftoversCapturedUnrecognisedStorage(t *testing.T) {
+	p, w := loadCapturedWorld(t, "lzprobe-")
+	pr := "/cloud/project/" + p.Project.ID
+	s := syntheticSeed{Replace: map[string][]json.RawMessage{
+		pr + "/region/RBX-ARCHIVE":         {json.RawMessage(`{"name":"RBX-ARCHIVE","type":"region","status":"UP","services":[{"name":"object-archive","status":"UP"}]}`)},
+		pr + "/region/RBX-ARCHIVE/storage": {json.RawMessage(`[{"name":"lzprobe-bkt-archive","region":"RBX-ARCHIVE"}]`)},
+	}}
+	rep, _ := checkCaptured(t, w, s, nil)
+	if got := leftoverKeys(rep.Leftovers); rep.Outcome != "fail" || !slices.Equal(got, []string{tStorage + " lzprobe-bkt-archive"}) || len(rep.Errors) != 0 {
+		t.Errorf("outcome %q, leftovers %v, errors %v; want fail with exactly the archive bucket", rep.Outcome, got, rep.Errors)
+	}
+}
+
+// TestLeftoversCapturedSecondProject: the floor holds per project: a second project none of whose
+// regions answers a bucket listing fails the check even though the captured project has one.
+func TestLeftoversCapturedSecondProject(t *testing.T) {
+	_, w := loadCapturedWorld(t, "lzprobe-")
+	const id = "f0000000000000000000000000000002"
+	urn := "urn:v1:eu:resource:publicCloudProject:" + id
+	pr := "/cloud/project/" + id
+	w.Projects = append(w.Projects, struct {
+		ID  string `json:"id"`
+		URN string `json:"urn"`
+	}{id, urn})
+	s := syntheticSeed{Replace: map[string][]json.RawMessage{
+		pr + "/region":          {json.RawMessage(`["GRA11"]`)},
+		pr + "/region/GRA11":    {json.RawMessage(`{"name":"GRA11","services":[{"name":"instance","status":"UP"}]}`)},
+		pr + "/network/private": {json.RawMessage(`[]`)},
+		pr + "/user":            {json.RawMessage(`[]`)},
+		pr + "/alerting":        {json.RawMessage(`[]`)},
+		"/iam/resource/" + urn:  {json.RawMessage(`{"urn":"` + urn + `"}`)},
+	}}
+	rep, _ := checkCaptured(t, w, s, nil)
+	want := "listing " + pr + "/region: no region's bucket listing succeeded"
+	if rep.Outcome != "fail" || len(rep.Errors) != 1 || !strings.Contains(rep.Errors[0], want) {
+		t.Errorf("outcome %q, errors %v; want fail with exactly %q", rep.Outcome, rep.Errors, want)
 	}
 }
