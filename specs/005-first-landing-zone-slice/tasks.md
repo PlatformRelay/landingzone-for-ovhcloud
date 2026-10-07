@@ -306,7 +306,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- components/project-factory; task test:unit -- stages/project; task test:dependencies`: green.
   - Evidence: `evidence/T028.md`; PR; initial status `not-run`.
 
-- [ ] T029 [US2] Write private-network module, network/island component and project-network stage tests in modules/private-network/tests/, components/network/island/tests/ and stages/project-network/tests/
+- [x] T029 [US2] Write private-network module, network/island component and project-network stage tests in modules/private-network/tests/, components/network/island/tests/ and stages/project-network/tests/ — closed 2026-10-07, evidence: evidence/T029.md
   - Requirements: FR-002, FR-004, FR-005; ADRs: 0004, 0017. Depends on: T012, T018.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network`: one network in the given region, one subnet with the given CIDR, DHCP on, no gateway resource; invalid CIDR and region outside the project's regions are rejected; outputs match schema and list the network and subnet as `unlabelled`. Stubs are behavioural red.
   - Evidence: `evidence/T029.md`; PR; initial status `not-run`.
