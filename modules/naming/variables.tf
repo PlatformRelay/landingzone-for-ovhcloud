@@ -1,9 +1,10 @@
-# Stub for the T011 tests: the interface only, no validation and no logic.
-# T012 implements the module (FR-001, FR-002, ADR-0003, data-model.md).
+# Inputs of the naming module (FR-001, FR-002, ADR-0003, data-model.md *Naming template* and
+# *Label set*). Name errors surface on `output.name`; a label-set key in `labels` fails here.
 
 variable "org" {
   description = "Organisation discriminator, the first naming segment of the default template (`lz`, D87)."
   type        = string
+  nullable    = false
 }
 
 variable "tenant" {
@@ -27,11 +28,13 @@ variable "region" {
 variable "kind" {
   description = "Logical resource kind, a key of `template.kinds` with a row in `kinds.yaml` (e.g. `bucket`)."
   type        = string
+  nullable    = false
 }
 
 variable "role" {
   description = "Human role of the resource within its scope (e.g. `state`, `runtime`)."
   type        = string
+  nullable    = false
 }
 
 variable "slot" {
@@ -64,6 +67,42 @@ variable "template" {
       s3_user         = "s3u"
     }
   }
+  nullable = false
+
+  validation {
+    condition     = var.template.version == 1
+    error_message = "template.version: only name algorithm version 1 exists."
+  }
+
+  validation {
+    condition     = alltrue([for s in var.template.segments : contains(["org", "tenant", "environment", "region", "kind", "role", "slot"], s)])
+    error_message = "template.segments: only org, tenant, environment, region, kind, role and slot are segments."
+  }
+
+  validation {
+    condition     = length(var.template.segments) == length(distinct(var.template.segments))
+    error_message = "template.segments: each segment at most once."
+  }
+
+  validation {
+    condition     = contains(var.template.segments, "kind") && contains(var.template.segments, "role")
+    error_message = "template.segments: kind and role are required."
+  }
+
+  validation {
+    condition     = alltrue([for k, v in var.template.kinds : v != null && v != ""])
+    error_message = "template.kinds: every kind needs a non-empty abbreviation; a null or empty one would drop the kind segment."
+  }
+
+  validation {
+    condition     = var.template.case == "lower"
+    error_message = "template.case: only \"lower\" is implemented."
+  }
+
+  validation {
+    condition     = var.template.separator != ""
+    error_message = "template.separator must not be empty."
+  }
 }
 
 variable "name_override" {
@@ -75,15 +114,36 @@ variable "name_override" {
 variable "instance" {
   description = "Immutable deployment instance id, the `lz:instance` label."
   type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.instance != ""
+    error_message = "instance must not be empty: it is the lz:instance label."
+  }
 }
 
 variable "managed_in" {
   description = "Owning code location `<forge>//<stack path>`, the `lz:managed-in` label."
   type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.managed_in != ""
+    error_message = "managed_in must not be empty: it is the lz:managed-in label."
+  }
 }
 
 variable "labels" {
   description = "Extra labels merged into the mandatory set; keys of the `lz:` label set are refused."
   type        = map(string)
   default     = {}
+  nullable    = false
+
+  validation {
+    condition = length(setintersection(
+      [for k in keys(var.labels) : lower(k)],
+      ["lz:managed-by", "lz:managed-in", "lz:instance", "lz:tenant", "lz:release", "lz:run-id"],
+    )) == 0
+    error_message = "labels: a key of the lz: label set (lz:managed-by, lz:managed-in, lz:instance, lz:tenant, lz:release, lz:run-id; any case) may not be set as an extra label."
+  }
 }
