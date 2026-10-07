@@ -6,6 +6,6 @@
   "entry_sha256": "bcb578bc24dc8167666d1f3352759fbf78a277462f19d2b617b56a199e9da9ac",
   "bwrap_sha256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
   "targets": ["verify:toolchain", "test:offline-boundary", "test:reports", "test:traceability", "check:specs",
-              "test:dependencies", "test:static", "test:runtime-image", "test:foundation-ci", "test:live-lane"],
+              "test:dependencies", "test:static", "test:runtime-image", "test:foundation-ci", "test:live-lane", "test:slice"],
   "deferred": {"ci:foundation": "judges this workflow's run evidence after the run completes"}
 }
