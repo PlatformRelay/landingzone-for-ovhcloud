@@ -754,16 +754,28 @@ func TestLiveLaneRunsProbeTests(t *testing.T) {
 	}) {
 		t.Errorf("test:live-lane %q no longer runs the Go controls of ./internal/live and ./cmd/lz-live", cmds)
 	}
-	tests, err := filepath.Glob(filepath.Join(repo, "tests", "live", "probes", "*", "*.tftest.hcl"))
+	// Every directory below tests/live/probes holding a *.tftest.hcl, nested ones included (T076: a
+	// root's companion/ carries its own tofu test, which the root's unit run does not reach).
+	probes := filepath.Join(repo, "tests", "live", "probes")
+	roots := map[string]bool{}
+	err = filepath.WalkDir(probes, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".tftest.hcl") {
+			rel, err := filepath.Rel(probes, filepath.Dir(p))
+			if err != nil {
+				return err
+			}
+			roots[filepath.ToSlash(rel)] = true
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	roots := map[string]bool{}
-	for _, f := range tests {
-		roots[filepath.Base(filepath.Dir(f))] = true
-	}
-	if !roots["alerting"] {
-		t.Fatalf("found probe tests in %v only: the discovery misses tests/live/probes/alerting", roots)
+	if !roots["alerting"] || !roots["storage-iam/companion"] {
+		t.Fatalf("found probe tests in %v only: the discovery misses tests/live/probes/alerting or storage-iam/companion", roots)
 	}
 	for root := range roots {
 		re := regexp.MustCompile(` unit tests/live/probes/` + regexp.QuoteMeta(root) + `/?$`) // the unit argument, nothing after it

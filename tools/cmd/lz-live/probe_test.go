@@ -104,7 +104,11 @@ func fakeTofu(args []string) int {
 			return 1
 		}
 		fmt.Println(`{"@level":"info","@message":"ovh_cloud_project_network_private.p: Creation complete after 1s [id=pn-1]","type":"apply_complete","hook":{"resource":{"addr":"ovh_cloud_project_network_private.p","resource_type":"ovh_cloud_project_network_private"},"action":"create","id_key":"id","id_value":"pn-1"}}`)
-		// The local backend keeps the previous state as <path>.backup.
+		// The local backend keeps the previous state as <path>.backup. A companion has no local
+		// state path (its backend is its own, T076): nothing to write.
+		if state == "" {
+			return 0
+		}
 		return writeOK(state, "state") + writeOK(state+".backup", "previous state")
 	case "destroy":
 		if _, err := os.Stat(filepath.Join(bin, "destroy-fails")); err == nil {
@@ -243,13 +247,18 @@ type probeWorld struct {
 	identityAccount string
 	identityRefused bool
 	identityAsked   *[]int
+	// The P25 identity a root publishes next to it (T076): GET /auth/details with its token answers
+	// p25Account; p25Asked as identityAsked.
+	p25Account string
+	p25Asked   *[]int
 }
 
 // newProbeWorld is an admitted host with a sandbox credential bound to probeAccount, one project,
 // the admin exemption and a probe root tests/live/probes/net in the checkout.
 func newProbeWorld(t *testing.T) *probeWorld {
 	t.Helper()
-	w := &probeWorld{world: newWorld(t, true), apiAcount: probeAccount, apiCalls: new(int), identityAccount: probeAccount, identityAsked: new([]int)}
+	w := &probeWorld{world: newWorld(t, true), apiAcount: probeAccount, apiCalls: new(int), identityAccount: probeAccount, identityAsked: new([]int),
+		p25Account: probeAccount, p25Asked: new([]int)}
 	// As in production (os.UserHomeDir), the injected home is the process HOME, which a child
 	// must not inherit.
 	t.Setenv("HOME", w.home)
@@ -283,6 +292,10 @@ func newProbeWorld(t *testing.T) *probeWorld {
 				fmt.Fprint(rw, `{"access_token":"tok-identity","token_type":"Bearer","expires_in":3600}`)
 				return
 			}
+			if r.PostForm.Get("client_id") == "EU.probep25" && r.PostForm.Get("client_secret") == p25Secret {
+				fmt.Fprint(rw, `{"access_token":"tok-p25","token_type":"Bearer","expires_in":3600}`)
+				return
+			}
 			if r.PostForm.Get("client_secret") != probeSecret {
 				rw.WriteHeader(http.StatusUnauthorized)
 				return
@@ -293,6 +306,9 @@ func newProbeWorld(t *testing.T) *probeWorld {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/details" && r.Header.Get("Authorization") == "Bearer tok-identity":
 			*w.identityAsked = append(*w.identityAsked, countLines(filepath.Join(filepath.Dir(w.git), "tofu.log")))
 			fmt.Fprintf(rw, `{"account":%q}`, w.identityAccount)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/details" && r.Header.Get("Authorization") == "Bearer tok-p25":
+			*w.p25Asked = append(*w.p25Asked, countLines(filepath.Join(filepath.Dir(w.git), "tofu.log")))
+			fmt.Fprintf(rw, `{"account":%q}`, w.p25Account)
 		default:
 			rw.WriteHeader(http.StatusForbidden)
 		}

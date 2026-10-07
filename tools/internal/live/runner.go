@@ -15,6 +15,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -81,7 +83,23 @@ type Runner struct {
 	PlanOnly          bool             // plan and judge every stack; apply and destroy nothing
 
 	cleanupOnly bool // Probe.Cleanup: destroy every ephemeral stack, plan and apply nothing
+	companion   *companionStage
 }
+
+// companionStage is a probe root's second stage (T075/T076): after the root's apply, the
+// credential the root publishes (output companion_env) is written by files.go to rel (0600, below
+// configRoot), every identity in it is bound, and the companion root runs with it in place of the
+// admin credential.
+type companionStage struct {
+	stage      Stack
+	stack      Stack
+	configRoot string
+	rel        string
+	bind       func(context.Context, Credential) error
+}
+
+// companionOutput is the root output that publishes the companion's variables.
+const companionOutput = "companion_env"
 
 // childEnv is what every child of one run shares: its environment (env.go's allowlist with the
 // run's scratch HOME), the grace period and the signal a stop forwards.
@@ -117,6 +135,12 @@ type session struct {
 	child   *childEnv
 	inv     *Inventory
 	started []Stack // stacks whose apply started, in order
+	// stackVars replaces the run's child variables for a stack (the companion's identity).
+	stackVars map[string]map[string]string
+	credFile  string // the companion credential file, once written
+	// The second writer's log and init outcome (prepareSecondWriter, secondWriter).
+	writerLog  bytes.Buffer
+	writerInit error
 }
 
 // tofuCmd is tofu on st's root with st's data directory (TF_DATA_DIR: backend configuration,
@@ -127,6 +151,9 @@ type session struct {
 // checkout stays untouched. A cleanup is a fresh run and initialises its own.
 func (s *session) tofuCmd(ctx context.Context, st Stack, args ...string) *exec.Cmd {
 	cmd := s.child.command(ctx, s.r.Tofu, append([]string{"-chdir=" + st.Dir}, args...)...)
+	if v, ok := s.stackVars[st.ID]; ok {
+		cmd.Env = childEnviron(s.child.home, v)
+	}
 	cmd.Env = append(cmd.Env, "TF_DATA_DIR="+filepath.Join(s.child.home, "tofu-data", st.ID))
 	return cmd
 }
@@ -198,9 +225,22 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("tofu apply %s: %w", st.ID, err)
 	}
-	cerr := ConsumeApply(out, st.ID, s.inv, s.term)
+	var reader io.Reader = out
+	var second chan error
+	fired := false
+	if c := s.r.companion; c != nil && st.ID == c.stack.ID {
+		second = make(chan error, 1)
+		reader = &applyStartWatch{r: out, fire: func() {
+			fired = true
+			go func() { second <- s.secondWriter(ctx, st) }()
+		}}
+	}
+	cerr := ConsumeApply(reader, st.ID, s.inv, s.term)
 	werr := cmd.Wait()
 	killGroup(ctx, cmd)
+	if fired {
+		cerr = errors.Join(cerr, <-second)
+	}
 	// P24 fallback, also (above all) after a failed apply: the state holds what the stream missed.
 	var ferr error
 	if s.r.StateListFallback {
@@ -217,6 +257,179 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 		return errors.Join(fmt.Errorf("tofu apply %s: %w", st.ID, werr), ferr)
 	}
 	return errors.Join(cerr, ferr)
+}
+
+// applyStartWatch calls fire once, when the apply stream reports its first resource operation:
+// tofu holds the state lock from before that line until the apply ends.
+type applyStartWatch struct {
+	r    io.Reader
+	fire func()
+	done bool
+}
+
+func (a *applyStartWatch) Read(p []byte) (int, error) {
+	n, err := a.r.Read(p)
+	if !a.done && bytes.Contains(p[:n], []byte(`"apply_start"`)) {
+		a.done = true
+		a.fire()
+	}
+	return n, err
+}
+
+// secondWriterStack is the second writer of st's state: st's root with a data directory of its own.
+func secondWriterStack(st Stack) Stack { return Stack{ID: st.ID + "-second-writer", Dir: st.Dir} }
+
+// prepareSecondWriter initialises the second writer's data directory before st's apply starts, so
+// that live the writer reaches its plan while a short apply still holds the lock (T076). Its
+// output and an init failure go to the writer's record, not to the run's outcome.
+func (s *session) prepareSecondWriter(ctx context.Context, st Stack) {
+	s.writerInit = s.tofu(ctx, secondWriterStack(st), &s.writerLog, initArgs...)
+}
+
+// secondWriter is a second writer of st's state while st's apply holds the lock (P1–P3): a plan
+// that must not wait for the lock, from the data directory prepareSecondWriter initialised. Its
+// outcome is recorded in the run record; a refusal is the expected observation, not an error of
+// the run.
+func (s *session) secondWriter(ctx context.Context, st Stack) error {
+	buf := &s.writerLog
+	err := s.writerInit
+	if err == nil {
+		cmd := s.tofuCmd(ctx, secondWriterStack(st), "plan", "-input=false", "-lock-timeout=0s")
+		cmd.Stdout, cmd.Stderr = buf, buf
+		err = cmd.Run()
+		killGroup(ctx, cmd)
+	}
+	fmt.Fprintf(buf, "\nsecond writer exit: %v\n", err)
+	return writeRecord(filepath.Join(s.r.Dir, "second-writer-"+st.ID+".txt"), []byte(s.red.Redact(buf.String())))
+}
+
+// identities returns the identities in a published environment: every <prefix>CLIENT_ID (or
+// <prefix>client_id) with its <prefix>CLIENT_SECRET (client_secret), sorted by variable name. The
+// default one, OVH_CLIENT_ID/OVH_CLIENT_SECRET, is required; half an identity is refused.
+func identities(env map[string]string, endpoint string) ([]Credential, error) {
+	pair := func(k string) (string, bool) {
+		for _, sfx := range [][2]string{{"CLIENT_ID", "CLIENT_SECRET"}, {"client_id", "client_secret"}, {"CLIENT_SECRET", "CLIENT_ID"}, {"client_secret", "client_id"}} {
+			if p, ok := strings.CutSuffix(k, sfx[0]); ok {
+				return p + sfx[1], true
+			}
+		}
+		return "", false
+	}
+	keys := slices.Sorted(maps.Keys(env))
+	var out []Credential
+	for _, k := range keys {
+		other, ok := pair(k)
+		if !ok {
+			continue
+		}
+		if env[k] == "" || env[other] == "" {
+			return nil, fmt.Errorf("output %s publishes %s without %s", companionOutput, k, other)
+		}
+		if strings.HasSuffix(strings.ToUpper(k), "CLIENT_ID") {
+			out = append(out, Credential{Endpoint: endpoint, ClientID: env[k], ClientSecret: env[other]})
+		}
+	}
+	if env["OVH_CLIENT_ID"] == "" {
+		return nil, fmt.Errorf("output %s holds no OVH_CLIENT_ID and OVH_CLIENT_SECRET", companionOutput)
+	}
+	return out, nil
+}
+
+// companionEnv reads the variables the stage published (under the admin credential), has
+// files.go write them to the run's probe directory, binds every published identity to the run's
+// account (P26) and makes them the companion's environment in place of the admin credential. On a
+// cleanup (optional) a stage that published nothing — its apply failed before — has no companion:
+// false, nil.
+func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error) {
+	c := s.r.companion
+	var out bytes.Buffer
+	var env map[string]string
+	if optional {
+		if err := s.tofu(ctx, c.stage, &out, "output", "-json"); err != nil {
+			return false, err
+		}
+		var all map[string]struct {
+			Value json.RawMessage `json:"value"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &all); err != nil {
+			return false, fmt.Errorf("tofu output -json of %s is not a map of outputs", c.stage.ID)
+		}
+		o, ok := all[companionOutput]
+		if !ok {
+			return false, nil
+		}
+		if err := json.Unmarshal(o.Value, &env); err != nil {
+			return false, fmt.Errorf("output %s of %s is not a map of strings", companionOutput, c.stage.ID)
+		}
+	} else {
+		if err := s.tofu(ctx, c.stage, &out, "output", "-json", companionOutput); err != nil {
+			return false, err
+		}
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			return false, fmt.Errorf("output %s of %s is not a map of strings", companionOutput, c.stage.ID)
+		}
+	}
+	secrets := make([]string, 0, len(env))
+	for _, v := range env {
+		secrets = append(secrets, v)
+	}
+	s.red.Add(secrets...)
+	if err := WriteCredentialFile(c.configRoot, c.rel, env); err != nil {
+		return false, err
+	}
+	s.credFile = filepath.Join(c.configRoot, c.rel)
+	cred, err := ReadCredentialFile(s.credFile)
+	if err != nil {
+		return false, err
+	}
+	// Bound as the companion gets them: from the file.
+	ids, err := identities(cred, s.r.Creds["OVH_ENDPOINT"])
+	if err != nil {
+		return false, err
+	}
+	if c.bind != nil {
+		for _, id := range ids {
+			if err := c.bind(ctx, id); err != nil {
+				return false, err
+			}
+		}
+	}
+	vars := maps.Clone(s.r.Vars)
+	if vars == nil {
+		vars = map[string]string{}
+	}
+	delete(vars, "TF_VAR_state_path") // the companion's state is its own backend's
+	delete(vars, "TF_DATA_DIR")
+	vars["OVH_ENDPOINT"] = s.r.Creds["OVH_ENDPOINT"]
+	vars["TF_VAR_state_passphrase"] = s.r.Creds["TF_VAR_state_passphrase"]
+	maps.Copy(vars, cred)
+	s.stackVars[c.stack.ID] = vars
+	s.stackVars[secondWriterStack(c.stack).ID] = vars
+	return true, nil
+}
+
+// companion runs the companion root after the stage's apply, under the published identity, with
+// the second writer's data directory initialised before the companion's apply.
+func (s *session) companion(ctx context.Context) error {
+	if _, err := s.companionEnv(ctx, false); err != nil {
+		return err
+	}
+	s.prepareSecondWriter(ctx, s.r.companion.stack)
+	return s.stack(ctx, s.r.companion.stack)
+}
+
+// cleanupCompanion is the companion's part of `--cleanup`: the identity re-read from the stage's
+// retained state, the companion initialised afresh and destroyed under it, before the stage.
+func (s *session) cleanupCompanion(ctx context.Context) error {
+	ok, err := s.companionEnv(ctx, true)
+	if err != nil || !ok {
+		return err
+	}
+	c := s.r.companion.stack
+	if err := s.tofu(ctx, c, s.term, initArgs...); err != nil {
+		return err
+	}
+	return s.tofu(ctx, c, s.term, "destroy", "-auto-approve", "-input=false")
 }
 
 var errDeadline = errors.New("deadline exceeded")
@@ -259,7 +472,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	}
 	maps.Copy(vars, r.Creds)
 	delete(vars, "TF_DATA_DIR") // set per stack by tofuCmd; a caller cannot move it
-	s := &session{r: r, red: red, term: term, child: &childEnv{home: home, vars: vars, grace: grace}}
+	s := &session{r: r, red: red, term: term, child: &childEnv{home: home, vars: vars, grace: grace}, stackVars: map[string]map[string]string{}}
 	if s.inv, err = OpenInventory(r.Dir, red); err != nil {
 		return err
 	}
@@ -303,6 +516,9 @@ func (r Runner) Execute(ctx context.Context) error {
 				break
 			}
 		}
+		if runErr == nil && runCtx.Err() == nil && r.companion != nil && !r.PlanOnly {
+			runErr = s.companion(runCtx)
+		}
 	}
 	if runCtx.Err() != nil {
 		runErr = errors.Join(context.Cause(runCtx), runErr)
@@ -323,10 +539,20 @@ func (r Runner) Execute(ctx context.Context) error {
 				destroyErr = errors.Join(destroyErr, e)
 				continue
 			}
+			// The companion first, under the identity the root still holds; the root follows
+			// whatever the companion's outcome, so the identity does not outlive the cleanup.
+			if c := r.companion; c != nil && st.ID == c.stage.ID {
+				destroyErr = errors.Join(destroyErr, s.cleanupCompanion(dctx))
+			}
 		}
 		if e := s.tofu(dctx, st, term, "destroy", "-auto-approve", "-input=false"); e != nil {
 			destroyErr = errors.Join(destroyErr, e)
 		}
+	}
+	// The probe credential goes once the companion is destroyed (the root's destroy above has
+	// removed the identity it names).
+	if s.credFile != "" {
+		destroyErr = errors.Join(destroyErr, removeFiles(s.credFile))
 	}
 
 	entries, invErr := ReadInventory(r.Dir)
@@ -414,10 +640,21 @@ func errString(err error) string {
 // to clean up, so its files go whatever the outcome.
 // Children get TF_VAR_state_path, TF_VAR_state_passphrase and TF_VAR_run_id (the probe roots name
 // their resources with it).
+//
+// Second stage (T075/T076, tests/live/probes/README.md *Two-stage runs*): a root with a
+// `companion/` directory publishes the companion's variables as output companion_env. After the
+// root's apply (never in a plan-only run) they are written 0600 to companion.env in the run's
+// probe directory, every published identity is bound (Bind), and the companion runs with them in
+// place of the admin credential, while a second writer tries its state lock. On every way out the
+// companion is destroyed before the root and companion.env is removed; `--cleanup` re-reads the
+// output from the root's retained state and does the same.
 type Probe struct {
 	Run        Runner
 	ConfigRoot string // ~/.config/ovh-lz
 	Account    string
+	// Bind binds a probe identity published for a companion to the run's account (P26) before
+	// the companion runs; nil binds nothing.
+	Bind func(context.Context, Credential) error
 }
 
 // RunIDPattern is the shape of a run id: YYYYMMDDThhmmssZ-<4 hex>.
@@ -529,6 +766,18 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 	r.Vars["TF_VAR_state_path"] = state
 	r.Vars["TF_VAR_run_id"] = r.ID
 	r.cleanupOnly = cleanup
+	// A companion root (its `companion/` directory) runs after a full apply of the root (never in
+	// a plan-only run: Execute), and is destroyed first on exit and on `--cleanup`.
+	cdir := filepath.Join(r.Stacks[0].Dir, "companion")
+	if fi, err := os.Stat(cdir); err == nil && fi.IsDir() {
+		dir, _, _, _, _ := p.files()
+		rel, err := filepath.Rel(p.ConfigRoot, dir)
+		if err != nil {
+			return err
+		}
+		r.companion = &companionStage{stage: r.Stacks[0], stack: Stack{ID: r.Stacks[0].ID + "-companion", Dir: cdir, Ephemeral: true},
+			configRoot: p.ConfigRoot, rel: filepath.Join(rel, "companion.env"), bind: p.Bind}
+	}
 	if err := r.Execute(ctx); err != nil {
 		if _, serr := os.Lstat(state); errors.Is(serr, os.ErrNotExist) {
 			// No state was ever written: nothing to destroy, so no cleanup can use the

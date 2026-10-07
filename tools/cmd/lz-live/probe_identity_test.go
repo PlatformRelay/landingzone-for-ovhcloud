@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,9 @@ import (
 // and the credential does not stay on disk.
 
 const identitySecret = "probe-identity-secret-7e1d22c9a0b4"
+
+// p25Secret is the P25 identity's secret (T076: every published identity is bound).
+const p25Secret = "probe-p25-secret-3c9a51e07d28"
 
 // countLines counts the lines of a log (0 when it does not exist).
 func countLines(path string) int {
@@ -44,24 +48,37 @@ func identityWorld(t *testing.T) *probeWorld {
 	return w
 }
 
+// withP25 makes the root publish the P25 identity too (TF_VAR_p25_client_id/_secret, as
+// storage-iam does).
+func (w *probeWorld) withP25(t *testing.T) {
+	t.Helper()
+	env, _ := json.Marshal(map[string]string{"OVH_CLIENT_ID": "EU.probeidentity", "OVH_CLIENT_SECRET": identitySecret,
+		"TF_VAR_p25_client_id": "EU.probep25", "TF_VAR_p25_client_secret": p25Secret})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(w.git), "companion-env.json"), env, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // noIdentitySecret fails when the identity's secret is on lz-live's output or in any file of the
 // config root or the checkout's run records.
 func (w *probeWorld) noIdentitySecret(t *testing.T, outputs ...string) {
 	t.Helper()
-	for _, o := range outputs {
-		if strings.Contains(o, identitySecret) {
-			t.Error("the identity's secret reached lz-live's output")
-		}
-	}
-	for _, dir := range []string{w.cfg, filepath.Join(w.checkout, ".local")} {
-		_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-			if err == nil && d.Type().IsRegular() {
-				if raw, _ := os.ReadFile(p); strings.Contains(string(raw), identitySecret) {
-					t.Errorf("%s holds the identity's secret", p)
-				}
+	for _, secret := range []string{identitySecret, p25Secret} {
+		for _, o := range outputs {
+			if strings.Contains(o, secret) {
+				t.Error("an identity's secret reached lz-live's output")
 			}
-			return nil
-		})
+		}
+		for _, dir := range []string{w.cfg, filepath.Join(w.checkout, ".local")} {
+			_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+				if err == nil && d.Type().IsRegular() {
+					if raw, _ := os.ReadFile(p); strings.Contains(string(raw), secret) {
+						t.Errorf("%s holds an identity's secret", p)
+					}
+				}
+				return nil
+			})
+		}
 	}
 }
 
@@ -128,4 +145,43 @@ func TestProbeIdentityBinding(t *testing.T) {
 			w.noIdentitySecret(t, stdout, stderr)
 		})
 	}
+
+	// T076 (coordinator): every published identity is bound, the P25 identity included.
+	t.Run("p25-bound-before-the-companion", func(t *testing.T) {
+		w := identityWorld(t)
+		w.withP25(t)
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+		if code != 0 {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		comp := companionCalls(w.childCalls(t, "tofu.log"))
+		if len(comp) == 0 {
+			t.Fatal("the companion never ran")
+		}
+		if len(*w.p25Asked) == 0 {
+			t.Fatal("the P25 identity was never bound: no GET /auth/details with its token")
+		}
+		if first := (*w.p25Asked)[0]; first > comp[0] {
+			t.Errorf("the P25 identity was bound after %d tofu calls, but the companion's first call was call %d", first, comp[0])
+		}
+		w.noIdentitySecret(t, stdout, stderr)
+	})
+
+	t.Run("p25-other-account", func(t *testing.T) {
+		w := identityWorld(t)
+		w.withP25(t)
+		w.p25Account = "zz99999-ovh"
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+		if code != 3 {
+			t.Errorf("exit %d, want 3 (the P25 identity belongs to another account)\nstderr:\n%s", code, stderr)
+		}
+		calls := w.childCalls(t, "tofu.log")
+		if comp := companionCalls(calls); len(comp) > 0 {
+			t.Errorf("the companion ran %d tofu calls with a P25 identity of another account", len(comp))
+		}
+		if !slices.Contains(subcommands(calls), "destroy") {
+			t.Error("the root was not destroyed: the probe identities outlive the run")
+		}
+		w.noIdentitySecret(t, stdout, stderr)
+	})
 }

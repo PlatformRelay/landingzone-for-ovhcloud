@@ -113,23 +113,46 @@ its pagination are UNVERIFIED until T065 (P18); a listing error is `fail`, never
 To look again by hand after a failed check (read only, same paths), with the admin credential
 loaded only in that shell: `ovhcloud api get <path>` (argv UNVERIFIED, P18).
 
-## Open: second stage (not runnable through `lz-live probe` as built)
+## Two-stage runs (T010)
 
-These observations need a credential that a probe root creates — the probe identities' client
-secrets, the probe S3 user's keys — used by a second client in the same session. `lz-live probe`
-runs one root under the admin credential, and OpenTofu does not support a provider configured
-from a resource of the same run. Until the coordinator decides how (decision request in
-`specs/005-first-landing-zone-slice/evidence/T008.md`), they are **not run**, and T010 records them
-`not-run`:
+Some observations need a credential a probe root creates, used by a second client in the same
+run. A root with a `companion/` directory (today `storage-iam/companion/`) runs in two stages
+under the one `task live:probe` command of its row:
 
-- P1–P3: a second root with `backend "s3"` (`use_lockfile = true`, OVH endpoint flags, client-side
-  encryption) on the `state-backend` bucket, two writers, the second started after the first one's
-  lock object is listed; the state object is an encryption envelope.
-- P14 (versions): two object versions written to the `state-backend` bucket before its destroy, to
-  see whether destroy removes noncurrent versions too (the root's bucket is empty).
+1. The root applies under the admin credential and publishes the companion's variables as the
+   sensitive output `companion_env` (storage-iam: the P9 tenant identity as `OVH_CLIENT_ID` /
+   `OVH_CLIENT_SECRET`, the P25 identity as `TF_VAR_p25_client_id` / `_secret`, the P1 S3 user's
+   keys as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
+2. `lz-live` reads that output, writes it 0600 to
+   `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/companion.env`, binds every
+   published identity to the account (`GET /auth/details`; an identity of another account stops
+   the run with exit 3 before the companion, and the root is still destroyed), initialises the
+   second writer's data directory, then plans and applies the companion with those variables in
+   place of the admin credential. When the companion's apply reports its first resource
+   operation, a second writer of the companion's state starts (`plan -lock-timeout=0s`); its
+   output goes to `second-writer-storage-iam-companion.txt` in the run record, and its refusal
+   does not fail the run.
+3. On every way out the companion is destroyed first (under the identity), then the root (which
+   removes the identities), then `companion.env` is removed.
+
+`--plan-only` on such a root plans the root only: nothing is applied, so there is no identity and
+the companion does not run. `--cleanup <run-id>` re-reads `companion_env` from the root's retained
+state, binds it again, destroys the companion, then the root, and removes `companion.env`; a root
+that published nothing (its apply failed before) has no companion to destroy.
+
+| # | Root (stage) | Premises | Task | Command | Expected observation (pass) | Refuted when | Destroy step |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8a | `storage-iam` → `companion` (state) | P1, P2, P3 | T010 | row 8's command (one run) | the companion's `init` and `apply` succeed on the S3 backend in `lzprobe-p1-<run-id>` with the OVHcloud options (P2) and enforced client-side encryption (P3); `second-writer-storage-iam-companion.txt` holds `Error acquiring the state lock` and a non-zero exit (P1) | the S3 backend or the lock file is refused (P2); the second writer's plan succeeds while the apply runs (P1: read the record's exit line) | destroy-on-exit: companion, then root |
+| 8b | `storage-iam` → `companion` (tenant identity) | P9 usage, P26 tenant | T010 | row 8's command | the tenant identity creates and destroys network and bucket `lzprobe-p9-<run-id>` and subnet `10.251.0.0/24` (P9); the binding step passes and check `p26_me_denied` warns that `GET /me` was denied (P26) | a create or delete is denied (the apply or destroy fails naming the action: record it); check `p26_me_denied` fails with "P26 refuted" | destroy-on-exit |
+| 8c | `storage-iam` → `companion` (P25 identity) | P25 evaluation | T010 | row 8's command | check `p25_bucket_a_readable` passes without a warning; check `p25_bucket_b_denied` warns that bucket B was denied | check `p25_bucket_b_denied` fails with "P25 refuted", or `p25_bucket_a_readable` warns (the identity was denied its own tenant's bucket) | destroy-on-exit |
+
+Whether a denied read inside a `check` block is a warning rather than an error is believed
+(Terraform semantics), UNVERIFIED for OpenTofu 1.13 until this run; record what the run printed.
+
+Still not run by any root (T010 records them `not-run`):
+
+- P14 (versions): two object versions written to the `state-backend` bucket before its destroy,
+  to see whether destroy removes noncurrent versions too (the root's bucket is empty).
 - P8 (usage): the `iam` client reads `GET /cloud/project/<p>` and is denied
   `GET /cloud/project/<p>/region`.
-- P9 (usage) and P26: the `storage-iam` tenant identity creates and destroys a network, subnet
-  and bucket, is denied an IAM write, reads its account from `GET /auth/details` and is denied
-  `GET /me`.
-- P25 (evaluation): the `lzprobe-p25` identity reads bucket A and is denied bucket B.
+- P9 (IAM write denied): the negative IAM write is V010's.

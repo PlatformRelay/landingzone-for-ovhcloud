@@ -214,7 +214,12 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		Terminal:  d.Stdout,
 		PlanOnly:  p.planOnly,
 	}
-	pr := live.Probe{Run: r, ConfigRoot: cfg, Account: account}
+	// P26 tenant half (T075/T076): every probe identity a root publishes for its companion (the
+	// P25 identity included) is bound like the sandbox credential before the companion runs, on a
+	// start and on a cleanup.
+	pr := live.Probe{Run: r, ConfigRoot: cfg, Account: account, Bind: func(ctx context.Context, c live.Credential) error {
+		return live.Bind(ctx, api, c, b, b.Org)
+	}}
 	rel, _ := filepath.Rel(checkout, root)
 	if p.cleanup != "" {
 		fmt.Fprintf(d.Stdout, "LZ-LIVE run %s start cleanup %s\n", runID, rel)
