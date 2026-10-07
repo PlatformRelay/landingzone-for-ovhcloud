@@ -281,7 +281,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/cloud-project; task test:unit -- modules/cloud-quota`: `adopt` mode manages `ovh_cloud_project` with `prevent_destroy` and `deletion_protection = true`; `reference` mode reads `data.ovh_cloud_project` and manages no project; both tag the project URN through `ovh_iam_resource_tags`; alerting only when enabled; quota resource only when enabled with `prevent_automatic_quota_upgrade = true`. Stubs are behavioural red.
   - Evidence: `evidence/T025.md`; PR; initial status `not-run`.
 
-- [ ] T026 [US2] Implement modules/cloud-project and modules/cloud-quota
+- [x] T026 [US2] Implement modules/cloud-project and modules/cloud-quota — closed 2026-10-07, evidence: evidence/T026.md
   - Requirements: FR-002, FR-004; ADRs: 0003, 0005, 0006. Depends on: T025. Premise waiver as T025; the sandbox mode is fixed in T039 from T009.
   - Verify: `task test:unit -- modules/cloud-project; task test:unit -- modules/cloud-quota; task lint -- modules/cloud-project`: green. Guard G7 (code part): a mutant dropping `prevent_destroy` from `modules/cloud-project` or `modules/object-storage-protected` fails a test that inspects the configuration (static lifecycle scan via `lz-check deps` or a tftest expectation; whichever T025 chose, applied to both modules).
   - Evidence: `evidence/T026.md`; PR; initial status `not-run`.

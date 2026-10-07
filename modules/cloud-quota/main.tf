@@ -1,17 +1,20 @@
-# Stub (spec 005 T025): the addresses the tests pin, no behaviour. T026 implements the optional
-# guard: only when enabled, `data.ovh_cloud_quota.current` reads the given project's current regions
-# and profiles and `ovh_cloud_quota.this` sends them unchanged with
-# `prevent_automatic_quota_upgrade = true`.
+# Optional quota guard (spec 005, P11). Only when enabled: the given project's current regions and
+# profiles are read and sent back unchanged with `prevent_automatic_quota_upgrade = true`, so the
+# module changes the flag only. `regions` is required by `ovh_cloud_quota`; regions omitted from it
+# are left unchanged upstream (cloud_quota.md). When off, nothing is read or managed.
 data "ovh_cloud_quota" "current" {
-  count = 0
+  count = var.enabled ? 1 : 0
 
-  service_name = "not-implemented"
+  service_name = var.project_id
 }
 
 resource "ovh_cloud_quota" "this" {
-  count = 0
+  count = var.enabled ? 1 : 0
 
-  service_name                    = "not-implemented"
-  prevent_automatic_quota_upgrade = false
-  regions                         = []
+  service_name                    = var.project_id
+  prevent_automatic_quota_upgrade = true
+  regions = [for r in data.ovh_cloud_quota.current[0].regions : {
+    region  = r.region
+    profile = r.profile
+  }]
 }

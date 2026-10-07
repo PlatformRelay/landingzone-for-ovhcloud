@@ -145,7 +145,9 @@ and `plan` arguments are filled from the probe's `-generate-config-out` result (
 not secret; no import id in this slice carries a secret.
 **Fallback if P5 refutes** (import plans a replacement or an update that re-orders): `reference` mode —
 `data "ovh_cloud_project"` read plus `ovh_iam_resource_tags` on the project URN for labels; the
-project resource is not managed. Decision recorded in `decisions.md` by the operator.
+project resource is not managed. Decision recorded in `decisions.md` by the operator. Switching an
+already adopted project to `reference` is an operator runbook step (state removal outside the live
+lane, which refuses a forget), never a `removed` block in code (`modules/cloud-project/README.md`, T026).
 **Premise gate**: T025–T028 build and test both modes offline under a recorded waiver (no cloud
 contact, both modes are needed anyway as the fallback); which mode the sandbox manifest uses is set
 in T039 from T009's result.

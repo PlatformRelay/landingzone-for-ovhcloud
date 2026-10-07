@@ -78,10 +78,44 @@ func unmarks(body *hclsyntax.Body) bool {
 	return found
 }
 
-// retainedModules are the library packages whose resources outlive every run
-// (contracts/checks.md G7): each resource there keeps a literal
-// prevent_destroy. modules/cloud-project joins with spec 005 T026.
-var retainedModules = []string{"modules/object-storage-protected"}
+// retainedPackage says what a retained library package keeps (contracts/checks.md
+// G7). kept lists the resource types that carry a literal prevent_destroy; nil
+// means every resource. single, when set, is a type the package declares at
+// exactly one address, in its root directory and without for_each, every block
+// of it with a literal deletion_protection = true. Every retained package refuses removed blocks and non-relative module
+// sources.
+type retainedPackage struct {
+	kept   []string
+	single string
+}
+
+// retainedModules are the library packages whose resources outlive every run.
+// The state bucket package keeps every resource. The project package keeps
+// only its project (spec 005 T026): the budget alert stays switchable, and
+// destroying the IAM tags removes only the configured keys
+// (iam_resource_tags.md Notes).
+var retainedModules = map[string]retainedPackage{
+	"modules/object-storage-protected": {},
+	"modules/cloud-project":            {kept: []string{"ovh_cloud_project"}, single: "ovh_cloud_project"},
+}
+
+// retainedOf returns the retained package a directory lies in.
+func retainedOf(dir string) (string, retainedPackage, bool) {
+	for m, p := range retainedModules {
+		if under(dir, m) {
+			return m, p, true
+		}
+	}
+	return "", retainedPackage{}, false
+}
+
+// literalTrue reports whether an attribute is the constant bool true, evaluated
+// without variables: OpenTofu admits no expression in prevent_destroy, and
+// deletion_protection must not depend on an input a run could vary.
+func literalTrue(attr *hclsyntax.Attribute) bool {
+	value, diags := attr.Expr.Value(nil)
+	return !diags.HasErrors() && value.Type() == cty.Bool && value.IsKnown() && !value.IsNull() && value.True()
+}
 
 // stateBackend creates the state buckets; it takes them only from
 // protectedBuckets, the retained module that pins a literal prevent_destroy
@@ -155,25 +189,36 @@ func moduleCalls(body *hclsyntax.Body) []moduleCall {
 }
 
 // unprotected lists the blocks of one parsed file that leave a retained
-// module's resources destroyable: a resource whose lifecycle does not set
-// prevent_destroy to the literal true (OpenTofu admits no expression there,
-// and an override file merges its own lifecycle), and any removed block.
-func unprotected(body *hclsyntax.Body) []string {
+// package's resources destroyable: a resource of a kept type whose lifecycle
+// does not set prevent_destroy to the literal true (an override file merges
+// its own lifecycle), a block of the single type without a literal top-level
+// deletion_protection = true, and any removed block.
+func unprotected(body *hclsyntax.Body, p retainedPackage) []string {
 	var out []string
 	for _, block := range body.Blocks {
 		switch block.Type {
 		case "removed":
 			out = append(out, "a removed block drops a retained resource from the configuration")
 		case "resource":
-			kept := false
-			for _, inner := range block.Body.Blocks {
-				if attr, ok := inner.Body.Attributes["prevent_destroy"]; ok && inner.Type == "lifecycle" {
-					value, diags := attr.Expr.Value(nil)
-					kept = !diags.HasErrors() && value.Type() == cty.Bool && value.IsKnown() && !value.IsNull() && value.True()
+			if len(block.Labels) == 0 {
+				continue
+			}
+			address := strings.Join(block.Labels, ".")
+			if p.kept == nil || slices.Contains(p.kept, block.Labels[0]) {
+				kept := false
+				for _, inner := range block.Body.Blocks {
+					if attr, ok := inner.Body.Attributes["prevent_destroy"]; ok && inner.Type == "lifecycle" {
+						kept = literalTrue(attr)
+					}
+				}
+				if !kept {
+					out = append(out, "resource "+address+" lacks a literal lifecycle { prevent_destroy = true }")
 				}
 			}
-			if !kept {
-				out = append(out, "resource "+strings.Join(block.Labels, ".")+" lacks a literal lifecycle { prevent_destroy = true }")
+			if p.single != "" && block.Labels[0] == p.single {
+				if attr, ok := block.Body.Attributes["deletion_protection"]; !ok || !literalTrue(attr) {
+					out = append(out, "resource "+address+" lacks a literal deletion_protection = true")
+				}
 			}
 		}
 	}
@@ -460,8 +505,9 @@ func sortedSet(set map[string]bool) []string { return slices.Sorted(maps.Keys(se
 // no backend or provider configuration in a library or stage, no
 // terraform_remote_state in any configuration, and only generated *.tf files
 // under stacks/ (test files are outside these rules). In a retained module
-// (G7) every resource keeps a literal prevent_destroy and no external module
-// is called; the state-backend component takes its buckets only from the
+// (G7) every resource of a kept type keeps a literal prevent_destroy, a single
+// type is declared once with a literal deletion_protection, and no removed
+// block or external module is used; the state-backend component takes its buckets only from the
 // protected module. No library, stage or instance calls nonsensitive (G2). A
 // stage declares no resource, and each stage of singleComponentStages calls
 // only one unrepeated instance of its component (G5, G6).
@@ -631,6 +677,10 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		call       moduleCall
 	}
 	var stageCalls []stageCall
+	// singles are the addresses (directory and name; an override block of the
+	// same name is the same address) of each scanned retained package's
+	// single type.
+	singles := map[string]map[string]bool{}
 
 	// judge parses one configuration directory, applies the FR-003 rules and
 	// records its layer and edges.
@@ -693,11 +743,30 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 				}
 			}
 		}
-		// G7: a retained package's library code keeps every resource.
-		if layer == LayerLibrary && slices.ContainsFunc(retainedModules, func(m string) bool { return under(dir, m) }) {
+		// G7: a retained package's library code keeps its retained resources.
+		if pkg, retained, ok := retainedOf(dir); ok && layer == LayerLibrary {
+			if singles[pkg] == nil {
+				singles[pkg] = map[string]bool{}
+			}
 			for _, body := range bodies {
-				for _, what := range unprotected(body) {
+				for _, what := range unprotected(body, retained) {
 					add("RETAINED_UNPROTECTED", dir, "retained module (G7): %s", what)
+				}
+				for _, block := range body.Blocks {
+					if retained.single == "" || block.Type != "resource" || len(block.Labels) != 2 || block.Labels[0] != retained.single {
+						continue
+					}
+					address := strings.Join(block.Labels, ".")
+					singles[pkg][dir+"\x00"+block.Labels[1]] = true
+					// One address must be one instance: a subdirectory can be
+					// called more than once, and for_each multiplies the block.
+					// count stays (adopt or not); the unit tests pin 0 or 1.
+					if dir != pkg {
+						add("RETAINED_UNPROTECTED", pkg, "retained module (G7): resource %s is declared in %s, outside the package root, where a repeated module call would multiply it", address, dir)
+					}
+					if _, ok := block.Body.Attributes["for_each"]; ok {
+						add("RETAINED_UNPROTECTED", pkg, "retained module (G7): resource %s repeats by for_each; the package holds one instance", address)
+					}
 				}
 			}
 			// Only a relative source is the code scanned here: a remote one,
@@ -876,6 +945,25 @@ func ScanDependencies(root string) (DependencyGraph, []Finding) {
 		for _, target := range slices.Sorted(maps.Keys(callers[stage])) {
 			if n := len(callers[stage][target]); n > 1 {
 				add("STAGE_COMPONENT_CALLS", stage, "%d module blocks call %s; the stage takes one %s instance", n, target, singleComponentStages[stage])
+			}
+		}
+	}
+	// G7: a retained package with a single type declares it at exactly one
+	// address of its root directory, without for_each (checked above); the
+	// instance count of that address is the unit tests' (0 or 1). A package
+	// with any configuration or test file left is held to the count, even
+	// with no library code.
+	for _, owners := range []map[string][]string{files, tests} {
+		for dir := range owners {
+			if pkg, _, ok := retainedOf(dir); ok && singles[pkg] == nil {
+				singles[pkg] = map[string]bool{}
+			}
+		}
+	}
+	for _, pkg := range slices.Sorted(maps.Keys(singles)) {
+		if single := retainedModules[pkg].single; single != "" {
+			if n := len(singles[pkg]); n != 1 {
+				add("RETAINED_UNPROTECTED", pkg, "retained module (G7): declares %d %s resources, want exactly one", n, single)
 			}
 		}
 	}
