@@ -286,7 +286,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/cloud-project; task test:unit -- modules/cloud-quota; task lint -- modules/cloud-project`: green. Guard G7 (code part): a mutant dropping `prevent_destroy` from `modules/cloud-project` or `modules/object-storage-protected` fails a test that inspects the configuration (static lifecycle scan via `lz-check deps` or a tftest expectation; whichever T025 chose, applied to both modules).
   - Evidence: `evidence/T026.md`; PR; initial status `not-run`.
 
-- [ ] T027 [US2] Write project-factory component and project stage tests in components/project-factory/tests/ and stages/project/tests/
+- [x] T027 [US2] Write project-factory component and project stage tests in components/project-factory/tests/ and stages/project/tests/ — closed 2026-10-07, evidence: evidence/T027.md
   - Requirements: FR-002, FR-004, FR-005; ADRs: 0004, 0005, 0006. Depends on: T026, T018. Premise waiver as T025.
   - Verify: `task test:unit -- components/project-factory; task test:unit -- stages/project`: tenant/environment labels from inputs; budget alert and quota toggles pass through; outputs `project_id`, `project_urn`, `regions` match the project schema. Stubs are behavioural red.
   - Evidence: `evidence/T027.md`; PR; initial status `not-run`.
