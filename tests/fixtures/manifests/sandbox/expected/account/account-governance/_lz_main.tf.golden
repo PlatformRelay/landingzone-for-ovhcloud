@@ -1,0 +1,8 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+module "account_governance" {
+  source     = "../../../stages/account-governance"
+  org        = "lz"
+  instance   = "account-governance"
+  managed_in = "example.org/platformrelay/landingzone-for-ovhcloud//stacks/account/account-governance"
+  tenants    = { for t in var.lz_tenants : t => var.tenants[t] }
+}

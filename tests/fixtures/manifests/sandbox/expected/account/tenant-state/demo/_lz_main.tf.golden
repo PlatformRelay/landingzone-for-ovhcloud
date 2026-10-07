@@ -1,0 +1,10 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+module "tenant_state" {
+  source           = "../../../../stages/tenant-state"
+  org              = "lz"
+  tenant           = "demo"
+  state_project_id = var.state_project_id
+  state_region     = "GRA"
+  instance         = "demo-state"
+  managed_in       = "example.org/platformrelay/landingzone-for-ovhcloud//stacks/account/tenant-state/demo"
+}

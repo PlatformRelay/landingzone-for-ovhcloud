@@ -1,0 +1,9 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+module "bootstrap" {
+  source           = "../../../stages/bootstrap"
+  org              = "lz"
+  state_project_id = var.state_project_id
+  state_region     = "GRA"
+  instance         = "account-bootstrap"
+  managed_in       = "example.org/platformrelay/landingzone-for-ovhcloud//stacks/account/bootstrap"
+}

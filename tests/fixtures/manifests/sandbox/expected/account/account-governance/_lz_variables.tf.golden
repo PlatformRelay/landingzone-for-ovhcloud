@@ -1,0 +1,19 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+variable "state_passphrase" {
+  type      = string
+  sensitive = true
+  nullable  = false
+}
+
+variable "lz_tenants" {
+  type     = list(string)
+  nullable = false
+}
+
+variable "tenants" {
+  type = map(object({
+    project_id  = string
+    project_urn = string
+  }))
+  nullable = false
+}

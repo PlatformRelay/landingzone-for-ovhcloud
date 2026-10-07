@@ -1,0 +1,13 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+module "project_network" {
+  source     = "../../../../../../stages/project-network"
+  org        = "lz"
+  region     = "GRA11"
+  instance   = "demo-dev-gra11-network"
+  managed_in = "example.org/platformrelay/demo-landing-zone//stacks/tenants/demo/dev/gra11/project-network"
+  project    = var.project
+  network = {
+    cidr    = "10.20.0.0/24"
+    vlan_id = 0
+  }
+}

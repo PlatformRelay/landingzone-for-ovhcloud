@@ -1,0 +1,21 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+variable "state_passphrase" {
+  type      = string
+  sensitive = true
+  nullable  = false
+}
+
+variable "lz_account_dir" {
+  type     = string
+  nullable = false
+
+  validation {
+    condition     = can(regex("^/.*/accounts/[^/]+$", var.lz_account_dir))
+    error_message = "lz_account_dir must be the bound account directory, an absolute path ending in accounts/<account>."
+  }
+}
+
+variable "state_project_id" {
+  type     = string
+  nullable = false
+}

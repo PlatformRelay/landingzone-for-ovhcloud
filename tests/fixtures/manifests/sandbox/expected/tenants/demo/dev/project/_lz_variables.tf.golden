@@ -1,0 +1,11 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+variable "state_passphrase" {
+  type      = string
+  sensitive = true
+  nullable  = false
+}
+
+variable "project_id" {
+  type     = string
+  nullable = false
+}
