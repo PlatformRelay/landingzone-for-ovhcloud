@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/outputs/account-governance.schema.json",
+  "title": "account-governance outputs",
+  "description": "`values` of the account-governance stage's outputs envelope (005 data-model *Per-stage values*), one `tenants` entry per tenant. The deployer secrets stay sensitive and are never published.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["platform_deployer", "tenants", "unlabelled"],
+  "properties": {
+    "platform_deployer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_id", "identity_urn"],
+      "properties": {
+        "client_id": { "type": "string", "minLength": 1 },
+        "identity_urn": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tenants": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["deployer_client_id", "deployer_identity_urn", "group_urn"],
+        "properties": {
+          "deployer_client_id": { "type": "string", "minLength": 1 },
+          "deployer_identity_urn": { "type": "string", "minLength": 1 },
+          "group_urn": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "unlabelled": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

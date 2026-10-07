@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/outputs/project.schema.json",
+  "title": "project outputs",
+  "description": "`values` of the project stage's outputs envelope (005 data-model *Per-stage values*). A consumer also refuses a `project_id` or `project_urn` that differs from the bound account's resolved reference (KD-3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tenant", "environment", "project_id", "project_urn", "regions", "unlabelled"],
+  "properties": {
+    "tenant": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "project_urn": { "type": "string", "minLength": 1 },
+    "regions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "budget_alert_id": { "type": "string", "minLength": 1 },
+    "unlabelled": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

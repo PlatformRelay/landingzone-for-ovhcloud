@@ -124,7 +124,10 @@ Uniqueness checks: id, path, (state bucket, state key), and planned bucket names
 ```
 Rules: no key matching `(?i)secret|password|token|private_key|access_key` anywhere in `values`; no entry
 that `tofu output -json` marked `sensitive`; `additionalProperties: false` per stage schema; no null or
-empty-string placeholders for capabilities.
+empty-string value anywhere in `values` (an absent capability or optional value is left out, never a
+placeholder); object keys match exactly (no case variants) and appear once. The validator in
+`tools/internal/stacks` enforces these with strict typed decoding; the schemas under `schemas/outputs/`
+are the published contract and a test keeps them and the Go types in agreement.
 
 Per-stage `values` (minimum):
 | Stage | values |

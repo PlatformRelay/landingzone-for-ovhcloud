@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/outputs/runtime.schema.json",
+  "title": "runtime outputs",
+  "description": "`values` of the runtime stage's outputs envelope (005 data-model *Per-stage values*, ADR-0017). A capability that does not exist is absent, never null or an empty string.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "scope", "readiness", "pending_actions", "capabilities", "unlabelled"],
+  "properties": {
+    "kind": { "type": "string", "const": "managed-only" },
+    "slot": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9]{0,15}$" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance", "project_id", "region"],
+      "properties": {
+        "instance": { "type": "string", "minLength": 1 },
+        "project_id": { "type": "string", "minLength": 1 },
+        "region": { "type": "string", "minLength": 1 }
+      }
+    },
+    "readiness": { "type": "string", "minLength": 1 },
+    "pending_actions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object-storage"],
+      "properties": {
+        "object-storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bucket", "endpoint", "region"],
+          "properties": {
+            "bucket": { "type": "string", "minLength": 1 },
+            "endpoint": { "type": "string", "minLength": 1 },
+            "region": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "unlabelled": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

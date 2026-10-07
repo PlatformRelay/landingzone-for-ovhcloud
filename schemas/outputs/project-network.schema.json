@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/outputs/project-network.schema.json",
+  "title": "project-network outputs",
+  "description": "`values` of the project-network stage's outputs envelope (005 data-model *Per-stage values*): one private network, its OpenStack id per region, one subnet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["network_id", "regions_openstack_ids", "subnet_id", "cidr", "unlabelled"],
+  "properties": {
+    "network_id": { "type": "string", "minLength": 1 },
+    "regions_openstack_ids": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+    "subnet_id": { "type": "string", "minLength": 1 },
+    "cidr": { "type": "string", "minLength": 1 },
+    "unlabelled": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
