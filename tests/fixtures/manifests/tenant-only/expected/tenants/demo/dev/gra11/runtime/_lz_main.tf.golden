@@ -1,0 +1,9 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+module "runtime" {
+  source     = "../../../../../../stages/runtime"
+  org        = "lz"
+  region     = "GRA11"
+  instance   = "demo-dev-gra11-runtime"
+  managed_in = "example.org/platformrelay/demo-landing-zone//stacks/tenants/demo/dev/gra11/runtime"
+  project    = var.project
+}

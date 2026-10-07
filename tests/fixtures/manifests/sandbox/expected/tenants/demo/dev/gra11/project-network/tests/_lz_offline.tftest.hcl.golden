@@ -1,0 +1,10 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+mock_provider "ovh" {}
+
+variables {
+  state_passphrase = "lz-offline-test-passphrase"
+}
+
+run "plan" {
+  command = plan
+}

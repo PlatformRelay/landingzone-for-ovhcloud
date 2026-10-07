@@ -1,0 +1,14 @@
+// Hand-written expectation (005 T037); compared as HCL, not byte for byte.
+module "project" {
+  source       = "../../../../../stages/project"
+  org          = "lz"
+  tenant       = "demo"
+  environment  = "dev"
+  instance     = "demo-dev-project"
+  managed_in   = "example.org/platformrelay/demo-landing-zone//stacks/tenants/demo/dev/project"
+  project_mode = "adopt"
+  project_id   = var.project_id
+  regions      = ["GRA11"]
+  budget_alert = { enabled = false }
+  quota_guard  = { enabled = false }
+}
