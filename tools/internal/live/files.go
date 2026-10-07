@@ -105,6 +105,44 @@ func privateDir(dir string) error {
 	return nil
 }
 
+// credentialDir checks that rel stays below root and creates its missing directories with mode
+// 0700, never through a symlink; an existing directory others can use is refused. It returns the
+// directory and the file name.
+func credentialDir(root, rel string) (string, string, error) {
+	clean := filepath.Clean(rel)
+	if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("credential path %q is not below %s", rel, root)
+	}
+	parts := strings.Split(clean, string(filepath.Separator))
+	dir := root
+	if err := privateDir(root); err != nil {
+		return "", "", err
+	}
+	for _, p := range parts[:len(parts)-1] {
+		dir = filepath.Join(dir, p)
+		fi, err := os.Lstat(dir)
+		switch {
+		case os.IsNotExist(err):
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				return "", "", err
+			}
+			// Mkdir applies the umask, which can only remove bits; Chmod pins the mode.
+			if err := os.Chmod(dir, 0o700); err != nil {
+				return "", "", err
+			}
+		case err != nil:
+			return "", "", err
+		case !fi.IsDir():
+			return "", "", fmt.Errorf("%s is not a directory (symlinks are not followed)", dir)
+		default:
+			if err := privateDir(dir); err != nil {
+				return "", "", err
+			}
+		}
+	}
+	return dir, parts[len(parts)-1], nil
+}
+
 // WriteCredentialFile writes values as sorted KEY=value lines to <root>/<rel>, mode 0600,
 // creating missing directories below root with mode 0700. rel must stay below root without
 // passing through a symlink; a symlink at the target itself is replaced, never followed. The file
@@ -129,38 +167,11 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 		fmt.Fprintf(&b, "%s=%s\n", k, values[k])
 	}
 
-	clean := filepath.Clean(rel)
-	if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("credential path %q is not below %s", rel, root)
-	}
-	parts := strings.Split(clean, string(filepath.Separator))
-	dir := root
-	if err := privateDir(root); err != nil {
+	dir, name, err := credentialDir(root, rel)
+	if err != nil {
 		return err
 	}
-	for _, p := range parts[:len(parts)-1] {
-		dir = filepath.Join(dir, p)
-		fi, err := os.Lstat(dir)
-		switch {
-		case os.IsNotExist(err):
-			if err := os.Mkdir(dir, 0o700); err != nil {
-				return err
-			}
-			// Mkdir applies the umask, which can only remove bits; Chmod pins the mode.
-			if err := os.Chmod(dir, 0o700); err != nil {
-				return err
-			}
-		case err != nil:
-			return err
-		case !fi.IsDir():
-			return fmt.Errorf("%s is not a directory (symlinks are not followed)", dir)
-		default:
-			if err := privateDir(dir); err != nil {
-				return err
-			}
-		}
-	}
-	target := filepath.Join(dir, parts[len(parts)-1])
+	target := filepath.Join(dir, name)
 	if fi, err := os.Lstat(target); err == nil && fi.IsDir() {
 		return fmt.Errorf("%s is a directory", target)
 	}
@@ -329,4 +340,22 @@ func removeFiles(paths ...string) error {
 		}
 	}
 	return nil
+}
+
+// MoveCredentialFile moves the credential file <root>/<from> to <root>/<to> (a previous
+// account's sandbox.env into its account directory, research R13), creating the target's missing
+// directories 0700. An existing target is never replaced: it may be that account's own file.
+func MoveCredentialFile(root, from, to string) error {
+	if _, _, err := credentialDir(root, from); err != nil {
+		return err
+	}
+	dir, name, err := credentialDir(root, to)
+	if err != nil {
+		return err
+	}
+	dst := filepath.Join(dir, name)
+	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
+		return fmt.Errorf("%s exists or cannot be examined; not replaced", dst)
+	}
+	return os.Rename(filepath.Join(root, from), dst)
 }

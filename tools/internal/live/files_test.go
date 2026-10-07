@@ -43,6 +43,45 @@ func mode(t *testing.T, path string) os.FileMode {
 	return fi.Mode()
 }
 
+// TestFilesMoveCredential (T043, R13 migration): a previous account's sandbox.env moves into its
+// account directory, created 0700; an existing target is never replaced and a path leaving the
+// root is refused, both with the source left in place.
+func TestFilesMoveCredential(t *testing.T) {
+	withUmask(t)
+	root := tempPrivate(t)
+	if err := WriteCredentialFile(root, "sandbox.env", map[string]string{"OVH_CLIENT_ID": "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := MoveCredentialFile(root, "sandbox.env", filepath.Join("accounts", "xx1-ovh", "sandbox.env")); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"accounts", filepath.Join("accounts", "xx1-ovh")} {
+		if m := mode(t, filepath.Join(root, d)); m.Perm() != 0o700 || !m.IsDir() {
+			t.Errorf("%s mode %v, want a 0700 directory", d, m)
+		}
+	}
+	if v, err := ReadCredentialFile(filepath.Join(root, "accounts", "xx1-ovh", "sandbox.env")); err != nil || v["OVH_CLIENT_ID"] != "a" {
+		t.Errorf("moved file %v, %v", v, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "sandbox.env")); !os.IsNotExist(err) {
+		t.Error("source still present after the move")
+	}
+	if err := WriteCredentialFile(root, "sandbox.env", map[string]string{"OVH_CLIENT_ID": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{filepath.Join("accounts", "xx1-ovh", "sandbox.env"), filepath.Join("..", "escaped.env"), "/abs.env"} {
+		if err := MoveCredentialFile(root, "sandbox.env", to); err == nil {
+			t.Errorf("move to %s: no error", to)
+		}
+	}
+	if v, err := ReadCredentialFile(filepath.Join(root, "accounts", "xx1-ovh", "sandbox.env")); err != nil || v["OVH_CLIENT_ID"] != "a" {
+		t.Errorf("existing target replaced: %v, %v", v, err)
+	}
+	if v, err := ReadCredentialFile(filepath.Join(root, "sandbox.env")); err != nil || v["OVH_CLIENT_ID"] != "b" {
+		t.Errorf("source lost by a refused move: %v, %v", v, err)
+	}
+}
+
 func TestFilesWriteCredential(t *testing.T) {
 	withUmask(t)
 	root := tempPrivate(t)
