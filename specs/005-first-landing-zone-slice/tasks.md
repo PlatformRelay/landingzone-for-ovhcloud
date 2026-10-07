@@ -360,7 +360,7 @@ Independent test: V005, V006, V012.
   - Verify: `go -C tools test ./internal/stacks -run TestReconcile -count=1`: on a scratch tree a missing stack is created through the pinned `terramate create` with the derived id, tags and `after`; a repeat run is a no-op; a directory without a row, a changed id and a changed dimension yield `UNSUPPORTED_CHANGE`; `account-fabric` and `account-admin` yield `STAGE_NOT_IMPLEMENTED`; `--check` reports without writing. A stub that only creates is behavioural red.
   - Evidence: `evidence/T035.md`; PR; initial status `not-run`.
 
-- [ ] T036 [US3] Implement the reconciler in tools/internal/stacks/reconcile.go, tools/cmd/lz-stacks/ and Taskfile.yml
+- [x] T036 [US3] Implement the reconciler in tools/internal/stacks/reconcile.go, tools/cmd/lz-stacks/ and Taskfile.yml — closed 2026-10-07, evidence: evidence/T036.md
   - Requirements: FR-007; ADRs: 0004, 0007. Depends on: T035.
   - Verify: `task test:stacks; task stacks:check`: T035 controls green; `stacks:reconcile` (host, credential-free, no host guard, runs in an authoring worktree) and `stacks:check` (offline, scratch copy) created; with no manifest yet `stacks:check` reports `fail: no manifest` (header exception, expected until T039).
   - Evidence: `evidence/T036.md`; PR; initial status `not-run`.

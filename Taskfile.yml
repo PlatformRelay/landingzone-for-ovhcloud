@@ -85,11 +85,31 @@ tasks:
   # Stack-model controls (005 T034, extended by T036, T038, T041): every test of
   # ./internal/stacks except the output contract (test:outputs) — manifest
   # decoding and refusals, schemas/deployments.schema.json agreeing with the
-  # decoder's types and value rules, the stage table agreeing with data-model.md.
+  # decoder's types and value rules, the stage table agreeing with data-model.md,
+  # the reconciler against the pinned Terramate — and lz-stacks.
   test:stacks:
-    desc: Deployment manifest decoder, schema/type agreement and stage table against data-model.md (005 V005)
+    desc: Deployment manifest decoder, schema/type agreement, stage table, reconciler and lz-stacks (005 V005)
     cmds:
-      - go -C tools test -count=1 -skip '^TestOutputs' ./internal/stacks
+      - go -C tools test -count=1 -skip '^TestOutputs' ./internal/stacks ./cmd/lz-stacks
+
+  # Host-side, credential-free, no host guard: runs in any checkout, including
+  # an authoring worktree with the uncommitted manifest edit (005 FR-007). The
+  # pinned Terramate is LZ_TERRAMATE, else /tcb/terramate, else terramate on
+  # PATH, and must match mise.toml; on a host whose PATH terramate differs, set
+  # LZ_TERRAMATE to the absolute path of mise's install (a relative one resolves
+  # against tools/). `task stacks:reconcile -- -check` writes nothing.
+  stacks:reconcile:
+    desc: Create the stacks stacks/deployments.yaml names and the tree lacks; refuse every other mismatch (005 FR-007)
+    cmds:
+      - go -C tools run ./cmd/lz-stacks -root .. reconcile {{.CLI_ARGS}}
+
+  # Offline: the entry mounts the candidate read-only, so the comparison runs
+  # on a scratch copy. Reports `fail: no manifest` until stacks/deployments.yaml
+  # exists (005 T039); that red is the expected result, never a pass.
+  stacks:check:
+    desc: Reconcile --check and terramate generate on a scratch copy, diffed against the candidate (005 V005)
+    cmds:
+      - go -C tools run ./cmd/lz-stacks -root .. check
 
   # The live lane's offline controls: fakes only, no credential, no API call.
   # The host guard, child environment, account binding and credential files

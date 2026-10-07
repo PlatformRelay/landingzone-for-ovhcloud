@@ -133,7 +133,7 @@ verb.
 | local state | `~/.config/ovh-lz/accounts/<account>/state/<id>.tfstate` (local backend, `bootstrap` only) | |
 | outputs object | `artifacts/<id>/outputs.json` in the instance's state bucket; `bootstrap` publishes to the account bucket (ADR-0004 `artifacts/` prefix) | |
 | Terramate tags | `lz-stage-*`, `lz-scope-*`, `lz-tenant-*`, `lz-env-*`, `lz-region-*`, `lz-slot-*` | |
-| after | tag filters of the instance's data producers and authority producers in the same tenant/env (and region) | |
+| after | tag filters of the instance's data producers and authority producers in the same tenant/env (and region) that are rows of the manifest: `tag:lz-stage-<stage>` plus the producer's `lz-tenant-`, `lz-env-`, `lz-region-` and `lz-slot-` tags where set; an `external` producer gives none (not a stack of this repository; T035/T036 decision 1) | `tag:lz-stage-project:lz-tenant-demo:lz-env-dev` |
 | module source | `spec.stage_source`: `local` → relative path to `stages/<stage>`; `git` → versioned ref (seam) | |
 | managed-in | `<spec.forge>//<path>` | |
 | bucket name (account state) | naming(org, kind=bkt, role=state) | `lz-bkt-state` |
