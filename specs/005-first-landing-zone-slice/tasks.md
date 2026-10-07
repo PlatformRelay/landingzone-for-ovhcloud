@@ -326,7 +326,7 @@ Independent test: V002 for all slice directories, V003, V004.
   - Verify: `task test:unit -- modules/private-network; task test:unit -- components/network/island; task test:unit -- stages/project-network; task test:outputs`: T085 controls green with one killed mutant per clause; the CIDR limits are cited or marked UNVERIFIED until T010 shows what the API accepts.
   - Evidence: `evidence/T086.md`; PR; initial status `not-run`.
 
-- [ ] T031 [US2] Write runtime/managed-only component and runtime stage tests in components/runtime/managed-only/tests/ and stages/runtime/tests/
+- [x] T031 [US2] Write runtime/managed-only component and runtime stage tests in components/runtime/managed-only/tests/ and stages/runtime/tests/ — closed 2026-10-07, evidence: evidence/T031.md
   - Requirements: FR-004, FR-005; ADRs: 0004, 0017. Depends on: T014, T018.
   - Verify: `task test:unit -- components/runtime/managed-only; task test:unit -- stages/runtime`: one labelled bucket through the unprotected `modules/object-storage`, its name built from naming with the instance's `slot` (two slot inputs give two bucket names; a stub that drops `slot` from the naming call is red); envelope `kind = managed-only`, optional `slot`, `scope`, `readiness`, `pending_actions = []`, `capabilities` with `object-storage` and without `network`; inputs consume only `project` outputs. A stub publishing an empty `network` capability is behavioural red.
   - Evidence: `evidence/T031.md`; PR; initial status `not-run`.
