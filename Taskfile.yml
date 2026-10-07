@@ -24,9 +24,9 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. deps
 
   test:runtime-image:
-    desc: Reproducible OCI packing of the runtime bundle and launcher, and its refusals (V009)
+    desc: Reproducible OCI packing of the runtime bundle and launcher, its refusals, and the entry's snapshot admission (V009)
     cmds:
-      - go -C tools test -count=1 ./cmd/lz-pack ./internal/bundle/...
+      - go -C tools test -count=1 ./cmd/lz-pack ./internal/bundle/... ./cmd/lz-offline
 
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)

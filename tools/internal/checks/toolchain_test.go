@@ -3,6 +3,7 @@ package checks
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,11 @@ func qualifiedInput() Prepared {
 			"tflint":    "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
 		},
 		Image: "cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26",
+		// Wolfi packages verified against the signed APKINDEX (evidence/T025.md).
+		Packages: map[string]string{
+			"git-2.56.0-r0.apk":         "33bc6d38714d6a65e412b87e7ef9392a27b4f2ca71f3506bd8e9eaa42d59c10d",
+			"libpcre2-8-0-10.49-r1.apk": "c2e8dacd8fe2f1c3de9eabd274532f74fcbbd3e919301fc95453ab3af850c38c",
+		},
 	}
 }
 
@@ -72,12 +78,60 @@ func TestToolchainCaptureAdmission(t *testing.T) {
 		assertCaptureDenied(t, p)
 	})
 	t.Run("missing-image", func(t *testing.T) { p := qualifiedInput(); p.Image = ""; assertCaptureDenied(t, p) })
+	// The packages unpacked over the image are pinned like the image itself.
+	for _, name := range []string{"git-2.56.0-r0.apk", "libpcre2-8-0-10.49-r1.apk"} {
+		t.Run("package-"+name, func(t *testing.T) {
+			p := qualifiedInput()
+			p.Packages[name] = "synthetic-wrong-digest"
+			assertCaptureDenied(t, p)
+		})
+		t.Run("missing-package-"+name, func(t *testing.T) { p := qualifiedInput(); delete(p.Packages, name); assertCaptureDenied(t, p) })
+	}
+	t.Run("other-package-version", func(t *testing.T) {
+		p := qualifiedInput()
+		p.Packages["git-2.55.0-r0.apk"] = p.Packages["git-2.56.0-r0.apk"]
+		delete(p.Packages, "git-2.56.0-r0.apk")
+		assertCaptureDenied(t, p)
+	})
+	t.Run("extra-package", func(t *testing.T) {
+		p := qualifiedInput()
+		p.Packages["synthetic-1.0-r0.apk"] = "33bc6d38714d6a65e412b87e7ef9392a27b4f2ca71f3506bd8e9eaa42d59c10d"
+		assertCaptureDenied(t, p)
+	})
+	t.Run("no-packages", func(t *testing.T) { p := qualifiedInput(); p.Packages = nil; assertCaptureDenied(t, p) })
 	t.Run("gate-off", func(t *testing.T) {
 		err, invoked, published := captureMarkers(t, qualifiedInput(), Isolation{})
 		if err == nil || invoked || published {
 			t.Errorf("BEHAVIORAL_RED: capture without isolation evidence must refuse: err=%v invoked=%v published=%v", err, invoked, published)
 		}
 	})
+}
+
+// VerifyRuntime executes every pinned tool, git from the pinned packages
+// included, and requires the pinned version in its output.
+func TestRuntimeToolsCoverPins(t *testing.T) {
+	want := map[string]string{"git": ""}
+	for name, version := range Versions {
+		want[name] = version
+	}
+	for name := range Packages {
+		if version, ok := strings.CutPrefix(name, "git-"); ok {
+			want["git"], _, _ = strings.Cut(version, "-r")
+		}
+	}
+	got := map[string]bool{}
+	for _, tool := range runtimeTools {
+		version, ok := want[tool.name]
+		if !ok || got[tool.name] || version == "" || !strings.Contains(tool.expected, version) {
+			t.Errorf("BEHAVIORAL_RED: runtime tool %s (expects %q) is not exactly one pinned tool at its pinned version %q", tool.name, tool.expected, version)
+		}
+		got[tool.name] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("BEHAVIORAL_RED: pinned tool %s is never executed by VerifyRuntime", name)
+		}
+	}
 }
 
 func assertCaptureDenied(t *testing.T, p Prepared) {

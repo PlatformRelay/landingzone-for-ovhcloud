@@ -176,6 +176,25 @@ func RuntimePrepared() (Prepared, Isolation, error) {
 	return gate.Prepared, Isolation{network: network}, nil
 }
 
+// runtimeTool is one pinned tool VerifyRuntime executes and the exact output
+// it requires.
+type runtimeTool struct {
+	name, path string
+	args       []string
+	expected   string
+}
+
+// runtimeTools covers every tool in Versions and git, from the pinned
+// Packages unpacked into the image root (TestRuntimeToolsCoverPins).
+var runtimeTools = []runtimeTool{
+	{"go", "/tools/go/bin/go", []string{"version"}, "go version go1.27.1 linux/amd64"},
+	{"tofu", "/tcb/tofu", []string{"version", "-json"}, "1.13.0"},
+	{"terramate", "/tcb/terramate", []string{"version"}, "0.17.3"},
+	{"task", "/tcb/task", []string{"--version"}, "3.53.1"},
+	{"tflint", "/tcb/tflint", []string{"--version"}, "TFLint version 0.64.0"},
+	{"git", "/usr/bin/git", []string{"--version"}, "git version 2.56.0"},
+}
+
 // VerifyRuntime admits capture before invoking the pinned tools. Publication
 // is owned by the external entry after exact observations and private cleanup.
 func VerifyRuntime() error {
@@ -184,18 +203,7 @@ func VerifyRuntime() error {
 		return err
 	}
 	return Capture(p, isolation, func() error {
-		commands := []struct {
-			name, path string
-			args       []string
-			expected   string
-		}{
-			{"go", "/tools/go/bin/go", []string{"version"}, "go version go1.27.1 linux/amd64"},
-			{"tofu", "/tcb/tofu", []string{"version", "-json"}, "1.13.0"},
-			{"terramate", "/tcb/terramate", []string{"version"}, "0.17.3"},
-			{"task", "/tcb/task", []string{"--version"}, "3.53.1"},
-			{"tflint", "/tcb/tflint", []string{"--version"}, "TFLint version 0.64.0"},
-		}
-		for _, tool := range commands {
+		for _, tool := range runtimeTools {
 			cmd := exec.Command(tool.path, tool.args...)
 			cmd.Dir = "/tmp"
 			cmd.Env = []string{"PATH=/tcb:/tools/go/bin:/usr/bin:/bin", "HOME=/home/offline", "TF_CLI_CONFIG_FILE=/run/lz/tofurc", "GOTOOLCHAIN=local", "GOENV=off", "GOWORK=off", "GOPROXY=off", "GOSUMDB=off"}

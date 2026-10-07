@@ -1,6 +1,9 @@
 package checks
 
-import "fmt"
+import (
+	"fmt"
+	"maps"
+)
 
 const Image = "cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26"
 
@@ -15,11 +18,22 @@ var Artifacts = map[string]string{
 	"tflint":    "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
 }
 
+// Packages pins the Wolfi packages unpacked into the image's root on top of
+// Image, by file name and the SHA-256 of the package file. Their provenance
+// (signed APKINDEX, control checksum, data hash) was verified when they were
+// pinned (specs/001-offline-foundation/evidence/T025.md). git's HTTP helpers
+// need libcurl, which is deliberately absent: the runtime has no network.
+var Packages = map[string]string{
+	"git-2.56.0-r0.apk":         "33bc6d38714d6a65e412b87e7ef9392a27b4f2ca71f3506bd8e9eaa42d59c10d",
+	"libpcre2-8-0-10.49-r1.apk": "c2e8dacd8fe2f1c3de9eabd274532f74fcbbd3e919301fc95453ab3af850c38c",
+}
+
 // Prepared carries the tool identities recorded when the bundle was prepared.
 type Prepared struct {
 	Versions  map[string]string
 	Artifacts map[string]string
 	Image     string
+	Packages  map[string]string
 }
 
 // Isolation is evidence that the caller runs inside the admitted sandbox. Its
@@ -27,7 +41,7 @@ type Prepared struct {
 // code outside this package cannot assert isolation.
 type Isolation struct{ network string }
 
-// AdmitPins accepts exactly the pinned tools, archives and image.
+// AdmitPins accepts exactly the pinned tools, archives, image and packages.
 func AdmitPins(p Prepared) error {
 	if len(p.Versions) != len(Versions) || len(p.Artifacts) != len(Artifacts) {
 		return fmt.Errorf("PIN_SET: exact pinned tool set required")
@@ -42,6 +56,9 @@ func AdmitPins(p Prepared) error {
 	}
 	if p.Image != Image {
 		return fmt.Errorf("PIN_IMAGE")
+	}
+	if !maps.Equal(p.Packages, Packages) {
+		return fmt.Errorf("PIN_PACKAGE: exact pinned package set required")
 	}
 	return nil
 }
