@@ -392,6 +392,23 @@ func identities(env map[string]string, endpoint string) ([]Credential, error) {
 	return out, nil
 }
 
+// reservedCompanionNames are set or owned by the run for the companion (T081): a root may not
+// publish them, in any case, or it would override the run's endpoint, state, run id, project, scratch
+// and search path. TF_DATA_DIR and TF_CLI_* fall under reservedCompanionName's TF_* rule.
+var reservedCompanionNames = []string{"OVH_ENDPOINT", "TF_VAR_state_passphrase", "TF_VAR_state_path",
+	"TF_VAR_run_id", "TF_VAR_project_id", "HOME", "TMPDIR", "PATH"}
+
+// reservedCompanionName reports whether a published name is the run's to set (T082): a listed
+// name, or any TF_* name other than TF_VAR_* (tofu's own settings, TF_LOG_PATH and future ones
+// included), in any case.
+func reservedCompanionName(k string) bool {
+	l := strings.ToLower(k)
+	if strings.HasPrefix(l, "tf_") && !strings.HasPrefix(l, "tf_var_") {
+		return true
+	}
+	return slices.ContainsFunc(reservedCompanionNames, func(r string) bool { return strings.EqualFold(k, r) })
+}
+
 // companionEnv reads the variables the stage published (under the admin credential), has
 // files.go write them to the run's probe directory, binds every published identity to the run's
 // account (P26) and makes them the companion's environment in place of the admin credential. On a
@@ -438,6 +455,13 @@ func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error)
 	cred, err := ReadCredentialFile(s.credFile)
 	if err != nil {
 		return false, err
+	}
+	// A name the run sets is refused before anything is bound or run (T082); the error names the
+	// key, never its value.
+	for _, k := range slices.Sorted(maps.Keys(cred)) {
+		if reservedCompanionName(k) {
+			return false, fmt.Errorf("output %s publishes %s, a name reserved for the run", companionOutput, k)
+		}
 	}
 	// Bound as the companion gets them: from the file.
 	ids, err := identities(cred, s.r.Creds["OVH_ENDPOINT"])

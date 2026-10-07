@@ -124,7 +124,11 @@ under the one `task live:probe` command of its row:
    `OVH_CLIENT_SECRET`, the P25 identity as `TF_VAR_p25_client_id` / `_secret`, the P1 S3 user's
    keys as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
 2. `lz-live` reads that output, writes it 0600 to
-   `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/companion.env`, binds every
+   `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/companion.env`, refuses (before
+   binding anything; the root is still destroyed) a name reserved for the run —
+   `OVH_ENDPOINT`, `TF_VAR_state_passphrase`, `TF_VAR_state_path`, `TF_VAR_run_id`,
+   `TF_VAR_project_id`, `HOME`, `TMPDIR`, `PATH` and every `TF_*` name other than `TF_VAR_*`, in
+   any case — binds every
    published identity to the account (`GET /auth/details`; an identity of another account stops
    the run with exit 3 before the companion, and the root is still destroyed), initialises the
    second writer's data directory, then plans and applies the companion with those variables in
