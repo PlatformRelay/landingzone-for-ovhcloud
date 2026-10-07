@@ -698,6 +698,8 @@ func TestLeftoversCapturedRegionRule(t *testing.T) {
 	if err := json.Unmarshal(p.files["listings/"+tRegion+".json"], &details); err != nil {
 		t.Fatal(err)
 	}
+	// The oracle knows only the two bucket services: it holds while the capture names no storage-s3
+	// service beyond the three in s3Services (an unknown one would make this test fail loudly).
 	var accepted, refused []string
 	for _, d := range details {
 		bucket := false
