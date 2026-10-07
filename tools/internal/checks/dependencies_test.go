@@ -1099,15 +1099,22 @@ func TestDependenciesNonsensitiveFixture(t *testing.T) {
 // components/state-backend call and calls nothing else (STAGE_COMPONENT_CALLS,
 // G6): a second call, a count or for_each, or another module would add
 // buckets or users no stage test can count. The first two rows are T021's
-// probes, verbatim. Test configuration, other layers and other stages'
-// component calls are outside the rules.
+// probes, verbatim. The account-governance stage likewise reaches its
+// deployers, policies and groups through exactly one, unrepeated
+// components/identity/ovh-native call (G5; coordinator decision 2026-10-07 on
+// T023's decision request 2): a second call would plan deployers and policies
+// outside every stage test. Its first row is T023's probe, verbatim. Test
+// configuration, other layers and other stages' component calls are outside
+// the rules.
 func TestDependenciesStageComposition(t *testing.T) {
 	const ts = "stages/tenant-state"
+	const ag = "stages/account-governance"
 	base := map[string]string{
-		"components/state-backend/main.tf":       `variable "x" {}`,
-		"components/state-backend/sub/main.tf":   `variable "x" {}`,
-		"components/identity/ovh-native/main.tf": `variable "x" {}`,
-		"modules/naming/main.tf":                 `variable "x" {}`,
+		"components/state-backend/main.tf":           `variable "x" {}`,
+		"components/state-backend/sub/main.tf":       `variable "x" {}`,
+		"components/identity/ovh-native/main.tf":     `variable "x" {}`,
+		"components/identity/ovh-native/sub/main.tf": `variable "x" {}`,
+		"modules/naming/main.tf":                     `variable "x" {}`,
 	}
 	call := func(name, source, extra string) string {
 		return "module \"" + name + "\" {\n  source = \"" + source + "\"\n" + extra + "}\n"
@@ -1115,6 +1122,8 @@ func TestDependenciesStageComposition(t *testing.T) {
 	one := call("state_backend", "../../components/state-backend", "")
 	probeSecondCall := "module \"second\" {\n  source     = \"../../components/state-backend\"\n  project_id = \"x\"\n  region     = \"GRA\"\n  org        = \"lz\"\n  instance   = \"x\"\n  managed_in = \"x\"\n  s3_users   = []\n}\n"
 	probeBucket := "resource \"ovh_cloud_project_storage\" \"extra\" {\n  service_name = \"x\"\n  region_name  = \"GRA\"\n  name         = \"lz-bkt-state\"\n}\n"
+	identity := call("identity", "../../components/identity/ovh-native", "")
+	probeSecondIdentity := "module \"second\" {\n  source     = \"../../components/identity/ovh-native\"\n  org        = \"lz\"\n  instance   = \"x\"\n  managed_in = \"x\"\n  tenants    = {}\n}\n"
 	for name, c := range map[string]struct {
 		files   map[string]string
 		subject string
@@ -1139,6 +1148,18 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"two stage subdirectories each calling it":     {map[string]string{ts + "/main.tf": call("a", "./a", "") + call("b", "./b", ""), ts + "/a/main.tf": call("s", "../../../components/state-backend", ""), ts + "/b/main.tf": call("s", "../../../components/state-backend", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
 		"only call by repository address":              {map[string]string{ts + "/main.tf": call("state_backend", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/state-backend?ref=v0.0.1", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
 		"call to an external module":                   {map[string]string{ts + "/main.tf": one + call("x", "ovh/bucket/ovh", "")}, ts, []string{"STAGE_COMPONENT_CALLS"}},
+		// account-governance: one identity component instance (G5)
+		"probe: second identity component call":          {map[string]string{ag + "/main.tf": identity, ag + "/extra.tf": probeSecondIdentity}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity call with for_each":                    {map[string]string{ag + "/main.tf": call("identity", "../../components/identity/ovh-native", "  for_each = toset([\"a\"])\n")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity call with count":                       {map[string]string{ag + "/main.tf": call("identity", "../../components/identity/ovh-native", "  count = 1\n")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity stage calls the state backend too":     {map[string]string{ag + "/main.tf": identity + one}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity stage calls only the state backend":    {map[string]string{ag + "/main.tf": one}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"only call to an identity subdirectory":          {map[string]string{ag + "/main.tf": call("identity", "../../components/identity/ovh-native/sub", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"second identity call from a stage subdirectory": {map[string]string{ag + "/main.tf": identity + call("s", "./sub", ""), ag + "/sub/main.tf": call("again", "../../../components/identity/ovh-native", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity call by repository address":            {map[string]string{ag + "/main.tf": call("identity", "github.com/PlatformRelay/landingzone-for-ovhcloud//components/identity/ovh-native?ref=v0.0.1", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity stage calls an external module":        {map[string]string{ag + "/main.tf": identity + call("x", "ovh/iam/ovh", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"identity stage subdirectory called twice":       {map[string]string{ag + "/main.tf": call("a", "./sub", "") + call("b", "./sub", ""), ag + "/sub/main.tf": call("identity", "../../../components/identity/ovh-native", "")}, ag, []string{"STAGE_COMPONENT_CALLS"}},
+		"resource in the identity stage":                 {map[string]string{ag + "/main.tf": identity + probeBucket}, ag, []string{"STAGE_RESOURCE"}},
 		// allowed
 		"one component call":                        {map[string]string{ts + "/main.tf": one}, "", nil},
 		"one component call through a subdirectory": {map[string]string{ts + "/main.tf": call("s", "./sub", ""), ts + "/sub/main.tf": call("state_backend", "../../../components/state-backend", "")}, "", nil},
@@ -1148,6 +1169,11 @@ func TestDependenciesStageComposition(t *testing.T) {
 		"test run calling the component again":      {map[string]string{ts + "/main.tf": one, ts + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/state-backend\"\n  }\n}\n"}, "", nil},
 		"resource in a component":                   {map[string]string{ts + "/main.tf": one, "components/identity/ovh-native/main.tf": probeBucket}, "", nil},
 		"other stage calls a component twice":       {map[string]string{"stages/platform/main.tf": call("a", "../../components/state-backend", "") + call("b", "../../components/state-backend", "")}, "", nil},
+		"one identity component call":               {map[string]string{ag + "/main.tf": identity}, "", nil},
+		"one identity call through a subdirectory":  {map[string]string{ag + "/main.tf": call("s", "./sub", ""), ag + "/sub/main.tf": call("identity", "../../../components/identity/ovh-native", "")}, "", nil},
+		"override file merging the identity call":   {map[string]string{ag + "/main.tf": identity, ag + "/main_override.tf": call("identity", "../../components/identity/ovh-native", "")}, "", nil},
+		"both stages, one call each":                {map[string]string{ts + "/main.tf": one, ag + "/main.tf": identity}, "", nil},
+		"test run calling the identity component":   {map[string]string{ag + "/main.tf": identity, ag + "/tests/unit.tftest.hcl": "run \"r\" {\n  module {\n    source = \"../../components/identity/ovh-native\"\n  }\n}\n"}, "", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := maps.Clone(base)

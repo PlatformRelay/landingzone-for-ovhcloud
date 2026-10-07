@@ -83,6 +83,13 @@ run "outputs" {
     condition     = output.name == ovh_me_identity_group.this.name && output.name == "lz-demo-grp-members"
     error_message = "the name output is the group's name"
   }
+
+  # T024 (T023 decision request 1): the identity component publishes the group's role from this
+  # output, so it carries the resource's role.
+  assert {
+    condition     = output.role == ovh_me_identity_group.this.role && output.role == "NONE"
+    error_message = "the role output is the group's role"
+  }
 }
 
 run "unknown_role_rejected" {

@@ -33,6 +33,7 @@ caller (T023).
 |---|---|
 | `urn` | URN of the group, `urn:v1:eu:identity:group:<nic>/<name>` (docs.ovhcloud.com `account-information/iam-policies-api`). |
 | `name` | Name of the group. |
+| `role` | The group's role as the resource carries it. |
 
 ## Resources
 

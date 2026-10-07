@@ -126,7 +126,10 @@ provider's destroy needs `object/delete` or `object/version/delete` on a runtime
 UNVERIFIED (P14, T010); it is added only on evidence. The OVH IAM resource for these actions is the
 project URN, so no allowlist can exclude the state buckets in a shared project: that is KD-1 (R20).
 Group: `ovh_me_identity_group` for future human tenant members, bound by a read-only policy;
-service-account membership in groups is not relied on.
+service-account membership in groups is not relied on. In this slice the group has role `NONE`, no
+members and no policy (coordinator decision 2026-10-07 on T023's decision request 4): with no
+member there is nothing to grant, and each tenant keeps exactly one policy, its deployer's. The
+read-only group policy comes with the first human member.
 **Child environment**: `lz-live` starts every `tofu` and `ovhcloud` child with an environment built
 from scratch — `PATH`, `HOME`, `TF_*` it sets itself, and the selected authority's variables — so a
 `.envrc` that exports the admin credential into the shell cannot leak into a tenant stack.
