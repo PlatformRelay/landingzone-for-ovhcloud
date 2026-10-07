@@ -43,7 +43,7 @@ No golangci/arch-lint config exists; `go vet`/`gofmt` are the only Go linters av
 | T021 (and T022 behind it) | needs an exclusive self-hosted runner with fixed CPU/memory — external |
 
 ## Lessons
-- Run every Task target through the installed entry: `~/.local/share/ovh-lz/003-runtime-r3-e2/lz-offline --candidate <absolute worktree> -- task <target>`; redirect output to a file under the job tmp dir (/tmp tmpfs quota fills; Bash output can be lost).
+- Run every Task target through the installed entry: `~/.local/share/ovh-lz/003-runtime-r4/lz-offline --candidate <absolute worktree> -- task <target>`; redirect output to a file under the job tmp dir (/tmp tmpfs quota fills; Bash output can be lost).
 - If the entry/runtime must change, rebuild per `evidence/T003.md` and the memory note: `go -C tools build -trimpath -ldflags '-X main.manifestSHA=<sha>' -o <runtime>/lz-offline ./cmd/lz-offline`; never edit the published r3-e2 bundle in place.
 - D62: a passing result needs mutation evidence (neutralise the guard → suite red). Runners: `~/.local/share/ovh-lz/review/mutate.py` (host) and `mutate-entry.py` (through the entry).
 - Keep helper scripts and review briefs in `~/.local/share/ovh-lz/review/` (session scratch dirs vanish); write them with the Write tool, not heredocs (the worktree guard refuses heredocs mentioning git).

@@ -105,7 +105,7 @@ See `~/.local/share/ovh-lz/review/loop-005/reviews/R-spec-set/triage.md`. Coordi
 | T049 | `task live:chain -- all` |
 
 ## Lessons
-- Run Task targets through the entry: `~/.local/share/ovh-lz/003-runtime-r3-e2/lz-offline --candidate <absolute worktree> -- task <target>`; `check:specs` takes no args and traces spec 001 until T002 lands. Host-side targets (`stacks:*`, `generate:*`) run directly.
+- Run Task targets through the entry: `~/.local/share/ovh-lz/003-runtime-r4/lz-offline --candidate <absolute worktree> -- task <target>`; `check:specs` takes no args and traces spec 001 until T002 lands. Host-side targets (`stacks:*`, `generate:*`) run directly.
 - The worktree guard refuses compound commands, `$(…)`, heredocs mentioning git, paths containing `github`, and `-run 'A|B'` regexes: put them in a script under `~/.local/share/ovh-lz/review/` written with the Write tool (Read the file first if it exists).
 - Red controls must show failed assertions (`--- FAIL:`), not just a non-zero exit (T023).
 - Owner/SUPERSEDED markers only count in the task TITLE line; never strike through task ids.
