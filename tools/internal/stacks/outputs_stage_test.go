@@ -275,6 +275,37 @@ func publishedEnvelope(t testing.TB, exp Expectation, doc []byte, secrets, want 
 	}
 }
 
+// planOutputContract pins the plan's own root outputs (005 T086, FR-005): their names are exactly
+// the stage schema's published values and the stage's credential outputs (data-model *Sensitive
+// outputs*); the credentials are planned sensitive and every other output is not, whatever its type.
+// BuildEnvelope drops a sensitive output before the schema sees it and the secrets scan reads only
+// string leaves, so neither catches a sensitive number, list, object or nested marker.
+func planOutputContract(t testing.TB, msg testPlan, stage string, credentials ...string) {
+	t.Helper()
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	raw, err := fs.ReadFile(schemas(), stage+".schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Sorted(slices.Values(append(slices.Collect(maps.Keys(schema.Properties)), credentials...)))
+	if names := slices.Sorted(maps.Keys(msg.Plan.Outputs)); !reflect.DeepEqual(names, want) {
+		t.Errorf("root outputs %v, want exactly %v", names, want)
+	}
+	for name, o := range msg.Plan.Outputs {
+		switch {
+		case slices.Contains(credentials, name) && string(o.AfterSensitive) != "true":
+			t.Errorf("credential output %s is not planned sensitive (%s)", name, o.AfterSensitive)
+		case !slices.Contains(credentials, name) && string(o.AfterSensitive) != "false":
+			t.Errorf("output %s is planned sensitive (%s); only the credential outputs may be", name, o.AfterSensitive)
+		}
+	}
+}
+
 // stagePlanPins is each capture case's pin over its plan; TestOutputsStagePlanPinsRefuse
 // (outputs_test.go, T085) runs them on mutated copies of the captured plans.
 var stagePlanPins = map[string]func(testing.TB, []byte){
@@ -291,7 +322,9 @@ func TestOutputsTenantStateStagePlan(t *testing.T) {
 
 func pinTenantStatePlan(t testing.TB, data []byte) {
 	t.Helper()
-	doc, secrets := planOutputs(t, decodePlan(t, data, "published_outputs_match_the_schema"), "tenant_s3", "platform_s3")
+	msg := decodePlan(t, data, "published_outputs_match_the_schema")
+	planOutputContract(t, msg, "tenant-state", "tenant_s3", "platform_s3")
+	doc, secrets := planOutputs(t, msg, "tenant_s3", "platform_s3")
 	// The two credentials, two fields each: the control that the secrets scan below can fail.
 	if len(secrets) != 4 {
 		t.Fatalf("want the four credential strings of tenant_s3 and platform_s3, got %d", len(secrets))
@@ -358,6 +391,7 @@ func TestOutputsAccountGovernanceStagePlan(t *testing.T) {
 func pinAccountGovernancePlan(t testing.TB, data []byte) {
 	t.Helper()
 	msg := decodePlan(t, data, "published_outputs_match_the_schema")
+	planOutputContract(t, msg, "account-governance", "platform_deployer_secret", "tenant_deployer_secrets")
 	doc, secrets := planOutputs(t, msg, "platform_deployer_secret", "tenant_deployer_secrets")
 	// The platform secret and one per tenant: the control that the secrets scan can fail.
 	if len(secrets) != 3 {
@@ -573,6 +607,7 @@ func pinProjectPlan(t testing.TB, c string, data []byte) {
 	}
 	_, run := planCase(c)
 	msg := decodePlan(t, data, run)
+	planOutputContract(t, msg, "project")
 	doc, secrets := planOutputs(t, msg)
 	if len(secrets) != 0 {
 		t.Errorf("the project stage publishes every output; %d sensitive strings found", len(secrets))
@@ -659,24 +694,14 @@ func pinProjectNetworkPlan(t testing.TB, data []byte) {
 	}
 	publishedEnvelope(t, Expectation{InstanceID: "demo-dev-project", Stage: "project", Project: binding}, projectDoc, nil, slices.Sorted(maps.Keys(entries)))
 
+	// The plan's own root outputs are exactly the five published, none sensitive (T030 review r1).
+	planOutputContract(t, msg, "project-network")
 	doc, secrets := planOutputs(t, msg)
 	if len(secrets) != 0 {
 		t.Errorf("the project-network stage publishes every output; %d sensitive strings found", len(secrets))
 	}
 	publishedEnvelope(t, Expectation{InstanceID: "demo-dev-gra11-network", Stage: "project-network", Project: binding}, doc, secrets,
 		[]string{"cidr", "network_id", "regions_openstack_ids", "subnet_id", "unlabelled"})
-	// The builder drops sensitive outputs before the schema sees them, and the secrets scan reads
-	// only string leaves: the plan's own root outputs are exactly the five, none marked sensitive
-	// (review r1).
-	published := []string{"cidr", "network_id", "regions_openstack_ids", "subnet_id", "unlabelled"}
-	if names := slices.Sorted(maps.Keys(msg.Plan.Outputs)); !reflect.DeepEqual(names, published) {
-		t.Errorf("root outputs %v, want exactly %v", names, published)
-	}
-	for name, o := range msg.Plan.Outputs {
-		if string(o.AfterSensitive) != "false" {
-			t.Errorf("output %s is marked sensitive (%s); the stage publishes every output", name, o.AfterSensitive)
-		}
-	}
 
 	// Exactly one network and one subnet, at the module's unkeyed addresses; nothing else, managed
 	// or read.

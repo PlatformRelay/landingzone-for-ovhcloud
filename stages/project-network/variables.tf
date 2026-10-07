@@ -58,7 +58,17 @@ variable "network" {
   nullable = false
 
   validation {
-    condition     = can(cidrnetmask(var.network.cidr)) && try(cidrsubnet(var.network.cidr, 0, 0) == var.network.cidr, false) && try(tonumber(split("/", var.network.cidr)[1]) <= 29, false)
-    error_message = "network.cidr must be an IPv4 network in CIDR form without host bits, /29 or larger."
+    condition     = can(cidrnetmask(var.network.cidr)) && try(cidrsubnet(var.network.cidr, 0, 0) == var.network.cidr, false)
+    error_message = "network.cidr must be an IPv4 network in CIDR form without host bits."
+  }
+
+  validation {
+    condition     = try(tonumber(split("/", var.network.cidr)[1]) >= 16 && tonumber(split("/", var.network.cidr)[1]) <= 29, false)
+    error_message = "network.cidr must have a prefix length from /16 to /29."
+  }
+
+  validation {
+    condition     = try(anytrue([for b in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] : cidrcontains(b, var.network.cidr)]), false)
+    error_message = "network.cidr must lie inside one RFC 1918 block (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)."
   }
 }
