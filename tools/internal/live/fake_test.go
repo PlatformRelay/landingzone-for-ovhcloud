@@ -39,6 +39,9 @@ func TestMain(m *testing.M) {
 	switch {
 	case filepath.Base(os.Args[0]) == "git":
 		os.Exit(fakeGit(os.Args[1:]))
+	case bssFakeWorld() != "":
+		// The fake tofu of the bootstrap state phases (bootstrap_state_test.go, T056).
+		os.Exit(fakeBootstrapTofu(bssFakeWorld(), os.Args[1:]))
 	case filepath.Base(os.Args[0]) == "tofu":
 		os.Exit(fakeTofu(os.Args[1:]))
 	case filepath.Base(os.Args[0]) == "ovhcloud":

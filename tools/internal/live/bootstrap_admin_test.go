@@ -135,6 +135,9 @@ type bootstrapAPI struct {
 	onAdmin  func(account string) // called before every admin client or policy request
 	pageSize int                  // > 0: GET /v2/iam/policy answers pages of this size (T043)
 	next     string               // the X-Pagination-Cursor-Next of the answer being written
+	// routes answers further authenticated routes (T056: storage reads); client is nil for a
+	// root-key request; ok false passes on.
+	routes func(acct *bsAccount, client *bsClient, may func(action string) bool, method, path string) (status int, body []byte, ok bool)
 }
 
 func newBootstrapAPI(t *testing.T) *bootstrapAPI {
@@ -309,6 +312,11 @@ func (f *bootstrapAPI) serve(r *http.Request, body []byte, c *bsCall) (int, []by
 	forbidden := func() (int, []byte) { return http.StatusForbidden, f.errBody("not allowed") }
 	notFound := func() (int, []byte) { return http.StatusNotFound, f.errBody("not found") }
 	path, method := r.URL.Path, r.Method
+	if f.routes != nil {
+		if s, b, ok := f.routes(acct, client, may, method, path); ok {
+			return s, b
+		}
+	}
 	switch {
 	case method == http.MethodGet && path == "/v1/auth/details":
 		m := "oauth2_client_credentials"
