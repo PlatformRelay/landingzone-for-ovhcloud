@@ -1,0 +1,28 @@
+AWS Signature Version 4 test vectors for the S3 object store (tools/internal/live/objectstore.go,
+TestS3SigV4Vectors). Fetched once on 2026-10-08; the tests read only these files, never the network.
+
+aws4_testsuite/
+  The published AWS SigV4 test suite as botocore vendors it, copied byte for byte from
+  boto/botocore commit bfb412faf00c249a54816e287a09a8bb79442c65,
+  tests/unit/auth/aws4_testsuite/<name>/<name>.{req,creq,sts,authz} (Apache License 2.0).
+  Signing inputs, from that commit's tests/unit/auth/test_sigv4.py: access key AKIDEXAMPLE, secret
+  wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY, region us-east-1, service "service", time
+  2015-08-30T12:36:00Z.
+  Kept: the GET vectors without path normalisation (S3 does not normalise paths) and without a
+  session token. Left out: post-*, normalize-path/*, post-sts-token/*, get-space and the other
+  non-GET vectors; nothing here signs a POST, a token or a dot-segment path.
+
+s3-examples/
+  The four worked examples of Amazon S3 API Reference, "Signature Calculations for the
+  Authorization Header: Transferring Payload in a Single Chunk (AWS Signature Version 4)"
+  (sig-v4-header-based-auth.html; read from the docs.aws.eu mirror,
+  /AmazonS3/latest/developerguide/sig-v4-header-based-auth.html, on 2026-10-08), transcribed into
+  the suite's file layout: Example: GET Object, PUT Object, GET Bucket Lifecycle, Get Bucket (List
+  Objects). Signing inputs from the same page: access key AKIAIOSFODNN7EXAMPLE, secret
+  wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY, region us-east-1, service s3, time 2013-05-24T00:00:00Z.
+  Transcription choices: header lines written as `Name:value` without the page's trailing spaces
+  (canonicalisation trims them anyway); the PUT example's request line `PUT test$file.text` is
+  written `PUT /test$file.text` (the canonical request on the same page has `/test%24file.text`);
+  its body is the page's "Welcome to Amazon S3." whose SHA-256 is the page's x-amz-content-sha256;
+  the bucket-level examples' `GET ?lifecycle` / `GET ?max-keys=2&prefix=J` are written with the
+  path `/`; the Authorization values keep the page's `,` separators (the suite uses `, `).

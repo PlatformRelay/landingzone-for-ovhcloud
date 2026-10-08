@@ -172,9 +172,9 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam/companion
 
-  # The account bootstrap's offline controls (T043; T057 extends): the phases
+  # The account bootstrap's offline controls (T043; T057, T089 extend): the phases
   # guard, identify, passphrase, admin and revoke against a fake OVHcloud API and
-  # a fake terminal, the lz-live bootstrap entry, and the no-echo prompt on a
+  # a fake terminal, the S3 store against a fake S3 endpoint, the lz-live bootstrap entry, and the no-echo prompt on a
   # pseudo-terminal. No credential, no API call.
   test:bootstrap:
     desc: Account bootstrap phases and lz-live bootstrap against a fake API and fake terminal (005 V008)
@@ -186,7 +186,7 @@ tasks:
   # prompts for the account root's keys, and calls the OVHcloud API), e.g.
   #   task bootstrap:account -- --reviewed-sha <sha> [--fresh-account]
   bootstrap:account:
-    desc: Bootstrap or re-check the bound account (identify, passphrase, admin; revoke under --fresh-account) (host, owner; 005 R13)
+    desc: Bootstrap or re-check the bound account (identify, passphrase, admin, state, publish, verify; revoke under --fresh-account) (host, owner; 005 R13)
     interactive: true
     cmds:
       - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live

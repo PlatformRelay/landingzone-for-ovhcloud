@@ -11,8 +11,8 @@
 // 3 naming the failed condition; usage errors exit 2; any other failure exits 1.
 //
 // `probe` runs one probe root through the run core (probe.go, T055); `bootstrap` runs the
-// bootstrap phases guard, identify, passphrase, admin and revoke (bootstrap.go, T043; state,
-// publish and verify arrive with T056/T057). The other verb bodies arrive with plan and apply
+// bootstrap phases guard, identify, passphrase, admin, state, publish, verify and revoke
+// (bootstrap.go; T043, T057, T089; every bootstrap run needs tofu on PATH). The other verb bodies arrive with plan and apply
 // (T059) and destroy and chain (T047); until then an admitted run stops with exit 1 before
 // reading any credential. A blocked bootstrap phase exits 2.
 package main
@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -53,6 +54,13 @@ type deps struct {
 	// Terminal opens the operator's terminal (bootstrap --fresh-account only); production reads
 	// /dev/tty, tests inject a fake.
 	Terminal func(ctx context.Context) (live.Terminal, error)
+	// Bootstrap runs the bootstrap phases; nil is live.Bootstrap (tests capture the options).
+	Bootstrap func(context.Context, live.BootstrapOptions) ([]live.PhaseResult, error)
+	// State turns the state phases' options into Bootstrap's Rest; nil is
+	// live.NewBootstrapState(o).Rest (tests capture the options the entry built).
+	State func(live.StateOptions) func(context.Context, live.BootstrapAccount) error
+	// S3HTTP is the account bucket's S3 client; nil is the store's default (tests dial a fake).
+	S3HTTP *http.Client
 }
 
 // parse reads the verb's flags and positional arguments in any order. Only probe and bootstrap
@@ -129,7 +137,7 @@ func run(args []string, d deps) int {
 				// --fresh-account is still revoked (research R13).
 				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
-				return bootstrap(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), fresh)
+				return bootstrap(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), reviewed, fresh)
 			}
 			return errors.New("lz-live " + verb + ": not implemented yet")
 		})

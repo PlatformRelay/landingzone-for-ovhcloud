@@ -758,6 +758,9 @@ type bssHarness struct {
 	callsFrom int             // fake tofu calls before the current run
 	evFrom    int             // cloud events before the current run
 	stores    []string        // access key of every store opened
+	// storeFor, when set, opens the account bucket instead of bssStore (T089: the S3 store against
+	// a fake S3 endpoint).
+	storeFor func(keys map[string]string) (ObjectStore, error)
 }
 
 // newBSSHarness is T042's harness with the fake tofu, the fake cloud and the checkout's generated
@@ -1052,6 +1055,9 @@ func (h *bssHarness) stateOptions() StateOptions {
 			h.mu.Lock()
 			h.stores = append(h.stores, keys["AWS_ACCESS_KEY_ID"])
 			h.mu.Unlock()
+			if h.storeFor != nil {
+				return h.storeFor(keys)
+			}
 			return bssStore{h: h, ak: keys["AWS_ACCESS_KEY_ID"], sk: keys["AWS_SECRET_ACCESS_KEY"]}, nil
 		},
 		Stdout: h.stdout,
