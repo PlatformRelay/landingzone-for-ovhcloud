@@ -500,6 +500,11 @@ Independent test: V007 offline; V010 owner session.
   - Verify: exempt — docs-only; content review against the implemented commands, the owner-only boundary, KD-1 and the postponed list.
   - Evidence: `evidence/T050.md`; PR; docs content review only.
 
+- [ ] T092 Add the docs header and anti-rot check of ADR-0013 to every page under docs/ with a `docs:check` Task target in tools/cmd/lz-check/, test first in tools/cmd/lz-check/docs_test.go
+  - Requirements: FR-011, FR-012; ADRs: 0013. Depends on: T050.
+  - Verify: `go -C tools test ./cmd/lz-check -run TestDocs -count=1` through the entry; this task registers `docs:check` in harness/checks.yaml and Taskfile.yml: every page under `docs/` (ADRs excepted, they are history) carries the ADR-0013 front matter (`references:` as repository path + git blob id, informational `last_verified:` commit); a page whose referenced file changed since its recorded blob id is reported stale; relative links and anchors resolve; every `task <target>` named in a page exists in Taskfile.yml; no 32-hex id appears; negative controls for each rule; `docs:check` joins the CI targets once this task is ticked. Rationale (coordinator 2026-10-08): ADR-0013 was accepted but never built, and T050 found its how-to had no header and no check.
+  - Evidence: `evidence/T092.md`; PR; initial status `not-run`.
+
 - [ ] T051 Run the slice exit checks V001–V012 through harness/checks.yaml
   - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, FR-011, FR-012, FR-013, FR-014, SC-001, SC-002, SC-003, SC-004, SC-005; ADRs: 0002, 0003, 0004, 0007, 0008, 0009, 0018. Depends on: T049, T050; T045 result (pass or `blocked`).
   - Verify: `task check:specs` and every other offline V-command green with discovery counts; V009/V010 PR records present; V009's fresh-account part may be `blocked` (then SC-004 is partial and the spec cannot be `done`); V010 carries KD-1 as a recorded known deviation, the exit record lists KD-3 (platform `project` state in the tenant bucket) and states that tenant state isolation is not demonstrated.
