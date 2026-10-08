@@ -152,6 +152,9 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"], "review": true},
     {"id": "live:chain", "requirements": ["005/FR-004", "005/FR-008", "005/FR-009", "005/FR-010", "005/FR-011", "005/SC-003"], "command": "task live:chain -- all", "creator": "005/T049", "kind": "behavioral",
      "scope": ["stacks", "tools/internal/live", "tools/cmd/lz-live", "tools/internal/probes/live"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"], "review": true}
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"], "review": true},
+    {"id": "docs:check", "requirements": ["005/FR-011", "005/FR-012"], "command": "task docs:check", "creator": "005/T092", "kind": "behavioral",
+     "scope": ["docs"],
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/cmd/lz-check"]}
   ]
 }

@@ -1,3 +1,8 @@
+---
+references: []
+last_verified: 98be1b345898be83963be8c87c64e1427d2425ff
+---
+
 # OVHcloud public-cloud-examples: reuse and value map
 
 Static inspection on 2026-10-01 of `ovh/public-cloud-examples` at

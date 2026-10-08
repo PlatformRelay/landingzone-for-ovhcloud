@@ -1,9 +1,14 @@
+---
+references: []
+last_verified: 03c784a8bf8014f71ba0abc0c5d8006c18fbafcf
+---
+
 # Start the first implementation
 
 This is a guide to implementing the draft planning set, not deployment approval.
 No product acceptance command exists until its creating task lands. Read the
 [phase gates](../../specs/README.md), the relevant spec/plan/tasks/contracts and
-[constitution](../../.specify/memory/constitution.md) before selecting work.
+constitution (`.specify/memory/constitution.md`) before selecting work.
 
 ## Select a bounded entry point
 

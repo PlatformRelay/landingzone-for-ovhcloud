@@ -1,3 +1,8 @@
+---
+references: []
+last_verified: 558c76ab6af6a4b025d1f7c1834917721d524cfb
+---
+
 # Product direction: a useful reference baseline
 
 Status: approved direction; architecture decisions remain Proposed and capabilities remain planned.
@@ -51,7 +56,7 @@ helper is explicitly in scope; no extra portal, daemon or general management CLI
 Every non-docs requirement/task has a predefined check with valid and rejection cases and an
 evidence destination. Tool fixtures come from pinned tools; checks that discover nothing cannot
 pass. Experiments can start with an explicitly unverified mechanism; supported claims need the
-appropriate observed proof. The [constitution](../../.specify/memory/constitution.md) defines this
+appropriate observed proof. The constitution (`.specify/memory/constitution.md`) defines this
 contract, including the docs-only exemption. Writing this direction does not execute its future checks.
 
 Challenge proposals with reasons and credible alternatives. A suggestion is not an order unless

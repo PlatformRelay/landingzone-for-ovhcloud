@@ -263,6 +263,12 @@ tasks:
     cmds:
       - go -C tools run ./cmd/lz-check -root .. dod {{.CLI_ARGS}}
 
+  docs:check:
+    desc: 'ADR-0013 docs rules on their controls, then every page under docs/: header and stale references, links and anchors, task targets, no 32-hex ids (005 FR-011, FR-012)'
+    cmds:
+      - go -C tools test -count=1 -run 'TestDocs' ./cmd/lz-check
+      - go -C tools run ./cmd/lz-check -root .. docs
+
   # One target per report fixture case; tests/fixtures/tofu/capture.sh records
   # their stdout. Each prints exactly the pinned `tofu test -json` stream.
   capture:tofu-pass:

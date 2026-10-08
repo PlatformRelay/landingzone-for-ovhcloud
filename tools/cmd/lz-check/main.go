@@ -12,6 +12,7 @@
 //	lz-check [-root <repo>] ci-source <spec-dir>...
 //	lz-check [-root <repo>] ci-runs
 //	lz-check ci-observe (<role> <candidate> <capture-dir>)...
+//	lz-check [-root <repo>] docs
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
@@ -27,7 +28,8 @@
 // finding. ci-runs judges the recorded GitHub runs in
 // pipelines/github/foundation-runs.json against that source and exits 1 on
 // any finding or an absent record; ci-observe prints that record from
-// captured GitHub output. Usage and input errors exit 2.
+// captured GitHub output. docs judges every Markdown page under docs/ by the
+// rules of ADR-0013 and exits 1 on any finding. Usage and input errors exit 2.
 package main
 
 import (
@@ -80,6 +82,8 @@ func run(args []string, out io.Writer) int {
 		return selectChanged(out, *root, flags.Arg(1))
 	case flags.NArg() == 1 && flags.Arg(0) == "ci-workflow":
 		return ciWorkflow(out, *root)
+	case flags.NArg() == 1 && flags.Arg(0) == "docs":
+		return docs(out, *root)
 	case flags.NArg() == 1 && flags.Arg(0) == "ci-runs":
 		return ciRuns(out, *root)
 	case flags.NArg() > 1 && (flags.NArg()-1)%3 == 0 && flags.Arg(0) == "ci-observe":
@@ -87,7 +91,7 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() >= 2 && flags.Arg(0) == "ci-source":
 		// One or more spec dirs; judged with the registry below.
 	case flags.NArg() != 2 || flags.Arg(0) == "deps":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)...")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs")
 		return 2
 	}
 	registry, err := loadRegistry(*root)

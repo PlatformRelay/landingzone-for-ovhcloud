@@ -1,3 +1,26 @@
+---
+references:
+  - path: tools/cmd/lz-live/main.go
+    blob: 0860b1daf0dc6ebcc1c98a0d575534fea7ee901a
+  - path: tools/cmd/lz-live/lane.go
+    blob: ae27bc8fa62bac408849ebe20559f77d71a5605d
+  - path: tools/internal/live/apply.go
+    blob: c658bea8402ce8b9259db0f2f71e6fcee81c9ba0
+  - path: tools/internal/live/bootstrap.go
+    blob: 7819586182b0b57b2fecc2af6aa96edc2305f46e
+  - path: tools/internal/live/chain.go
+    blob: aa54c58f0e04e8bb9d23c2ed7ed91b3c33f63a91
+  - path: tools/internal/live/observe.go
+    blob: 8aa5fd34a16cecafed7b4c3a0f6047a025158b55
+  - path: stacks/deployments.yaml
+    blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
+  - path: mise.toml
+    blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
+  - path: tests/live/probes/README.md
+    blob: 01807dbfce2ac559d2573c4735cccec0cea9bf4d
+last_verified: 4817d011585ccad9d42c42eac27470a910148111
+---
+
 # Run the first slice on an OVHcloud account
 
 This guide is for the maintainer who runs the first landing-zone slice

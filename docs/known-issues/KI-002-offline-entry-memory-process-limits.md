@@ -13,6 +13,10 @@ verified:
 issue:
 source: independent review of the T003 offline entry, 2026-10-04
 decision:
+references:
+  - path: tools/cmd/lz-offline/main.go
+    blob: 141914f1e30740e4aa51950819f99bc77f10816f
+last_verified: 3a1f06584f6a987bfd13d6a4de1168cf59b5f4fe
 ---
 
 ## What is true

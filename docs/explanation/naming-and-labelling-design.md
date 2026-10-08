@@ -1,3 +1,8 @@
+---
+references: []
+last_verified: e22fa16282e106e73bf9c4dd00f230aff9287fa1
+---
+
 # Naming and labelling: interface exploration and behavioral contract
 
 Status: **per-resource pure helper with shared context selected** on 2026-10-01.
