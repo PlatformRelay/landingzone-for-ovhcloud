@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 )
@@ -32,6 +33,7 @@ type bootstrapWorld struct {
 	boot      func(context.Context, live.BootstrapOptions) ([]live.PhaseResult, error)   // nil: live.Bootstrap
 	s3        *http.Client                                                               // the S3 store's client
 	state     func(live.StateOptions) func(context.Context, live.BootstrapAccount) error // nil: live.NewBootstrapState
+	apply     func(context.Context, live.ApplyOptions) error                             // nil: live.Apply (T059)
 }
 
 func newBootstrapWorld(t *testing.T) *bootstrapWorld {
@@ -73,6 +75,8 @@ func (w *bootstrapWorld) run(args ...string) (int, string) {
 		},
 		Bootstrap: w.boot,
 		State:     w.state,
+		Apply:     w.apply,
+		Now:       time.Now,
 		S3HTTP:    w.s3,
 		API: func(endpoint string) (live.API, error) {
 			if endpoint != "ovh-eu" {

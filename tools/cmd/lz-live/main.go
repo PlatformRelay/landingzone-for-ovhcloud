@@ -1,6 +1,7 @@
 // lz-live runs the live lane on the maintainer host (spec 005 FR-010, FR-011, research R11).
 //
-//	lz-live <plan|apply|destroy|chain> --reviewed-sha <sha> [args...]
+//	lz-live <plan|apply> --reviewed-sha <sha> <instance|all>
+//	lz-live <destroy|chain> --reviewed-sha <sha> [args...]
 //	lz-live bootstrap --reviewed-sha <sha> [--fresh-account]
 //	lz-live probe --reviewed-sha <sha> <probe-root> [--plan-only] [--deadline <dur>]
 //	lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--deadline <dur>]
@@ -12,9 +13,10 @@
 //
 // `probe` runs one probe root through the run core (probe.go, T055); `bootstrap` runs the
 // bootstrap phases guard, identify, passphrase, admin, state, publish, verify and revoke
-// (bootstrap.go; T043, T057, T089; every bootstrap run needs tofu on PATH). The other verb bodies arrive with plan and apply
-// (T059) and destroy and chain (T047); until then an admitted run stops with exit 1 before
-// reading any credential. A blocked bootstrap phase exits 2.
+// (bootstrap.go; T043, T057, T089; every bootstrap run needs tofu on PATH); `plan` and `apply`
+// run the selected stacks through live.Apply (lane.go, T059). The destroy and chain bodies arrive
+// with T047; until then an admitted run stops with exit 1 before reading any credential. A blocked
+// bootstrap phase or lane stack exits 2.
 package main
 
 import (
@@ -34,7 +36,8 @@ import (
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 )
 
-const usage = `usage: lz-live <plan|apply|destroy|chain> --reviewed-sha <sha> [args...]
+const usage = `usage: lz-live <plan|apply> --reviewed-sha <sha> <instance|all>
+       lz-live <destroy|chain> --reviewed-sha <sha> [args...]
        lz-live bootstrap --reviewed-sha <sha> [--fresh-account]
        lz-live probe --reviewed-sha <sha> <probe-root> [--plan-only] [--deadline <dur>]
        lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--deadline <dur>]`
@@ -59,8 +62,10 @@ type deps struct {
 	// State turns the state phases' options into Bootstrap's Rest; nil is
 	// live.NewBootstrapState(o).Rest (tests capture the options the entry built).
 	State func(live.StateOptions) func(context.Context, live.BootstrapAccount) error
-	// S3HTTP is the account bucket's S3 client; nil is the store's default (tests dial a fake).
+	// S3HTTP is the state buckets' S3 client; nil is the store's default (tests dial a fake).
 	S3HTTP *http.Client
+	// Apply runs plan or apply; nil is live.Apply (tests capture the options).
+	Apply func(context.Context, live.ApplyOptions) error
 }
 
 // parse reads the verb's flags and positional arguments in any order. Only probe and bootstrap
@@ -107,6 +112,9 @@ func run(args []string, d deps) int {
 	if err == nil && verb == "bootstrap" && len(positional) > 0 {
 		err = errors.New("bootstrap takes no positional argument")
 	}
+	if err == nil && (verb == "plan" || verb == "apply") && len(positional) != 1 {
+		err = errors.New(verb + " takes one target: an instance id or all")
+	}
 	if err != nil {
 		fmt.Fprintln(d.Stderr, usage)
 		return 2
@@ -138,6 +146,13 @@ func run(args []string, d deps) int {
 				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
 				return bootstrap(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), reviewed, fresh)
+			}
+			if verb == "plan" || verb == "apply" {
+				// SIGINT/SIGTERM cancel the run: the running tofu gets SIGINT (its own process group)
+				// and the run locks and saved plan are released on the way out.
+				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return lane(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), reviewed, verb, positional[0])
 			}
 			return errors.New("lz-live " + verb + ": not implemented yet")
 		})

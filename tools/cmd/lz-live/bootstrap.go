@@ -53,27 +53,39 @@ func manifestBinding(checkout string) (*stacks.Manifest, []string, error) {
 // state.env's keys. spec.state.endpoint must be the endpoint its region derives: the generated S3
 // backends use the manifest's endpoint, the store the derived one, and they must not diverge.
 func stateOptions(d deps, checkout string, m *stacks.Manifest, reviewed, tofu string, api live.API) (live.StateOptions, error) {
-	endpoint, err := live.ObjectStorageEndpoint(m.StateRegion)
+	store, err := stateStore(d, m)
 	if err != nil {
-		return live.StateOptions{}, fmt.Errorf("%s: spec.state.region: %w", stacks.ManifestPath, err)
+		return live.StateOptions{}, err
 	}
-	if m.StateEndpoint != endpoint {
-		return live.StateOptions{}, fmt.Errorf("%s: spec.state.endpoint %q is not %s, the endpoint of spec.state.region %q",
-			stacks.ManifestPath, m.StateEndpoint, endpoint, m.StateRegion)
-	}
-	region := m.StateRegion
 	return live.StateOptions{
 		Checkout: checkout,
 		Manifest: m,
-		Region:   strings.ToUpper(region),
+		Region:   strings.ToUpper(m.StateRegion),
 		Schemas:  os.DirFS(filepath.Join(checkout, "schemas", "outputs")),
 		Revision: reviewed,
 		Tofu:     tofu,
 		API:      api,
-		Store: func(keys map[string]string) (live.ObjectStore, error) {
-			return live.NewS3Store(live.S3Options{Region: region, Keys: keys, HTTP: d.S3HTTP})
-		},
-		Stdout: d.Stdout,
+		Store:    store,
+		Stdout:   d.Stdout,
+	}, nil
+}
+
+// stateStore opens the state buckets over S3 with one authority's keys, in the manifest's
+// spec.state region, after checking that spec.state.endpoint is the endpoint the region derives
+// (the generated S3 backends use the manifest's endpoint, the store the derived one). The
+// bootstrap's account bucket and the lane's tenant buckets share it (one spec.state per manifest).
+func stateStore(d deps, m *stacks.Manifest) (func(map[string]string) (live.ObjectStore, error), error) {
+	endpoint, err := live.ObjectStorageEndpoint(m.StateRegion)
+	if err != nil {
+		return nil, fmt.Errorf("%s: spec.state.region: %w", stacks.ManifestPath, err)
+	}
+	if m.StateEndpoint != endpoint {
+		return nil, fmt.Errorf("%s: spec.state.endpoint %q is not %s, the endpoint of spec.state.region %q",
+			stacks.ManifestPath, m.StateEndpoint, endpoint, m.StateRegion)
+	}
+	region := m.StateRegion
+	return func(keys map[string]string) (live.ObjectStore, error) {
+		return live.NewS3Store(live.S3Options{Region: region, Keys: keys, HTTP: d.S3HTTP})
 	}, nil
 }
 
