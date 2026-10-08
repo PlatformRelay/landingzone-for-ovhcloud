@@ -392,6 +392,8 @@ type chainExec struct {
 	observer *chainObserver
 	// signalAtObserve is sent once the observer registered its cleanup (review r1 of T048).
 	signalAtObserve os.Signal
+	// productionObserver (T062): ChainOptions.Observer nil, the production collector.
+	productionObserver bool
 }
 
 // chainRun is a chain run and what the harness saw while it ran.
@@ -500,11 +502,15 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	if c.signalAtObserve != nil {
 		obs.stop = func() { sigs <- c.signalAtObserve }
 	}
+	var observer Observer = obs
+	if c.productionObserver {
+		observer = nil
+	}
 	streams := laneCaptureStd(t)
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
-		Deadline: c.deadline, Signals: sigs, Lister: lister, Observer: obs})
+		Deadline: c.deadline, Signals: sigs, Lister: lister, Observer: observer})
 	process := streams()
 	close(stop)
 	<-watched

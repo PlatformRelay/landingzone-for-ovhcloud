@@ -93,7 +93,8 @@ func lane(ctx context.Context, d deps, checkout, cfg, reviewed, verb, target str
 			chain = live.Chain
 		}
 		// Signals nil: live.Chain handles SIGINT, SIGTERM and SIGHUP itself (destroy-on-exit);
-		// Lister nil: the leftover check lists through api with the sandbox admin credential.
+		// Lister nil: the leftover check lists through api with the sandbox admin credential;
+		// Observer nil: the production L7 collector (observe.go).
 		return chain(ctx, live.ChainOptions{ApplyOptions: o, Deadline: deadline})
 	}
 	apply := d.Apply

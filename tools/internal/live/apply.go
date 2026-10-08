@@ -115,6 +115,9 @@ type laneRunner struct {
 	inv     *Inventory
 	started []string
 	stop    atomic.Value
+	// chain only: the L7 assessments (nil: not judged) and why the assertions were not run.
+	assessments []Assessment
+	notRun      string
 }
 
 // accountFile reads one of the bound account's own files, which bootstrap:account writes: missing,
@@ -386,11 +389,17 @@ func (r *laneRunner) bind(ctx context.Context, creds map[string]string) error {
 // tofu runs one tofu call on a stack's root as the run core does: allowlisted environment, its own
 // process group, SIGINT when ctx ends and a kill after DefaultGrace (runner.go childEnv).
 func (r *laneRunner) tofu(ctx context.Context, child *childEnv, id, dir string, stdout io.Writer, args ...string) error {
+	return r.tofuStreams(ctx, child, id, dir, stdout, r.term, args...)
+}
+
+// tofuStreams is tofu with the child's stderr to stderr (the terminal for every call but the L7
+// second writer, whose refusal is on stderr).
+func (r *laneRunner) tofuStreams(ctx context.Context, child *childEnv, id, dir string, stdout, stderr io.Writer, args ...string) error {
 	cmd := child.command(ctx, r.o.Tofu, append([]string{"-chdir=" + dir}, args...)...)
 	// The chain forwards the signal that stopped it (SIGTERM as SIGTERM; SIGINT otherwise).
 	cmd.Cancel = func() error { return cmd.Process.Signal(r.stopSignal()) }
 	cmd.Env = append(cmd.Env, "TF_DATA_DIR="+filepath.Join(r.home, "tofu-data", id))
-	cmd.Stdout, cmd.Stderr = stdout, r.term
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := cmd.Run()
 	killGroup(ctx, cmd)
 	if err != nil {

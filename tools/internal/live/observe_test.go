@@ -67,6 +67,10 @@ type canaryAPI struct {
 	answer map[string]int
 	// bulkErrorsOnly: the tenant's bulkDeleteObjects answers 200 with every object in errors.
 	bulkErrorsOnly bool
+	// T062: the server's mux (the collector's tests add routes) and, by bucket, the fields a GET
+	// …/storage/{name} answers beside name, region and objects (versioning, tags).
+	mux  *http.ServeMux
+	meta map[string]map[string]any
 }
 
 func newCanaryAPI(t *testing.T, tenantPolicy func([]string) []string) *canaryAPI {
@@ -74,7 +78,7 @@ func newCanaryAPI(t *testing.T, tenantPolicy func([]string) []string) *canaryAPI
 	var fx apiFixture
 	readJSON(t, filepath.Join("testdata", "api", "credentials.json"), &fx)
 	f := &canaryAPI{t: t, creds: map[string]apiCredential{}, tokens: map[string]apiCredential{}, buckets: map[string]map[string]string{},
-		answer: map[string]int{}, trap: &Trap{}}
+		answer: map[string]int{}, trap: &Trap{}, meta: map[string]map[string]any{}}
 	for _, c := range fx.Credentials {
 		if c.Name == "tenant-deployer" && tenantPolicy != nil {
 			c.Policy = tenantPolicy(slices.Clone(c.Policy))
@@ -87,6 +91,7 @@ func newCanaryAPI(t *testing.T, tenantPolicy func([]string) []string) *canaryAPI
 	mux.HandleFunc("/auth/oauth2/token", tok.token)
 	mux.HandleFunc("/v1/", f.api)
 	mux.HandleFunc("/presigned/", f.upload)
+	f.mux = mux
 	f.Server = httptest.NewServer(mux)
 	t.Cleanup(f.Close)
 	return f
@@ -229,7 +234,11 @@ func (f *canaryAPI) api(w http.ResponseWriter, r *http.Request) {
 		}
 		canaryReply(w, call, http.StatusOK, out)
 	case "get":
-		canaryReply(w, call, http.StatusOK, map[string]any{"name": bucket, "region": canaryRegion, "objectsCount": len(objs), "objects": keyList(objs)})
+		doc := map[string]any{"name": bucket, "region": canaryRegion, "objectsCount": len(objs), "objects": keyList(objs)}
+		for k, v := range f.meta[bucket] {
+			doc[k] = v
+		}
+		canaryReply(w, call, http.StatusOK, doc)
 	case "objects":
 		canaryReply(w, call, http.StatusOK, keyList(objs))
 	case "delete":
@@ -627,23 +636,37 @@ func (o *chainObserver) Observe(ctx context.Context, run ObserveRun) ([]Observat
 	return o.obs, o.err
 }
 
-// chainPassing is a complete L7 set in which every assertion holds and KD-1 did not reproduce.
+// chainPassing is a complete L7 set in which every assertion holds and KD-1 did not reproduce:
+// every subject the sandbox manifest requires (L7Subjects, pinned by TestL7Subjects; T062: the
+// chain judges the set against them).
 func chainPassing() []Observation {
-	return []Observation{
-		{Assertion: "state-bucket-versioned", Subject: "lz-bkt-acct", Observed: "holds"},
-		{Assertion: "state-bucket-versioned", Subject: "lz-bkt-demo", Observed: "holds"},
-		{Assertion: "state-object-encrypted", Subject: "lz-bkt-demo/tenants/demo/dev/project/terraform.tfstate", Observed: "holds"},
-		{Assertion: "state-lock-contention", Subject: "lz-bkt-demo/tenants/demo/dev/project/terraform.tfstate", Observed: "holds"},
-		{Assertion: "bucket-tags", Subject: "lz-bkt-demo", Observed: "holds"},
-		{Assertion: "project-tags", Subject: "urn:v1:eu:resource:publicCloudProject:" + laneProject, Observed: "holds"},
-		{Assertion: "tenant-iam-write", Subject: "POST /v2/iam/policy", Observed: "denied"},
-		{Assertion: "tenant-s3-read", Subject: "lz-bkt-acct", Observed: "denied"},
-		{Assertion: "outputs-schema", Subject: "demo-dev-project", Observed: "holds"},
-		{Assertion: "deployer-binding", Subject: "platform", Observed: "holds"},
-		{Assertion: "deployer-binding", Subject: "tenant", Observed: "holds", Detail: "bound with " + laneTenantSecret},
-		{Assertion: "kd1-canary", Subject: "bulkDeleteObjects", Observed: "denied"},
-		{Assertion: "kd1-canary", Subject: "DELETE", Observed: "denied"},
+	urn := "urn:v1:eu:resource:publicCloudProject:" + laneProject
+	out := []Observation{
+		{Assertion: "state-bucket-versioned", Subject: "lz-bkt-state", Observed: "holds"},
+		{Assertion: "state-bucket-versioned", Subject: "lz-demo-bkt-state", Observed: "holds"},
 	}
+	for _, k := range []string{"lz-bkt-state/account/account-governance/terraform.tfstate", "lz-bkt-state/account/tenant-state/demo/terraform.tfstate",
+		"lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", "lz-demo-bkt-state/tenants/demo/dev/gra11/project-network/terraform.tfstate",
+		"lz-demo-bkt-state/tenants/demo/dev/gra11/runtime/terraform.tfstate"} {
+		out = append(out, Observation{Assertion: "state-object-encrypted", Subject: k, Observed: "holds"})
+	}
+	out = append(out,
+		Observation{Assertion: "state-lock-contention", Subject: "lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", Observed: "holds"},
+		Observation{Assertion: "bucket-tags", Subject: "lz-bkt-state", Observed: "holds"},
+		Observation{Assertion: "bucket-tags", Subject: "lz-demo-bkt-state", Observed: "holds"},
+		Observation{Assertion: "project-tags", Subject: urn, Observed: "holds"},
+		Observation{Assertion: "tenant-iam-write", Subject: "demo", Observed: "denied"},
+		Observation{Assertion: "tenant-s3-read", Subject: "demo:lz-bkt-state", Observed: "denied"},
+	)
+	for _, id := range []string{"account-bootstrap", "account-governance", "demo-state", "demo-dev-project", "demo-dev-gra11-network", "demo-dev-gra11-runtime"} {
+		out = append(out, Observation{Assertion: "outputs-schema", Subject: id, Observed: "holds"})
+	}
+	return append(out,
+		Observation{Assertion: "deployer-binding", Subject: "platform", Observed: "holds"},
+		Observation{Assertion: "deployer-binding", Subject: "tenant:demo", Observed: "holds", Detail: "bound with " + laneTenantSecret},
+		Observation{Assertion: "kd1-canary", Subject: "bulkDeleteObjects", Observed: "denied"},
+		Observation{Assertion: "kd1-canary", Subject: "DELETE", Observed: "denied"},
+	)
 }
 
 // chainWith returns chainPassing with f applied to each observation (nil drops it).
