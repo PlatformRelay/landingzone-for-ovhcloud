@@ -606,7 +606,8 @@ func TestProbeIdentityCleanup(t *testing.T) {
 					}
 				}
 			}
-			if c.Cmd == "plan" || c.Cmd == "apply" {
+			// A destroy is a saved `plan -destroy` applied (T047); a forward plan or apply is not.
+			if c.Cmd == "plan" && !slices.Contains(c.Args, "-destroy") || c.Cmd == "apply" {
 				t.Errorf("cleanup ran tofu %s in %s: it must only destroy", c.Cmd, c.Stack)
 			}
 		}

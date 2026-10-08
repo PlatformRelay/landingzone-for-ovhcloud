@@ -201,8 +201,8 @@ func TestEntryGuardsEveryVerb(t *testing.T) {
 				if verb == "probe" {
 					args = append(args, "tests/live/probes/x")
 				}
-				if verb == "plan" || verb == "apply" {
-					args = append(args, "all") // one target (T059)
+				if verb == "plan" || verb == "apply" || verb == "destroy" || verb == "chain" {
+					args = append(args, "all") // one target (T059, T047)
 				}
 				code, stderr := w.run(args...)
 				want := map[string]string{"offline-marker": "offline", "offline-env": "offline", "head-mismatch": "head"}[name]
@@ -218,7 +218,7 @@ func TestEntryGuardsEveryVerb(t *testing.T) {
 // without it the run is refused, with it the guard admits and the verb body runs.
 func TestEntryReadsLiveEnvFromHome(t *testing.T) {
 	w := newWorld(t, false)
-	code, stderr := w.run("chain", "--reviewed-sha", fakeHead)
+	code, stderr := w.run("chain", "--reviewed-sha", fakeHead, "all")
 	if code != 3 || !strings.Contains(stderr, "(live-env)") {
 		t.Fatalf("no live.env: exit %d, stderr %q; want 3 naming live-env", code, stderr)
 	}
@@ -227,10 +227,10 @@ func TestEntryReadsLiveEnvFromHome(t *testing.T) {
 	if w.gitCalls(t) == 0 {
 		t.Fatal("admitted without asking git")
 	}
-	// The chain body arrives with T047 (plan/apply with T059): an admitted run stops there with
-	// exit 1, never 0.
-	if code != 1 || !strings.Contains(stderr, "not implemented") {
-		t.Fatalf("admitted: exit %d, stderr %q; want 1, not implemented", code, stderr)
+	// Admitted, the chain body runs (T047): this world's checkout has no stacks/deployments.yaml,
+	// so it fails (exit 1) past the guard, never 0 and never a guard refusal.
+	if code != 1 || strings.Contains(stderr, "(live-env)") {
+		t.Fatalf("admitted: exit %d, stderr %q; want 1 from the chain body", code, stderr)
 	}
 }
 
@@ -342,9 +342,9 @@ func TestProbeRerunEntry(t *testing.T) {
 			calls    []childCall
 			want     []string
 		}{
-			{"run 1", id1, calls[:n1], []string{"init", "plan", "show", "show", "apply", "destroy"}},
-			{"run 2", id2, calls[n1:n2], []string{"init", "plan", "show", "show", "apply", "destroy"}},
-			{"cleanup of run 1", id1, calls[n2:], []string{"init", "destroy"}},
+			{"run 1", id1, calls[:n1], []string{"init", "plan", "show", "show", "apply", "plan-destroy", "show-destroy", "destroy"}},
+			{"run 2", id2, calls[n1:n2], []string{"init", "plan", "show", "show", "apply", "plan-destroy", "show-destroy", "destroy"}},
+			{"cleanup of run 1", id1, calls[n2:], []string{"init", "plan-destroy", "show-destroy", "destroy"}},
 		}
 		dataDirs := make([]string, len(runs))
 		for i, r := range runs {
@@ -676,8 +676,8 @@ func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
 			t.Errorf("a cleanup's read of passphrase.env was not observed (opened %v)", got)
 		}
 		calls := w.childCalls(t, "tofu.log")[tofuN:]
-		if got := subcommands(calls); !slices.Equal(got, []string{"init", "destroy"}) {
-			t.Errorf("cleanup tofu calls %v, want [init destroy]", got)
+		if got := subcommands(calls); !slices.Equal(got, []string{"init", "plan-destroy", "show-destroy", "destroy"}) {
+			t.Errorf("cleanup tofu calls %v, want [init plan-destroy show-destroy destroy]", got)
 		}
 		for _, c := range calls {
 			if got := c.env()["TF_VAR_project_id"]; got != "p1" {

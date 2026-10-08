@@ -7,21 +7,24 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks"
 )
 
-// `lz-live plan|apply <instance|all>` (spec 005 FR-009, FR-010, FR-011, research R21; T059): after
-// the host guard admitted the run, live.Apply acts on the selected stacks of the checkout's
-// stacks/deployments.yaml in the account the sandbox admin's credential names (GET /auth/details),
-// with the account's run locks (accounts/<account>/locks), the state buckets of spec.state over
-// S3, and a run directory .local/live/<run-id>/ in the checkout beside the records
-// (.local/live/records). Every credential live.Apply loads is bound to that account before use.
+// `lz-live plan|apply|destroy <instance|all>` and `lz-live chain <instance|all> [--deadline <dur>]`
+// (spec 005 FR-009, FR-010, FR-011, research R12, R21; T059, T047): after the host guard admitted
+// the run, live.Apply (plan, apply, destroy) or live.Chain (chain) acts on the stacks of the
+// checkout's stacks/deployments.yaml in the account the sandbox admin's credential names (GET
+// /auth/details), with the account's run locks (accounts/<account>/locks), the state buckets of
+// spec.state over S3, and a run directory .local/live/<run-id>/ in the checkout beside the records
+// (.local/live/records). Every credential they load is bound to that account before use.
 
-// lane runs plan or apply. A TMPDIR inside the checkout is refused first (the children's scratch
-// HOME goes under it); a missing sandbox.env is blocked (exit 2) naming bootstrap:account.
-func lane(ctx context.Context, d deps, checkout, cfg, reviewed, verb, target string) error {
+// lane runs plan, apply, destroy or chain. A TMPDIR inside the checkout is refused first (the
+// children's scratch HOME goes under it); a missing sandbox.env is blocked (exit 2) naming
+// bootstrap:account. deadline is chain's (0: live.DefaultDeadline).
+func lane(ctx context.Context, d deps, checkout, cfg, reviewed, verb, target string, deadline time.Duration) error {
 	if err := live.ScratchOutside(checkout); err != nil {
 		return err
 	}
@@ -65,12 +68,8 @@ func lane(ctx context.Context, d deps, checkout, cfg, reviewed, verb, target str
 	if err != nil {
 		return err
 	}
-	apply := d.Apply
-	if apply == nil {
-		apply = live.Apply
-	}
 	fmt.Fprintf(d.Stdout, "LZ-LIVE run %s start %s %s\n", runID, verb, target)
-	return apply(ctx, live.ApplyOptions{
+	o := live.ApplyOptions{
 		Verb:       verb,
 		Target:     target,
 		Checkout:   checkout,
@@ -87,5 +86,19 @@ func lane(ctx context.Context, d deps, checkout, cfg, reviewed, verb, target str
 		Store:      store,
 		Terminal:   d.Stdout,
 		API:        api,
-	})
+	}
+	if verb == "chain" {
+		chain := d.Chain
+		if chain == nil {
+			chain = live.Chain
+		}
+		// Signals nil: live.Chain handles SIGINT, SIGTERM and SIGHUP itself (destroy-on-exit);
+		// Lister nil: the leftover check lists through api with the sandbox admin credential.
+		return chain(ctx, live.ChainOptions{ApplyOptions: o, Deadline: deadline})
+	}
+	apply := d.Apply
+	if apply == nil {
+		apply = live.Apply
+	}
+	return apply(ctx, o)
 }

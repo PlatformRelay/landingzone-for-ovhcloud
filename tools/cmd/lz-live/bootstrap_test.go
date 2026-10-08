@@ -34,6 +34,7 @@ type bootstrapWorld struct {
 	s3        *http.Client                                                               // the S3 store's client
 	state     func(live.StateOptions) func(context.Context, live.BootstrapAccount) error // nil: live.NewBootstrapState
 	apply     func(context.Context, live.ApplyOptions) error                             // nil: live.Apply (T059)
+	chain     func(context.Context, live.ChainOptions) error                             // nil: live.Chain (T047)
 }
 
 func newBootstrapWorld(t *testing.T) *bootstrapWorld {
@@ -76,6 +77,7 @@ func (w *bootstrapWorld) run(args ...string) (int, string) {
 		Bootstrap: w.boot,
 		State:     w.state,
 		Apply:     w.apply,
+		Chain:     w.chain,
 		Now:       time.Now,
 		S3HTTP:    w.s3,
 		API: func(endpoint string) (live.API, error) {

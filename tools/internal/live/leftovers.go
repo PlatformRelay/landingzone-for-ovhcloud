@@ -87,6 +87,9 @@ type Leftover struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
+	// Before marks a leftover the chain's baseline record listed (there before the run's first
+	// apply, T047); it never decides whether a resource is a leftover.
+	Before bool `json:"before_run,omitempty"`
 }
 
 // Report is the outcome of a leftover check: "pass" only with no leftover and no error.
@@ -95,6 +98,8 @@ type Report struct {
 	Leftovers []Leftover                   `json:"leftovers"`
 	Errors    []string                     `json:"errors"`
 	Listings  map[string][]json.RawMessage `json:"-"`
+	// Listed is provider type -> the id of every resource listed (the chain's baseline record).
+	Listed map[string][]string `json:"-"`
 }
 
 const (
@@ -430,6 +435,10 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	if src != nil {
 		l := lister{ctx: ctx, l: src, errs: &errs, rec: rep.Listings}
 		items = c.list(l)
+	}
+	rep.Listed = map[string][]string{}
+	for _, it := range items {
+		rep.Listed[it.typ] = append(rep.Listed[it.typ], it.id)
 	}
 	retained := map[string]bool{}
 	for typ, ids := range c.Retained {

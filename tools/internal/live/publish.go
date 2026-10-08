@@ -160,3 +160,12 @@ func WriteRecord(dir, id string, r Record) error {
 	}
 	return writeRecord(filepath.Join(dir, id+".json"), data)
 }
+
+// RemoveRecord removes <dir>/<id>.json after a destroy (T047), so the next selection picks the
+// instance again; a missing record is no error, an id that is not an instance id is refused.
+func RemoveRecord(dir, id string) error {
+	if !instanceIDPattern.MatchString(id) {
+		return fmt.Errorf("record id %q is not an instance id", id)
+	}
+	return removeFiles(filepath.Join(dir, id+".json"))
+}

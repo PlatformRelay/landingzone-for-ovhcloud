@@ -30,7 +30,8 @@ import (
 // guard (live.Protect, protect.go) and applies exactly that file with `-json`, appending the
 // inventory as resources are created. Before the first apply it registers the destroy-on-exit: on
 // success, failure, SIGINT, SIGTERM and deadline expiry it destroys the ephemeral stacks whose
-// apply started, in reverse order, continuing after a failed destroy; then it runs the leftover
+// apply started, in reverse order, each as a saved `plan -destroy` judged by the same guard and
+// applied as that file (session.destroy), continuing after a refused or failed destroy; then it runs the leftover
 // check and writes summary.json. Every child gets the environment of env.go with a per-run scratch
 // HOME (0700, removed when the run ends; never the caller's HOME, so ~/.ovh.conf,
 // ~/.aws/credentials and the like cannot reach tofu) and a data directory
@@ -517,7 +518,28 @@ func (s *session) cleanupCompanion(ctx context.Context) error {
 	if err := s.tofu(ctx, c, s.term, initArgs...); err != nil {
 		return err
 	}
-	return s.tofu(ctx, c, s.term, "destroy", "-auto-approve", "-input=false")
+	return s.destroy(ctx, c)
+}
+
+// destroy destroys st as every destroy of the live lane does (T047, coordinator decision 2: one
+// destroy discipline with the chain): `plan -destroy` to a file, `show -json` of that file through
+// the retained-resource guard, then exactly that file applied (a saved plan is applied without a
+// prompt); never `tofu destroy -auto-approve`. The saved plan holds root variable values (a probe's
+// state passphrase among them): it is removed whatever happened.
+func (s *session) destroy(ctx context.Context, st Stack) (err error) {
+	plan := filepath.Join(s.r.Dir, "destroy-"+st.ID+".tfplan")
+	defer func() { err = errors.Join(err, removeFiles(plan)) }()
+	if err := s.tofu(ctx, st, s.term, "plan", "-destroy", "-input=false", "-out="+plan); err != nil {
+		return err
+	}
+	var js bytes.Buffer
+	if err := s.tofu(ctx, st, &js, "show", "-json", plan); err != nil {
+		return err
+	}
+	if err := s.protect(st, js.Bytes()); err != nil {
+		return err
+	}
+	return s.tofu(ctx, st, s.term, "apply", "-input=false", plan)
 }
 
 var errDeadline = errors.New("deadline exceeded")
@@ -633,7 +655,7 @@ func (r Runner) Execute(ctx context.Context) error {
 				destroyErr = errors.Join(destroyErr, s.cleanupCompanion(dctx))
 			}
 		}
-		if e := s.tofu(dctx, st, term, "destroy", "-auto-approve", "-input=false"); e != nil {
+		if e := s.destroy(dctx, st); e != nil {
 			destroyErr = errors.Join(destroyErr, e)
 		}
 	}
