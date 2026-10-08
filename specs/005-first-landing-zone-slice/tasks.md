@@ -495,7 +495,7 @@ Independent test: V007 offline; V010 owner session.
 
 ## Polish and exit
 
-- [ ] T050 Write the how-to in docs/how-to/run-the-first-slice.md and link it from README.md
+- [x] T050 Write the how-to in docs/how-to/run-the-first-slice.md and link it from README.md — closed 2026-10-08 with gaps, evidence: evidence/T050.md
   - Requirements: FR-011, FR-012; ADRs: 0013. Depends on: T047, T057.
   - Verify: exempt — docs-only; content review against the implemented commands, the owner-only boundary, KD-1 and the postponed list.
   - Evidence: `evidence/T050.md`; PR; docs content review only.

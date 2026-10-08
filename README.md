@@ -74,6 +74,8 @@ defines the requested terminal journey alongside those phases; its implementatio
 
 The [first implementation guide](docs/how-to/first-implementation.md) explains the minimum
 safety subset, local versus live qualification, evidence and stop conditions.
+[Run the first slice](docs/how-to/run-the-first-slice.md) is the maintainer's guide to
+bootstrapping an OVHcloud account and running the slice's live lane (owner only).
 The current delivery scope covers all eligible work in specs 001–004 as dependencies and
 required decisions are satisfied. Independently reviewed increments are published as
 stacked PRs and merge once review and applicable checks pass. T001–T009 remain the minimum safety
