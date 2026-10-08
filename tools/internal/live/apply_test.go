@@ -167,8 +167,35 @@ type laneStack struct {
 	// Fail names the call of the stack that fails (init, plan, show-json, show, output; T059,
 	// coordinator decision 3b: the locks are released after any of them).
 	Fail string `json:"fail,omitempty"`
-	// Block names the call of the stack that waits for a signal (review r1 of T059: cancellation).
+	// Block names the call of the stack that waits for a signal (review r1 of T059: cancellation);
+	// "apply+events" makes the apply print its apply_complete events first (T046: inventory).
 	Block string `json:"block,omitempty"`
+	// T046 (chain, destroy): DestroyPlan is the `show -json` document of a `plan -destroy` file;
+	// StateDoc the `show -json` document of the stack's state (no plan file argument), "" when it
+	// holds nothing the test names; Creates the resources an apply reports as apply_complete events.
+	DestroyPlan string       `json:"destroy_plan,omitempty"`
+	StateDoc    string       `json:"state_doc,omitempty"`
+	Creates     []laneCreate `json:"creates,omitempty"`
+}
+
+// laneCreate is one resource an apply creates: one `apply_complete` event of `tofu apply -json`
+// (hook.resource.addr, hook.resource.resource_type, hook.id_value; premise P24, inventory.go).
+type laneCreate struct {
+	Addr string `json:"addr"`
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// laneApplyComplete is c's `apply_complete` event line under `-json`; without it, the human line
+// OpenTofu prints (no event to parse: T046 review r1).
+func laneApplyComplete(c laneCreate, flags map[string][]string) string {
+	if _, ok := flags["-json"]; !ok {
+		return fmt.Sprintf("%s: Creation complete after 1s [id=%s]", c.Addr, c.ID)
+	}
+	ev := map[string]any{"@level": "info", "@message": c.Addr + ": Creation complete", "type": "apply_complete",
+		"hook": map[string]any{"resource": map[string]any{"addr": c.Addr, "resource_type": c.Type}, "action": "create", "id_key": "id", "id_value": c.ID}}
+	raw, _ := json.Marshal(ev)
+	return string(raw)
 }
 
 // laneCall is one logged event: a fake tofu call, a store operation, a lock event or a binding.
@@ -183,8 +210,13 @@ type laneCall struct {
 	Unlocked []string `json:"unlocked,omitempty"` // run locks found free during the call
 	Signal   string   `json:"signal,omitempty"`   // the signal a blocked call received
 	Key      string   `json:"key,omitempty"`      // store: the access key the store was opened with
+	Destroy  bool     `json:"destroy,omitempty"`  // plan -destroy, or a show/apply of such a plan file (T046)
 	Exit     int      `json:"exit"`
 }
+
+// laneNotTofu are the logged events that are not a tofu call (store, locks, binding, and the
+// leftover listings of T046).
+var laneNotTofu = []string{"put", "get", "lock", "release", "lock-refused", "bind", "list"}
 
 func laneAppend(path string, c laneCall) {
 	line, _ := json.Marshal(c)
@@ -209,6 +241,7 @@ func laneFakeWorld() string {
 type laneState struct {
 	PassSHA string `json:"pass_sha"`
 	Serial  int    `json:"serial"`
+	Empty   bool   `json:"empty,omitempty"` // destroyed: the state holds no resource (T046)
 }
 
 type lanePlanFile struct {
@@ -216,6 +249,7 @@ type lanePlanFile struct {
 	Nonce   string `json:"nonce"`
 	Serial  int    `json:"serial"`
 	PassSHA string `json:"pass_sha"`
+	Destroy bool   `json:"destroy,omitempty"`
 }
 
 // laneRequired are the root variables without a default per stage (stacks/…/_lz_variables.tf).
@@ -309,12 +343,19 @@ func fakeLaneTofu(worldPath string, args []string) int {
 	}
 	// Block (review r1): the call announces itself next to the log and waits for SIGINT, as tofu
 	// stops gracefully on it; a kill is never logged.
-	if st.Block != "" && st.Block == failing {
+	// A destroy (a call on a `plan -destroy` file, or the plan itself) never blocks (T046).
+	var blockPlan lanePlanFile
+	if len(positional) == 1 {
+		if raw, err := os.ReadFile(positional[0]); err == nil && json.Unmarshal(raw, &blockPlan) == nil {
+			call.Plan, call.Nonce, call.Destroy = positional[0], blockPlan.Nonce, blockPlan.Destroy
+		}
+	}
+	_, destroying := flags["-destroy"]
+	if st.Block != "" && (st.Block == failing || st.Block == "apply+events" && failing == "apply") && !blockPlan.Destroy && !destroying {
 		call.Cmd = failing
-		if len(positional) == 1 {
-			var pf lanePlanFile
-			if raw, err := os.ReadFile(positional[0]); err == nil && json.Unmarshal(raw, &pf) == nil {
-				call.Plan, call.Nonce = positional[0], pf.Nonce
+		if st.Block == "apply+events" {
+			for _, c := range st.Creates {
+				fmt.Println(laneApplyComplete(c, flags))
 			}
 		}
 		sig := make(chan os.Signal, 1)
@@ -324,7 +365,8 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		case s := <-sig:
 			call.Signal = s.String()
 			return fail("interrupted by %s", s)
-		case <-time.After(60 * time.Second):
+		// Bounded so a run that never stops its child fails in seconds, inside the entry's time (T046).
+		case <-time.After(10 * time.Second):
 			return fail("fake: never interrupted")
 		}
 	}
@@ -354,7 +396,8 @@ func fakeLaneTofu(worldPath string, args []string) int {
 	}
 	switch sub {
 	case "init":
-		if sk, ok := st.BucketKeys[os.Getenv("AWS_ACCESS_KEY_ID")]; !ok || sk != os.Getenv("AWS_SECRET_ACCESS_KEY") {
+		// account-bootstrap has the local backend: no bucket to open (T046 reads its state).
+		if sk, ok := st.BucketKeys[os.Getenv("AWS_ACCESS_KEY_ID")]; st.Bucket != "" && (!ok || sk != os.Getenv("AWS_SECRET_ACCESS_KEY")) {
 			return fail("Failed to get existing workspaces: AccessDenied on bucket %s", st.Bucket)
 		}
 		if os.MkdirAll(dataDir, 0o700) != nil || os.WriteFile(marker, []byte(st.Bucket), 0o600) != nil {
@@ -411,18 +454,38 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		b := make([]byte, 8)
 		_, _ = rand.Read(b)
 		call.Plan, call.Nonce = out, hex.EncodeToString(b)
-		raw, _ := json.Marshal(lanePlanFile{Stack: st.ID, Nonce: call.Nonce, Serial: state.Serial, PassSHA: pass})
+		_, call.Destroy = flags["-destroy"]
+		raw, _ := json.Marshal(lanePlanFile{Stack: st.ID, Nonce: call.Nonce, Serial: state.Serial, PassSHA: pass, Destroy: call.Destroy})
 		if os.WriteFile(out, raw, 0o600) != nil {
 			return fail("cannot write the plan file")
 		}
 		fmt.Print("Plan: 1 to add, 0 to change, 0 to destroy.\n" + echo)
 		return done(0)
 	case "show":
+		if _, ok := flags["-json"]; ok && len(positional) == 0 {
+			// The state as `show -json` prints it (T046: the retained instances' states the
+			// leftover check exempts); it carries the state's secrets.
+			call.Cmd = "show-state"
+			if !initialised() {
+				return fail(`Backend initialization required, please run "tofu init"`)
+			}
+			if !stateOK() {
+				return fail("decrypting the state of %s: the passphrase does not match", st.ID)
+			}
+			doc := []byte(`{"format_version":"1.0"}`)
+			if hasState && !state.Empty && st.StateDoc != "" {
+				if doc, err = os.ReadFile(st.StateDoc); err != nil {
+					return fail("fake: no state document")
+				}
+			}
+			fmt.Println(strings.TrimSpace(string(doc)))
+			return done(0)
+		}
 		if len(positional) != 1 {
 			return fail("fake: show without a plan file")
 		}
 		pf, ok := readPlan(positional[0])
-		call.Plan, call.Nonce = positional[0], pf.Nonce
+		call.Plan, call.Nonce, call.Destroy = positional[0], pf.Nonce, pf.Destroy
 		if !ok || pf.Stack != st.ID {
 			return fail("Failed to read the given file as a state or plan file")
 		}
@@ -431,7 +494,11 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		}
 		if _, ok := flags["-json"]; ok {
 			call.Cmd = "show-json"
-			raw, err := os.ReadFile(st.Plan)
+			planDoc := st.Plan
+			if pf.Destroy {
+				planDoc = st.DestroyPlan
+			}
+			raw, err := os.ReadFile(planDoc)
 			var doc map[string]any
 			if err != nil || json.Unmarshal(raw, &doc) != nil {
 				return fail("fake: no plan document")
@@ -452,7 +519,7 @@ func fakeLaneTofu(worldPath string, args []string) int {
 			return fail("fake: apply without a saved plan file")
 		}
 		pf, ok := readPlan(positional[0])
-		call.Plan, call.Nonce = positional[0], pf.Nonce
+		call.Plan, call.Nonce, call.Destroy = positional[0], pf.Nonce, pf.Destroy
 		if !initialised() {
 			return fail(`Backend initialization required, please run "tofu init"`)
 		}
@@ -461,6 +528,17 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		}
 		if pf.Serial != state.Serial {
 			return fail("Saved plan is stale")
+		}
+		if pf.Destroy {
+			fmt.Print(`{"@level":"info","@message":"Destroy complete!","type":"change_summary"}` + "\n" + echo)
+			raw, _ := json.Marshal(laneState{PassSHA: pass, Serial: state.Serial + 1, Empty: true})
+			if os.WriteFile(statePath, raw, 0o600) != nil {
+				return fail("cannot write the state")
+			}
+			return done(0)
+		}
+		for _, c := range st.Creates {
+			fmt.Println(laneApplyComplete(c, flags))
 		}
 		fmt.Print(`{"@level":"info","@message":"Apply complete!","type":"change_summary"}` + "\n" + echo)
 		// The outputs event as OpenTofu writes it: a sensitive output's value omitted (verified with
@@ -495,7 +573,7 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		if _, ok := flags["-json"]; !ok {
 			return fail("fake: output without -json")
 		}
-		if !hasState {
+		if !hasState || state.Empty {
 			fmt.Println("{}")
 			return done(0)
 		}
@@ -644,8 +722,13 @@ type laneHarness struct {
 	api      *fakeAPI
 	// afterLock runs after each run lock is taken (nil: nothing).
 	afterLock func(name string)
-	term      bytes.Buffer
-	runs      int
+	// destroys: the runs under test may destroy ephemeral stacks and read retained states (T046).
+	destroys bool
+	// chainRun: the run under judgement is a chain, which reads account-bootstrap's state for the
+	// leftover check; plan, apply and destroy never do (T046 review r2).
+	chainRun bool
+	term     bytes.Buffer
+	runs     int
 }
 
 // newLaneHarness: a checkout copy (generated stacks and their stage, component and module
@@ -1066,7 +1149,7 @@ type laneRun struct {
 func (r laneRun) tofu() []laneCall {
 	var out []laneCall
 	for _, c := range r.calls {
-		if !slices.Contains([]string{"put", "get", "lock", "release", "lock-refused", "bind"}, c.Cmd) {
+		if !slices.Contains(laneNotTofu, c.Cmd) {
 			out = append(out, c)
 		}
 	}
@@ -1310,13 +1393,14 @@ func (h *laneHarness) judge(r laneRun, checkoutBefore map[string]string) {
 		if c.Cmd == "bind" && c.Exit == http.StatusOK {
 			boundAs[c.Stack] = true
 		}
-		if a, ok := laneAuthority[c.Stack]; ok && !slices.Contains([]string{"put", "get", "lock", "release", "lock-refused", "bind"}, c.Cmd) && !boundAs[laneAPINames[a]] {
+		if a, ok := laneAuthority[c.Stack]; ok && !slices.Contains(laneNotTofu, c.Cmd) && !boundAs[laneAPINames[a]] {
 			t.Errorf("tofu %s on %s before its %s credential was bound to the account (GET /auth/details)", c.Cmd, c.Stack, a)
 		}
 	}
-	// account-bootstrap is bootstrap:account's: the lane never runs tofu in its root.
+	// account-bootstrap is bootstrap:account's: the lane never runs tofu in its root, except that
+	// a run that destroys (T046) reads its state for the leftover check: init and `show -json`.
 	for _, c := range r.tofu() {
-		if c.Stack == "account-bootstrap" {
+		if c.Stack == "account-bootstrap" && !(h.chainRun && (c.Cmd == "init" || c.Cmd == "show-state")) {
 			t.Errorf("tofu %s in the account-bootstrap root: bootstrap:account owns it", c.Cmd)
 		}
 	}
@@ -1325,6 +1409,11 @@ func (h *laneHarness) judge(r laneRun, checkoutBefore map[string]string) {
 	lastPlan, lastShown := map[string]laneCall{}, map[string]laneCall{}
 	for _, c := range r.tofu() {
 		for _, a := range c.Args {
+			// A destroy is a saved `plan -destroy` of an ephemeral stack, judged and applied as
+			// every plan (T046); never of a retained one, never `destroy -auto-approve`.
+			if a == "-destroy" && h.destroys && c.Cmd == "plan" && laneEphemeral[c.Stack] {
+				continue
+			}
 			if strings.HasPrefix(a, "-lock=") || a == "-destroy" || a == "-auto-approve" || strings.HasPrefix(a, "-target") || strings.HasPrefix(a, "-replace") {
 				t.Errorf("tofu %s on %s with %s", c.Cmd, c.Stack, a)
 			}
@@ -1369,7 +1458,7 @@ func (h *laneHarness) judge(r laneRun, checkoutBefore map[string]string) {
 			}
 		case "put":
 			lastPut = i
-		case "get", "lock-refused", "bind":
+		case "get", "lock-refused", "bind", "list":
 		default:
 			if firstTofu < 0 {
 				firstTofu = i
