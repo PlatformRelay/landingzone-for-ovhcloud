@@ -101,7 +101,7 @@ type laneRunner struct {
 	pass    string
 	account stacks.BoundAccount
 	binding Binding
-	bound   map[string]bool // client ids bound in this run
+	bound   map[Credential]bool // credentials (endpoint, client, secret) bound in this run
 	code    map[string]string
 	passes  int // selections run so far
 }
@@ -167,7 +167,7 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	if err != nil {
 		return err
 	}
-	r := &laneRunner{o: o, red: red, term: term, bound: map[string]bool{}, code: map[string]string{}}
+	r := &laneRunner{o: o, red: red, term: term, bound: map[Credential]bool{}, code: map[string]string{}}
 	pf, err := accountFile(acctDir, "state-passphrase.env")
 	if err != nil {
 		return err
@@ -327,13 +327,13 @@ func (r *laneRunner) selected() ([]stacks.Selected, error) {
 // (FR-010, G13), once per credential and run, before the stack's first child.
 func (r *laneRunner) bind(ctx context.Context, creds map[string]string) error {
 	c := Credential{Endpoint: creds["OVH_ENDPOINT"], ClientID: creds["OVH_CLIENT_ID"], ClientSecret: creds["OVH_CLIENT_SECRET"]}
-	if r.bound[c.ClientID] {
+	if r.bound[c] {
 		return nil
 	}
 	if err := Bind(ctx, r.o.API, c, r.binding, r.o.Manifest.Org); err != nil {
 		return err
 	}
-	r.bound[c.ClientID] = true
+	r.bound[c] = true
 	return nil
 }
 
@@ -421,7 +421,12 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if o.Verb == VerbPlan {
 		return nil
 	}
-	if err := r.tofu(ctx, child, id, dir, r.term, "apply", "-json", "-input=false", plan); err != nil {
+	// The apply stream without its `outputs` event: an output value the redactor cannot know yet
+	// (a secret created by this apply, wrongly not sensitive) never reaches the terminal (review r2).
+	applied := &dropOutputs{w: r.term}
+	err = r.tofu(ctx, child, id, dir, applied, "apply", "-json", "-input=false", plan)
+	applied.flush()
+	if err != nil {
 		return err
 	}
 	var out bytes.Buffer
@@ -536,6 +541,40 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 		}
 	}
 	return nil
+}
+
+// dropOutputs passes a `tofu apply -json` stream through line by line, without the `outputs`
+// events (they carry every non-sensitive output value).
+type dropOutputs struct {
+	w   io.Writer
+	buf []byte
+}
+
+var outputsEvent = []byte(`"type":"outputs"`)
+
+func (d *dropOutputs) Write(p []byte) (int, error) {
+	d.buf = append(d.buf, p...)
+	for {
+		i := bytes.IndexByte(d.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		line := d.buf[:i+1]
+		if !bytes.Contains(line, outputsEvent) {
+			if _, err := d.w.Write(line); err != nil {
+				return len(p), err
+			}
+		}
+		d.buf = d.buf[i+1:]
+	}
+}
+
+// flush passes on an unterminated last line (unless it is an outputs event).
+func (d *dropOutputs) flush() {
+	if len(d.buf) > 0 && !bytes.Contains(d.buf, outputsEvent) {
+		_, _ = d.w.Write(d.buf)
+	}
+	d.buf = nil
 }
 
 func digestHex(b []byte) string {

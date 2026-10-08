@@ -463,6 +463,20 @@ func fakeLaneTofu(worldPath string, args []string) int {
 			return fail("Saved plan is stale")
 		}
 		fmt.Print(`{"@level":"info","@message":"Apply complete!","type":"change_summary"}` + "\n" + echo)
+		// The outputs event as OpenTofu writes it: a sensitive output's value omitted (verified with
+		// OpenTofu 1.10.3, evidence/T059.md iteration 7), every other value shown (T059 review r2).
+		if raw, err := os.ReadFile(st.Outputs); err == nil {
+			var outs map[string]map[string]any
+			if json.Unmarshal(raw, &outs) == nil {
+				for _, o := range outs {
+					if s, _ := o["sensitive"].(bool); s {
+						delete(o, "value")
+					}
+				}
+				ev, _ := json.Marshal(map[string]any{"@level": "info", "@message": fmt.Sprintf("Outputs: %d", len(outs)), "type": "outputs", "outputs": outs})
+				fmt.Println(string(ev))
+			}
+		}
 		if st.ApplyExit != 0 {
 			return fail("fake apply failure")
 		}
@@ -2401,5 +2415,102 @@ func TestApplyCancelStopsChild(t *testing.T) {
 				t.Errorf("the blocked tofu %s got signal %q, want %q (stopped gracefully, not killed)", call, got, syscall.SIGINT.String())
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------- T059 review round 2
+
+// tenant-state's outputs carry the tenant's and the platform's S3 keys: each must be a sensitive
+// output with both halves present and writable, checked before any file is written (review r2).
+func TestApplyTenantStateOutputValues(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(outs map[string]map[string]any)
+	}{
+		{"tenant-s3-not-sensitive", func(o map[string]map[string]any) { o["tenant_s3"]["sensitive"] = false }},
+		{"platform-s3-not-sensitive", func(o map[string]map[string]any) { o["platform_s3"]["sensitive"] = false }},
+		{"platform-secret-empty", func(o map[string]map[string]any) {
+			o["platform_s3"]["value"].(map[string]any)["secret_access_key"] = ""
+		}},
+		{"tenant-key-empty", func(o map[string]map[string]any) {
+			o["tenant_s3"]["value"].(map[string]any)["access_key_id"] = ""
+		}},
+		{"tenant-secret-newline", func(o map[string]map[string]any) {
+			o["tenant_s3"]["value"].(map[string]any)["secret_access_key"] = "lz-seed-t059-s3\nbreak"
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newLaneHarness(t)
+			h.steady()
+			h.touch("demo-state")
+			in := h.row("demo-state")
+			st := h.world.Stacks[in.Path]
+			raw, err := os.ReadFile(st.Outputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outs map[string]map[string]any
+			if err := json.Unmarshal(raw, &outs); err != nil {
+				t.Fatal(err)
+			}
+			// New keys for both users, so a file written before the rejected value shows.
+			outs["platform_s3"]["value"].(map[string]any)["access_key_id"] = "AK-t059-new-platform"
+			outs["tenant_s3"]["value"].(map[string]any)["access_key_id"] = "AK-t059-new-tenant"
+			c.mutate(outs)
+			raw, _ = json.Marshal(outs)
+			st.Outputs = filepath.Join(h.base, "fake", "outputs-state-"+c.name+".json")
+			if err := os.WriteFile(st.Outputs, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.world.Stacks[in.Path] = st
+			h.save()
+			before := h.configFiles()
+			r := h.run(VerbApply, "demo-state")
+			laneExit(t, r, 1)
+			if after := h.configFiles(); !maps.Equal(after, before) {
+				t.Errorf("credential files changed from rejected outputs")
+			}
+		})
+	}
+}
+
+// The binding cache holds whole credentials: a credential file replaced during the run with the
+// same client id but another endpoint or secret is bound again, not taken as bound (review r2).
+func TestApplyBindCacheWholeCredential(t *testing.T) {
+	h := newLaneHarness(t)
+	r := &laneRunner{o: ApplyOptions{API: h.laneAPI(), Manifest: h.m}, bound: map[Credential]bool{},
+		binding: Binding{AccountID: laneAccount, Endpoint: "ovh-eu", Org: h.m.Org}}
+	ctx := context.Background()
+	creds := maps.Clone(laneCreds[AuthorityTenant])
+	if err := r.bind(ctx, creds); err != nil {
+		t.Fatalf("bind of the tenant credential: %v", err)
+	}
+	creds["OVH_ENDPOINT"] = "ovh-ca"
+	var ref *Refusal
+	if err := r.bind(ctx, creds); !errors.As(err, &ref) || ref.Condition != CondEndpoint {
+		t.Errorf("same client id, endpoint ovh-ca: err %v, want an endpoint refusal", err)
+	}
+	creds["OVH_ENDPOINT"] = "ovh-eu"
+	creds["OVH_CLIENT_SECRET"] = "lz-seed-t059-other-secret"
+	if err := r.bind(ctx, creds); err == nil {
+		t.Error("same client id, another secret: bound without asking the API")
+	}
+}
+
+// The apply stream reaches the terminal line by line without its `outputs` events; an
+// unterminated last line is passed on at the end (review r2).
+func TestApplyDropOutputs(t *testing.T) {
+	var out bytes.Buffer
+	d := &dropOutputs{w: &out}
+	for _, chunk := range []string{`{"type":"apply_start"}` + "\n" + `{"type":"out`, `puts","outputs":{"s":{"value":"x"}}}` + "\n", `{"type":"change_summary"}` + "\n", "tail"} {
+		if _, err := d.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.flush()
+	want := `{"type":"apply_start"}` + "\n" + `{"type":"change_summary"}` + "\n" + "tail"
+	if out.String() != want {
+		t.Errorf("terminal got %q, want %q", out.String(), want)
 	}
 }
