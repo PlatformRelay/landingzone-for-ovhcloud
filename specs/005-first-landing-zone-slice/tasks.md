@@ -473,7 +473,7 @@ Independent test: V007 offline; V010 owner session.
   - Verify: `task test:live-lane`: T046 controls green with each named guard's mutant killed; `ovhcloud` 0.15.0 pinned in `mise.live.toml` only; `task verify:toolchain` unchanged. Creates host targets `live:destroy`, `live:chain`.
   - Evidence: `evidence/T047.md`; PR; initial status `not-run`.
 
-- [ ] T091 [US5] Stop a chain before any apply when its baseline listing fails, and refuse to destroy a producer whose consumer is still applied, in tools/internal/live/chain.go, test first in tools/internal/live/chain_test.go
+- [x] T091 [US5] Stop a chain before any apply when its baseline listing fails, and refuse to destroy a producer whose consumer is still applied, in tools/internal/live/chain.go, test first in tools/internal/live/chain_test.go — closed 2026-10-08, evidence: evidence/T091.md
   - Requirements: FR-009, FR-011; ADRs: 0004, 0008. Depends on: T047.
   - Verify: `task test:live-lane`: a chain whose baseline listing errors or is unparseable exits 2 (`blocked`) with no tofu apply and no OVHcloud write (T046's `listing-error` and `listing-unparseable` rows changed to expect no apply, said in the evidence); `destroy -- <producer>` while any consumer of it has a record (applied) is refused before any tofu call with a code naming the consumer, while `destroy -- all` and the chain's reverse-order destroy are unchanged; mutants per clause. Rationale (coordinator 2026-10-08): a run that can only fail must not spend credit, and destroying a producer under an applied consumer orphans the consumer's resources.
   - Evidence: `evidence/T091.md`; PR; initial status `not-run`.
