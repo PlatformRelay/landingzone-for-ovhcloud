@@ -264,12 +264,16 @@ run ends. All files mode 600, directories 700; the lane refuses group/world-read
 ## Live run record (gitignored, `.local/live/`)
 `<run-id>/plan-<id>.txt` (rendered plans, no raw JSON), `<run-id>/inputs/<id>/*.tfvars.json`,
 `<run-id>/inventory.jsonl` (one line per created resource, appended as `apply_complete` arrives),
-`<run-id>/listings/<kind>.json`, `<run-id>/leftovers.json`, `<run-id>/observations.json`,
+`<run-id>/listings/<kind>.json`, `<run-id>/leftovers.json`, `<run-id>/observations.json` (the
+chain's L7 set once every stack is applied: `run_id`, the manifest's `shared_state_project`,
+`observations` of `{assertion, subject, observed, detail}`, judged one outcome per assertion, T048),
 the chain's baseline before its first apply (`<run-id>/listings-before/<kind>.json`, and
 `<run-id>/baseline.json`: the listed ids by provider type and the listing errors, read back by the
 final reconciliation, which marks each leftover it lists `before_run`; a baseline with listing
 errors ends the chain blocked before its first apply, T091),
-`<run-id>/summary.json` (outcome, deadline, known deviations observed), `records/<id>.json`
+`<run-id>/summary.json` (`outcome` `pass`, `fail` or `blocked` — exit 2, T048; `deadline`;
+`known_deviations`: the ids of spec *Known deviations* the L7 assessment reported, e.g. `["KD-1"]`,
+`[]` when none), `records/<id>.json`
 (`applied_at`, `source_revision`, `code_digest`, consumed `{producer: sha256}`, `resolved` sha256 of
 the resolved-reference input when the stage takes one; one type, `stacks.Record`, written by the lane
 and read by selection).

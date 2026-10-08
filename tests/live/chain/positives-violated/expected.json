@@ -1,0 +1,17 @@
+{
+  "_comment": "each positive assertion with one violated (or unobservable) subject fails",
+  "outcomes": {
+    "bucket-tags": "fail",
+    "deployer-binding": "fail",
+    "kd1-canary": "pass",
+    "outputs-schema": "fail",
+    "project-tags": "fail",
+    "state-bucket-versioned": "fail",
+    "state-lock-contention": "fail",
+    "state-object-encrypted": "fail",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

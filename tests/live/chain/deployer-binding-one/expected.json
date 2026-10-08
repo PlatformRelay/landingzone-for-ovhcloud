@@ -1,0 +1,17 @@
+{
+  "_comment": "both deployer credentials bind (P26), or the assertion is incomplete",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "fail",
+    "kd1-canary": "pass",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

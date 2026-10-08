@@ -1,0 +1,19 @@
+{
+  "_comment": "every assertion holds; KD-1 did not reproduce: pass with a note naming KD-1 (R20)",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "pass",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [],
+  "notes": {
+    "kd1-canary": "KD-1"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "_comment": "a tenant IAM write, or one tenant S3 read of another bucket, that succeeded fails",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "pass",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "fail",
+    "tenant-s3-read": "fail"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

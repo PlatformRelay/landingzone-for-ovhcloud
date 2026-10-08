@@ -1,0 +1,18 @@
+{
+  "_comment": "a value outside the assertion's vocabulary, or an assertion outside the L7 set, fails",
+  "outcomes": {
+    "bucket-tags": "fail",
+    "deployer-binding": "pass",
+    "kd1-canary": "pass",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "fail",
+    "tenant-s3-read": "pass",
+    "made-up": "fail"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

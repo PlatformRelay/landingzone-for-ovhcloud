@@ -1,0 +1,19 @@
+{
+  "_comment": "one KD-1 call allowed is the gap",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "known-deviation",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [
+    "KD-1"
+  ],
+  "notes": {}
+}
