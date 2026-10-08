@@ -387,6 +387,9 @@ type chainExec struct {
 	// signalAtBaseline is sent on the first listing request, which then waits for the run to stop
 	// (T091: an interrupted baseline is not a blocked run); production must be false.
 	signalAtBaseline os.Signal
+	// observer is the run's L7 collector (T048; nil: a complete set in which every assertion
+	// holds, observe_test.go chainPassing).
+	observer *chainObserver
 }
 
 // chainRun is a chain run and what the harness saw while it ran.
@@ -487,11 +490,16 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		api.HTTP = &http.Client{Transport: chainAdminTransport{lane: api.HTTP.Transport, list: f, log: h.world.Log, late: late, done: &lateDone,
 			mu: &sync.Mutex{}, adminTo: "Bearer fake-token-" + laneAPINames[AuthorityBootstrap]}}
 	}
+	obs := c.observer
+	if obs == nil {
+		obs = &chainObserver{obs: chainPassing()}
+	}
+	obs.log = h.world.Log
 	streams := laneCaptureStd(t)
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
-		Deadline: c.deadline, Signals: sigs, Lister: lister})
+		Deadline: c.deadline, Signals: sigs, Lister: lister, Observer: obs})
 	process := streams()
 	close(stop)
 	<-watched
@@ -1322,10 +1330,15 @@ func chainBlockedAtBaseline(t *testing.T, h *laneHarness, r chainRun) {
 	if rec, ok := readChainBaseline(t, r.runDir); !ok || len(rec.Errors) == 0 {
 		t.Errorf("baseline record %+v (present %t), want it written with the listing errors", rec, ok)
 	}
+	// T048 (coordinator 2026-10-08): a blocked chain reports `blocked`, not `fail`, in summary.json
+	// and the summary line (contracts/checks.md outcome words; exit 2).
 	lines := strings.Split(strings.TrimSpace(h.term.String()), "\n")
 	tail := lines[max(0, len(lines)-2):]
-	if len(tail) != 2 || !strings.HasPrefix(tail[0], "LZ-LIVE summary "+r.runID+" fail ") || tail[1] != "record approximate cost for run "+r.runID+" in the PR" {
-		t.Errorf("terminal does not end with the fail summary and the cost reminder; it ends:\n%s", strings.Join(tail, "\n"))
+	if len(tail) != 2 || tail[0] != "LZ-LIVE summary "+r.runID+" blocked known-deviations=none" || tail[1] != "record approximate cost for run "+r.runID+" in the PR" {
+		t.Errorf("terminal does not end with the blocked summary and the cost reminder; it ends:\n%s", strings.Join(tail, "\n"))
+	}
+	if s := readChainSummary(t, r.runDir); s.Outcome != "blocked" || s.RunID != r.runID || len(s.KnownDeviations) != 0 {
+		t.Errorf("summary.json %+v, want outcome blocked for run %s without deviations", s, r.runID)
 	}
 }
 

@@ -56,6 +56,9 @@ type ChainOptions struct {
 	// Lister serves the leftover check's listings (tests); nil lists through API with the sandbox
 	// admin credential (sandbox.env), bound to the account before the first listing.
 	Lister Lister
+	// Observer collects the L7 observations once every stack is applied (tests); nil: the
+	// collector (observe.go, T062).
+	Observer Observer
 }
 
 // CondConsumerApplied refuses `destroy -- <producer>` while a stack consuming it has a record

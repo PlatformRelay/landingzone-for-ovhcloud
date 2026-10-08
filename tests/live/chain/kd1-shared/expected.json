@@ -1,0 +1,19 @@
+{
+  "_comment": "G15: the tenant deleted the canary with shared_state_project: known-deviation KD-1, never pass",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "known-deviation",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [
+    "KD-1"
+  ],
+  "notes": {}
+}
