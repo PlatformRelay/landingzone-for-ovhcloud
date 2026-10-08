@@ -396,3 +396,35 @@ func TestCredentialsBoundAccountOnly(t *testing.T) {
 		t.Errorf("account %q: err %v, variables %v; want an error that is not blocked: an account id is one path segment", bad, err, slices.Sorted(maps.Keys(got)))
 	}
 }
+
+// T059, decision 2: a missing file names what writes it, so the operator knows what to run:
+// sandbox.env and the account's state.env bootstrap:account, the deployer files
+// account-governance, a tenant's S3 files that tenant's tenant-state instance.
+func TestCredentialsMissingFileNamesProducer(t *testing.T) {
+	m := credManifest(t, true)
+	acct := "accounts/" + credAccount + "/"
+	for _, c := range []struct{ id, rel, producer string }{
+		{"account-governance", "sandbox.env", "bootstrap:account"},
+		{"demo-state", acct + "state.env", "bootstrap:account"},
+		{"demo-dev-project", acct + "platform-deployer.env", "account-governance"},
+		{"demo-dev-project", acct + "tenants/demo/platform-state.env", "demo-state"},
+		{"demo-dev-gra11-network", acct + "tenants/demo/deployer.env", "account-governance"},
+		{"demo-dev-gra11-network", acct + "tenants/demo/state.env", "demo-state"},
+		{"ops-dev-gra11-runtime", acct + "tenants/ops/state.env", "ops-state"},
+	} {
+		t.Run(c.id+"/"+c.rel, func(t *testing.T) {
+			root := credRoot(t)
+			if err := os.Remove(filepath.Join(root, filepath.FromSlash(c.rel))); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := LoadCredentials(root, credAccount, m, c.id)
+			var b *Blocked
+			if !errors.As(err, &b) {
+				t.Fatalf("err %v, want *Blocked", err)
+			}
+			if !strings.Contains(err.Error(), c.producer) {
+				t.Errorf("err %v does not name %s, which writes %s", err, c.producer, c.rel)
+			}
+		})
+	}
+}

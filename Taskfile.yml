@@ -159,7 +159,7 @@ tasks:
   # The live lane's offline controls: fakes only, no credential, no API call.
   # The host guard, child environment, account binding and credential files
   # (T053), the run core, redaction, leftover check and `lz-live probe`
-  # (T055); later verbs (T059, T047, T062) extend it.
+  # (T055); `lz-live plan|apply` (T059); later verbs (T047, T062) extend it.
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
@@ -203,6 +203,26 @@ tasks:
     cmds:
       - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
       - .local/bin/lz-live probe {{.CLI_ARGS}}
+
+  # Host targets: the owner on the maintainer host only, never inside lz-offline
+  # and never run by an agent (they load ~/.config/ovh-lz/ credentials, call the
+  # OVHcloud API and, for apply, change the account). The selected stacks of
+  # stacks/deployments.yaml in run order, each under its own authority, holding
+  # the run locks; every saved plan through the retained-resource guard (005
+  # FR-009, FR-010, FR-011, R21), e.g.
+  #   task live:plan -- --reviewed-sha <sha> all
+  #   task live:apply -- --reviewed-sha <sha> <instance|all>
+  live:plan:
+    desc: Plan the selected stacks (or one instance) with each stack's authority, judged by the retained-resource guard (host, owner; 005 R21)
+    cmds:
+      - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
+      - .local/bin/lz-live plan {{.CLI_ARGS}}
+
+  live:apply:
+    desc: Plan, judge and apply the selected stacks (or one instance), publish their envelopes and write the deployer credential files (host, owner; 005 R21)
+    cmds:
+      - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
+      - .local/bin/lz-live apply {{.CLI_ARGS}}
 
   check:specs:
     desc: 'Trace a spec''s requirements and tasks through its keys in harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'

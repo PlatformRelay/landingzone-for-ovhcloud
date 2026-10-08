@@ -201,6 +201,9 @@ func TestEntryGuardsEveryVerb(t *testing.T) {
 				if verb == "probe" {
 					args = append(args, "tests/live/probes/x")
 				}
+				if verb == "plan" || verb == "apply" {
+					args = append(args, "all") // one target (T059)
+				}
 				code, stderr := w.run(args...)
 				want := map[string]string{"offline-marker": "offline", "offline-env": "offline", "head-mismatch": "head"}[name]
 				if code != 3 || !strings.Contains(stderr, "("+want+")") {
@@ -215,17 +218,17 @@ func TestEntryGuardsEveryVerb(t *testing.T) {
 // without it the run is refused, with it the guard admits and the verb body runs.
 func TestEntryReadsLiveEnvFromHome(t *testing.T) {
 	w := newWorld(t, false)
-	code, stderr := w.run("plan", "--reviewed-sha", fakeHead)
+	code, stderr := w.run("chain", "--reviewed-sha", fakeHead)
 	if code != 3 || !strings.Contains(stderr, "(live-env)") {
 		t.Fatalf("no live.env: exit %d, stderr %q; want 3 naming live-env", code, stderr)
 	}
 	w = newWorld(t, true)
-	code, stderr = w.run("plan", "--reviewed-sha", fakeHead, "stage-x")
+	code, stderr = w.run("chain", "--reviewed-sha", fakeHead, "stage-x")
 	if w.gitCalls(t) == 0 {
 		t.Fatal("admitted without asking git")
 	}
-	// The verb bodies arrive with the run core (T055) and plan/apply (T059): an admitted run
-	// stops there with exit 1, never 0.
+	// The chain body arrives with T047 (plan/apply with T059): an admitted run stops there with
+	// exit 1, never 0.
 	if code != 1 || !strings.Contains(stderr, "not implemented") {
 		t.Fatalf("admitted: exit %d, stderr %q; want 1, not implemented", code, stderr)
 	}

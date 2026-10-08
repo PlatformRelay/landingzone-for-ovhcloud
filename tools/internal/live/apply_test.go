@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -162,11 +163,14 @@ type laneStack struct {
 	Plan       string            `json:"plan"`    // file: the `show -json` document
 	Outputs    string            `json:"outputs"` // file: the `output -json` document
 	ApplyExit  int               `json:"apply_exit"`
+	// Fail names the call of the stack that fails (init, plan, show-json, show, output; T059,
+	// coordinator decision 3b: the locks are released after any of them).
+	Fail string `json:"fail,omitempty"`
 }
 
-// laneCall is one logged event: a fake tofu call, a store operation or a lock event.
+// laneCall is one logged event: a fake tofu call, a store operation, a lock event or a binding.
 type laneCall struct {
-	Cmd      string   `json:"cmd"`   // init plan show-json show apply output other | put get | lock release
+	Cmd      string   `json:"cmd"`   // init plan show-json show apply output other | put get | lock release | bind
 	Stack    string   `json:"stack"` // instance id (tofu), bucket/key (store), lock name
 	Args     []string `json:"args,omitempty"`
 	Env      []string `json:"env,omitempty"`
@@ -291,6 +295,14 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		flags[name] = append(flags[name], v)
 	}
 	call.VarFiles = flags["-var-file"]
+	failing := sub
+	if _, ok := flags["-json"]; ok && sub == "show" {
+		failing = "show-json"
+	}
+	if st.Fail != "" && st.Fail == failing {
+		call.Cmd = failing
+		return fail("fake %s failure of %s", failing, st.ID)
+	}
 	dataDir := fakeDataDir(dir)
 	marker := filepath.Join(dataDir, "lane-init-"+st.ID)
 	initialised := func() bool { _, err := os.Stat(marker); return err == nil }
@@ -586,6 +598,7 @@ type laneHarness struct {
 	world    laneWorld
 	m        *stacks.Manifest
 	store    *laneStore
+	api      *fakeAPI
 	term     bytes.Buffer
 	runs     int
 }
@@ -650,6 +663,13 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	h.world = laneWorld{Checkout: h.checkout, Log: filepath.Join(base, "fake", "calls.jsonl"), States: filepath.Join(base, "fake", "states"),
 		LockDir: filepath.Join(h.acctDir, "locks"), Passphrase: lanePassphrase, Project: laneProject, State: laneProject, Stacks: map[string]laneStack{}}
 	h.store = &laneStore{log: h.world.Log, objects: map[string][]byte{}}
+	// The OVHcloud API (T059, coordinator decision 3a): every lane credential belongs to the bound
+	// account; GET /auth/details answers which (binding.go, premise P26).
+	h.api = newFakeAPI(t)
+	for a, name := range laneAPINames {
+		h.api.add(apiCredential{Name: name, Class: string(a), Account: laneAccount, ClientID: laneCreds[a]["OVH_CLIENT_ID"], ClientSecret: laneCreds[a]["OVH_CLIENT_SECRET"]})
+	}
+	h.api.add(apiCredential{Name: "lane-foreign", Class: "admin", Account: laneForeignAccount, ClientID: laneForeignID, ClientSecret: laneForeignSecret})
 	for _, in := range h.m.Instances {
 		ls := laneStack{ID: in.ID, Stage: in.Stage, Bucket: in.StateBucket, BucketKeys: laneBucketKeys[in.StateBucket]}
 		locks, err := stacks.RunLocks(h.m, []string{in.ID})
@@ -1001,7 +1021,7 @@ type laneRun struct {
 func (r laneRun) tofu() []laneCall {
 	var out []laneCall
 	for _, c := range r.calls {
-		if !slices.Contains([]string{"put", "get", "lock", "release", "lock-refused"}, c.Cmd) {
+		if !slices.Contains([]string{"put", "get", "lock", "release", "lock-refused", "bind"}, c.Cmd) {
 			out = append(out, c)
 		}
 	}
@@ -1080,7 +1100,7 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 	streams := laneCaptureStd(t)
 	err := Apply(ctx, ApplyOptions{Verb: verb, Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
-		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log}, Store: h.store.open, Terminal: &h.term})
+		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI()})
 	return laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: streams()}, before
 }
 
@@ -1221,6 +1241,18 @@ func (h *laneHarness) judge(r laneRun, checkoutBefore map[string]string) {
 			}
 		}
 	}
+	// FR-010 (T059, decision 3a): every credential is bound to the account before use: each tofu
+	// call of a stack follows a successful GET /auth/details with its authority's credential in
+	// this run.
+	boundAs := map[string]bool{}
+	for _, c := range r.calls {
+		if c.Cmd == "bind" && c.Exit == http.StatusOK {
+			boundAs[c.Stack] = true
+		}
+		if a, ok := laneAuthority[c.Stack]; ok && !slices.Contains([]string{"put", "get", "lock", "release", "lock-refused", "bind"}, c.Cmd) && !boundAs[laneAPINames[a]] {
+			t.Errorf("tofu %s on %s before its %s credential was bound to the account (GET /auth/details)", c.Cmd, c.Stack, a)
+		}
+	}
 	// account-bootstrap is bootstrap:account's: the lane never runs tofu in its root.
 	for _, c := range r.tofu() {
 		if c.Stack == "account-bootstrap" {
@@ -1276,7 +1308,7 @@ func (h *laneHarness) judge(r laneRun, checkoutBefore map[string]string) {
 			}
 		case "put":
 			lastPut = i
-		case "get", "lock-refused":
+		case "get", "lock-refused", "bind":
 		default:
 			if firstTofu < 0 {
 				firstTofu = i
@@ -1894,5 +1926,287 @@ func TestApplyDestroyRetainedRefused(t *testing.T) {
 				t.Errorf("%d tofu calls on a refused destroy", n)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------- T059 additions (decision 3)
+
+// laneAPINames are the fake API's names of the lane credentials, by authority.
+var laneAPINames = map[Authority]string{AuthorityBootstrap: "lane-admin", AuthorityPlatform: "lane-platform", AuthorityTenant: "lane-tenant"}
+
+// A credential of another account, known to the fake API.
+const (
+	laneForeignAccount = "yy000058-ovh"
+	laneForeignID      = "EU.lane-foreign-58"
+	laneForeignSecret  = "lz-seed-t059-foreign-client-secret"
+)
+
+// add registers a credential with the fake API.
+func (f *fakeAPI) add(c apiCredential) {
+	f.creds[c.ClientID] = c
+	f.tokens["fake-token-"+c.Name] = c
+}
+
+// laneAPITransport logs every GET /auth/details in the lane's log as a "bind" event of the
+// credential's fake name, with the answer's status, so its order against tofu calls shows.
+type laneAPITransport struct {
+	inner http.RoundTripper
+	log   string
+}
+
+func (l laneAPITransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := l.inner.RoundTrip(r)
+	if r.URL.Path == "/v1/auth/details" {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		laneAppend(l.log, laneCall{Cmd: "bind", Stack: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer fake-token-"), Exit: status})
+	}
+	return resp, err
+}
+
+func (h *laneHarness) laneAPI() API {
+	a := h.api.API()
+	a.HTTP = &http.Client{Transport: laneAPITransport{inner: h.api.Client().Transport, log: h.world.Log}}
+	return a
+}
+
+// setFail makes id's call cmd fail (init, plan, show-json, show, output).
+func (h *laneHarness) setFail(id, cmd string) {
+	in := h.row(id)
+	st := h.world.Stacks[in.Path]
+	st.Fail = cmd
+	h.world.Stacks[in.Path] = st
+	h.save()
+}
+
+// writeConfig replaces a file below the config root with values.
+func (h *laneHarness) writeConfig(rel string, values map[string]string) {
+	h.t.Helper()
+	if err := WriteCredentialFile(h.root, filepath.FromSlash(rel), values); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// Decision 3a (FR-010 "every credential is checked against the bound account before use", G13):
+// a credential the API places in another account, one for another endpoint, or a binding whose
+// org is not the manifest's or whose account id is not the run's, is refused (exit 3) before any
+// tofu call of its stack; nothing is applied or published; the locks are released (the harness
+// checks every run, and that every stack's calls follow a successful GET /auth/details with its
+// authority's credential).
+func TestApplyBindsCredentials(t *testing.T) {
+	acct := "accounts/" + laneAccount + "/"
+	foreign := map[string]string{"OVH_ENDPOINT": "ovh-eu", "OVH_CLIENT_ID": laneForeignID, "OVH_CLIENT_SECRET": laneForeignSecret}
+	accountEnv := func(id, org string) map[string]string {
+		return map[string]string{"LZ_ACCOUNT_ID": id, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": org, "LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject}
+	}
+	cases := []struct {
+		name, verb, touch, file string
+		values                  map[string]string
+		cond                    string
+		refused                 string // the stack refused: no tofu call of it, nothing after it
+	}{
+		{"admin-foreign", VerbApply, "", "sandbox.env", foreign, CondAccount, "account-governance"},
+		{"platform-foreign", VerbApply, "demo-dev-project", acct + "platform-deployer.env", foreign, CondAccount, "demo-dev-project"},
+		{"platform-foreign-plan", VerbPlan, "demo-dev-project", acct + "platform-deployer.env", foreign, CondAccount, "demo-dev-project"},
+		{"tenant-foreign", VerbApply, "demo-dev-gra11-network", acct + "tenants/demo/deployer.env", foreign, CondAccount, "demo-dev-gra11-network"},
+		{"tenant-endpoint", VerbApply, "demo-dev-gra11-network", acct + "tenants/demo/deployer.env",
+			map[string]string{"OVH_ENDPOINT": "ovh-ca", "OVH_CLIENT_ID": laneTenantID, "OVH_CLIENT_SECRET": laneTenantSecret}, CondEndpoint, "demo-dev-gra11-network"},
+		{"org-mismatch", VerbApply, "demo-dev-project", acct + "account.env", accountEnv(laneAccount, "zz"), CondOrg, "demo-dev-project"},
+		{"account-env-other-id", VerbApply, "demo-dev-project", acct + "account.env", accountEnv(laneForeignAccount, "lz"), CondAccount, "demo-dev-project"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newLaneHarness(t)
+			if c.touch != "" {
+				h.steady()
+				h.touch(c.touch)
+			}
+			h.writeConfig(c.file, c.values)
+			objects := h.store.snapshot()
+			r := h.run(c.verb, TargetAll)
+			laneCondition(t, r, c.cond)
+			for _, call := range r.tofu() {
+				if call.Stack == c.refused {
+					t.Errorf("tofu %s on %s, whose credential is not bound to the account", call.Cmd, c.refused)
+				}
+			}
+			if got := r.stacksOf("apply"); len(got) != 0 {
+				t.Errorf("applied %v on a refused binding", got)
+			}
+			if len(r.puts()) != 0 || !maps.Equal(h.store.snapshot(), objects) {
+				t.Errorf("a refused run published")
+			}
+			if c.cond == CondEndpoint {
+				// The endpoint is compared before the credential is sent anywhere (Bind).
+				for _, call := range h.api.Calls() {
+					if call.Credential == "lane-tenant" || call.Credential == laneTenantID {
+						t.Errorf("the ovh-ca credential reached the API: %+v", call)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Decision 3b: a failed init, plan, `show -json`, rendered `show` or `output` stops the run (exit
+// 1) with nothing applied after it, no record or artefact of the failed stack, its saved plan
+// removed, and every run lock released (the harness checks the last two on every run).
+func TestApplyChildFailureReleasesLocks(t *testing.T) {
+	for _, verb := range []string{VerbApply, VerbPlan} {
+		for _, fail := range []string{"init", "plan", "show-json", "show", "output"} {
+			if verb == VerbPlan && fail == "output" {
+				continue // plan reads no output
+			}
+			t.Run(verb+"/"+fail, func(t *testing.T) {
+				h := newLaneHarness(t)
+				h.steady()
+				h.touch("demo-dev-project")
+				h.setFail("demo-dev-project", fail)
+				record, objects := h.record("demo-dev-project"), h.store.snapshot()
+				r := h.run(verb, TargetAll)
+				laneExit(t, r, 1)
+				if got := r.events("lock"); !slices.Equal(got, []string{"tenant-demo"}) {
+					t.Errorf("locks taken %v, want [tenant-demo]", got)
+				}
+				var want []string
+				if fail == "output" {
+					want = []string{"demo-dev-project"}
+				}
+				if got := r.stacksOf("apply"); !slices.Equal(got, want) {
+					t.Errorf("applied %v, want %v", got, want)
+				}
+				if got := r.stacksOf(fail); !slices.Equal(got, []string{"demo-dev-project"}) {
+					t.Errorf("failing %s ran on %v, want [demo-dev-project]", fail, got)
+				}
+				for _, call := range r.tofu() {
+					if call.Stack != "demo-dev-project" {
+						t.Errorf("tofu %s on %s after the failed %s of demo-dev-project", call.Cmd, call.Stack, fail)
+					}
+				}
+				if !bytes.Equal(h.record("demo-dev-project"), record) || !maps.Equal(h.store.snapshot(), objects) {
+					t.Errorf("a failed %s wrote a record or published", fail)
+				}
+			})
+		}
+	}
+}
+
+// account-governance's outputs name the tenants whose deployer files the lane writes: a tenant the
+// manifest does not have (a path among them), or a manifest tenant or the platform deployer
+// without its client or secret, fails the run (exit 1) before any credential file is written.
+func TestApplyDeployerOutputsChecked(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(outs map[string]map[string]any)
+	}{
+		{"unknown-tenant", func(o map[string]map[string]any) {
+			o["tenants"]["value"].(map[string]any)["ghost"] = map[string]any{"deployer_client_id": "EU.ghost"}
+			o["tenant_deployer_secrets"]["value"].(map[string]any)["ghost"] = "lz-seed-t059-ghost-secret"
+		}},
+		{"path-tenant", func(o map[string]map[string]any) {
+			o["tenants"]["value"].(map[string]any)["../../escape"] = map[string]any{"deployer_client_id": "EU.escape"}
+			o["tenant_deployer_secrets"]["value"].(map[string]any)["../../escape"] = "lz-seed-t059-escape-secret"
+		}},
+		{"tenant-missing", func(o map[string]map[string]any) {
+			delete(o["tenants"]["value"].(map[string]any), "demo")
+		}},
+		{"secret-missing", func(o map[string]map[string]any) {
+			delete(o["tenant_deployer_secrets"]["value"].(map[string]any), "demo")
+		}},
+		{"client-empty", func(o map[string]map[string]any) {
+			o["platform_deployer"]["value"].(map[string]any)["client_id"] = ""
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newLaneHarness(t)
+			in := h.row("account-governance")
+			st := h.world.Stacks[in.Path]
+			raw, err := os.ReadFile(st.Outputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outs map[string]map[string]any
+			if err := json.Unmarshal(raw, &outs); err != nil {
+				t.Fatal(err)
+			}
+			c.mutate(outs)
+			raw, _ = json.Marshal(outs)
+			st.Outputs = filepath.Join(h.base, "fake", "outputs-governance-"+c.name+".json")
+			if err := os.WriteFile(st.Outputs, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.world.Stacks[in.Path] = st
+			h.save()
+			before := h.configFiles()
+			r := h.run(VerbApply, TargetAll)
+			laneExit(t, r, 1)
+			if got := r.stacksOf("apply"); !slices.Equal(got, []string{"account-governance"}) {
+				t.Errorf("applied %v, want only account-governance", got)
+			}
+			for p := range h.configFiles() {
+				if _, ok := before[p]; !ok {
+					t.Errorf("the run wrote %s from rejected outputs", p)
+				}
+			}
+			if len(h.record("account-governance")) != 0 {
+				t.Errorf("account-governance recorded with rejected outputs")
+			}
+		})
+	}
+}
+
+// The bound account's own files (account.env, state-passphrase.env: bootstrap:account writes them)
+// missing stop the run before any lock or tofu call, blocked (exit 2) naming bootstrap:account; a
+// passphrase file without the passphrase is refused (exit 3).
+func TestApplyAccountFilesMissing(t *testing.T) {
+	acct := "accounts/" + laneAccount + "/"
+	for _, c := range []struct {
+		name, rel string
+		empty     bool
+	}{
+		{"account-env", acct + "account.env", false},
+		{"passphrase", acct + "state-passphrase.env", false},
+		{"passphrase-empty", acct + "state-passphrase.env", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newLaneHarness(t)
+			if c.empty {
+				h.writeConfig(c.rel, map[string]string{"OTHER": "x"})
+			} else if err := os.Remove(filepath.Join(h.root, filepath.FromSlash(c.rel))); err != nil {
+				t.Fatal(err)
+			}
+			r := h.run(VerbApply, TargetAll)
+			if c.empty {
+				laneExit(t, r, RefusalExit)
+			} else {
+				laneExit(t, r, BlockedExit)
+				if !strings.Contains(fmt.Sprint(r.err), "bootstrap:account") {
+					t.Errorf("err %v does not name bootstrap:account", r.err)
+				}
+			}
+			if n := len(r.tofu()); n != 0 || len(r.events("lock")) != 0 {
+				t.Errorf("%d tofu calls, locks %v without the account's files", n, r.events("lock"))
+			}
+		})
+	}
+}
+
+// Selection reads each producer's artefact with that producer's keys: a producer's credential file
+// that exists but is refused (here readable by others) refuses the run (exit 3, CondFileMode)
+// before any lock or tofu call; only a missing file means "nothing published yet".
+func TestApplySelectionCredentialRefused(t *testing.T) {
+	h := newLaneHarness(t)
+	h.steady()
+	h.touch("demo-dev-gra11-runtime")
+	if err := os.Chmod(filepath.Join(h.acctDir, "platform-deployer.env"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := h.run(VerbApply, TargetAll)
+	laneCondition(t, r, CondFileMode)
+	if n := len(r.tofu()); n != 0 || len(r.events("lock")) != 0 {
+		t.Errorf("%d tofu calls, locks %v after a refused producer credential", n, r.events("lock"))
 	}
 }

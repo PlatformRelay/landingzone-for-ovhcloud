@@ -54,3 +54,6 @@ func stageNames() []string {
 	}
 	return names
 }
+
+// StageOf returns the stage table row of a stage name; the live lane reads its principal and chain.
+func StageOf(name string) (Stage, bool) { return stageNamed(name) }
