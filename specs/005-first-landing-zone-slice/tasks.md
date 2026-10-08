@@ -448,7 +448,7 @@ Independent test: V008 offline; V009 owner session.
 
 Independent test: V007 offline; V010 owner session.
 
-- [ ] T058 [US5] Write live plan/apply tests (authority selection, retained-resource refusal integration, selection integration) in tools/internal/live/{apply,credentials}_test.go
+- [x] T058 [US5] Write live plan/apply tests (authority selection, retained-resource refusal integration, selection integration) in tools/internal/live/{apply,credentials}_test.go — closed 2026-10-08, evidence: evidence/T058.md
   - Requirements: FR-009, FR-010, FR-011, SC-005; ADRs: 0004, 0008, 0009. Depends on: T053, T041, T061, T064.
   - Verify: `go -C tools test ./internal/live -run "TestApply|TestCredentials" -count=1`: `plan|apply -- all` acts on the selected set in order with each stack's authority; deployer credential files are written by `files.go` after `account-governance` and `tenant-state` applies; a consumer without its producer's artefact reports `blocked` (exit 2). Every plan of a retained instance goes through T064's guard before apply (reusing T063's plan fixtures with stack addresses: `org` change, tenant removed from `tenant-state`'s inputs, removed block, replaced project), and `destroy` of `account-bootstrap`, `demo-state`, `account-governance`, `demo-dev-project` or `all` is refused. Guards G1, G2, G7: platform credentials for a tenant stack, a seeded secret in the rendered plan file or a stream, an apply path that bypasses `protect.go` and a retained instance accepted by `destroy` are each behavioural red against stubs.
   - Evidence: `evidence/T058.md`; PR; initial status `not-run`.

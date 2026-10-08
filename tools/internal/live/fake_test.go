@@ -42,6 +42,9 @@ func TestMain(m *testing.M) {
 	case bssFakeWorld() != "":
 		// The fake tofu of the bootstrap state phases (bootstrap_state_test.go, T056).
 		os.Exit(fakeBootstrapTofu(bssFakeWorld(), os.Args[1:]))
+	case laneFakeWorld() != "":
+		// The fake tofu of the plan/apply lane (apply_test.go, T058).
+		os.Exit(fakeLaneTofu(laneFakeWorld(), os.Args[1:]))
 	case filepath.Base(os.Args[0]) == "tofu":
 		os.Exit(fakeTofu(os.Args[1:]))
 	case filepath.Base(os.Args[0]) == "ovhcloud":
