@@ -55,6 +55,9 @@ const (
 const (
 	CondConfigRoot  = "config-root"  // the credential directory lies inside the checkout (directly or through a symlink)
 	CondAdminExists = "admin-exists" // --fresh-account on an account whose admin exists but is drifted or has no working sandbox.env
+	// CondPassphraseLost: encrypted bootstrap state exists (accounts/<a>/state/*.tfstate) without
+	// state-passphrase.env.
+	CondPassphraseLost = "passphrase-lost"
 )
 
 // PhaseResult is one phase's outcome; Detail never holds a secret.
@@ -426,6 +429,22 @@ func (b *bootstrap) passphrase() error {
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return b.fail(PhasePassphrase, err.Error())
+	}
+	// Coordinator decision 2 (2026-10-08): encrypted bootstrap state without its passphrase is
+	// refused; a new passphrase beside it could never read it. Probe states keep their own
+	// passphrases under state/probes/ and do not count.
+	held, err := filepath.Glob(filepath.Join(b.dir, "state", "*.tfstate"))
+	if err != nil {
+		return b.fail(PhasePassphrase, err.Error())
+	}
+	if len(held) > 0 {
+		detail := fmt.Sprintf("encrypted state %s exists but state-passphrase.env is missing: restore accounts/%s/state-passphrase.env from your copy and re-run; "+
+			"a new passphrase is never generated beside state it cannot read. The remote states in the account bucket (account-governance, tenant stacks) "+
+			"are encrypted with the same passphrase and are unreadable without it too: starting over means deleting the resources all those states manage, "+
+			"then the bucket's state objects and these local state files, before a new passphrase is created",
+			strings.Join(held, ", "), b.account)
+		b.add(PhasePassphrase, StatusFail, "refused ("+CondPassphraseLost+"): "+detail)
+		return refuse(CondPassphraseLost, "%s", detail)
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

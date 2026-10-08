@@ -70,7 +70,8 @@ const (
 	bssForeignPrj = "f0000000000000000000000000000009"
 	bssPrefix     = "module.bootstrap.module.state_backend."
 	bssBucketAddr = bssPrefix + "module.bucket.ovh_cloud_project_storage.this"
-	bssUserAddr   = bssPrefix + `module.s3_user["platform"].ovh_cloud_project_user.this`
+	bssUserModule = bssPrefix + `module.s3_user["platform"]`
+	bssUserAddr   = bssUserModule + `.ovh_cloud_project_user.this`
 	bssCredAddr   = bssPrefix + `module.s3_user["platform"].ovh_cloud_project_user_s3_credential.this`
 	bssPolicyAddr = bssPrefix + `module.s3_user["platform"].ovh_cloud_project_user_s3_policy.this`
 )
@@ -97,6 +98,26 @@ type bssWorld struct {
 	FailAfter   int    `json:"fail_after"`   // > 0: the bootstrap apply stops (exit 1) after this many creates
 	BucketFirst bool   `json:"bucket_first"` // the bootstrap apply creates the bucket before the S3 user
 	FailShow    bool   `json:"fail_show"`    // `show -json` fails: the run stops between plan and guard
+	// UserDescription is the platform S3 user's description, from the pinned-tool capture of the
+	// bootstrap stage (bssCapturedUserDescription), never written by hand.
+	UserDescription string `json:"user_description"`
+	// PolicyConflict: the bootstrap apply creates what it plans, then fails with a 409 on the
+	// platform user's S3 policy (a 409 that is not the bucket's name).
+	PolicyConflict bool `json:"policy_conflict"`
+	// OtherRunUser: while the apply runs, another run creates a platform S3 user (id 4800) in the
+	// project, which no state of this run knows.
+	OtherRunUser bool `json:"other_run_user"`
+	// OutputChange: the plan changes only an output (the stage's outputs.tf changed): no resource
+	// change, but an apply is needed for `tofu output` to return the new outputs.
+	OutputChange bool `json:"output_change"`
+	// OtherRunStateUser: between this run's user listing and its plan, another run created the
+	// platform S3 user (id 4800) and recorded it in the shared bootstrap state (review r2).
+	OtherRunStateUser bool `json:"other_run_state_user"`
+	// MixedErrors: the bucket create fails with a 500 while a separate diagnostic reports a 409 of
+	// the user's policy (review r2).
+	MixedErrors bool `json:"mixed_errors"`
+	// WrapConflict: the taken name's 409 diagnostic is word-wrapped across lines (review r2).
+	WrapConflict bool `json:"wrap_conflict"`
 	// Tenants is the resolved project of each manifest tenant: account-governance's required
 	// `tenants` input (data-model *Resolved-reference input*; stacks.Adapt writes it).
 	Tenants map[string]string `json:"tenants"`
@@ -116,11 +137,12 @@ type bssBucketRec struct {
 }
 
 type bssUser struct {
-	Account   string `json:"account"`
-	Project   string `json:"project"`
-	Bucket    string `json:"bucket"` // the bucket its S3 policy covers
-	AccessKey string `json:"access_key"`
-	Secret    string `json:"secret"`
+	Account     string `json:"account"`
+	Project     string `json:"project"`
+	Description string `json:"description"`
+	Bucket      string `json:"bucket"` // the bucket its S3 policy covers
+	AccessKey   string `json:"access_key"`
+	Secret      string `json:"secret"`
 }
 
 // bssLocal is the fake encrypted local state of the bootstrap root.
@@ -373,6 +395,16 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 			if c := needs(); c != 0 {
 				return c
 			}
+			if w.OtherRunStateUser && st.User == "" {
+				cloud.Users["4800"] = bssUser{Account: w.Account, Project: w.Project, Bucket: w.Bucket, Description: w.UserDescription,
+					AccessKey: "FAKEAK0800", Secret: "fakeS3Secret0800Qx7v"}
+				cloud.Events = append(cloud.Events, "other run creates user 4800")
+				st.User = "4800"
+				saveCloud()
+				if c := saveState(); c != 0 {
+					return c
+				}
+			}
 			pf := bssPlanFile{Root: call.Root, Destroy: has("-destroy"), Nonce: bssSHA(fmt.Sprint(os.Getpid(), statePath, len(cloud.Events), os.Args))[:16]}
 			if ch, _, ok := recorded(); ok {
 				pf.Changes, pf.Recorded = ch, true
@@ -415,8 +447,14 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 				rcs = append(rcs, map[string]any{"address": c.Address, "mode": "managed", "type": bssTypes[c.Address], "name": "this",
 					"change": map[string]any{"actions": c.Actions}})
 			}
-			raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.0", "planned_values": map[string]any{},
-				"resource_changes": rcs, "errored": false})
+			plan := map[string]any{"format_version": "1.2", "terraform_version": "1.13.0", "planned_values": map[string]any{},
+				"resource_changes": rcs, "errored": false}
+			if w.OutputChange {
+				plan["output_changes"] = map[string]any{"state_endpoint": map[string]any{"actions": []string{"update"},
+					"before": "https://s3.old.example", "after": "https://s3." + strings.ToLower(w.Region) + ".io.cloud.ovh.net",
+					"after_unknown": false, "before_sensitive": false, "after_sensitive": false}}
+			}
+			raw, _ := json.Marshal(plan)
 			fmt.Println(string(raw))
 			return done(0)
 		case "apply", "destroy":
@@ -450,6 +488,11 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 			if w.BucketFirst {
 				order = append(bucketOps, userOps...)
 			}
+			if w.OtherRunUser {
+				cloud.Users["4800"] = bssUser{Account: w.Account, Project: w.Project, Bucket: w.Bucket, Description: w.UserDescription,
+					AccessKey: "FAKEAK0800", Secret: "fakeS3Secret0800Qx7v"}
+				cloud.Events = append(cloud.Events, "other run creates user 4800")
+			}
 			creates := 0
 			for _, c := range order {
 				for _, a := range c.Actions {
@@ -467,8 +510,18 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 						if _, taken := cloud.Buckets[w.Bucket]; taken {
 							saveCloud()
 							saveState()
-							return fail("calling Post /cloud/project/%s/region/%s/storage: OVHcloud API error (status code 409): Client::Conflict: bucket name %q is already in use (client_secret=%s)",
-								w.Project, w.Region, w.Bucket, os.Getenv("OVH_CLIENT_SECRET"))
+							code := "(status code 409)"
+							if w.WrapConflict {
+								code = "(status code\n409)"
+							}
+							return fail("calling Post /cloud/project/%s/region/%s/storage: OVHcloud API error %s: Client::Conflict: bucket name %q is already in use (client_secret=%s)",
+								w.Project, w.Region, code, w.Bucket, os.Getenv("OVH_CLIENT_SECRET"))
+						}
+						if w.MixedErrors {
+							saveCloud()
+							saveState()
+							fmt.Fprintf(os.Stderr, "Error: calling Post /cloud/project/%s/user/%s/policy: OVHcloud API error (status code 409): Client::Conflict\n", w.Project, st.User)
+							return fail("calling Post /cloud/project/%s/region/%s/storage: OVHcloud API error (status code 500): Server::InternalServerError", w.Project, w.Region)
 						}
 						cloud.Buckets[w.Bucket] = bssBucketRec{Account: w.Account, Project: w.Project, Region: w.Region}
 						cloud.Events = append(cloud.Events, "create bucket "+w.Bucket)
@@ -477,7 +530,7 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 					case a == "create" && c.Address == bssUserAddr:
 						cloud.Next++
 						id := strconv.Itoa(4700 + cloud.Next)
-						cloud.Users[id] = bssUser{Account: w.Account, Project: w.Project, Bucket: w.Bucket,
+						cloud.Users[id] = bssUser{Account: w.Account, Project: w.Project, Bucket: w.Bucket, Description: w.UserDescription,
 							AccessKey: fmt.Sprintf("FAKEAK%04d", cloud.Next), Secret: fmt.Sprintf("fakeS3Secret%04dQx7v", cloud.Next)}
 						cloud.Events = append(cloud.Events, "create user "+id)
 						st.User = id
@@ -493,6 +546,10 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 			saveCloud()
 			if c := saveState(); c != 0 {
 				return c
+			}
+			if w.PolicyConflict && creates > 0 {
+				return fail("calling Post /cloud/project/%s/user/%s/policy with params: OVHcloud API error (status code 409): Client::Conflict: policy already exists",
+					w.Project, st.User)
 			}
 			fmt.Println("Apply complete! (fake)")
 			return done(0)
@@ -551,11 +608,34 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 			if !initialised() {
 				return fail(`Backend initialization required, please run "tofu init"`)
 			}
+			// As OpenTofu does on a local backend whose file does not exist yet (observed with
+			// tofu 1.10.3 on the host, 2026-10-08: exit 1; the pinned 1.13.0 believed the same).
+			if _, err := os.Stat(statePath); err != nil {
+				return fail("No state file was found!")
+			}
 			if st.Bucket != "" {
 				fmt.Println(bssBucketAddr)
 			}
 			if st.User != "" {
 				fmt.Println(bssUserAddr + "\n" + bssCredAddr + "\n" + bssPolicyAddr)
+			}
+			return done(0)
+		case "state rm":
+			call.Cmd = "state-rm"
+			if !initialised() {
+				return fail(`Backend initialization required, please run "tofu init"`)
+			}
+			if _, err := os.Stat(statePath); err != nil {
+				return fail("No state file was found!")
+			}
+			for _, a := range positional {
+				if a != bssUserModule || st.User == "" {
+					return fail("Invalid target address %s", a)
+				}
+				st.User = ""
+			}
+			if c := saveState(); c != 0 {
+				return c
 			}
 			return done(0)
 		}
@@ -716,7 +796,8 @@ func newBSSHarness(t *testing.T) *bssHarness {
 	h.worldPath = filepath.Join(h.bin, bssWorldFile)
 	h.world = bssWorld{Account: bsOldAccount, Project: bsOldProject, Region: bssRegion, Bucket: bssBucket,
 		Cloud: filepath.Join(fake, "cloud.json"), S3: filepath.Join(fake, "s3"), Log: filepath.Join(fake, "tofu.jsonl"),
-		Tenants: map[string]string{"demo": bsOldProject}} // KD-1: DEMO_DEV is the state project
+		Tenants:         map[string]string{"demo": bsOldProject}, // KD-1: DEMO_DEV is the state project
+		UserDescription: bssCapturedUserDescription(t)}
 	h.saveWorld()
 	if err := bssSave(h.world.Cloud, bssCloud{Buckets: map[string]bssBucketRec{}, Users: map[string]bssUser{}}); err != nil {
 		t.Fatal(err)
@@ -786,13 +867,20 @@ func (h *bssHarness) setCloud(c bssCloud) {
 	}
 }
 
-// storageRoutes answers the storage reads from the fake cloud (kb/api/v1/cloud.json).
+// storageRoutes answers the storage reads and the project S3 user routes from the fake cloud
+// (kb/api/v1/cloud.json).
 func (h *bssHarness) storageRoutes(acct *bsAccount, client *bsClient, may func(string) bool, method, path string) (int, []byte, bool) {
 	rest, ok := strings.CutPrefix(path, "/v1/cloud/project/")
-	if !ok || method != http.MethodGet {
+	if !ok {
 		return 0, nil, false
 	}
 	parts := strings.Split(rest, "/")
+	if len(parts) >= 2 && parts[1] == "user" {
+		return h.userRoutes(acct, client, may, method, parts)
+	}
+	if method != http.MethodGet {
+		return 0, nil, false
+	}
 	if len(parts) < 4 || parts[1] != "region" || parts[3] != "storage" || len(parts) > 5 {
 		return 0, nil, false
 	}
@@ -832,6 +920,83 @@ func (h *bssHarness) storageRoutes(acct *bsAccount, client *bsClient, may func(s
 	}
 	raw, _ := json.Marshal(list)
 	return http.StatusOK, raw, true
+}
+
+// userRoutes: GET /cloud/project/{serviceName}/user (cloud.user.User[], id long; IAM
+// publicCloudProject:apiovh:user/get) and DELETE /cloud/project/{serviceName}/user/{userId} (IAM
+// publicCloudProject:apiovh:user/delete), kb/api/v1/cloud.json. A delete is a cloud event.
+func (h *bssHarness) userRoutes(acct *bsAccount, client *bsClient, may func(string) bool, method string, parts []string) (int, []byte, bool) {
+	project := parts[0]
+	if client == nil {
+		h.issue("user route %s %v with the root keys", method, parts)
+		return http.StatusForbidden, h.api.errBody("root keys refused by the fake"), true
+	}
+	if !slices.Contains(acct.Projects, project) {
+		return http.StatusNotFound, h.api.errBody("project not found"), true
+	}
+	var c bssCloud
+	if bssLoad(h.world.Cloud, &c) != nil {
+		return http.StatusInternalServerError, h.api.errBody("fake cloud"), true
+	}
+	switch {
+	case method == http.MethodGet && len(parts) == 2:
+		if !may("publicCloudProject:apiovh:user/get") {
+			return http.StatusForbidden, h.api.errBody("not allowed"), true
+		}
+		list := []map[string]any{}
+		for _, id := range slices.Sorted(maps.Keys(c.Users)) {
+			u := c.Users[id]
+			if u.Account != acct.Account || u.Project != project {
+				continue
+			}
+			n, _ := strconv.Atoi(id)
+			list = append(list, map[string]any{"id": n, "description": u.Description, "username": "user-" + id,
+				"status": "ok", "creationDate": "2026-10-08T07:00:00Z", "openstackId": "os-" + id, "roles": []any{}})
+		}
+		raw, _ := json.Marshal(list)
+		return http.StatusOK, raw, true
+	case method == http.MethodDelete && len(parts) == 3:
+		if !may("publicCloudProject:apiovh:user/delete") {
+			return http.StatusForbidden, h.api.errBody("not allowed"), true
+		}
+		u, found := c.Users[parts[2]]
+		if !found || u.Account != acct.Account || u.Project != project {
+			return http.StatusNotFound, h.api.errBody("user not found"), true
+		}
+		delete(c.Users, parts[2])
+		c.Events = append(c.Events, "delete user "+parts[2])
+		if bssSave(h.world.Cloud, c) != nil {
+			return http.StatusInternalServerError, h.api.errBody("fake cloud"), true
+		}
+		return http.StatusOK, []byte("null"), true
+	}
+	return 0, nil, false
+}
+
+// bssCapturedUserDescription is the platform S3 user's description in the plan pinned OpenTofu
+// 1.13.0 made of the bootstrap stage (org lz).
+func bssCapturedUserDescription(t *testing.T) string {
+	t.Helper()
+	var capture struct {
+		TestPlan struct {
+			ResourceChanges []struct {
+				Address string `json:"address"`
+				Change  struct {
+					After map[string]any `json:"after"`
+				} `json:"change"`
+			} `json:"resource_changes"`
+		} `json:"test_plan"`
+	}
+	readJSON(t, filepath.Join(bssRepoRoot, "tests/fixtures/outputs/captures/bootstrap-plan.json"), &capture)
+	for _, rc := range capture.TestPlan.ResourceChanges {
+		if "module.bootstrap."+rc.Address == bssUserAddr {
+			if d, _ := rc.Change.After["description"].(string); d != "" {
+				return d
+			}
+		}
+	}
+	t.Fatal("no platform S3 user description in the captured bootstrap plan")
+	return ""
 }
 
 // bssStore is the account bucket as state.env's S3 keys reach it: a key pair of a user bound to
@@ -1294,6 +1459,48 @@ func bssNoDeployerFile(t *testing.T, h *bssHarness) {
 	}
 }
 
+// bssDropBucket deletes the account bucket and its objects out of band.
+func bssDropBucket(h *bssHarness) {
+	h.t.Helper()
+	c := h.cloud()
+	delete(c.Buckets, h.world.Bucket)
+	h.setCloud(c)
+	if err := os.RemoveAll(filepath.Join(h.world.S3, h.world.Bucket)); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// bssBucketLost (coordinator decision 1): the run refuses with state-bucket-lost (exit 3), names
+// the bucket and how to recover, creates or imports nothing, applies nothing, leaves state.env as
+// it was, and neither publishes nor verifies.
+func bssBucketLost(t *testing.T, h *bssHarness, rs []PhaseResult, err error) {
+	t.Helper()
+	bsExit(t, err, RefusalExit)
+	var ref *Refusal
+	if !errors.As(err, &ref) || ref.Condition != "state-bucket-lost" {
+		t.Errorf("err %v, want the state-bucket-lost refusal", err)
+	}
+	bsWantStatus(t, rs, PhaseState, StatusFail)
+	r, _ := bsResult(rs, PhaseState)
+	if !strings.Contains(r.Detail, h.world.Bucket) || !strings.Contains(r.Detail, "restore") {
+		t.Errorf("state detail %q: want the bucket named and the recovery steps (restore …)", r.Detail)
+	}
+	if ev := h.runEvents(); len(ev) > 0 {
+		t.Errorf("events %v: a lost bucket is never created or imported again", ev)
+	}
+	if slices.ContainsFunc(h.runCalls(), func(c bssCall) bool { return c.Cmd == "apply" || c.Cmd == "import" }) {
+		t.Error("tofu applied or imported after the bucket was found lost")
+	}
+	if _, serr := os.Stat(h.accountPath("state.env")); serr != nil {
+		t.Errorf("state.env: %v (it is the record of the lost bucket, kept)", serr)
+	}
+	for _, p := range []string{PhasePublish, PhaseVerify} {
+		if r, ok := bsResult(rs, p); ok && r.Status != StatusFail {
+			t.Errorf("%s %s after the lost bucket's refusal", p, r.Status)
+		}
+	}
+}
+
 func bssExitNonZero(t *testing.T, err error) {
 	t.Helper()
 	if ExitCode(err) == 0 {
@@ -1481,6 +1688,10 @@ func TestBootstrapStateBucketTaken(t *testing.T) {
 	h.seedCurrentSandbox()
 	c := h.cloud()
 	c.Buckets[bssBucket] = bssBucketRec{Account: bssForeign, Project: bssForeignPrj, Region: bssRegion}
+	// A platform S3 user of an earlier, lost bootstrap: not this run's, so never deleted (decision 3).
+	const earlier = "4690"
+	c.Users[earlier] = bssUser{Account: h.world.Account, Project: h.world.Project, Bucket: bssBucket,
+		Description: h.world.UserDescription, AccessKey: "FAKEAK0690", Secret: "fakeS3Secret0690Qx7v"}
 	h.setCloud(c)
 	rs, err := h.run(false)
 	bssExitNonZero(t, err)
@@ -1511,9 +1722,183 @@ func TestBootstrapStateBucketTaken(t *testing.T) {
 	if _, ok := h.object(stacks.ArtifactKey("account-bootstrap")); ok {
 		t.Error("an envelope was written into the other account's bucket")
 	}
+	// Coordinator decision 3 (2026-10-08): the S3 user the failed apply created before the bucket's
+	// 409 is deleted again in the same run (as T043 deletes its admin client); nothing else is.
+	var created []string
+	for _, e := range h.runEvents() {
+		if id, ok := strings.CutPrefix(e, "create user "); ok {
+			created = append(created, id)
+		}
+	}
+	if len(created) == 0 {
+		t.Error("the fake apply created no S3 user before the 409: the row tests nothing")
+	}
+	for _, e := range h.runEvents() {
+		if id, ok := strings.CutPrefix(e, "delete user "); strings.HasPrefix(e, "delete ") && (!ok || !slices.Contains(created, id)) {
+			t.Errorf("cloud event %q: only the S3 user this run created may be deleted", e)
+		}
+	}
+	for id, u := range h.cloud().Users {
+		if u.Account == h.world.Account && id != earlier {
+			t.Errorf("S3 user %s (%s) this run created is left behind with keys bound to %s", id, u.Description, u.Bucket)
+		}
+	}
+	if _, ok := h.cloud().Users[earlier]; !ok {
+		t.Errorf("the earlier bootstrap's S3 user %s was deleted: only this run's user may be", earlier)
+	}
+	if !strings.Contains(text, earlier) {
+		t.Errorf("state failure %q does not name the earlier platform S3 user %s", text, earlier)
+	}
+	// The deleted user leaves the bootstrap state too, so the next run plans a clean create.
+	if !slices.ContainsFunc(h.runCalls(), func(c bssCall) bool {
+		return c.Cmd == "state-rm" && c.Exit == 0 && slices.Contains(c.Args, bssUserModule)
+	}) {
+		t.Errorf("the deleted S3 user was not removed from the bootstrap state (tofu state rm %s)", bssUserModule)
+	}
 	bssGuarded(t, h.runCalls())
-	bssNeverDestroyed(t, h)
 	bssNoLeak(t, h, rs, err)
+}
+
+// TestBootstrapStateTakenOtherRunUser (decision 3, review r1): while the apply ran, a platform S3
+// user of another run appeared in the project. Nothing proves which new user is this run's, so
+// none is deleted; both are named.
+func TestBootstrapStateTakenOtherRunUser(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	c := h.cloud()
+	c.Buckets[bssBucket] = bssBucketRec{Account: bssForeign, Project: bssForeignPrj, Region: bssRegion}
+	h.setCloud(c)
+	h.world.OtherRunUser = true
+	rs, err := h.run(false)
+	bssExitNonZero(t, err)
+	r, _ := bsResult(rs, PhaseState)
+	for _, e := range h.runEvents() {
+		if strings.HasPrefix(e, "delete ") {
+			t.Errorf("cloud event %q: a user that cannot be attributed to this run was deleted", e)
+		}
+	}
+	for id, u := range h.cloud().Users {
+		if u.Account == h.world.Account && !strings.Contains(r.Detail, id) {
+			t.Errorf("state detail %q does not name the new platform S3 user %s", r.Detail, id)
+		}
+	}
+	bssGuarded(t, h.runCalls())
+	bssNoLeak(t, h, rs, err)
+}
+
+// bssTakenWorld seeds the current sandbox with the account bucket's name owned by another account.
+func bssTakenWorld(t *testing.T) *bssHarness {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	c := h.cloud()
+	c.Buckets[bssBucket] = bssBucketRec{Account: bssForeign, Project: bssForeignPrj, Region: bssRegion}
+	h.setCloud(c)
+	return h
+}
+
+// bssNoDelete: the run deleted nothing.
+func bssNoDelete(t *testing.T, h *bssHarness) {
+	t.Helper()
+	for _, e := range h.runEvents() {
+		if strings.HasPrefix(e, "delete ") {
+			t.Errorf("cloud event %q: nothing this run cannot prove its own is deleted", e)
+		}
+	}
+}
+
+// TestBootstrapStateTakenUserOfOtherRun (decision 3, review r2): between this run's user listing
+// and its plan, another run created the platform S3 user and recorded it in the shared bootstrap
+// state; this run's plan does not create it, so the taken-name failure deletes nothing.
+func TestBootstrapStateTakenUserOfOtherRun(t *testing.T) {
+	h := bssTakenWorld(t)
+	h.world.OtherRunStateUser = true
+	rs, err := h.run(false)
+	bssExitNonZero(t, err)
+	bssNoDelete(t, h)
+	if _, ok := h.cloud().Users["4800"]; !ok {
+		t.Error("the other run's S3 user 4800 was deleted")
+	}
+	bssGuarded(t, h.runCalls())
+	bssNoLeak(t, h, rs, err)
+}
+
+// TestBootstrapStateMixedDiagnostics (review r2): the bucket create fails with a 500 while another
+// diagnostic of the same apply is a 409: not a taken name, nothing deleted, no spec.org advice.
+func TestBootstrapStateMixedDiagnostics(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	h.world.MixedErrors = true
+	rs, err := h.run(false)
+	bssExitNonZero(t, err)
+	if r, _ := bsResult(rs, PhaseState); strings.Contains(r.Detail, "spec.org") {
+		t.Errorf("state detail %q: a 500 on the bucket read as a taken name", r.Detail)
+	}
+	bssNoDelete(t, h)
+	bssNoLeak(t, h, rs, err)
+}
+
+// TestBootstrapStateBucketTakenWrapped (review r2): the 409 diagnostic is word-wrapped; it is still
+// the taken name, and this run's S3 user is deleted again.
+func TestBootstrapStateBucketTakenWrapped(t *testing.T) {
+	h := bssTakenWorld(t)
+	h.world.WrapConflict = true
+	rs, err := h.run(false)
+	bssExitNonZero(t, err)
+	if r, _ := bsResult(rs, PhaseState); !strings.Contains(r.Detail, "spec.org") {
+		t.Errorf("state detail %q: a wrapped 409 not recognised as the taken name", r.Detail)
+	}
+	if bssCount(h.runEvents(), "delete user ") != 1 {
+		t.Errorf("events %v: want this run's S3 user deleted once", h.runEvents())
+	}
+	bssNoLeak(t, h, rs, err)
+}
+
+// TestBootstrapStateScratchInCheckout (G3, review r2): a TMPDIR inside the checkout is refused
+// before any child starts: plan files and data directories go under it.
+func TestBootstrapStateScratchInCheckout(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	inner := filepath.Join(h.checkout, ".tmp")
+	bsMkdirPrivate(t, inner)
+	before := treeSnapshot(t, h.checkout)
+	t.Setenv("TMPDIR", inner)
+	rs, err := h.run(false)
+	bsExit(t, err, RefusalExit)
+	var ref *Refusal
+	if !errors.As(err, &ref) || ref.Condition != CondScratch {
+		t.Errorf("err %v, want the scratch refusal", err)
+	}
+	bssNoTofu(t, h)
+	bsWantStatus(t, rs, PhaseState, StatusFail)
+	bssCheckout(t, h, before)
+}
+
+// TestBootstrapStateUnrelatedConflict (review r1): a 409 that is not the bucket's name (here the
+// S3 policy's, after the bucket was created) is a plain failure: no spec.org advice, nothing
+// deleted, and the next run resumes.
+func TestBootstrapStateUnrelatedConflict(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	h.world.PolicyConflict = true
+	rs, err := h.run(false)
+	bssExitNonZero(t, err)
+	r, _ := bsResult(rs, PhaseState)
+	if strings.Contains(r.Detail, "spec.org") {
+		t.Errorf("state detail %q: a policy conflict read as a taken bucket name", r.Detail)
+	}
+	for _, e := range h.runEvents() {
+		if strings.HasPrefix(e, "delete ") {
+			t.Errorf("cloud event %q after a conflict that is not the bucket's", e)
+		}
+	}
+	h.world.PolicyConflict = false
+	if _, err := h.run(false); err != nil {
+		t.Errorf("the next run did not resume: %v", err)
+	}
+	if all := h.cloud().Events; bssCount(all, "create bucket") != 1 || bssCount(all, "create user") != 1 {
+		t.Errorf("events %v: one bucket and one S3 user over both runs", all)
+	}
+	bssNeverDestroyed(t, h)
 }
 
 // TestBootstrapStateCredentialInRepo (G3): a config root inside the checkout is refused before the
@@ -1662,20 +2047,20 @@ func TestBootstrapPartial(t *testing.T) {
 				t.Errorf("events %v: state.env is rewritten from the state, nothing is created", ev)
 			}
 		}},
+		// Coordinator decision 1 (2026-10-08): a missing account bucket that the bootstrap state or
+		// state.env records is refused (its remote states are lost; an apply would recreate
+		// resources that still exist), never created again.
 		{"bucket-missing", func(h *bssHarness) {
 			h.mustRun()
-			c := h.cloud()
-			delete(c.Buckets, h.world.Bucket)
-			h.setCloud(c)
-			if err := os.RemoveAll(filepath.Join(h.world.S3, h.world.Bucket)); err != nil {
+			bssDropBucket(h)
+		}, bssBucketLost},
+		{"bucket-missing-state-lost", func(h *bssHarness) {
+			h.mustRun()
+			bssDropBucket(h)
+			if err := os.Remove(h.accountPath("state/" + bssStateFile)); err != nil {
 				h.t.Fatal(err)
 			}
-		}, func(t *testing.T, h *bssHarness, rs []PhaseResult, err error) {
-			resumed(StatusRan, StatusRan)(t, h, rs, err)
-			if ev := h.runEvents(); bssCount(ev, "create bucket") != 1 || bssCount(ev, "create user") != 0 {
-				t.Errorf("events %v: want the missing bucket created once and no second S3 user", ev)
-			}
-		}},
+		}, bssBucketLost},
 		{"bucket-not-in-state", func(h *bssHarness) {
 			h.mustRun()
 			if err := os.Remove(h.accountPath("state/" + bssStateFile)); err != nil {
@@ -1686,6 +2071,57 @@ func TestBootstrapPartial(t *testing.T) {
 			ev := h.runEvents()
 			if bssCount(ev, "create bucket") != 0 || !slices.Contains(ev, "import bucket "+bsOldProject+"/"+bssRegion+"/"+bssBucket) {
 				t.Errorf("events %v: want the existing bucket imported by name (%s/%s/%s), not created", ev, bsOldProject, bssRegion, bssBucket)
+			}
+			// Decision 3: the earlier run's S3 user, no longer in the state, is named, not deleted.
+			keys, _ := ReadCredentialFile(h.accountPath("state.env"))
+			var old []string
+			for id, u := range h.cloud().Users {
+				if u.Account == h.world.Account && u.AccessKey != keys["AWS_ACCESS_KEY_ID"] {
+					old = append(old, id)
+				}
+			}
+			if len(old) != 1 {
+				t.Fatalf("users %v: want the earlier run's S3 user kept beside the new one", old)
+			}
+			if r, _ := bsResult(rs, PhaseState); !strings.Contains(r.Detail, old[0]) {
+				t.Errorf("state detail %q does not name the leftover S3 user %s", r.Detail, old[0])
+			}
+		}},
+		// Review r1: a plan that changes only an output is applied, or `tofu output` (and the
+		// envelope) would keep the outputs of the earlier apply.
+		{"output-only-change", func(h *bssHarness) {
+			h.mustRun()
+			h.world.OutputChange = true
+		}, func(t *testing.T, h *bssHarness, rs []PhaseResult, err error) {
+			if err != nil {
+				t.Errorf("err %v", err)
+			}
+			bsWantStatus(t, rs, PhaseState, StatusRan)
+			if !slices.ContainsFunc(h.runCalls(), func(c bssCall) bool { return c.Root == "bootstrap" && c.Cmd == "apply" && c.Exit == 0 }) {
+				t.Error("a plan with an output change was not applied")
+			}
+			bssVerified(t, h)
+		}},
+		{"orphan-user-named", func(h *bssHarness) {
+			c := h.cloud()
+			// A platform S3 user no state knows (an earlier, lost bootstrap) and, in the same
+			// project (KD-1), a tenant's S3 user: only the first is a leftover of the bootstrap.
+			c.Users["4690"] = bssUser{Account: h.world.Account, Project: h.world.Project, Bucket: h.world.Bucket,
+				Description: h.world.UserDescription, AccessKey: "FAKEAK0690", Secret: "fakeS3Secret0690Qx7v"}
+			c.Users["4691"] = bssUser{Account: h.world.Account, Project: h.world.Project, Bucket: "lz-demo-bkt-state",
+				Description: strings.Replace(h.world.UserDescription, "lz-", "lz-demo-", 1), AccessKey: "FAKEAK0691", Secret: "fakeS3Secret0691Qx7v"}
+			h.setCloud(c)
+		}, func(t *testing.T, h *bssHarness, rs []PhaseResult, err error) {
+			resumed(StatusRan, StatusRan)(t, h, rs, err)
+			r, _ := bsResult(rs, PhaseState)
+			if !strings.Contains(r.Detail, "4690") {
+				t.Errorf("state detail %q does not name the leftover platform S3 user 4690", r.Detail)
+			}
+			if strings.Contains(r.Detail, "4691") {
+				t.Errorf("state detail %q names the tenant's S3 user 4691 as a leftover", r.Detail)
+			}
+			if c := h.cloud(); c.Users["4690"].AccessKey == "" || c.Users["4691"].AccessKey == "" {
+				t.Error("a pre-existing S3 user was deleted")
 			}
 		}},
 		{"apply-stopped-after-user", func(h *bssHarness) {
@@ -1764,7 +2200,18 @@ func TestBootstrapPartial(t *testing.T) {
 				h.t.Fatal(err)
 			}
 		}, func(t *testing.T, h *bssHarness, rs []PhaseResult, err error) {
-			bssExitNonZero(t, err)
+			// Coordinator decision 2 (2026-10-08): `passphrase` refuses; no new passphrase is
+			// generated beside state it cannot read.
+			bsExit(t, err, RefusalExit)
+			var ref *Refusal
+			if !errors.As(err, &ref) || ref.Condition != "passphrase-lost" {
+				t.Errorf("err %v, want the passphrase-lost refusal", err)
+			}
+			bsWantStatus(t, rs, PhasePassphrase, StatusFail)
+			bssNoTofu(t, h)
+			if _, serr := os.Stat(h.accountPath("state-passphrase.env")); serr == nil {
+				t.Error("a new passphrase was written beside encrypted state it cannot read")
+			}
 			if ev := h.runEvents(); len(ev) > 0 {
 				t.Errorf("events %v with the passphrase of the encrypted state lost", ev)
 			}
@@ -1826,7 +2273,7 @@ func TestBootstrapPartial(t *testing.T) {
 					t.Error("the encrypted state was lost or re-encrypted under another passphrase")
 				}
 			}
-			if c := h.cloud(); len(c.Buckets) < bucketsBefore || bssCount(c.Events, "create bucket") > 1+bssCount(c.Events, "delete bucket") && tc.name != "bucket-missing" {
+			if c := h.cloud(); len(c.Buckets) < bucketsBefore || bssCount(c.Events, "create bucket") > 1+bssCount(c.Events, "delete bucket") {
 				t.Errorf("events %v: a bucket was lost or created twice", c.Events)
 			}
 			bssCheckout(t, h, checkout)
