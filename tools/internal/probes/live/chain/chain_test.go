@@ -114,10 +114,15 @@ func TestChainObservations(t *testing.T) {
 			readJSON(t, filepath.Join(fixtures, c.Name(), "observations.json"), &set)
 			readJSON(t, filepath.Join(fixtures, c.Name(), "expected.json"), &want)
 			judge(t, set, want)
+			// The order of observations does not change an outcome (review r1: a failing subject
+			// first or last is judged alike).
+			set.Observations = slices.Clone(set.Observations)
+			slices.Reverse(set.Observations)
+			judge(t, set, want)
 		})
 	}
-	if n < 12 {
-		t.Errorf("%d observation cases under %s, want the 12 recorded ones", n, fixtures)
+	if n < 16 {
+		t.Errorf("%d observation cases under %s, want the 16 recorded ones", n, fixtures)
 	}
 
 	// An observation set missing any assertion fails that assertion, and only that one.

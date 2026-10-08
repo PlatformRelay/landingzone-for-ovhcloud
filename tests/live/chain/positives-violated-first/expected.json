@@ -1,0 +1,17 @@
+{
+  "_comment": "review r1: a violated subject before a holding one of the same assertion still fails it",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "fail",
+    "kd1-canary": "pass",
+    "outputs-schema": "fail",
+    "project-tags": "pass",
+    "state-bucket-versioned": "fail",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "fail",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

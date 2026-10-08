@@ -1,0 +1,19 @@
+{
+  "_comment": "review r1: a known deviation is still reported when another assertion fails",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "known-deviation",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "fail",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [
+    "KD-1"
+  ],
+  "notes": {}
+}

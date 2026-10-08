@@ -1,0 +1,17 @@
+{
+  "_comment": "review r1: a subject observed twice with different values is judged on every observation",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "fail",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "fail",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

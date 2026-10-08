@@ -1,0 +1,17 @@
+{
+  "_comment": "review r1: an unobservable KD-1 call is a fail even when the other call shows the gap (an error is never folded into a deviation)",
+  "outcomes": {
+    "bucket-tags": "pass",
+    "deployer-binding": "pass",
+    "kd1-canary": "fail",
+    "outputs-schema": "pass",
+    "project-tags": "pass",
+    "state-bucket-versioned": "pass",
+    "state-lock-contention": "pass",
+    "state-object-encrypted": "pass",
+    "tenant-iam-write": "pass",
+    "tenant-s3-read": "pass"
+  },
+  "known_deviations": [],
+  "notes": {}
+}

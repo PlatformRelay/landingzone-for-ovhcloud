@@ -18,6 +18,7 @@ package live
 // Chain (TestObserveChain*): the chain harness of chain_test.go with a fake Observer.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,7 +31,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const (
@@ -169,6 +172,16 @@ func (f *canaryAPI) api(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[1] == "object" && r.Method == http.MethodGet:
 		op, action, bucket = "objects", "region/storage/object/get", parts[0]
 	}
+	if op == "create" {
+		// The bucket a create asks for is recorded even when the answer is forced (review r1).
+		raw, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var in struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(raw, &in)
+		bucket = in.Name
+	}
 	call := f.arrive(r, op, c.Name, bucket)
 	if !known {
 		canaryReply(w, call, http.StatusUnauthorized, map[string]string{"message": "Invalid credentials"})
@@ -187,7 +200,7 @@ func (f *canaryAPI) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	objs, exists := f.buckets[bucket]
-	if bucket != "" && !exists {
+	if op != "create" && bucket != "" && !exists {
 		canaryReply(w, call, http.StatusNotFound, map[string]string{"message": "no such container"})
 		return
 	}
@@ -317,11 +330,19 @@ func kd1(t *testing.T, obs []Observation) map[string]Observation {
 }
 
 // canaryJudge checks what every canary run must hold: the tenant's requests are its two KD-1
-// calls on the canary (and reads), never on another bucket; the admin writes nothing but the
-// canary; no client secret in the observations.
+// calls on the canary (and reads), never on another bucket; the admin creates one bucket, the
+// run's canary, and writes nothing else; the presigned upload goes to the canary; no client
+// secret in the observations.
 func canaryJudge(t *testing.T, f *canaryAPI, obs []Observation) {
 	t.Helper()
+	creates := 0
 	for _, c := range f.Calls() {
+		if c.Op == "create" {
+			creates++
+			if c.Cred != "admin" || !strings.HasPrefix(c.Bucket, canaryOrg+"-bkt-canary-") || !strings.Contains(c.Bucket, strings.ToLower(canaryRunID)) {
+				t.Errorf("create of %q as %s: the only bucket the canary run creates is its canary, by the admin", c.Bucket, c.Cred)
+			}
+		}
 		switch c.Cred {
 		case "tenant-deployer":
 			if c.Bucket != f.canary || f.canary == "" {
@@ -335,9 +356,15 @@ func canaryJudge(t *testing.T, f *canaryAPI, obs []Observation) {
 				t.Errorf("admin %s %s: the bootstrap authority writes only the canary", c.Method, c.Path)
 			}
 		case "presigned":
+			if c.Bucket != f.canary || f.canary == "" {
+				t.Errorf("presigned %s %s: the object goes to the canary only", c.Method, c.Path)
+			}
 		default:
 			t.Errorf("%s %s with credential %q: the canary uses the admin and the tenant deployer only", c.Method, c.Path, c.Cred)
 		}
+	}
+	if creates > 1 {
+		t.Errorf("%d bucket creates: one canary per run", creates)
 	}
 	raw, _ := json.Marshal(obs)
 	for _, c := range f.creds {
@@ -568,6 +595,9 @@ type chainObserver struct {
 	cleanupErr error
 	log        string
 	runs       []ObserveRun
+	// stop, when set, is called once the cleanup is registered; the observer then waits for the
+	// run to stop and returns its error (review r1: an interruption after the canary exists).
+	stop func()
 }
 
 func (o *chainObserver) Observe(ctx context.Context, run ObserveRun) ([]Observation, error) {
@@ -578,6 +608,14 @@ func (o *chainObserver) Observe(ctx context.Context, run ObserveRun) ([]Observat
 			laneAppend(o.log, laneCall{Cmd: "trap", Stack: "chain-canary"})
 			return o.cleanupErr
 		})
+	}
+	if o.stop != nil {
+		o.stop()
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * time.Second):
+		}
+		return nil, ctx.Err()
 	}
 	return o.obs, o.err
 }
@@ -654,6 +692,7 @@ func TestObserveChainReported(t *testing.T) {
 		obsErr     error
 		cleanupErr error
 		unflagged  bool // the manifest without spec.sandbox.shared_state_project
+		interrupt  bool // SIGINT once the observer registered its cleanup
 		exit       int
 		outcome    string
 		deviations []string
@@ -684,6 +723,13 @@ func TestObserveChainReported(t *testing.T) {
 			}
 			return &o
 		}), exit: 1, outcome: "fail", reason: "state-lock-contention"},
+		{name: "kd1-with-failure", obs: chainWith(func(o Observation) *Observation {
+			if o.Assertion == "kd1-canary" || o.Assertion == "tenant-iam-write" {
+				o.Observed = "allowed"
+			}
+			return &o
+		}), exit: 1, outcome: "fail", deviations: []string{"KD-1"}, reason: "tenant-iam-write"},
+		{name: "interrupted-after-canary", interrupt: true, exit: 1, outcome: "fail", reason: "interrupt"},
 		{name: "collector-fails", obsErr: errors.New("collector: listing the state buckets failed"), exit: 1, outcome: "fail", reason: "collector"},
 		{name: "trap-fails", obs: chainPassing(), cleanupErr: errors.New("canary still exists"), exit: 1, outcome: "fail", reason: "chain-canary"},
 	}
@@ -694,7 +740,11 @@ func TestObserveChainReported(t *testing.T) {
 				h.m.SharedStateProject = false
 			}
 			o := &chainObserver{obs: tc.obs, err: tc.obsErr, cleanupErr: tc.cleanupErr}
-			r := h.chain(chainExec{observer: o})
+			var sig os.Signal
+			if tc.interrupt {
+				sig = syscall.SIGINT
+			}
+			r := h.chain(chainExec{observer: o, signalAtObserve: sig})
 			laneExit(t, r.laneRun, tc.exit)
 			if tc.reason != "" && (r.err == nil || !strings.Contains(r.err.Error(), tc.reason)) {
 				t.Errorf("err %v, want one naming %s", r.err, tc.reason)
@@ -725,14 +775,27 @@ func TestObserveChainReported(t *testing.T) {
 				t.Errorf("trap ran %d times at event %d (observe %d, first final listing %d): once, after the observer registered it and before the leftover check lists",
 					len(traps), trapAt, obsAt, finalList)
 			}
-			// observations.json: the set as observed, with the run id and the manifest's flag.
+			// observations.json: the set as observed, with the run id and the manifest's flag; each
+			// observation kept as given, the seeded secret redacted from its detail (review r1).
 			var set ObservationSet
 			raw, err := os.ReadFile(filepath.Join(r.runDir, "observations.json"))
-			if tc.obsErr == nil {
+			if tc.obsErr == nil && !tc.interrupt {
 				if err != nil || json.Unmarshal(raw, &set) != nil {
 					t.Errorf("observations.json unreadable (%v)", err)
 				} else if set.RunID != r.runID || set.SharedStateProject != !tc.unflagged || len(set.Observations) != len(tc.obs) {
 					t.Errorf("observations.json run %q flag %t %d observations, want %q %t %d", set.RunID, set.SharedStateProject, len(set.Observations), r.runID, !tc.unflagged, len(tc.obs))
+				} else {
+					for i, want := range tc.obs {
+						got := set.Observations[i]
+						detailOK := got.Detail == want.Detail
+						if strings.Contains(want.Detail, laneTenantSecret) {
+							prefix, _, _ := strings.Cut(want.Detail, laneTenantSecret)
+							detailOK = strings.HasPrefix(got.Detail, prefix) && !strings.Contains(got.Detail, laneTenantSecret) && got.Detail != prefix
+						}
+						if got.Assertion != want.Assertion || got.Subject != want.Subject || got.Observed != want.Observed || !detailOK {
+							t.Errorf("observations.json[%d] %+v, want %+v (detail redacted, not dropped)", i, got, want)
+						}
+					}
 				}
 			}
 			s := readChainSummary(t, r.runDir)

@@ -390,6 +390,8 @@ type chainExec struct {
 	// observer is the run's L7 collector (T048; nil: a complete set in which every assertion
 	// holds, observe_test.go chainPassing).
 	observer *chainObserver
+	// signalAtObserve is sent once the observer registered its cleanup (review r1 of T048).
+	signalAtObserve os.Signal
 }
 
 // chainRun is a chain run and what the harness saw while it ran.
@@ -495,6 +497,9 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		obs = &chainObserver{obs: chainPassing()}
 	}
 	obs.log = h.world.Log
+	if c.signalAtObserve != nil {
+		obs.stop = func() { sigs <- c.signalAtObserve }
+	}
 	streams := laneCaptureStd(t)
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
