@@ -458,7 +458,7 @@ input* the lane writes from `account.env` (data-model): the `tenants` map of `ac
 `project_id` of each `project`. A new tenant row changes the generated map, so `account-governance`
 is code-changed and selected with the new `tenant-state`; a changed `LZ_PROJECT_ID_<REF>` changes
 the resolved digest and selects `account-governance` and that `project`. Authority edges and Terramate `after` order the
-selected set but never add to it. `live:plan|apply -- all` acts on the selected set; `-- <instance>`
+selected set but never add to it. `live:plan|apply -- all` acts on the selected set (`plan -- all` reports a consumer whose data producer is also selected as `blocked-on=<producer>` and does not plan it, T090); `-- <instance>`
 acts on that instance and refuses when a producer it consumes is selected and not applied; a
 consumer whose producer has no artefact yet is `blocked`. `stacks:order` prints the order and the
 reason for each selected stack.
