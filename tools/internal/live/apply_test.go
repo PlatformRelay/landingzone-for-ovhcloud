@@ -1687,6 +1687,75 @@ func TestApplySelectionProducerSelected(t *testing.T) {
 	}
 }
 
+// `plan -- all` with a selected producer (T090, coordinator 2026-10-08): each selected data
+// consumer of a selected producer is reported `blocked-on=<producer>` and runs no tofu, as
+// `plan -- <consumer>` refuses the same state (a plan against the producer's old artefact could be
+// approved by mistake); the run plans everything else and ends blocked (exit 2). A consumer whose
+// producer is not selected still plans, and an authority edge never blocks. `apply -- all` is
+// unchanged: TestApplySelection (project-and-consumers) and TestApplySelectionInputs.
+func TestApplyPlanAllProducerSelected(t *testing.T) {
+	consumers := []string{"demo-dev-gra11-network", "demo-dev-gra11-runtime"}
+	cases := []struct {
+		name    string
+		touch   []string
+		planned []string
+		blocked []string // reported blocked-on=demo-dev-project
+	}{
+		{"producer-and-consumers", []string{"demo-dev-project"}, []string{"demo-dev-project"}, consumers},
+		{"producer-and-touched-consumer", []string{"demo-dev-project", "demo-dev-gra11-runtime"}, []string{"demo-dev-project"}, consumers},
+		{"consumer-alone", []string{"demo-dev-gra11-runtime"}, []string{"demo-dev-gra11-runtime"}, nil},
+		{"authority-producer-selected", []string{"account-governance", "demo-dev-gra11-runtime"}, []string{"account-governance", "demo-dev-gra11-runtime"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newLaneHarness(t)
+			h.steady()
+			for _, id := range c.touch {
+				h.touch(id)
+			}
+			r := h.run(VerbPlan, TargetAll)
+			term := h.term.String()
+			if got := r.stacksOf("plan"); !slices.Equal(got, c.planned) {
+				t.Errorf("planned %v, want %v", got, c.planned)
+			}
+			for _, call := range r.tofu() {
+				if slices.Contains(c.blocked, call.Stack) {
+					t.Errorf("tofu %s on %s, which is blocked on its selected producer", call.Cmd, call.Stack)
+				}
+			}
+			for _, id := range consumers {
+				line := "LZ-LIVE plan " + id + " blocked-on=demo-dev-project\n"
+				if want := slices.Contains(c.blocked, id); strings.Contains(term, line) != want {
+					t.Errorf("terminal reports %q: %v, want %v (terminal %q)", strings.TrimSpace(line), !want, want, term)
+				}
+			}
+			if len(c.blocked) == 0 {
+				laneExit(t, r, 0)
+				return
+			}
+			var b *Blocked
+			if !errors.As(r.err, &b) || ExitCode(r.err) != BlockedExit {
+				t.Errorf("err %v (exit %d), want *Blocked (exit 2)", r.err, ExitCode(r.err))
+			} else {
+				for _, id := range append([]string{"demo-dev-project"}, c.blocked...) {
+					if !strings.Contains(r.err.Error(), id) {
+						t.Errorf("err %v does not name %s", r.err, id)
+					}
+				}
+			}
+			// The producer's plan ran to its end before the run reported the block.
+			if !strings.Contains(term, "LZ-LIVE plan demo-dev-project ok\n") {
+				t.Errorf("the producer's plan did not complete (terminal %q)", term)
+			}
+			// The two forms agree: `plan -- <consumer>` refuses the same state.
+			for _, id := range c.blocked {
+				one := h.run(VerbPlan, id)
+				laneCondition(t, one, CondProducerSelected)
+			}
+		})
+	}
+}
+
 // account-bootstrap is applied by bootstrap:account only (its state phase imports, guards and
 // publishes it, research R13): `plan|apply -- account-bootstrap` is refused and runs nothing.
 func TestApplyBootstrapOwned(t *testing.T) {
@@ -1730,16 +1799,18 @@ func TestApplyPlanOnly(t *testing.T) {
 		name    string
 		touch   []string
 		planned []string
+		exit    int
 	}{
-		{"project-and-consumers", []string{"demo-dev-project"}, []string{"demo-dev-project", "demo-dev-gra11-network", "demo-dev-gra11-runtime"}},
-		{"credential-producers", []string{"account-governance", "demo-state"}, []string{"account-governance", "demo-state"}},
+		// The consumers are blocked on the selected project (T090): it alone is planned, exit 2.
+		{"project-and-consumers", []string{"demo-dev-project"}, []string{"demo-dev-project"}, BlockedExit},
+		{"credential-producers", []string{"account-governance", "demo-state"}, []string{"account-governance", "demo-state"}, 0},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) { lanePlanOnly(t, c.touch, c.planned) })
+		t.Run(c.name, func(t *testing.T) { lanePlanOnly(t, c.touch, c.planned, c.exit) })
 	}
 }
 
-func lanePlanOnly(t *testing.T, touch, want []string) {
+func lanePlanOnly(t *testing.T, touch, want []string, exit int) {
 	h := newLaneHarness(t)
 	h.steady()
 	for _, id := range touch {
@@ -1751,7 +1822,7 @@ func lanePlanOnly(t *testing.T, touch, want []string) {
 	}
 	objects, config := h.store.snapshot(), h.configFiles()
 	r := h.run(VerbPlan, TargetAll)
-	laneExit(t, r, 0)
+	laneExit(t, r, exit)
 	if got := r.stacksOf("plan"); !slices.Equal(got, want) {
 		t.Errorf("planned %v, want %v", got, want)
 	}

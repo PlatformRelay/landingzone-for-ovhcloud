@@ -11,9 +11,11 @@ package live
 // plan redacted to plan-<id>.txt, and for apply exactly that file applied; then the credential
 // files the stack's sensitive outputs carry (account-governance, tenant-state; written by
 // files.go), the envelope published and the record written. A refusal or failure stops the run:
-// nothing after it is planned or applied. `destroy` refuses every retained instance (G7); the rest
-// of destroy is T047's. account-bootstrap is bootstrap:account's, never the lane's (decision 1,
-// 2026-10-08).
+// nothing after it is planned or applied. Under `plan -- all` a stack consuming a selected producer
+// is reported `blocked-on=<producer>` and not planned (its plan would read the producer's old
+// artefact), the rest is planned and the run ends blocked, exit 2 (T090). `destroy` refuses every
+// retained instance (G7); the rest of destroy is T047's. account-bootstrap is bootstrap:account's,
+// never the lane's (decision 1, 2026-10-08).
 //
 // Not here (recorded gaps of T059): a run deadline and the inventory of what an apply created.
 // A cancelled context stops the running child as the run core does (SIGINT, then a kill after
@@ -190,7 +192,7 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	if r.account, err = BoundAccountFromEnv(acc); err != nil {
 		return err
 	}
-	ids, err := r.acted()
+	ids, _, err := r.acted()
 	if err != nil {
 		return err
 	}
@@ -208,7 +210,7 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	defer func() { err = errors.Join(err, release()) }()
 	// Selection again under the locks (review r1): another run that held them between the first
 	// selection and HoldRun may have applied, so the set the locks cover may be stale.
-	again, err := r.acted()
+	again, blocked, err := r.acted()
 	if err != nil {
 		return err
 	}
@@ -219,7 +221,13 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 		return err
 	}
 	defer removeTree(r.home)
+	var held []string
 	for _, id := range ids {
+		if p := blocked[id]; len(p) > 0 {
+			fmt.Fprintf(term, "LZ-LIVE %s %s blocked-on=%s\n", o.Verb, id, strings.Join(p, ","))
+			held = append(held, fmt.Sprintf("%s (consumes %s, selected in this run and not applied)", id, strings.Join(p, ", ")))
+			continue
+		}
 		fmt.Fprintf(term, "LZ-LIVE %s %s start\n", o.Verb, id)
 		if err := r.stack(ctx, id); err != nil {
 			fmt.Fprintf(term, "LZ-LIVE %s %s fail\n", o.Verb, id)
@@ -227,34 +235,50 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 		}
 		fmt.Fprintf(term, "LZ-LIVE %s %s ok\n", o.Verb, id)
 	}
+	if len(held) > 0 {
+		return &Blocked{Phase: "selection", Detail: fmt.Sprintf("not planned: %s; apply, then plan again",
+			strings.Join(held, "; "))}
+	}
 	return nil
 }
 
 // acted returns the stacks the run acts on, in run order: the selected set without
 // account-bootstrap for `all`; for `-- <instance>` that instance, refused while a producer it
-// consumes is selected.
-func (r *laneRunner) acted() ([]string, error) {
+// consumes is selected. Under `plan -- all`, blocked maps each acted stack that consumes a selected
+// producer to those producers (T090): it is reported, never planned, as `plan -- <it>` refuses the
+// same state; `apply -- all` applies the producer first and plans the consumer on its fresh artefact.
+func (r *laneRunner) acted() (ids []string, blocked map[string][]string, err error) {
 	m := r.o.Manifest
 	sel, err := r.selected()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if r.o.Target != TargetAll {
-		in, _ := m.Row(r.o.Target)
+	producers := func(id string) []string {
+		in, _ := m.Row(id)
+		var out []string
 		for _, e := range in.Edges {
 			if e.Kind == stacks.EdgeData && slices.ContainsFunc(sel, func(s stacks.Selected) bool { return s.ID == e.Producer }) {
-				return nil, refuse(CondProducerSelected, "%s consumes %s, which is selected and not applied", r.o.Target, e.Producer)
+				out = append(out, e.Producer)
 			}
 		}
-		return []string{r.o.Target}, nil
+		return out
 	}
-	var ids []string
+	if r.o.Target != TargetAll {
+		if p := producers(r.o.Target); len(p) > 0 {
+			return nil, nil, refuse(CondProducerSelected, "%s consumes %s, which is selected and not applied", r.o.Target, p[0])
+		}
+		return []string{r.o.Target}, nil, nil
+	}
+	blocked = map[string][]string{}
 	for _, s := range sel {
 		if in, _ := m.Row(s.ID); in.Stage != "bootstrap" {
 			ids = append(ids, s.ID)
+			if p := producers(s.ID); r.o.Verb == VerbPlan && len(p) > 0 {
+				blocked[s.ID] = p
+			}
 		}
 	}
-	return ids, nil
+	return ids, blocked, nil
 }
 
 // selected runs stacks.Select over the current code digests, the resolved-reference digests and

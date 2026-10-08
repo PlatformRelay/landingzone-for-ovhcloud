@@ -458,7 +458,7 @@ Independent test: V007 offline; V010 owner session.
   - Verify: `task test:live-lane`: T058 controls green with the G1, G2, G7 mutants killed. The runner holds the run locks (`stacks.HoldRun` over the run's instances, `accounts/<account>/locks/`) before any plan or apply, and a run refused on a lock (exit 3) applies nothing (T040 gap 3, T041). Creates host targets `live:plan`, `live:apply`.
   - Evidence: `evidence/T059.md`; PR; initial status `not-run`.
 
-- [ ] T090 [US5] Report a consumer as blocked in `plan -- all` when its producer is selected in the same run, in tools/internal/live/apply.go, test first in tools/internal/live/apply_test.go
+- [x] T090 [US5] Report a consumer as blocked in `plan -- all` when its producer is selected in the same run, in tools/internal/live/apply.go, test first in tools/internal/live/apply_test.go — closed 2026-10-08, evidence: evidence/T090.md
   - Requirements: FR-009, FR-011; ADRs: 0004, 0008. Depends on: T059.
   - Verify: `task test:live-lane`: `plan -- all` with a selected producer reports each of its consumers as `blocked-on=<producer>` and runs no tofu for them, exactly as `plan -- <consumer>` refuses the same state; `apply -- all` is unchanged (it applies the producer first, then plans the consumer on the fresh artefact); a consumer whose producer is not selected still plans; mutants per clause. Rationale (coordinator 2026-10-08): a plan against a stale producer artefact can be approved by mistake, and the two forms must agree.
   - Evidence: `evidence/T090.md`; PR; initial status `not-run`.
