@@ -32,6 +32,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -166,6 +167,8 @@ type laneStack struct {
 	// Fail names the call of the stack that fails (init, plan, show-json, show, output; T059,
 	// coordinator decision 3b: the locks are released after any of them).
 	Fail string `json:"fail,omitempty"`
+	// Block names the call of the stack that waits for a signal (review r1 of T059: cancellation).
+	Block string `json:"block,omitempty"`
 }
 
 // laneCall is one logged event: a fake tofu call, a store operation, a lock event or a binding.
@@ -178,6 +181,7 @@ type laneCall struct {
 	Nonce    string   `json:"nonce,omitempty"`
 	VarFiles []string `json:"var_files,omitempty"`
 	Unlocked []string `json:"unlocked,omitempty"` // run locks found free during the call
+	Signal   string   `json:"signal,omitempty"`   // the signal a blocked call received
 	Key      string   `json:"key,omitempty"`      // store: the access key the store was opened with
 	Exit     int      `json:"exit"`
 }
@@ -302,6 +306,27 @@ func fakeLaneTofu(worldPath string, args []string) int {
 	if st.Fail != "" && st.Fail == failing {
 		call.Cmd = failing
 		return fail("fake %s failure of %s", failing, st.ID)
+	}
+	// Block (review r1): the call announces itself next to the log and waits for SIGINT, as tofu
+	// stops gracefully on it; a kill is never logged.
+	if st.Block != "" && st.Block == failing {
+		call.Cmd = failing
+		if len(positional) == 1 {
+			var pf lanePlanFile
+			if raw, err := os.ReadFile(positional[0]); err == nil && json.Unmarshal(raw, &pf) == nil {
+				call.Plan, call.Nonce = positional[0], pf.Nonce
+			}
+		}
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		_ = os.WriteFile(w.Log+".blocked", []byte(st.ID), 0o600)
+		select {
+		case s := <-sig:
+			call.Signal = s.String()
+			return fail("interrupted by %s", s)
+		case <-time.After(60 * time.Second):
+			return fail("fake: never interrupted")
+		}
 	}
 	dataDir := fakeDataDir(dir)
 	marker := filepath.Join(dataDir, "lane-init-"+st.ID)
@@ -565,6 +590,7 @@ func (s *laneStore) snapshot() map[string]string {
 type laneLocks struct {
 	inner stacks.LockStore
 	log   string
+	after func(name string) // called after a lock is taken (T059 review r1: another run finished meanwhile)
 }
 
 func (l laneLocks) TryLock(name string) (func() error, error) {
@@ -574,6 +600,9 @@ func (l laneLocks) TryLock(name string) (func() error, error) {
 		return nil, err
 	}
 	laneAppend(l.log, laneCall{Cmd: "lock", Stack: name})
+	if l.after != nil {
+		l.after(name)
+	}
 	var once sync.Once
 	return func() error {
 		var rerr error
@@ -599,8 +628,10 @@ type laneHarness struct {
 	m        *stacks.Manifest
 	store    *laneStore
 	api      *fakeAPI
-	term     bytes.Buffer
-	runs     int
+	// afterLock runs after each run lock is taken (nil: nothing).
+	afterLock func(name string)
+	term      bytes.Buffer
+	runs      int
 }
 
 // newLaneHarness: a checkout copy (generated stacks and their stage, component and module
@@ -1095,12 +1126,28 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 	h.term.Reset()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	// A blocked call (laneStack.Block) cancels the run once it announced itself (T059 review r1).
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				if _, err := os.Stat(h.world.Log + ".blocked"); err == nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	// The process's own stdout and stderr are captured too (review r1): a child stream or a print
 	// that bypasses Terminal lands there.
 	streams := laneCaptureStd(t)
 	err := Apply(ctx, ApplyOptions{Verb: verb, Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
-		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI()})
+		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI()})
 	return laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: streams()}, before
 }
 
@@ -2208,5 +2255,151 @@ func TestApplySelectionCredentialRefused(t *testing.T) {
 	laneCondition(t, r, CondFileMode)
 	if n := len(r.tofu()); n != 0 || len(r.events("lock")) != 0 {
 		t.Errorf("%d tofu calls, locks %v after a refused producer credential", n, r.events("lock"))
+	}
+}
+
+// ---------------------------------------------------------------- T059 review round 1
+
+// The bound account is the run's: an account.env naming another account is refused before any
+// lock or tofu call, also when the stack's own credential belongs to that other account (the
+// binding alone would then pass: the credential answers the account account.env names).
+func TestApplyAccountEnvNamesOtherAccount(t *testing.T) {
+	h := newLaneHarness(t)
+	h.steady()
+	h.touch("demo-dev-project")
+	acct := "accounts/" + laneAccount + "/"
+	h.writeConfig(acct+"account.env", map[string]string{"LZ_ACCOUNT_ID": laneForeignAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+		"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject})
+	h.writeConfig(acct+"platform-deployer.env", map[string]string{"OVH_ENDPOINT": "ovh-eu", "OVH_CLIENT_ID": laneForeignID, "OVH_CLIENT_SECRET": laneForeignSecret})
+	r := h.run(VerbApply, "demo-dev-project")
+	laneCondition(t, r, CondAccount)
+	if n := len(r.tofu()); n != 0 || len(r.events("lock")) != 0 || len(r.events("bind")) != 0 {
+		t.Errorf("%d tofu calls, locks %v, bindings %v under another account's account.env", n, r.events("lock"), r.events("bind"))
+	}
+}
+
+// Credential values from the outputs are checked as files.go would before the first file is
+// written (a later value with a line break must not leave earlier files replaced), and the
+// secrets the lane writes must be sensitive outputs (a non-sensitive one would also be published).
+func TestApplyDeployerOutputValues(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(outs map[string]map[string]any)
+	}{
+		{"tenant-secret-newline", func(o map[string]map[string]any) {
+			o["tenant_deployer_secrets"]["value"].(map[string]any)["demo"] = "lz-seed-t059-line\nbreak"
+		}},
+		{"platform-secret-space", func(o map[string]map[string]any) {
+			o["platform_deployer_secret"]["value"] = " lz-seed-t059-padded"
+		}},
+		{"platform-secret-not-sensitive", func(o map[string]map[string]any) {
+			o["platform_deployer_secret"]["sensitive"] = false
+		}},
+		{"tenant-secrets-not-sensitive", func(o map[string]map[string]any) {
+			o["tenant_deployer_secrets"]["sensitive"] = false
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newLaneHarness(t)
+			h.steady()
+			h.touch("account-governance")
+			in := h.row("account-governance")
+			st := h.world.Stacks[in.Path]
+			raw, err := os.ReadFile(st.Outputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outs map[string]map[string]any
+			if err := json.Unmarshal(raw, &outs); err != nil {
+				t.Fatal(err)
+			}
+			// A new platform client, so a platform file written before the rejected value shows.
+			outs["platform_deployer"]["value"].(map[string]any)["client_id"] = "EU.lz-t059-new-platform"
+			c.mutate(outs)
+			raw, _ = json.Marshal(outs)
+			st.Outputs = filepath.Join(h.base, "fake", "outputs-governance-"+c.name+".json")
+			if err := os.WriteFile(st.Outputs, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.world.Stacks[in.Path] = st
+			h.save()
+			before, objects := h.configFiles(), h.store.snapshot()
+			r := h.run(VerbApply, "account-governance")
+			laneExit(t, r, 1)
+			if after := h.configFiles(); !maps.Equal(after, before) {
+				t.Errorf("credential files changed from rejected outputs")
+			}
+			if !maps.Equal(h.store.snapshot(), objects) {
+				t.Errorf("published from rejected outputs")
+			}
+		})
+	}
+}
+
+// Selection runs again once the run locks are held: another run that finished in between (here:
+// it recorded demo-dev-project's new code) changes the set, and the run is refused (exit 3,
+// CondLocked) with nothing planned, the locks released.
+func TestApplySelectionChangedUnderLock(t *testing.T) {
+	h := newLaneHarness(t)
+	h.steady()
+	h.touch("demo-dev-project")
+	var once sync.Once
+	h.afterLock = func(string) {
+		once.Do(func() {
+			var rec Record
+			if err := json.Unmarshal(h.record("demo-dev-project"), &rec); err != nil {
+				t.Error(err)
+				return
+			}
+			code, err := stacks.CodeDigest(h.checkout, h.row("demo-dev-project"))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			rec.CodeDigest = code
+			if err := WriteRecord(h.recordsDir(), "demo-dev-project", rec); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	r := h.run(VerbApply, TargetAll)
+	laneCondition(t, r, CondLocked)
+	if n := len(r.tofu()); n != 0 {
+		t.Errorf("%d tofu calls after the selection changed under the locks", n)
+	}
+}
+
+// SIGINT/SIGTERM cancel the run (the entry's context): the running tofu gets SIGINT, as the run
+// core stops its children (never an immediate kill), the run fails, nothing after it runs, and the
+// locks and the saved plan are released (the harness checks both).
+func TestApplyCancelStopsChild(t *testing.T) {
+	for _, call := range []string{"plan", "apply"} {
+		t.Run(call, func(t *testing.T) {
+			h := newLaneHarness(t)
+			h.steady()
+			h.touch("demo-dev-project")
+			in := h.row("demo-dev-project")
+			st := h.world.Stacks[in.Path]
+			st.Block = call
+			h.world.Stacks[in.Path] = st
+			h.save()
+			r := h.run(VerbApply, TargetAll)
+			if r.err == nil {
+				t.Fatal("a cancelled run returned no error")
+			}
+			var got string
+			for _, c := range r.tofu() {
+				if c.Cmd == call && c.Stack == "demo-dev-project" {
+					got = c.Signal
+				}
+				if c.Stack != "demo-dev-project" {
+					t.Errorf("tofu %s on %s after the cancellation", c.Cmd, c.Stack)
+				}
+			}
+			if got != syscall.SIGINT.String() {
+				t.Errorf("the blocked tofu %s got signal %q, want %q (stopped gracefully, not killed)", call, got, syscall.SIGINT.String())
+			}
+		})
 	}
 }
