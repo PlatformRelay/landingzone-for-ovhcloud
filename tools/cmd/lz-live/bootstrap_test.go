@@ -28,11 +28,15 @@ type bootstrapWorld struct {
 	term      live.Terminal
 	stdout    bytes.Buffer
 	api       *httptest.Server
+	tofu      string                                                                     // what LookPath("tofu") finds; "" not found
+	boot      func(context.Context, live.BootstrapOptions) ([]live.PhaseResult, error)   // nil: live.Bootstrap
+	s3        *http.Client                                                               // the S3 store's client
+	state     func(live.StateOptions) func(context.Context, live.BootstrapAccount) error // nil: live.NewBootstrapState
 }
 
 func newBootstrapWorld(t *testing.T) *bootstrapWorld {
 	t.Helper()
-	w := &bootstrapWorld{world: newWorld(t, true)}
+	w := &bootstrapWorld{world: newWorld(t, true), tofu: "/opt/tofu/bin/tofu"}
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "stacks", "deployments.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +65,15 @@ func (w *bootstrapWorld) run(args ...string) (int, string) {
 		OfflineMarker: w.marker,
 		Stderr:        &stderr,
 		Stdout:        &w.stdout,
+		LookPath: func(name string) (string, error) {
+			if name != "tofu" || w.tofu == "" {
+				return "", errors.New(name + ": not found")
+			}
+			return w.tofu, nil
+		},
+		Bootstrap: w.boot,
+		State:     w.state,
+		S3HTTP:    w.s3,
 		API: func(endpoint string) (live.API, error) {
 			if endpoint != "ovh-eu" {
 				return live.API{}, errors.New("unexpected endpoint " + endpoint)
@@ -95,12 +108,16 @@ func (r *refusingTerminal) ReadLine(string) (string, error) {
 // stacks/deployments.yaml: the state project's reference first, then every environment's.
 func TestBootstrapEntryManifest(t *testing.T) {
 	w := newBootstrapWorld(t)
-	org, refs, err := manifestBinding(w.checkout)
+	m, refs, err := manifestBinding(w.checkout)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if org != "lz" || !slices.Equal(refs, []string{"STATE", "DEMO_DEV"}) {
-		t.Errorf("org %q refs %v, want lz [STATE DEMO_DEV]", org, refs)
+	if m.Org != "lz" || !slices.Equal(refs, []string{"STATE", "DEMO_DEV"}) {
+		t.Errorf("org %q refs %v, want lz [STATE DEMO_DEV]", m.Org, refs)
+	}
+	// T089: the state bucket's region and endpoint come from the same manifest.
+	if m.StateRegion != "gra" || m.StateEndpoint != "https://s3.gra.io.cloud.ovh.net" {
+		t.Errorf("spec.state region %q endpoint %q, want gra https://s3.gra.io.cloud.ovh.net", m.StateRegion, m.StateEndpoint)
 	}
 	if err := os.Remove(filepath.Join(w.checkout, "stacks", "deployments.yaml")); err != nil {
 		t.Fatal(err)

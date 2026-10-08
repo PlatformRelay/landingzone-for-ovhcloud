@@ -429,7 +429,7 @@ Independent test: V008 offline; V009 owner session.
   - Verify: `task test:bootstrap`: T042 and T056 controls green with each named guard's mutant killed, including G7 (bootstrap part: apply without `protect.go`); the `state` phase applies only the saved plan file the guard admitted.
   - Evidence: `evidence/T057.md`; PR; initial status `not-run`.
 
-- [ ] T089 [US4] Add the live S3 object store in tools/internal/live/objectstore.go and wire the state, publish and verify phases into `lz-live bootstrap` in tools/cmd/lz-live/bootstrap.go, test first in tools/internal/live/objectstore_test.go
+- [x] T089 [US4] Add the live S3 object store in tools/internal/live/objectstore.go and wire the state, publish and verify phases into `lz-live bootstrap` in tools/cmd/lz-live/bootstrap.go, test first in tools/internal/live/objectstore_test.go — closed 2026-10-08, evidence: evidence/T089.md
   - Requirements: FR-010, FR-012; ADRs: 0008, 0009, 0018, 0024. Depends on: T057.
   - Verify: `task test:bootstrap` then `task test:live-lane`: a minimal SigV4 client (GET, PUT, HEAD only; any other method refused before any request) passes the published AWS Signature Version 4 test-suite vectors that apply to GET/PUT with a fixed clock; requests carry no secret in URL, headers other than Authorization, logs or errors; answers are size-capped and server text is never echoed; the endpoint is derived from the region and refused unless it matches the OVHcloud Object Storage host pattern (UNVERIFIED until T044); `lz-live bootstrap` passes `Rest: live.NewBootstrapState(...)` with this store, proven by a fake S3 server in the bootstrap tests; no new third-party dependency.
   - Evidence: `evidence/T089.md`; PR; initial status `not-run`.

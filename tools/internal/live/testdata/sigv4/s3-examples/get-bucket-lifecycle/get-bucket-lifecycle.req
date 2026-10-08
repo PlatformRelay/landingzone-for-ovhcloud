@@ -1,0 +1,4 @@
+GET /?lifecycle HTTP/1.1
+Host:examplebucket.s3.amazonaws.com
+x-amz-date:20130524T000000Z
+x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855

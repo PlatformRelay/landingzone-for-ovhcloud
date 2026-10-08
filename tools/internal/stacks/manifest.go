@@ -99,6 +99,8 @@ type Manifest struct {
 	StageSource        string        // spec.stage_source.kind; generation refuses the git seam
 	SharedStateProject bool          // spec.sandbox.shared_state_project
 	StateProjectRef    string        // spec.state.project.ref
+	StateRegion        string        // spec.state.region: Object Storage region of the state buckets (gra)
+	StateEndpoint      string        // spec.state.endpoint: their S3 endpoint
 	Tenants            []Tenant      // spec.tenants, in order
 	Instances          []Instance    // spec.instances, in order, with derived fields
 	External           []ExternalRef // spec.external, in order (tenant scope)
@@ -433,7 +435,8 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 	}
 	s := doc.Spec
 	m := &Manifest{Name: doc.Metadata.Name, Scope: s.Scope, Org: s.Org, Forge: s.Forge, StageSource: s.StageSource.Kind,
-		SharedStateProject: s.Sandbox.SharedStateProject, StateProjectRef: s.State.Project.Ref}
+		SharedStateProject: s.Sandbox.SharedStateProject, StateProjectRef: s.State.Project.Ref,
+		StateRegion: s.State.Region, StateEndpoint: s.State.Endpoint}
 	if m.Scope == "" {
 		m.Scope = ManifestScopePlatform
 	}
