@@ -604,8 +604,14 @@ func (o *chainObserver) Observe(ctx context.Context, run ObserveRun) ([]Observat
 	laneAppend(o.log, laneCall{Cmd: "observe"})
 	o.runs = append(o.runs, run)
 	if run.Trap != nil {
-		run.Trap.Add("chain-canary", func(context.Context) error {
-			laneAppend(o.log, laneCall{Cmd: "trap", Stack: "chain-canary"})
+		run.Trap.Add("chain-canary", func(ctx context.Context) error {
+			// Exit 1 marks a cleanup handed a context that is already done: a real cleanup's
+			// requests would fail (review r2: the trap gets its own time, not the run's).
+			exit := 0
+			if ctx.Err() != nil {
+				exit = 1
+			}
+			laneAppend(o.log, laneCall{Cmd: "trap", Stack: "chain-canary", Exit: exit})
 			return o.cleanupErr
 		})
 	}
@@ -613,9 +619,10 @@ func (o *chainObserver) Observe(ctx context.Context, run ObserveRun) ([]Observat
 		o.stop()
 		select {
 		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-time.After(10 * time.Second):
+			return nil, errors.New("observer not cancelled by the run's stop")
 		}
-		return nil, ctx.Err()
 	}
 	return o.obs, o.err
 }
@@ -770,6 +777,9 @@ func TestObserveChainReported(t *testing.T) {
 					finalList = i
 					break
 				}
+			}
+			if trapAt >= 0 && r.calls[trapAt].Exit != 0 {
+				t.Errorf("trap cleanup ran with a context already done: the destroy-on-exit's own time, not the run's")
 			}
 			if len(traps) != 1 || trapAt < obsAt || finalList >= 0 && trapAt > finalList {
 				t.Errorf("trap ran %d times at event %d (observe %d, first final listing %d): once, after the observer registered it and before the leftover check lists",

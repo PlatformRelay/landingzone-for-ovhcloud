@@ -141,6 +141,21 @@ func TestChainObservations(t *testing.T) {
 		})
 	}
 
+	// Each required subject (review r2): deployer-binding needs platform and tenant (P26), the
+	// canary both KD-1 calls; one missing fails the assertion.
+	for _, req := range [][2]string{{"deployer-binding", "platform"}, {"deployer-binding", "tenant"}, {"kd1-canary", "bulkDeleteObjects"}, {"kd1-canary", "DELETE"}} {
+		t.Run("missing-subject-"+req[0]+"-"+req[1], func(t *testing.T) {
+			set := base
+			set.Observations = slices.DeleteFunc(slices.Clone(base.Observations), func(o live.Observation) bool { return o.Assertion == req[0] && o.Subject == req[1] })
+			want := expected{Outcomes: map[string]string{}}
+			for _, a := range l7 {
+				want.Outcomes[a] = "pass"
+			}
+			want.Outcomes[req[0]] = "fail"
+			judge(t, set, want)
+		})
+	}
+
 	// G15 over the flag: the canary deleted by the tenant is a known deviation only with the flag.
 	for _, flag := range []bool{true, false} {
 		set := base
