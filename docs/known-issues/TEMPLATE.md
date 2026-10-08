@@ -13,6 +13,8 @@ verified:
 issue:
 source:
 decision:
+references: []
+last_verified: c3c7e7adf8ed8aa588669817f16c58da7294a33c
 ---
 
 Use `bug | security | limitation | debt` for kind, `open | accepted | wont-fix`
@@ -20,6 +22,10 @@ for status, and `high | medium | low` for likelihood and impact. Derive severity
 from the index matrix. Verification methods are `code read | executed | test |
 claimed`. `issue` is an optional delivery link; `source` names the finding's origin.
 For an accepted limitation, set `decision: "#decision"` and retain the section below.
+`references` and `last_verified` are the docs header of ADR-0013: list each file the issue
+describes with its blob id (`git hash-object <path>`, which is `HEAD:<path>` once committed)
+and the commit you checked against; `task docs:check` reports the page stale once a listed
+file changes.
 
 ## What is true
 

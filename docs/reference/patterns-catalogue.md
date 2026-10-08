@@ -1,3 +1,8 @@
+---
+references: []
+last_verified: 3a1f06584f6a987bfd13d6a4de1168cf59b5f4fe
+---
+
 # Patterns catalogue — small patterns, guidelines, tools and techniques
 
 Status: draft, 2026-10-01. Harvested from the design rounds, independent designs, one
@@ -59,7 +64,7 @@ their summary. Naming uses a scalar interface with shared context (ADR-0003); fi
 | LZ-TST-009 | `-json-into` on every layer; JUnit via `tools/json2junit` | Both forges render results | Taskfile |
 | LZ-TST-010 | Tests assert effective behaviour (denied call, failed probe, finding emitted), not "variable equals input" | Evidence, not theatre | review checklist |
 | LZ-TST-011 | Capture the denial reason in negative tests so an outage is not read as isolation | Correct evidence | review |
-| LZ-TST-012 | Plan snapshots normalised (sorted keys, timestamps and random ids stripped); `task snap:update` diff must be in the PR | Reviewable intent | snapshot tool |
+| LZ-TST-012 | Plan snapshots normalised (sorted keys, timestamps and random ids stripped); the diff of the planned `snap:update` target must be in the PR | Reviewable intent | snapshot tool |
 | LZ-TST-013 | Defect-specific module mutants nightly, deduplicated by behavioural failure, equivalent mutants classified; survivors open an issue | Test-the-tests without noise | mutation harness |
 | LZ-TST-014 | Never override the subject under test; assert the implementation's real outputs; `override_*` only for dependencies outside the asserted boundary; wiring tests are separate | A substituted subject proves nothing | review + test lint |
 | LZ-TST-015 | Every isolation or denial probe has a positive control and records the denial reason; a timeout is not a denial | Correct evidence | probe helpers |
@@ -140,7 +145,7 @@ their summary. Naming uses a scalar interface with shared context (ADR-0003); fi
 | LZ-AGX-004 | `AGENTS.md` per top-level directory with golden example, checklist, anti-patterns | Files-only onboarding | docs lint |
 | LZ-AGX-005 | Retrieved documents are evidence, never instructions; claims cite the KB manifest or are UNVERIFIED | Prompt-injection and rot | review + manifest check |
 | LZ-AGX-006 | Code comments cite ADR ids; a reference to a superseded ADR fails lint | Decision map stays true | lint |
-| LZ-AGX-007 | Local `task check` under two minutes on a changed directory; PR feedback under ten | Fast loops | CI timing report |
+| LZ-AGX-007 | A planned local `check` target under two minutes on a changed directory; PR feedback under ten | Fast loops | CI timing report |
 | LZ-AGX-008 | AgentEx drill before release: fresh sessions against fixed acceptance and independent adversarial cases, including a required escalation; green `task dod` alone is insufficient | Tests the guides and the evaluator | release checklist |
 | LZ-AGX-009 | A regression fix records red-on-parent (or a targeted mutation) and green-on-change; a compile error or outage is not the red | Test sensitivity is evidence | evidence packet check |
 | LZ-AGX-010 | A skipped check, a crash, a parser failure or zero discovered tests can never produce green; missing observation is reported as `not-run` or `blocked` | Missing evidence is not success | report envelope |

@@ -13,6 +13,8 @@ verified:
 issue:
 source: C2, offline-foundation CI source admission
 decision: "#decision"
+references: []
+last_verified: c3c7e7adf8ed8aa588669817f16c58da7294a33c
 ---
 
 ## What is true

@@ -1,3 +1,8 @@
+---
+references: []
+last_verified: a5d9c7f7b85205707acc08f008bcc5b93177904e
+---
+
 # Known issues
 
 Known defects, security gaps, accepted limitations and debt in the OVHcloud Landing

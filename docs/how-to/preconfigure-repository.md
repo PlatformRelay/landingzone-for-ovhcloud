@@ -1,3 +1,10 @@
+---
+references:
+  - path: specs/004-guided-preconfiguration/spec.md
+    blob: 93c57d281070feafcdfc089602b3e57ff1a647fd
+last_verified: 3a1f06584f6a987bfd13d6a4de1168cf59b5f4fe
+---
+
 # Explore repository preconfiguration
 
 Start with what you want to learn or build. The planned setup helper will explain the choices,
@@ -117,19 +124,19 @@ Writing this guide does not supply those contracts or qualify save/resume, helpe
 
 ## Commands you may see in the plan
 
-**All of these commands are planned and not yet implemented. Do not run them as setup
+**All of these targets are planned and not in Taskfile.yml yet. Do not run them as setup
 instructions.** There is no public command for the bounded prototype yet.
 
-| Planned command | Intended purpose | Creating task in spec 004 |
+| Planned Task target | Intended purpose | Creating task in spec 004 |
 | --- | --- | --- |
-| `task configure` | Start the full guided helper | T009 |
-| `task configure:resume` | Revalidate and continue a saved session | T009, after T005 persistence |
-| `task test:configure-flow` | Check controller/default/progress behavior | T003 |
-| `task test:configure-resume` | Check checkpoint and revalidation controls | T005 |
-| `task test:configure-checks` | Check bounded local helper controls | T007 |
-| `task verify:configure-journey` | Inspect actual terminal captures and the human walkthrough | T009 |
-| `task test:configure-export` | Check reviewed draft publication controls | T011 |
-| `task verify:configure` | Aggregate the full V001–V005 evidence | T013 |
+| `configure` | Start the full guided helper | T009 |
+| `configure:resume` | Revalidate and continue a saved session | T009, after T005 persistence |
+| `test:configure-flow` | Check controller/default/progress behavior | T003 |
+| `test:configure-resume` | Check checkpoint and revalidation controls | T005 |
+| `test:configure-checks` | Check bounded local helper controls | T007 |
+| `verify:configure-journey` | Inspect actual terminal captures and the human walkthrough | T009 |
+| `test:configure-export` | Check reviewed draft publication controls | T011 |
+| `verify:configure` | Aggregate the full V001–V005 evidence | T013 |
 
 The [task list](../../specs/004-guided-preconfiguration/tasks.md) keeps the implementation
 dependencies and deferred controls. T014 owns this early written journey. T012 will turn it
