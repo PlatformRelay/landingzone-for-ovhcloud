@@ -48,7 +48,7 @@ task bootstrap:account -- --reviewed-sha $S   # bind account, passphrase, admin 
 #   first run on the existing account: fill LZ_PROJECT_ID_STATE and LZ_PROJECT_ID_DEMO_DEV in
 #   ~/.config/ovh-lz/accounts/<account>/account.env when the run reports `blocked`, then re-run
 #   (the admin credential already exists, so the re-run needs no root keys)
-task live:chain -- --reviewed-sha $S all      # apply 6 stacks → assertions → destroy runtime + network (trap) → leftover check
+task live:chain -- --reviewed-sha $S all      # apply 5 stacks (account-bootstrap is bootstrap:account's) → assertions → destroy runtime + network (trap) → leftover check
 task live:plan -- --reviewed-sha $S all       # afterwards: plans the selected set; consumers of an unpublished producer show `blocked`
 # a probe whose destroy failed: task live:probe -- --reviewed-sha $S --cleanup <run-id>
 ```
