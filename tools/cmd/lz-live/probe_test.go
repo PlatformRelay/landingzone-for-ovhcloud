@@ -62,7 +62,11 @@ func fakeTofu(args []string) int {
 	if !filepath.IsAbs(data) {
 		data = filepath.Join(root, data)
 	}
-	logChildIn(bin, "tofu.log", args, resolvedPath(data))
+	// A destroy is a saved `plan -destroy` (its file says so), judged and applied as that file
+	// (T047: the run core's one destroy discipline).
+	saved, _ := os.ReadFile(positional)
+	destroy := slices.Contains(args, "-destroy") || (sub == "show" || sub == "apply") && string(saved) == fakeDestroyPlan
+	logTofu(bin, args, resolvedPath(data), destroy)
 	fmt.Fprintf(os.Stderr, "fake-tofu-stderr token=%s\n", os.Getenv("OVH_CLIENT_SECRET"))
 	backend := filepath.Join(data, "terraform.tfstate")
 	recorded, rerr := os.ReadFile(backend)
@@ -92,10 +96,17 @@ func fakeTofu(args []string) int {
 		fmt.Println(string(raw))
 		return 0
 	case "plan":
+		if destroy {
+			return writeOK(out, fakeDestroyPlan)
+		}
 		return writeOK(out, "fake plan")
 	case "show":
+		action := "create"
+		if destroy {
+			action = "delete"
+		}
 		if slices.Contains(args, "-json") {
-			fmt.Println(`{"format_version":"1.2","terraform_version":"1.13.0","planned_values":{},"resource_changes":[{"address":"ovh_cloud_project_network_private.p","change":{"actions":["create"]}}]}`)
+			fmt.Println(`{"format_version":"1.2","terraform_version":"1.13.0","planned_values":{},"resource_changes":[{"address":"ovh_cloud_project_network_private.p","change":{"actions":["` + action + `"]}}]}`)
 		} else {
 			fmt.Println("  + ovh_cloud_project_network_private.p")
 		}
@@ -103,6 +114,13 @@ func fakeTofu(args []string) int {
 	case "apply":
 		if _, err := os.Stat(positional); err != nil {
 			return 1
+		}
+		if destroy {
+			if _, err := os.Stat(filepath.Join(bin, "destroy-fails")); err == nil {
+				fmt.Fprintln(os.Stderr, "Error: fake destroy failure")
+				return 1
+			}
+			return 0
 		}
 		fmt.Println(`{"@level":"info","@message":"ovh_cloud_project_network_private.p: Creation complete after 1s [id=pn-1]","type":"apply_complete","hook":{"resource":{"addr":"ovh_cloud_project_network_private.p","resource_type":"ovh_cloud_project_network_private"},"action":"create","id_key":"id","id_value":"pn-1"}}`)
 		// The local backend keeps the previous state as <path>.backup. A companion has no local
@@ -112,11 +130,9 @@ func fakeTofu(args []string) int {
 		}
 		return writeOK(state, "state") + writeOK(state+".backup", "previous state")
 	case "destroy":
-		if _, err := os.Stat(filepath.Join(bin, "destroy-fails")); err == nil {
-			fmt.Fprintln(os.Stderr, "Error: fake destroy failure")
-			return 1
-		}
-		return 0
+		// lz-live destroys only through a judged saved plan (T047): `tofu destroy` is refused.
+		fmt.Fprintln(os.Stderr, "Error: fake: tofu destroy is not how lz-live destroys")
+		return 1
 	}
 	return 0
 }
@@ -169,12 +185,21 @@ type childCall struct {
 	Args    []string `json:"args"`
 	Env     []string `json:"env"`
 	DataDir string   `json:"data_dir,omitempty"` // tofu: its data directory, symlinks resolved
+	Destroy bool     `json:"destroy,omitempty"`  // tofu: `plan -destroy`, or a show/apply of its file (T047)
 }
 
-func logChild(dir, name string, args []string) { logChildIn(dir, name, args, "") }
+// fakeDestroyPlan is what the fake's `plan -destroy` writes to its plan file.
+const fakeDestroyPlan = "fake destroy plan"
 
-func logChildIn(dir, name string, args []string, dataDir string) {
-	raw, _ := json.Marshal(childCall{Args: args, Env: os.Environ(), DataDir: dataDir})
+func logChild(dir, name string, args []string) { logChildIn(dir, name, childCall{Args: args}) }
+
+func logTofu(dir string, args []string, dataDir string, destroy bool) {
+	logChildIn(dir, "tofu.log", childCall{Args: args, DataDir: dataDir, Destroy: destroy})
+}
+
+func logChildIn(dir, name string, c childCall) {
+	c.Env = os.Environ()
+	raw, _ := json.Marshal(c)
 	if f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintln(f, string(raw))
 		f.Close()
@@ -203,12 +228,17 @@ func (w world) childCalls(t *testing.T, name string) []childCall {
 	return out
 }
 
-// subcommands returns each tofu call's subcommand (the first argument not a flag).
+// subcommands returns each tofu call's subcommand (the first argument not a flag); for a destroy
+// (T047: a saved `plan -destroy` judged and applied) "plan-destroy", "show-destroy" and, for the
+// apply of that plan, "destroy".
 func subcommands(calls []childCall) []string {
 	var out []string
 	for _, c := range calls {
 		for _, a := range c.Args {
 			if !strings.HasPrefix(a, "-") {
+				if c.Destroy {
+					a = map[string]string{"plan": "plan-destroy", "show": "show-destroy", "apply": "destroy"}[a]
+				}
 				out = append(out, a)
 				break
 			}
@@ -421,7 +451,7 @@ func TestProbeEntry(t *testing.T) {
 		}
 		id := runIDOf(t, stdout)
 		calls := w.childCalls(t, "tofu.log")
-		if got, want := subcommands(calls), []string{"init", "plan", "show", "show", "apply", "destroy"}; !slices.Equal(got, want) {
+		if got, want := subcommands(calls), []string{"init", "plan", "show", "show", "apply", "plan-destroy", "show-destroy", "destroy"}; !slices.Equal(got, want) {
 			t.Errorf("tofu calls %v, want %v", got, want)
 		}
 		statePath := filepath.Join(w.probeDir(id), "net.tfstate")
@@ -527,8 +557,8 @@ func TestProbeEntry(t *testing.T) {
 		// A fresh process initialises the root (it may not be in this checkout yet), then only
 		// destroys.
 		after := w.childCalls(t, "tofu.log")[before:]
-		if got := subcommands(after); !slices.Equal(got, []string{"init", "destroy"}) {
-			t.Errorf("cleanup tofu calls %v, want [init destroy]: no plan, no apply", got)
+		if got := subcommands(after); !slices.Equal(got, []string{"init", "plan-destroy", "show-destroy", "destroy"}) {
+			t.Errorf("cleanup tofu calls %v, want [init plan-destroy show-destroy destroy]: no forward plan, no forward apply", got)
 		} else if !slices.Contains(after[0].Args, "-lockfile=readonly") {
 			t.Errorf("cleanup init %v may write the lock file into the checkout", after[0].Args)
 		}

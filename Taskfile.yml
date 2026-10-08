@@ -224,6 +224,30 @@ tasks:
       - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
       - .local/bin/lz-live apply {{.CLI_ARGS}}
 
+  # Host targets: the owner on the maintainer host only, never inside lz-offline
+  # and never run by an agent (they load ~/.config/ovh-lz/ credentials, call the
+  # OVHcloud API and change the account). destroy takes one ephemeral instance
+  # (a retained one, or all, is refused); chain applies the selected stacks, then
+  # destroys the ephemeral ones from its destroy-on-exit (also on a failure,
+  # SIGINT, SIGTERM or the deadline) and runs the leftover check; every destroy a
+  # saved `plan -destroy` read by protect.go before that file is applied, and
+  # only ever of an ephemeral instance (005 FR-011, R12).
+  # The ovhcloud CLI for checking leftovers by hand is pinned in mise.live.toml
+  # (MISE_ENV=live), e.g.
+  #   task live:destroy -- --reviewed-sha <sha> demo-dev-gra11-runtime
+  #   task live:chain -- --reviewed-sha <sha> all [--deadline 60m]
+  live:destroy:
+    desc: Destroy one ephemeral instance through a saved destroy plan read by protect.go (host, owner; 005 R12)
+    cmds:
+      - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
+      - .local/bin/lz-live destroy {{.CLI_ARGS}}
+
+  live:chain:
+    desc: Apply the selected stacks, destroy the ephemeral ones on exit, check leftovers (host, owner; 005 R12)
+    cmds:
+      - go -C tools build -o ../.local/bin/lz-live ./cmd/lz-live
+      - .local/bin/lz-live chain {{.CLI_ARGS}}
+
   check:specs:
     desc: 'Trace a spec''s requirements and tasks through its keys in harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'
     vars:

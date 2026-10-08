@@ -240,9 +240,13 @@ func fakeTofu(args []string) int {
 	}
 	secret := os.Getenv("OVH_CLIENT_SECRET")
 	statePath := os.Getenv("TF_VAR_state_path")
+	label := sub
+	if pf, ok := readPlan(resolve(positional)); sub == "apply" && ok && pf.Destroy {
+		label = "destroy" // the apply of a saved `plan -destroy` file is the destroy (T047)
+	}
 	// Every subcommand prints the credential and the probe passphrase on stderr: the runner must
 	// redact every child stream, not only apply's.
-	fmt.Fprintf(os.Stderr, "fake-tofu-%s-stderr token=%s passphrase=%s s3=%s p25=%s\n", sub, secret, os.Getenv("TF_VAR_state_passphrase"),
+	fmt.Fprintf(os.Stderr, "fake-tofu-%s-stderr token=%s passphrase=%s s3=%s p25=%s\n", label, secret, os.Getenv("TF_VAR_state_passphrase"),
 		os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("TF_VAR_p25_client_secret"))
 	// ... and every scanned secret (ScanFor) it holds in its environment, under whatever name
 	// (T080): the terminal checks then cover published keys in any case.
@@ -356,7 +360,7 @@ func fakeTofu(args []string) int {
 				changes = append(changes, map[string]any{"address": c.Address, "change": map[string]any{"actions": c.Actions}})
 			}
 			raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.0", "stack": pf.Stack, "nonce": pf.Nonce,
-				"planned_values": map[string]any{}, "resource_changes": changes})
+				"destroy": pf.Destroy, "planned_values": map[string]any{}, "resource_changes": changes})
 			fmt.Println(string(raw))
 			return 0
 		}
@@ -837,6 +841,85 @@ func TestRunnerDestroyOnExit(t *testing.T) {
 		}
 		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"a"}) {
 			t.Errorf("destroys %v, want [a]", got)
+		}
+	})
+}
+
+// TestRunnerDestroyJudgedPlan (T047, coordinator decision 2: one destroy discipline): the run core
+// destroys an ephemeral stack as the chain does: `plan -destroy` to a file, `show -json` of that
+// file judged by the guard, and exactly that file applied; never `tofu destroy -auto-approve`. A
+// destroy plan the guard refuses is not applied, the destroy goes on with the next stack, the
+// leftover check still runs, and the run exits 3.
+func TestRunnerDestroyJudgedPlan(t *testing.T) {
+	judged := func(t *testing.T, calls []tofuCall, id string) {
+		t.Helper()
+		var plan, protect, applied string
+		for _, c := range calls {
+			if c.Stack != id {
+				continue
+			}
+			switch {
+			case c.Cmd == "plan" && slices.Contains(c.Args, "-destroy"):
+				plan = c.Nonce
+			case c.Cmd == "protect" && c.Nonce == plan && plan != "":
+				protect = c.Nonce
+			case c.Cmd == "destroy":
+				applied = c.Nonce
+				if protect == "" || applied != protect {
+					t.Errorf("%s destroyed (plan %q) before its destroy plan %q was judged (%q)", id, applied, plan, protect)
+				}
+			}
+		}
+		if applied == "" {
+			t.Errorf("%s: no saved destroy plan applied", id)
+		}
+	}
+	t.Run("judged-saved-plan", func(t *testing.T) {
+		w := newRunWorld(t)
+		s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "r", false, tofuStack{}), w.stack(t, "b", true, tofuStack{})}
+		if err, _ := execute(t, w.runner(t, s...)); err != nil {
+			t.Fatalf("Execute: %v\n%s", err, w.term.String())
+		}
+		calls := w.calls(t, "tofu.log")
+		for _, c := range calls {
+			if slices.Contains(c.Args, "destroy") || slices.Contains(c.Args, "-auto-approve") {
+				t.Errorf("tofu %v: a destroy that no guard judged", c.Args)
+			}
+		}
+		judged(t, calls, "b")
+		judged(t, calls, "a")
+		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+			t.Errorf("destroys %v, want [b a]", got)
+		}
+		if slices.ContainsFunc(calls, func(c tofuCall) bool { return c.Stack == "r" && slices.Contains(c.Args, "-destroy") }) {
+			t.Error("a destroy plan of the retained stack")
+		}
+	})
+	t.Run("refused-destroy-plan", func(t *testing.T) {
+		w := newRunWorld(t)
+		s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{})}
+		r := w.runner(t, s...)
+		hook := r.Protect
+		r.Protect = func(st Stack, plan []byte) error {
+			var p planFile
+			_ = json.Unmarshal(plan, &p)
+			if err := hook(st, plan); err != nil || !p.Destroy || st.ID != "b" {
+				return err
+			}
+			return refuse(CondRetained, "fake refusal of the destroy plan of b")
+		}
+		err, _ := execute(t, r)
+		if ExitCode(err) != RefusalExit {
+			t.Errorf("exit %d (%v), want %d", ExitCode(err), err, RefusalExit)
+		}
+		if got := sequence(w.calls(t, "tofu.log"), "destroy"); !slices.Equal(got, []string{"a"}) {
+			t.Errorf("destroys %v, want [a] (b's refused plan not applied, a still destroyed)", got)
+		}
+		if s := w.summary(t); s["outcome"] != "fail" {
+			t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
+		}
+		if _, err := os.Stat(filepath.Join(w.runDir, "leftovers.json")); err != nil {
+			t.Errorf("the leftover check did not run after a refused destroy: %v", err)
 		}
 	})
 }
@@ -1562,7 +1645,17 @@ func TestProbeState(t *testing.T) {
 			return n
 		}
 		before := passing()
-		applies := len(sequence(w.calls(t, "tofu.log"), "plan")) + len(sequence(w.calls(t, "tofu.log"), "apply"))
+		// A destroy is a saved `plan -destroy` applied (T047): only forward plans and applies count.
+		forward := func(calls []tofuCall) int {
+			n := 0
+			for _, c := range calls {
+				if c.Cmd == "plan" && !slices.Contains(c.Args, "-destroy") || c.Cmd == "apply" {
+					n++
+				}
+			}
+			return n
+		}
+		applies := forward(w.calls(t, "tofu.log"))
 		lister := filepath.Join(w.bin, "lister.log")
 		out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}, ListerLog: lister}).CombinedOutput()
 		if err != nil {
@@ -1571,7 +1664,7 @@ func TestProbeState(t *testing.T) {
 		if passing() == before {
 			t.Error("the cleanup process never destroyed the probe with the retained passphrase")
 		}
-		if n := len(sequence(w.calls(t, "tofu.log"), "plan")) + len(sequence(w.calls(t, "tofu.log"), "apply")); n != applies {
+		if n := forward(w.calls(t, "tofu.log")); n != applies {
 			t.Errorf("the cleanup process planned or applied %d times: it must only destroy", n-applies)
 		}
 		for _, c := range w.calls(t, "tofu.log") {

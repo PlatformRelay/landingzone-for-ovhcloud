@@ -26,10 +26,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -306,14 +311,55 @@ type chainLister struct {
 }
 
 func (l chainLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
-	if !*l.done {
-		if raw, err := os.ReadFile(l.log); err == nil && strings.Contains(string(raw), `"cmd":"apply"`) {
-			l.late()
-			*l.done = true
-		}
-	}
+	chainLate(l.log, l.late, l.done)
 	laneAppend(l.log, laneCall{Cmd: "list", Stack: path})
 	return l.inner.Get(ctx, path, cursor)
+}
+
+// chainLate calls late once, on the first listing request after an apply.
+func chainLate(log string, late func(), done *bool) {
+	if !*done {
+		if raw, err := os.ReadFile(log); err == nil && strings.Contains(string(raw), `"cmd":"apply"`) {
+			late()
+			*done = true
+		}
+	}
+}
+
+// chainAdminTransport is the production listing path's API (T047, coordinator decision 1: the
+// chain lists through lz-live's own read-only client with the sandbox admin credential, bound to
+// the account through GET /auth/details before any listing). The token endpoint and GET
+// /auth/details go to the lane's fake API (its binding log included); every other request is a
+// listing: logged as a "list" event and answered by the fake listing API only when it carries the
+// bearer token the lane's fake API issued to the admin credential (any other: 401, exit logged).
+type chainAdminTransport struct {
+	lane    http.RoundTripper // the lane's fake API, binding log included
+	list    *fakeListAPI
+	log     string
+	late    func()
+	done    *bool
+	mu      *sync.Mutex
+	adminTo string // "Bearer fake-token-<admin name>"
+}
+
+func (c chainAdminTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == "/auth/oauth2/token" || r.URL.Path == "/v1/auth/details" {
+		return c.lane.RoundTrip(r)
+	}
+	c.mu.Lock()
+	chainLate(c.log, c.late, c.done)
+	c.mu.Unlock()
+	if r.Header.Get("Authorization") != c.adminTo {
+		laneAppend(c.log, laneCall{Cmd: "list", Stack: r.URL.Path, Exit: http.StatusUnauthorized})
+		return &http.Response{StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized", Body: io.NopCloser(strings.NewReader(`{"message":"Invalid credentials"}`)),
+			Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+	}
+	laneAppend(c.log, laneCall{Cmd: "list", Stack: r.URL.Path, Exit: http.StatusOK})
+	u, _ := url.Parse(c.list.URL)
+	out := r.Clone(r.Context())
+	out.URL.Scheme, out.URL.Host, out.Host = u.Scheme, u.Host, u.Host
+	out.Header.Set("Authorization", "Bearer "+listToken)
+	return c.list.Client().Transport.RoundTrip(out)
 }
 
 // chainExec is one chain run's setup beyond the fake world.
@@ -323,6 +369,14 @@ type chainExec struct {
 	signal   os.Signal // sent once a call blocks (laneStack.Block); nil: nothing is sent
 	seed     syntheticSeed
 	faults   map[string]listFault
+	// T047 (coordinator decisions 1, 3): early serves the seed from the first request (it is in
+	// the baseline); atBlock runs once a call blocks, before the signal; atFinal runs on the first
+	// listing request after an apply (the final reconciliation's first listing); production lists
+	// without the Lister seam, through ApplyOptions.API with the sandbox admin credential.
+	early      bool
+	atBlock    func(runDir string)
+	atFinal    func(runDir string, f *fakeListAPI)
+	production bool
 }
 
 // chainRun is a chain run and what the harness saw while it ran.
@@ -343,15 +397,26 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	t.Helper()
 	runID := h.nextRunID()
 	_, w := chainWorld(t, runID)
-	f := newFakeListAPI(t, seededResponses(w, syntheticSeed{}))
 	seeded := seededResponses(w, c.seed)
-	late := func() { f.mu.Lock(); f.responses = seeded; f.mu.Unlock() }
+	first := seededResponses(w, syntheticSeed{})
+	if c.early {
+		first = seeded
+	}
+	f := newFakeListAPI(t, first)
+	runDir := filepath.Join(h.checkout, ".local", "live", runID)
+	late := func() {
+		f.mu.Lock()
+		f.responses = seeded
+		f.mu.Unlock()
+		if c.atFinal != nil {
+			c.atFinal(runDir, f)
+		}
+	}
 	lateDone := false
 	for path, fault := range c.faults {
 		f.faults[path] = fault
 	}
 	h.runs++
-	runDir := filepath.Join(h.checkout, ".local", "live", runID)
 	from := len(h.logCalls())
 	before := laneTree(t, h.checkout, filepath.Join(h.checkout, ".local"))
 	h.term.Reset()
@@ -370,6 +435,9 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 			}
 			if _, err := os.Stat(h.world.Log + ".blocked"); err != nil {
 				continue
+			}
+			if c.atBlock != nil {
+				c.atBlock(runDir)
 			}
 			// The blocked call printed its apply_complete events first: the inventory holds
 			// them while the child still runs, or it is not appended as they arrive.
@@ -390,11 +458,18 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	if target == "" {
 		target = TargetAll
 	}
+	api := h.laneAPI()
+	var lister Lister = chainLister{inner: newAPILister(f.API(), listCred), log: h.world.Log, late: late, done: &lateDone}
+	if c.production {
+		lister = nil
+		api.HTTP = &http.Client{Transport: chainAdminTransport{lane: api.HTTP.Transport, list: f, log: h.world.Log, late: late, done: &lateDone,
+			mu: &sync.Mutex{}, adminTo: "Bearer fake-token-" + laneAPINames[AuthorityBootstrap]}}
+	}
 	streams := laneCaptureStd(t)
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
-		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI()},
-		Deadline: c.deadline, Signals: sigs, Lister: chainLister{inner: newAPILister(f.API(), listCred), log: h.world.Log, late: late, done: &lateDone}})
+		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
+		Deadline: c.deadline, Signals: sigs, Lister: lister})
 	process := streams()
 	close(stop)
 	<-watched
@@ -886,5 +961,283 @@ func TestChainDestroyVerb(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestLiveToolchainPin (T047, research R19): the ovhcloud CLI 0.15.0 is pinned in mise.live.toml
+// only (loaded with MISE_ENV=live, on the host), as its one tool; mise.toml, which the offline
+// toolchain identity reads, names no ovhcloud tool. The offline entry admits mise.toml but not
+// mise.live.toml (lz-offline's candidate allow-list): there the mise.toml half runs and the pin
+// half is skipped, naming why; on the host both run.
+func TestLiveToolchainPin(t *testing.T) {
+	_, tcb := os.Stat("/tcb")
+	offline := tcb == nil || os.Getenv("LZ_OFFLINE") == "1"
+	if _, err := os.Stat(filepath.Join(laneRepoRoot, "mise.live.toml")); offline && err != nil {
+		defer t.Skip("mise.live.toml is host-only: the offline entry does not admit it; the pin half runs on the host")
+		for _, line := range miseTools(t, "mise.toml") {
+			if strings.Contains(line, "ovhcloud") {
+				t.Errorf("mise.toml pins %s: the live tool belongs in mise.live.toml only", line)
+			}
+		}
+		return
+	}
+	if got := miseTools(t, "mise.live.toml"); !slices.Equal(got, []string{`"github:ovh/ovhcloud-cli" = "0.15.0"`}) {
+		t.Errorf("mise.live.toml tools %q, want exactly the ovhcloud CLI 0.15.0", got)
+	}
+	for _, line := range miseTools(t, "mise.toml") {
+		if strings.Contains(line, "ovhcloud") {
+			t.Errorf("mise.toml pins %s: the live tool belongs in mise.live.toml only", line)
+		}
+	}
+}
+
+// miseTools returns the entries of a mise file's [tools] table at the repository root.
+func miseTools(t *testing.T, name string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(laneRepoRoot, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	section := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			section = line
+			continue
+		}
+		if section == "[tools]" && line != "" && !strings.HasPrefix(line, "#") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// ---------------------------------------------------------------- T047: coordinator decisions 1, 3, 4
+
+// Decision 1 (production lister): without the Lister seam the chain lists through lz-live's own
+// read-only API client (ApplyOptions.API) with the sandbox admin credential (sandbox.env), bound to
+// the account through GET /auth/details before any listing. An admin credential of another
+// account is refused (exit 3) before any listing and before any tofu call.
+func TestChainAdminLister(t *testing.T) {
+	t.Run("bound-before-listing", func(t *testing.T) {
+		h := newChainHarness(t)
+		r := h.chain(chainExec{production: true})
+		laneExit(t, r.laneRun, 0)
+		chainDestroyedAfter(t, h, r, chainDestroyOrder, "pass")
+		bound := r.index(false, func(c laneCall) bool {
+			return c.Cmd == "bind" && c.Stack == laneAPINames[AuthorityBootstrap] && c.Exit == http.StatusOK
+		})
+		firstList := r.index(false, func(c laneCall) bool { return c.Cmd == "list" })
+		if bound < 0 || firstList < 0 || bound > firstList {
+			t.Errorf("the admin credential was not bound (GET /auth/details) before the first listing (events %v)", laneEvents(r.calls))
+		}
+		for _, c := range r.calls {
+			if c.Cmd == "list" && c.Exit != http.StatusOK {
+				t.Errorf("listing %s answered %d: not listed with the sandbox admin credential", c.Stack, c.Exit)
+			}
+		}
+	})
+	t.Run("admin-of-another-account", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.writeConfig("sandbox.env", map[string]string{"OVH_ENDPOINT": "ovh-eu", "OVH_CLIENT_ID": laneForeignID, "OVH_CLIENT_SECRET": laneForeignSecret})
+		r := h.chain(chainExec{production: true})
+		laneExit(t, r.laneRun, 3)
+		laneCondition(t, r.laneRun, CondAccount)
+		if got := r.events("list"); len(got) != 0 {
+			t.Errorf("listed %v with an admin credential of another account", got)
+		}
+		if got := r.tofu(); len(got) != 0 {
+			t.Errorf("tofu calls %v after the admin credential was refused", laneEvents(got))
+		}
+		// Every way out of a chain ends with summary.json and the summary line (review r1).
+		var sum map[string]any
+		if raw, err := os.ReadFile(filepath.Join(r.runDir, "summary.json")); err != nil || json.Unmarshal(raw, &sum) != nil || sum["outcome"] != "fail" {
+			t.Errorf("summary.json %v (%v), want outcome fail after the refusal", sum, err)
+		}
+		if !strings.Contains(h.term.String(), "LZ-LIVE summary "+r.runID+" fail ") {
+			t.Errorf("no fail summary line after the refusal:\n%s", h.term.String())
+		}
+	})
+}
+
+// chainBaselineFile is the run's baseline record (T047, coordinator decision 3): the listings taken
+// before the first apply, persisted redacted in the run directory, by provider type the listed ids.
+const chainBaselineFile = "baseline.json"
+
+type chainBaselineRecord struct {
+	RunID  string              `json:"run_id"`
+	Listed map[string][]string `json:"listed"`
+	Errors []string            `json:"errors"`
+}
+
+func readChainBaseline(t *testing.T, runDir string) (chainBaselineRecord, bool) {
+	t.Helper()
+	var b chainBaselineRecord
+	raw, err := os.ReadFile(filepath.Join(runDir, chainBaselineFile))
+	if err != nil {
+		return b, false
+	}
+	if err := json.Unmarshal(raw, &b); err != nil {
+		t.Errorf("%s: %v", chainBaselineFile, err)
+		return b, false
+	}
+	return b, true
+}
+
+// Decision 3 (baseline): the listings before the first apply are persisted as a redacted record in
+// the run directory before that apply; the final reconciliation reads that record back and marks
+// each leftover listed in it as there before the run (`before_run`); a missing record or a
+// baseline listing that failed is an error of the final report (fail, never pass).
+func TestChainBaseline(t *testing.T) {
+	t.Run("persisted-before-first-apply", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.setStack("account-governance", func(s *laneStack) { s.Block = "apply+events" })
+		var at chainBaselineRecord
+		seen := false
+		r := h.chain(chainExec{signal: syscall.SIGINT, atBlock: func(runDir string) { at, seen = readChainBaseline(t, runDir) }})
+		if r.err == nil {
+			t.Errorf("exit 0 after SIGINT")
+		}
+		if !seen {
+			t.Fatalf("no %s in the run directory while the first apply ran", chainBaselineFile)
+		}
+		if at.RunID != r.runID || !slices.Contains(at.Listed[tStorage], "lz-bkt-state") || !slices.Contains(at.Listed[tClient], laneAdminID) || len(at.Errors) != 0 {
+			t.Errorf("baseline record %+v: want run %s, the listed state bucket and admin client, no error", at, r.runID)
+		}
+		if raws, _ := filepath.Glob(filepath.Join(r.runDir, "listings-before", "*.json")); len(raws) == 0 {
+			t.Errorf("no raw baseline listings under listings-before/")
+		}
+	})
+	storage := func(p capturedProvenance, w syntheticWorld) syntheticSeed { return chainSeed(p, w, "storage") }
+	before := func(t *testing.T, r chainRun) map[string]bool {
+		t.Helper()
+		out := map[string]bool{}
+		for _, l := range chainReport(t, r.runDir).Leftovers {
+			out[l.Type+" "+l.ID] = l.Before
+		}
+		return out
+	}
+	seedKey := tStorage + " lz-seed-bkt-seed"
+	for _, tc := range []struct {
+		name    string
+		early   bool
+		atFinal func(t *testing.T) func(string, *fakeListAPI)
+		faults  map[string]listFault
+		want    map[string]bool // leftover key -> before_run
+		errWord string          // in a report error
+	}{
+		{name: "pre-existing-leftover", early: true, want: map[string]bool{seedKey: true}},
+		{name: "new-leftover", want: map[string]bool{seedKey: false}},
+		{name: "record-is-compared", early: true, atFinal: func(t *testing.T) func(string, *fakeListAPI) {
+			return func(runDir string, _ *fakeListAPI) {
+				p := filepath.Join(runDir, chainBaselineFile)
+				var doc map[string]any
+				raw, err := os.ReadFile(p)
+				if err != nil || json.Unmarshal(raw, &doc) != nil {
+					t.Errorf("no baseline record to edit: %v", err)
+					return
+				}
+				listed, _ := doc["listed"].(map[string]any)
+				delete(listed, tStorage)
+				raw, _ = json.Marshal(doc)
+				if err := os.WriteFile(p, raw, 0o600); err != nil {
+					t.Error(err)
+				}
+			}
+		}, want: map[string]bool{seedKey: false}},
+		{name: "record-missing", atFinal: func(t *testing.T) func(string, *fakeListAPI) {
+			return func(runDir string, _ *fakeListAPI) { _ = os.Remove(filepath.Join(runDir, chainBaselineFile)) }
+		}, errWord: "baseline"},
+		{name: "baseline-listing-failed", faults: map[string]listFault{"/cloud/project/" + laneProject + "/network/private": {Kind: "malformed"}},
+			atFinal: func(t *testing.T) func(string, *fakeListAPI) {
+				return func(_ string, f *fakeListAPI) { f.mu.Lock(); f.faults = map[string]listFault{}; f.mu.Unlock() }
+			}, errWord: "baseline"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newChainHarness(t)
+			c := chainExec{early: tc.early, faults: tc.faults}
+			if tc.want != nil {
+				p, w := chainWorld(t, h.nextRunID())
+				c.seed = storage(p, w)
+			}
+			if tc.atFinal != nil {
+				c.atFinal = tc.atFinal(t)
+			}
+			r := h.chain(c)
+			laneExit(t, r.laneRun, 1)
+			chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+			rep := chainReport(t, r.runDir)
+			if tc.want != nil {
+				if got := before(t, r); !maps.Equal(got, tc.want) {
+					t.Errorf("leftovers (key -> before_run) %v, want %v", got, tc.want)
+				}
+			}
+			if tc.errWord != "" {
+				if len(rep.Leftovers) != 0 || !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, tc.errWord) }) {
+					t.Errorf("report leftovers %v, errors %v; want no leftover and an error naming the %s", leftoverKeys(rep.Leftovers), rep.Errors, tc.errWord)
+				}
+			}
+		})
+	}
+}
+
+// G9 fail closed (T047, mutant g9-state-error-ignored): a retained instance's state that cannot be
+// read leaves its resources unexempted and unknowable; the report names it as an error and the
+// chain fails, after the destroys.
+func TestChainStateUnreadable(t *testing.T) {
+	h := newChainHarness(t)
+	h.setStack("account-bootstrap", func(s *laneStack) { s.StateDoc = h.writeFake("state-unreadable.json", "not a state document") })
+	r := h.chain(chainExec{})
+	laneExit(t, r.laneRun, 1)
+	chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+	rep := chainReport(t, r.runDir)
+	if !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, "account-bootstrap") }) {
+		t.Errorf("report errors %v, want one naming the unreadable state of account-bootstrap", rep.Errors)
+	}
+}
+
+// Decision 4 (failed destroy apply): a destroy whose saved plan passed the guard but whose apply
+// fails does not stop the destroy-on-exit: the other ephemeral stack is still destroyed, the
+// failure is reported, the leftover check still runs after the last destroy, and the run exits
+// non-zero with a fail summary.
+func TestChainDestroyApplyFails(t *testing.T) {
+	for _, failing := range chainDestroyOrder {
+		t.Run(failing, func(t *testing.T) {
+			h := newChainHarness(t)
+			h.setStack(failing, func(s *laneStack) { s.DestroyExit = 1 })
+			r := h.chain(chainExec{})
+			laneExit(t, r.laneRun, 1)
+			if r.err == nil || !strings.Contains(r.err.Error(), failing) {
+				t.Errorf("err %v, want it to name %s", r.err, failing)
+			}
+			if got := r.applies(true); !slices.Equal(got, chainDestroyOrder) {
+				t.Errorf("destroy applies %v, want %v (the other still destroyed after the failure)", got, chainDestroyOrder)
+			}
+			for _, id := range chainDestroyOrder {
+				s, ok := h.stateOf(id)
+				if id == failing && (!ok || s.Empty) {
+					t.Errorf("state of %s emptied although its destroy failed", id)
+				}
+				if id != failing && (!ok || !s.Empty) {
+					t.Errorf("state of %s not destroyed", id)
+				}
+			}
+			lastDestroy := r.index(true, func(c laneCall) bool { return c.Destroy })
+			lastList := r.index(true, func(c laneCall) bool { return c.Cmd == "list" })
+			if lastList < lastDestroy {
+				t.Errorf("no leftover listing after the last destroy (events %v)", laneEvents(r.calls))
+			}
+			if _, err := os.Stat(filepath.Join(r.runDir, "leftovers.json")); err != nil {
+				t.Errorf("no leftover report: %v", err)
+			}
+			lines := strings.Split(strings.TrimSpace(h.term.String()), "\n")
+			if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "LZ-LIVE summary "+r.runID+" fail ") {
+				t.Errorf("terminal does not end with a fail summary:\n%s", strings.Join(lines[max(0, len(lines)-3):], "\n"))
+			}
+			if len(h.record(failing)) == 0 {
+				t.Errorf("record of %s removed although its destroy failed", failing)
+			}
+		})
 	}
 }

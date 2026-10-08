@@ -14,12 +14,15 @@ package live
 // nothing after it is planned or applied. Under `plan -- all` a stack consuming a selected producer
 // is reported `blocked-on=<producer>` and not planned (its plan would read the producer's old
 // artefact), the rest is planned and the run ends blocked, exit 2 (T090). `destroy` refuses every
-// retained instance (G7); the rest of destroy is T047's. account-bootstrap is bootstrap:account's,
-// never the lane's (decision 1, 2026-10-08).
+// retained instance (G7) before any file is read; `destroy -- <ephemeral instance>` holds that
+// instance's run locks and destroys it as the chain does (chain.go destroyStack: a saved
+// `plan -destroy` judged by protect.go, that file applied, its record removed). account-bootstrap
+// is bootstrap:account's, never the lane's (decision 1, 2026-10-08). `chain` (chain.go) runs
+// through the same runner.
 //
-// Not here (recorded gaps of T059): a run deadline and the inventory of what an apply created.
-// A cancelled context stops the running child as the run core does (SIGINT, then a kill after
-// DefaultGrace).
+// Not here for plan|apply (recorded gaps of T059): a run deadline and the inventory of what an
+// apply created; the chain has both. A cancelled context stops the running child as the run core
+// does (SIGINT, then a kill after DefaultGrace).
 
 import (
 	"bytes"
@@ -36,6 +39,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks"
@@ -106,6 +110,11 @@ type laneRunner struct {
 	bound   map[Credential]bool // credentials (endpoint, client, secret) bound in this run
 	code    map[string]string
 	passes  int // selections run so far
+	// chain only (chain.go): the inventory, the stacks whose apply started, the signal a stop
+	// forwards to the running child (unset: SIGINT).
+	inv     *Inventory
+	started []string
+	stop    atomic.Value
 }
 
 // accountFile reads one of the bound account's own files, which bootstrap:account writes: missing,
@@ -119,7 +128,13 @@ func accountFile(dir, name string) (map[string]string, error) {
 }
 
 // Apply runs one plan, apply or destroy; the error maps to the exit code through ExitCode.
-func Apply(ctx context.Context, o ApplyOptions) (err error) {
+func Apply(ctx context.Context, o ApplyOptions) error {
+	return runLane(ctx, o, nil)
+}
+
+// runLane is Apply, and with ch the chain (chain.go): every way out of a chain run ends with its
+// summary line.
+func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) {
 	red := NewRedactor()
 	terminal := o.Terminal
 	if terminal == nil {
@@ -132,6 +147,10 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 			err = redactedError{err, red}
 		}
 	}()
+	r := &laneRunner{o: o, red: red, term: term, bound: map[Credential]bool{}, code: map[string]string{}}
+	if ch != nil {
+		defer func() { err = r.summary(err, ch.Deadline) }()
+	}
 	m := o.Manifest
 	if o.Verb == VerbDestroy {
 		// Before any file is read or child started (G7).
@@ -151,9 +170,7 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 				return refuse(CondRetained, "destroy refuses retained instance %s", id)
 			}
 		}
-		return errors.New("destroy of ephemeral instances arrives with lz-live destroy (T047)")
-	}
-	if o.Verb != VerbPlan && o.Verb != VerbApply {
+	} else if o.Verb != VerbPlan && o.Verb != VerbApply {
 		return fmt.Errorf("unknown verb %q", o.Verb)
 	}
 	if o.Target != TargetAll {
@@ -169,7 +186,6 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	if err != nil {
 		return err
 	}
-	r := &laneRunner{o: o, red: red, term: term, bound: map[Credential]bool{}, code: map[string]string{}}
 	pf, err := accountFile(acctDir, "state-passphrase.env")
 	if err != nil {
 		return err
@@ -192,9 +208,15 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	if r.account, err = BoundAccountFromEnv(acc); err != nil {
 		return err
 	}
+	if o.Verb == VerbDestroy {
+		return r.destroyOne(ctx)
+	}
 	ids, _, err := r.acted()
 	if err != nil {
 		return err
+	}
+	if ch != nil {
+		return r.chain(ctx, ch, ids)
 	}
 	if len(ids) == 0 {
 		fmt.Fprintf(term, "LZ-LIVE %s nothing selected\n", o.Verb)
@@ -365,6 +387,8 @@ func (r *laneRunner) bind(ctx context.Context, creds map[string]string) error {
 // process group, SIGINT when ctx ends and a kill after DefaultGrace (runner.go childEnv).
 func (r *laneRunner) tofu(ctx context.Context, child *childEnv, id, dir string, stdout io.Writer, args ...string) error {
 	cmd := child.command(ctx, r.o.Tofu, append([]string{"-chdir=" + dir}, args...)...)
+	// The chain forwards the signal that stopped it (SIGTERM as SIGTERM; SIGINT otherwise).
+	cmd.Cancel = func() error { return cmd.Process.Signal(r.stopSignal()) }
 	cmd.Env = append(cmd.Env, "TF_DATA_DIR="+filepath.Join(r.home, "tofu-data", id))
 	cmd.Stdout, cmd.Stderr = stdout, r.term
 	err := cmd.Run()
@@ -381,15 +405,7 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	_, creds, err := LoadCredentials(o.ConfigRoot, o.Account, m, id)
-	if err != nil {
-		return err
-	}
-	r.red.Add(creds["OVH_CLIENT_SECRET"], creds["AWS_SECRET_ACCESS_KEY"])
-	if err := r.bind(ctx, creds); err != nil {
-		return err
-	}
-	store, err := o.Store(s3Of(creds))
+	child, dir, store, err := r.prepare(ctx, in)
 	if err != nil {
 		return err
 	}
@@ -401,12 +417,6 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	vars := map[string]string{"TF_VAR_state_passphrase": r.pass}
-	for k, v := range creds {
-		vars[k] = v
-	}
-	child := &childEnv{home: r.home, vars: vars, grace: DefaultGrace}
-	dir := filepath.Join(o.Checkout, filepath.FromSlash(in.Path))
 	if err := r.tofu(ctx, child, id, dir, r.term, initArgs...); err != nil {
 		return err
 	}
@@ -445,13 +455,29 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if o.Verb == VerbPlan {
 		return nil
 	}
-	// The apply stream without its `outputs` event: an output value the redactor cannot know yet
-	// (a secret created by this apply, wrongly not sensitive) never reaches the terminal (review r2).
-	applied := &dropOutputs{w: r.term}
-	err = r.tofu(ctx, child, id, dir, applied, "apply", "-json", "-input=false", plan)
-	applied.flush()
-	if err != nil {
-		return err
+	if r.inv != nil {
+		// The chain (R12): from here the stack is destroyed on exit; the inventory is appended as
+		// each apply_complete event arrives. ConsumeApply writes each event's message only, never
+		// the values an `outputs` event carries.
+		r.started = append(r.started, id)
+		pr, pw := io.Pipe()
+		consumed := make(chan error, 1)
+		go func() { consumed <- ConsumeApply(pr, id, r.inv, r.term) }()
+		err = r.tofu(ctx, child, id, dir, pw, "apply", "-json", "-input=false", plan)
+		pw.Close()
+		if err = errors.Join(err, <-consumed); err != nil {
+			return err
+		}
+	} else {
+		// The apply stream without its `outputs` event: an output value the redactor cannot know
+		// yet (a secret created by this apply, wrongly not sensitive) never reaches the terminal
+		// (review r2).
+		applied := &dropOutputs{w: r.term}
+		err = r.tofu(ctx, child, id, dir, applied, "apply", "-json", "-input=false", plan)
+		applied.flush()
+		if err != nil {
+			return err
+		}
 	}
 	var out bytes.Buffer
 	if err := r.tofu(ctx, child, id, dir, &out, "output", "-json"); err != nil {

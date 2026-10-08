@@ -1,0 +1,8 @@
+# Host-only live tools (spec 005 research R19), loaded only with MISE_ENV=live in the
+# owner's checkout (contracts/checks.md: credential-bearing host targets run with
+# MISE_ENV=live). mise.toml, verify:toolchain and the offline image stay unchanged:
+# nothing here reaches lz-offline.
+[tools]
+# The official OVHcloud CLI, for checking leftovers by hand after a live run
+# (AGENTS.md *Tools*). lz-live itself lists through its own read-only API client.
+"github:ovh/ovhcloud-cli" = "0.15.0"

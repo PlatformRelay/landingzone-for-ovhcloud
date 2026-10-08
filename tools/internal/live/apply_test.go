@@ -176,6 +176,9 @@ type laneStack struct {
 	DestroyPlan string       `json:"destroy_plan,omitempty"`
 	StateDoc    string       `json:"state_doc,omitempty"`
 	Creates     []laneCreate `json:"creates,omitempty"`
+	// DestroyExit makes the apply of the stack's `plan -destroy` file fail, its state kept (T047,
+	// coordinator decision 4).
+	DestroyExit int `json:"destroy_exit,omitempty"`
 }
 
 // laneCreate is one resource an apply creates: one `apply_complete` event of `tofu apply -json`
@@ -396,7 +399,12 @@ func fakeLaneTofu(worldPath string, args []string) int {
 	}
 	switch sub {
 	case "init":
-		// account-bootstrap has the local backend: no bucket to open (T046 reads its state).
+		// account-bootstrap has the local backend: no bucket to open (T046 reads its state); its
+		// path is ${var.lz_account_dir}/state/… (stacks/account/bootstrap/_lz_backend.tf), so init
+		// needs the bound account's directory (T047 review r1).
+		if st.Stage == "bootstrap" && os.Getenv("TF_VAR_lz_account_dir") != filepath.Dir(w.LockDir) {
+			return fail("No value for required variable \"lz_account_dir\" (got %q)", os.Getenv("TF_VAR_lz_account_dir"))
+		}
 		if sk, ok := st.BucketKeys[os.Getenv("AWS_ACCESS_KEY_ID")]; st.Bucket != "" && (!ok || sk != os.Getenv("AWS_SECRET_ACCESS_KEY")) {
 			return fail("Failed to get existing workspaces: AccessDenied on bucket %s", st.Bucket)
 		}
@@ -530,6 +538,9 @@ func fakeLaneTofu(worldPath string, args []string) int {
 			return fail("Saved plan is stale")
 		}
 		if pf.Destroy {
+			if st.DestroyExit != 0 {
+				return fail("fake destroy failure of %s", st.ID)
+			}
 			fmt.Print(`{"@level":"info","@message":"Destroy complete!","type":"change_summary"}` + "\n" + echo)
 			raw, _ := json.Marshal(laneState{PassSHA: pass, Serial: state.Serial + 1, Empty: true})
 			if os.WriteFile(statePath, raw, 0o600) != nil {
