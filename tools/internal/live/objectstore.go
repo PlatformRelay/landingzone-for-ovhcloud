@@ -113,9 +113,22 @@ func (s *S3Store) Put(bucket, key string, data []byte) error {
 	return err
 }
 
+// PutNew writes an object only if none exists (`If-None-Match: *`, the conditional write OpenTofu's
+// S3 backend locks with); an existing object answers 412, a typed error (statusOf). That OVHcloud
+// honours the condition is UNVERIFIED until T049.
+func (s *S3Store) PutNew(bucket, key string, data []byte) error {
+	_, err := s.requestWith(http.MethodPut, bucket, key, data, http.Header{"If-None-Match": {"*"}})
+	return err
+}
+
 // request is the store's one way out: the method gate, the names, the signature, the size caps.
 // Only a 200 answer succeeds; a 404 to GET or HEAD is fs.ErrNotExist.
 func (s *S3Store) request(method, bucket, key string, body []byte) ([]byte, error) {
+	return s.requestWith(method, bucket, key, body, nil)
+}
+
+// requestWith is request with extra, unsigned request headers (a write condition).
+func (s *S3Store) requestWith(method, bucket, key string, body []byte, extra http.Header) ([]byte, error) {
 	switch method {
 	case http.MethodGet, http.MethodPut, http.MethodHead:
 	default:
@@ -147,6 +160,9 @@ func (s *S3Store) request(method, bucket, key string, body []byte) ([]byte, erro
 	signed := http.Header{"Host": {s.host}, "X-Amz-Date": {at.Format(sigV4Time)}, "X-Amz-Content-Sha256": {hash}}
 	_, _, authz := s.signer.sign(method, path, nil, signed, hash, at)
 	req.Header.Set("Authorization", authz)
+	for k, v := range extra {
+		req.Header[k] = v
+	}
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return nil, quiet(what, err)
@@ -163,7 +179,8 @@ func (s *S3Store) request(method, bucket, key string, body []byte) ([]byte, erro
 	case resp.StatusCode == http.StatusNotFound && method != http.MethodPut:
 		return nil, fmt.Errorf("%s: %w", what, fs.ErrNotExist)
 	case resp.StatusCode != http.StatusOK:
-		return nil, fmt.Errorf("%s answered %d", what, resp.StatusCode)
+		// The same text as before, typed so that a refusal (403) can be told apart (T062).
+		return nil, &apiStatus{what: what, code: resp.StatusCode}
 	}
 	return raw, nil
 }

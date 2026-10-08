@@ -179,6 +179,9 @@ type laneStack struct {
 	// DestroyExit makes the apply of the stack's `plan -destroy` file fail, its state kept (T047,
 	// coordinator decision 4).
 	DestroyExit int `json:"destroy_exit,omitempty"`
+	// LockHeld (T062): a plan that must not wait for the lock (-lock-timeout) is refused, as
+	// OpenTofu refuses a second writer, naming this lock id; "" when the state is not locked.
+	LockHeld string `json:"lock_held,omitempty"`
 }
 
 // laneCreate is one resource an apply creates: one `apply_complete` event of `tofu apply -json`
@@ -422,6 +425,9 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		if os.Getenv("OVH_ENDPOINT") != "ovh-eu" || os.Getenv("OVH_CLIENT_ID") == "" || os.Getenv("OVH_CLIENT_SECRET") == "" {
 			return fail("ovh provider: missing credentials")
 		}
+		if _, ok := flags["-lock-timeout"]; ok && st.LockHeld != "" {
+			return fail("Error acquiring the state lock\n\nError message: operation error S3: PutObject, StatusCode: 412, PreconditionFailed\nLock Info:\n  ID:        %s\n  Path:      %s/%s.tflock\n  Operation: OperationTypePlan", st.LockHeld, st.Bucket, st.ID)
+		}
 		vars := map[string]json.RawMessage{}
 		for _, f := range call.VarFiles {
 			raw, err := os.ReadFile(f)
@@ -663,6 +669,17 @@ func (b *laneBucket) Put(bucket, key string, data []byte) error {
 	}
 	b.s.objects[bucket+"/"+key] = bytes.Clone(data)
 	return nil
+}
+
+// PutNew is Put if absent (T062: the L7 lock object); an existing object answers 412.
+func (b *laneBucket) PutNew(bucket, key string, data []byte) error {
+	b.s.mu.Lock()
+	_, exists := b.s.objects[bucket+"/"+key]
+	b.s.mu.Unlock()
+	if exists {
+		return &apiStatus{what: "PUT " + bucket + "/" + key, code: http.StatusPreconditionFailed}
+	}
+	return b.Put(bucket, key, data)
 }
 
 func (b *laneBucket) Get(bucket, key string) ([]byte, error) {

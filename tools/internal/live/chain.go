@@ -25,6 +25,16 @@ package live
 // (consumer-applied) while a stack consuming it has a record (T091); the destroy-on-exit has no
 // such check: it destroys ephemeral consumers before their producers (a retained consumer of an
 // ephemeral producer would not be; no stage of today's table is one, evidence/T091.md gap 1).
+//
+// L7 (V010, T062): once every stack of `-- all` is applied, before the destroy-on-exit, the
+// observer (nil: the production collector, observe.go) collects the observations; the chain writes
+// them to observations.json (redacted, with the manifest's sandbox flag and the subjects the
+// manifest requires, L7Subjects), judges them (Assess) and fails on any failed assertion; a known
+// deviation leaves the exit code unchanged and is listed in summary.json and the summary line. The
+// trap (the canary, the lock object, a wrongly created policy) runs after the destroys and before
+// the leftover check lists. `-- <instance>` does not observe (coordinator decision 1, 2026-10-08):
+// every assertion is recorded not-run. The run locks cover every retained instance too, whose
+// state the leftover check (and the collector) reads.
 
 import (
 	"bytes"
@@ -32,6 +42,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/signal"
@@ -98,17 +109,40 @@ func (r *laneRunner) summary(err error, deadline time.Duration) error {
 		deadline = DefaultDeadline
 	}
 	outcome := "pass"
-	if err != nil {
+	switch ExitCode(err) {
+	case 0:
+	case BlockedExit:
+		outcome = "blocked"
+	default:
 		outcome = "fail"
 	}
+	as := r.assessments
+	if as == nil {
+		why := r.notRun
+		if why == "" {
+			why = "not observed: the chain ended before every stack was applied"
+		}
+		as = notRun(why)
+	}
+	kd := KnownDeviations(as)
+	if kd == nil {
+		kd = []string{}
+	}
 	sum, _ := json.Marshal(map[string]any{"run_id": r.o.RunID, "outcome": outcome, "deadline": deadline.String(),
-		"known_deviations": []string{}, "error": errString(err)})
+		"known_deviations": kd, "assertions": as, "error": errString(err)})
 	if r.o.RunDir == "" {
 		err, outcome = errors.Join(err, errors.New("no run directory for summary.json")), "fail"
 	} else if werr := writeRecord(filepath.Join(r.o.RunDir, "summary.json"), []byte(r.red.Redact(string(sum)))); werr != nil {
 		err, outcome = errors.Join(err, werr), "fail"
 	}
-	fmt.Fprintf(r.term, "LZ-LIVE summary %s %s known-deviations=none\nrecord approximate cost for run %s in the PR\n", r.o.RunID, outcome, r.o.RunID)
+	for _, a := range as {
+		fmt.Fprintf(r.term, "LZ-LIVE assert %s %s%s\n", a.Assertion, a.Outcome, strings.TrimSuffix(" "+a.Deviation, " "))
+	}
+	kdLine := "none"
+	if len(kd) > 0 {
+		kdLine = strings.Join(kd, ",")
+	}
+	fmt.Fprintf(r.term, "LZ-LIVE summary %s %s known-deviations=%s\nrecord approximate cost for run %s in the PR\n", r.o.RunID, outcome, kdLine, r.o.RunID)
 	return err
 }
 
@@ -142,6 +176,13 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	for _, id := range eph {
 		if !slices.Contains(lockIDs, id) {
 			lockIDs = append(lockIDs, id)
+		}
+	}
+	// The leftover check reads every retained instance's state (and the L7 collector its state
+	// objects and the lock row's root): their locks too (T062: a partial chain read them unlocked).
+	for _, in := range m.Instances {
+		if _, st, err := stageOf(m, in.ID); err == nil && st.Chain == "retained" && !slices.Contains(lockIDs, in.ID) {
+			lockIDs = append(lockIDs, in.ID)
 		}
 	}
 	release, err := stacks.HoldRun(o.Locks, m, lockIDs)
@@ -220,6 +261,12 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 			fmt.Fprintf(r.term, "LZ-LIVE chain %s ok\n", id)
 		}
 	}
+	trap := &Trap{}
+	if o.Target != TargetAll {
+		r.notRun = fmt.Sprintf("not observed: partial chain (-- %s); the L7 assertions run under -- all only", o.Target)
+	} else if runErr == nil && runCtx.Err() == nil {
+		runErr = r.observe(runCtx, c, trap)
+	}
 	if runCtx.Err() != nil {
 		runErr = errors.Join(context.Cause(runCtx), runErr)
 	}
@@ -240,6 +287,10 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 			continue
 		}
 		fmt.Fprintf(r.term, "LZ-LIVE destroy %s ok\n", id)
+	}
+	// The trap after the destroys, before the leftover check lists (the canary would be a leftover).
+	if e := trap.Run(dctx); e != nil {
+		destroyErr = errors.Join(destroyErr, e)
 	}
 
 	rep := r.leftovers(dctx, check)
@@ -275,24 +326,32 @@ func (r *laneRunner) leftoverCheck(ctx context.Context, c *ChainOptions) (Leftov
 		return check, err
 	}
 	if c.Lister == nil {
-		sb, err := ReadCredentialFile(filepath.Join(o.ConfigRoot, "sandbox.env"))
-		if errors.Is(err, fs.ErrNotExist) {
-			return check, &Blocked{Phase: "credentials", Detail: "sandbox.env does not exist; bootstrap:account writes it"}
-		}
-		if err != nil {
-			return check, err
-		}
-		check.Cred = Credential{Endpoint: sb["OVH_ENDPOINT"], ClientID: sb["OVH_CLIENT_ID"], ClientSecret: sb["OVH_CLIENT_SECRET"]}
-		r.red.Add(check.Cred.ClientSecret)
-		if check.Cred.Endpoint == "" || check.Cred.ClientID == "" || check.Cred.ClientSecret == "" {
-			return check, refuse(CondCredentials, "sandbox.env: OVH_ENDPOINT, OVH_CLIENT_ID and OVH_CLIENT_SECRET are required")
-		}
-		if err := r.bind(ctx, map[string]string{"OVH_ENDPOINT": check.Cred.Endpoint, "OVH_CLIENT_ID": check.Cred.ClientID,
-			"OVH_CLIENT_SECRET": check.Cred.ClientSecret}); err != nil {
+		if check.Cred, err = r.admin(ctx); err != nil {
 			return check, err
 		}
 	}
 	return check, nil
+}
+
+// admin is the sandbox admin credential (sandbox.env, the bootstrap authority), bound to the
+// account before its first use.
+func (r *laneRunner) admin(ctx context.Context) (Credential, error) {
+	sb, err := ReadCredentialFile(filepath.Join(r.o.ConfigRoot, "sandbox.env"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return Credential{}, &Blocked{Phase: "credentials", Detail: "sandbox.env does not exist; bootstrap:account writes it"}
+	}
+	if err != nil {
+		return Credential{}, err
+	}
+	c := Credential{Endpoint: sb["OVH_ENDPOINT"], ClientID: sb["OVH_CLIENT_ID"], ClientSecret: sb["OVH_CLIENT_SECRET"]}
+	r.red.Add(c.ClientSecret)
+	if c.Endpoint == "" || c.ClientID == "" || c.ClientSecret == "" {
+		return Credential{}, refuse(CondCredentials, "sandbox.env: OVH_ENDPOINT, OVH_CLIENT_ID and OVH_CLIENT_SECRET are required")
+	}
+	if err := r.bind(ctx, map[string]string{"OVH_ENDPOINT": c.Endpoint, "OVH_CLIENT_ID": c.ClientID, "OVH_CLIENT_SECRET": c.ClientSecret}); err != nil {
+		return Credential{}, err
+	}
+	return c, nil
 }
 
 // baseline lists every kind before the first apply (R12) and persists it, redacted, in the run
@@ -612,4 +671,130 @@ func (r *laneRunner) projects() ([]Project, error) {
 		}
 	}
 	return out, nil
+}
+
+// observe collects the L7 observations once every stack is applied (the observer, or the
+// production collector), records them with the subjects the manifest requires, judges them and
+// fails the run on any assertion that neither passes nor reports a known deviation. What a failed
+// collector returned is still recorded; its assertions stay not-run.
+func (r *laneRunner) observe(ctx context.Context, c *ChainOptions, trap *Trap) error {
+	o, m := r.o, r.o.Manifest
+	expected, err := L7Subjects(m, r.account)
+	if err != nil {
+		r.notRun = "not judged: the manifest's L7 subjects could not be derived"
+		return fmt.Errorf("L7 subjects: %w", err)
+	}
+	obsr := c.Observer
+	if obsr == nil {
+		col, err := r.collector(ctx)
+		if err != nil {
+			r.notRun = "not judged: the L7 collector could not start"
+			return fmt.Errorf("L7 collector: %w", err)
+		}
+		obsr = col
+	}
+	obs, oerr := obsr.Observe(ctx, ObserveRun{RunID: o.RunID, RunDir: o.RunDir, Manifest: m, Trap: trap})
+	set := ObservationSet{RunID: o.RunID, SharedStateProject: m.SharedStateProject, Observations: obs, Expected: expected}
+	if oerr == nil || len(obs) > 0 {
+		raw, err := json.Marshal(set)
+		if err != nil {
+			return err
+		}
+		if err := writeRecord(filepath.Join(o.RunDir, "observations.json"), []byte(r.red.Redact(string(raw)))); err != nil {
+			return errors.Join(oerr, err)
+		}
+	}
+	if oerr != nil {
+		r.notRun = "not judged: the L7 collector failed"
+		if ctx.Err() != nil {
+			r.notRun = "not judged: " + context.Cause(ctx).Error()
+		}
+		return fmt.Errorf("L7 collector: %w", oerr)
+	}
+	r.assessments = Assess(set)
+	var failed []string
+	for _, a := range r.assessments {
+		if a.Outcome != "pass" && a.Outcome != outcomeKnownDev {
+			failed = append(failed, a.Assertion+" ("+a.Detail+")")
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("L7 assertions failed: %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// collector is the production L7 collector of this run: the lane's API, the sandbox admin
+// credential, the bound account, each instance's authority's credential (its secrets redacted),
+// the lane's state store and schemas, and a second writer through the lane's tofu.
+func (r *laneRunner) collector(ctx context.Context) (*collector, error) {
+	admin, err := r.admin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	o := r.o
+	return &collector{API: o.API, Admin: admin, Binding: r.binding, Account: r.account,
+		Creds: func(id string) (map[string]string, error) {
+			_, creds, err := LoadCredentials(o.ConfigRoot, o.Account, o.Manifest, id)
+			if err == nil {
+				r.red.Add(creds["OVH_CLIENT_SECRET"], creds["AWS_SECRET_ACCESS_KEY"])
+			}
+			return creds, err
+		},
+		Store: o.Store, Schemas: o.Schemas, Writer: &laneLockWriter{r: r, ready: map[string]lockRoot{}}}, nil
+}
+
+// laneLockWriter is the lock-contention assertion's second writer: the instance's root under its
+// own authority (bound first), with its consumed inputs, initialised before the lock object exists;
+// then a plan that must not wait for the lock, as the probe run core's second writer (runner.go).
+type laneLockWriter struct {
+	r     *laneRunner
+	ready map[string]lockRoot
+}
+
+type lockRoot struct {
+	child *childEnv
+	dir   string
+	files []string
+}
+
+func (w *laneLockWriter) Prepare(ctx context.Context, id string) error {
+	r := w.r
+	in, _, err := stageOf(r.o.Manifest, id)
+	if err != nil {
+		return err
+	}
+	child, dir, store, err := r.prepare(ctx, in)
+	if err != nil {
+		return err
+	}
+	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: r.o.Manifest, Consumer: id, Store: store, Schemas: r.o.Schemas, Account: r.account,
+		Dir: filepath.Join(r.o.RunDir, "inputs-l7", id)})
+	if err != nil {
+		return err
+	}
+	if err := r.tofu(ctx, child, id, dir, r.term, initArgs...); err != nil {
+		return err
+	}
+	w.ready[id] = lockRoot{child: child, dir: dir, files: inputs.Files}
+	return nil
+}
+
+func (w *laneLockWriter) Plan(ctx context.Context, id string) (string, error) {
+	r := w.r
+	root, ok := w.ready[id]
+	if !ok {
+		return "", fmt.Errorf("second writer of %s not prepared", id)
+	}
+	plan := filepath.Join(r.home, "l7-lock-"+id+".tfplan")
+	args := []string{"plan", "-input=false", "-lock-timeout=0s", "-out=" + plan}
+	for _, f := range root.files {
+		args = append(args, "-var-file="+f)
+	}
+	// One writer for both streams: exec copies them in one goroutine then (review r1: two writers
+	// over one buffer raced).
+	var out bytes.Buffer
+	w2 := io.MultiWriter(&out, r.term)
+	err := r.tofuStreams(ctx, root.child, id, root.dir, w2, w2, args...)
+	return r.red.Redact(out.String()), errors.Join(err, removeFiles(plan))
 }

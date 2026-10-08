@@ -108,4 +108,6 @@ T091), an existing admin under `bootstrap --fresh-account`). Every verb that app
 destroy (`destroy`, the chain's and the probes' destroy-on-exit) is a saved `plan -destroy` (T047). Output lines are `LZ-LIVE <phase> <instance> <status>
 <detail>`; no secret, no raw plan JSON. Every run prints its run id and, at the end,
 `LZ-LIVE summary <run-id> <outcome> known-deviations=<ids|none>` and
-`record approximate cost for run <id> in the PR`.
+`record approximate cost for run <id> in the PR`; a `chain` prints one
+`LZ-LIVE assert <assertion> <outcome> [<deviation>]` line per L7 assertion before them (`not-run`
+under `chain -- <instance>`, which does not observe, T062).

@@ -159,11 +159,13 @@ tasks:
   # The live lane's offline controls: fakes only, no credential, no API call.
   # The host guard, child environment, account binding and credential files
   # (T053), the run core, redaction, leftover check and `lz-live probe`
-  # (T055); `lz-live plan|apply` (T059); later verbs (T047, T062) extend it.
+  # (T055); `lz-live plan|apply` (T059); `lz-live chain` (T047); the L7 collector
+  # and, under the `live` tag, the L7 judge over recorded observations (T062).
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
       - go -C tools test -count=1 ./internal/planjson ./internal/live ./cmd/lz-live
+      - go -C tools test -count=1 -tags live ./internal/probes/live/chain
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/alerting
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/iam
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/network
