@@ -7,7 +7,8 @@ package live
 // run locks of the selected set and the target's ephemeral stacks over every call. Before the first
 // apply it binds the sandbox admin credential (sandbox.env) to the account through GET
 // /auth/details and records the run's listings (R12) as a redacted baseline in the run directory
-// (baseline.json, listings-before/<kind>.json). From then on a destroy-on-exit that also fires on
+// (baseline.json, listings-before/<kind>.json); a baseline listing with errors ends the run there,
+// blocked (exit 2), since its final check could only fail (T091). From then on a destroy-on-exit that also fires on
 // an apply failure, SIGINT, SIGTERM (SIGHUP as SIGINT) and the run deadline destroys the ephemeral
 // stacks whose apply started (after a complete run every ephemeral stack of the target), in reverse
 // run order, continuing after a refused or failed destroy; it has its own time, and signals that
@@ -20,7 +21,9 @@ package live
 // instances' states hold (`tofu show -json`, nested modules included) and the admin client and
 // policy by recorded id, marks each leftover the baseline record listed (read back from the run
 // directory), and fails on any leftover or error; the run ends with summary.json, the summary line
-// and the cost reminder (contracts/checks.md `lz-live`).
+// and the cost reminder (contracts/checks.md `lz-live`). `destroy -- <instance>` is refused
+// (consumer-applied) while a stack consuming it has a record (T091); the destroy-on-exit has no
+// such check, as it destroys consumers before their producers.
 
 import (
 	"bytes"
@@ -34,6 +37,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,6 +56,10 @@ type ChainOptions struct {
 	// admin credential (sandbox.env), bound to the account before the first listing.
 	Lister Lister
 }
+
+// CondConsumerApplied refuses `destroy -- <producer>` while a stack consuming it has a record
+// (T091): destroying the producer would orphan the consumer's resources.
+const CondConsumerApplied = "consumer-applied"
 
 // baselineFile is the run's baseline record in the run directory.
 const baselineFile = "baseline.json"
@@ -190,6 +198,11 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	}()
 
 	runErr := r.baseline(runCtx, check)
+	var blocked *Blocked
+	if errors.As(runErr, &blocked) {
+		// Nothing applied: nothing to destroy, nothing to reconcile (T091).
+		return runErr
+	}
 	if runErr == nil {
 		for _, id := range ids {
 			if runCtx.Err() != nil {
@@ -281,7 +294,9 @@ func (r *laneRunner) leftoverCheck(ctx context.Context, c *ChainOptions) (Leftov
 // baseline lists every kind before the first apply (R12) and persists it, redacted, in the run
 // directory: the raw listings under listings-before/ and the listed ids with the listing errors
 // in baseline.json, which the final reconciliation reads back. A record that cannot be written
-// stops the run before any apply.
+// stops the run before any apply; a listing with errors (an HTTP error, an unparseable listing)
+// blocks it there once the record is written (exit 2, T091): the final check would fail on it, so
+// the run could only fail.
 func (r *laneRunner) baseline(ctx context.Context, check LeftoverCheck) error {
 	o := r.o
 	rep := check.Check(ctx, nil)
@@ -298,7 +313,16 @@ func (r *laneRunner) baseline(ctx context.Context, check LeftoverCheck) error {
 	if err != nil {
 		return err
 	}
-	return writeRecord(filepath.Join(o.RunDir, baselineFile), []byte(r.red.Redact(string(raw))))
+	if err := writeRecord(filepath.Join(o.RunDir, baselineFile), []byte(r.red.Redact(string(raw)))); err != nil {
+		return err
+	}
+	// A listing cut short by a signal or the deadline is the run's interruption, not a blocked run:
+	// the loop sees the cause and nothing is applied either way.
+	if len(rep.Errors) > 0 && ctx.Err() == nil {
+		return &Blocked{Phase: "baseline", Detail: fmt.Sprintf("the baseline listing before the first apply failed (%d errors, see %s); nothing applied",
+			len(rep.Errors), baselineFile)}
+	}
+	return nil
 }
 
 // readBaseline reads the run's baseline record back.
@@ -317,10 +341,19 @@ func readBaseline(runDir, runID string) (baselineRecord, error) {
 	return b, nil
 }
 
-// destroyOne is `destroy -- <ephemeral instance>`: that instance's run locks, then destroyStack.
+// destroyOne is `destroy -- <ephemeral instance>`: the run locks of that instance and of every
+// stack consuming it (a data or an authority edge), then, refused while any such consumer has a
+// record (T091: its resources would be orphaned; destroy it first), destroyStack. The chain's
+// destroy-on-exit calls destroyStack directly: it destroys consumers before their producers.
 func (r *laneRunner) destroyOne(ctx context.Context) (err error) {
-	o := r.o
-	release, err := stacks.HoldRun(o.Locks, o.Manifest, []string{o.Target})
+	o, m := r.o, r.o.Manifest
+	var consumers []string
+	for _, in := range m.Instances {
+		if slices.ContainsFunc(in.Edges, func(e stacks.Edge) bool { return e.Producer == o.Target }) {
+			consumers = append(consumers, in.ID)
+		}
+	}
+	release, err := stacks.HoldRun(o.Locks, m, append([]string{o.Target}, consumers...))
 	if errors.Is(err, stacks.ErrLocked) {
 		return refuse(CondLocked, "%v", err)
 	}
@@ -328,6 +361,19 @@ func (r *laneRunner) destroyOne(ctx context.Context) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
+	records, err := stacks.ReadRecords(o.Records, m)
+	if err != nil {
+		return err
+	}
+	var applied []string
+	for _, id := range consumers {
+		if _, ok := records[id]; ok {
+			applied = append(applied, id)
+		}
+	}
+	if len(applied) > 0 {
+		return refuse(CondConsumerApplied, "destroy -- %s would orphan its applied consumers %s; destroy them first", o.Target, strings.Join(applied, ", "))
+	}
 	if r.home, err = scratchHome(); err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ package live
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -308,9 +309,15 @@ type chainLister struct {
 	log   string
 	late  func() // serves the seeded answers; called once, on the first request after an apply
 	done  *bool
+	// first runs once, on the run's first listing request (nil: nothing).
+	first     func(ctx context.Context)
+	firstOnce *sync.Once
 }
 
 func (l chainLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
+	if l.first != nil {
+		l.firstOnce.Do(func() { l.first(ctx) })
+	}
 	chainLate(l.log, l.late, l.done)
 	laneAppend(l.log, laneCall{Cmd: "list", Stack: path})
 	return l.inner.Get(ctx, path, cursor)
@@ -377,6 +384,9 @@ type chainExec struct {
 	atBlock    func(runDir string)
 	atFinal    func(runDir string, f *fakeListAPI)
 	production bool
+	// signalAtBaseline is sent on the first listing request, which then waits for the run to stop
+	// (T091: an interrupted baseline is not a blocked run); production must be false.
+	signalAtBaseline os.Signal
 }
 
 // chainRun is a chain run and what the harness saw while it ran.
@@ -385,6 +395,8 @@ type chainRun struct {
 	runID string
 	// invAtBlock is the inventory as it was while the blocked call still ran.
 	invAtBlock []InventoryEntry
+	// list are the requests the fake listing API received (T091: none writes).
+	list []listCall
 }
 
 func (h *laneHarness) nextRunID() string {
@@ -459,7 +471,17 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		target = TargetAll
 	}
 	api := h.laneAPI()
-	var lister Lister = chainLister{inner: newAPILister(f.API(), listCred), log: h.world.Log, late: late, done: &lateDone}
+	cl := chainLister{inner: newAPILister(f.API(), listCred), log: h.world.Log, late: late, done: &lateDone, firstOnce: &sync.Once{}}
+	if c.signalAtBaseline != nil {
+		cl.first = func(ctx context.Context) {
+			sigs <- c.signalAtBaseline
+			select {
+			case <-ctx.Done():
+			case <-time.After(10 * time.Second):
+			}
+		}
+	}
+	var lister Lister = cl
 	if c.production {
 		lister = nil
 		api.HTTP = &http.Client{Transport: chainAdminTransport{lane: api.HTTP.Transport, list: f, log: h.world.Log, late: late, done: &lateDone,
@@ -474,7 +496,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	close(stop)
 	<-watched
 	_ = os.Remove(h.world.Log + ".blocked")
-	r := chainRun{laneRun: laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: process}, runID: runID, invAtBlock: invAtBlock}
+	r := chainRun{laneRun: laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: process}, runID: runID, invAtBlock: invAtBlock, list: f.Calls()}
 	h.chainRun = true
 	h.judge(r.laneRun, before)
 	h.chainRun = false
@@ -806,15 +828,19 @@ func chainSeed(p capturedProvenance, w syntheticWorld, name string) syntheticSee
 // reported exactly and fails the chain; a retained instance's resources are exempt only through
 // that instance's state (an emptied state reports them); the admin client and policy only by the
 // recorded ids (another LZ_ADMIN_POLICY_ID reports the admin policy); a listing error or an
-// unparseable listing is `fail`, never `pass`.
+// unparseable listing is `fail`, never `pass`. T091: a listing that fails from the start fails the
+// baseline, and the chain stops there, blocked (exit 2), before any apply (chainBlockedAtBaseline);
+// one that fails only in the final reconciliation (late) fails the chain after the destroys.
 func TestChainLeftovers(t *testing.T) {
 	type row struct {
-		name   string
-		seed   func(p capturedProvenance, w syntheticWorld) syntheticSeed
-		setup  func(h *laneHarness)
-		faults func(p capturedProvenance) map[string]listFault
-		expect []string // leftover keys; nil with errors=true: errors only
-		errors bool
+		name    string
+		seed    func(p capturedProvenance, w syntheticWorld) syntheticSeed
+		setup   func(h *laneHarness)
+		faults  func(p capturedProvenance) map[string]listFault
+		late    bool     // faults only from the final reconciliation's first listing on
+		blocked bool     // the baseline fails: blocked before any apply (T091)
+		expect  []string // leftover keys; nil with errors=true: errors only
+		errors  bool
 	}
 	var rows []row
 	p0, w0 := chainWorld(t, "x")
@@ -869,10 +895,16 @@ func TestChainLeftovers(t *testing.T) {
 		}, expect: []string{tClient + " EU.00000000000000c1"}},
 		row{name: "listing-error", faults: func(p capturedProvenance) map[string]listFault {
 			return map[string]listFault{"/cloud/project/" + laneProject + "/region/GRA/storage": {Kind: "status", Status: 503}}
-		}, errors: true},
+		}, blocked: true},
 		row{name: "listing-unparseable", faults: func(p capturedProvenance) map[string]listFault {
 			return map[string]listFault{"/cloud/project/" + laneProject + "/network/private": {Kind: "malformed"}}
-		}, errors: true},
+		}, blocked: true},
+		row{name: "final-listing-error", faults: func(p capturedProvenance) map[string]listFault {
+			return map[string]listFault{"/cloud/project/" + laneProject + "/region/GRA/storage": {Kind: "status", Status: 503}}
+		}, late: true, errors: true},
+		row{name: "final-listing-unparseable", faults: func(p capturedProvenance) map[string]listFault {
+			return map[string]listFault{"/cloud/project/" + laneProject + "/network/private": {Kind: "malformed"}}
+		}, late: true, errors: true},
 	)
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
@@ -885,10 +917,21 @@ func TestChainLeftovers(t *testing.T) {
 			if tc.seed != nil {
 				c.seed = tc.seed(p, w)
 			}
-			if tc.faults != nil {
+			if tc.faults != nil && tc.late {
+				faults := tc.faults(p)
+				c.atFinal = func(_ string, f *fakeListAPI) {
+					f.mu.Lock()
+					defer f.mu.Unlock()
+					maps.Copy(f.faults, faults)
+				}
+			} else if tc.faults != nil {
 				c.faults = tc.faults(p)
 			}
 			r := h.chain(c)
+			if tc.blocked {
+				chainBlockedAtBaseline(t, h, r)
+				return
+			}
 			laneExit(t, r.laneRun, 1)
 			chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
 			rep := chainReport(t, r.runDir)
@@ -1126,6 +1169,7 @@ func TestChainBaseline(t *testing.T) {
 		faults  map[string]listFault
 		want    map[string]bool // leftover key -> before_run
 		errWord string          // in a report error
+		blocked bool            // blocked at the baseline (T091)
 	}{
 		{name: "pre-existing-leftover", early: true, want: map[string]bool{seedKey: true}},
 		{name: "new-leftover", want: map[string]bool{seedKey: false}},
@@ -1149,10 +1193,9 @@ func TestChainBaseline(t *testing.T) {
 		{name: "record-missing", atFinal: func(t *testing.T) func(string, *fakeListAPI) {
 			return func(runDir string, _ *fakeListAPI) { _ = os.Remove(filepath.Join(runDir, chainBaselineFile)) }
 		}, errWord: "baseline"},
+		// T091: a baseline listing that failed stops the chain before its first apply.
 		{name: "baseline-listing-failed", faults: map[string]listFault{"/cloud/project/" + laneProject + "/network/private": {Kind: "malformed"}},
-			atFinal: func(t *testing.T) func(string, *fakeListAPI) {
-				return func(_ string, f *fakeListAPI) { f.mu.Lock(); f.faults = map[string]listFault{}; f.mu.Unlock() }
-			}, errWord: "baseline"},
+			blocked: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newChainHarness(t)
@@ -1165,6 +1208,10 @@ func TestChainBaseline(t *testing.T) {
 				c.atFinal = tc.atFinal(t)
 			}
 			r := h.chain(c)
+			if tc.blocked {
+				chainBlockedAtBaseline(t, h, r)
+				return
+			}
 			laneExit(t, r.laneRun, 1)
 			chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
 			rep := chainReport(t, r.runDir)
@@ -1240,4 +1287,166 @@ func TestChainDestroyApplyFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------- T091
+
+// chainBlockedAtBaseline checks a chain whose baseline listing failed (T091, coordinator
+// 2026-10-08: a run that can only fail must not spend credit): blocked (exit 2) naming the
+// baseline, after the baseline record was written with its errors; no tofu call at all (no apply,
+// no destroy, no state touched), no object-store put, and no request to OVHcloud but reads (the
+// OAuth2 token request aside); the run still ends with the fail summary and the cost reminder.
+func chainBlockedAtBaseline(t *testing.T, h *laneHarness, r chainRun) {
+	t.Helper()
+	laneExit(t, r.laneRun, 2)
+	var b *Blocked
+	if !errors.As(r.err, &b) || !strings.Contains(b.Error(), "baseline") {
+		t.Errorf("err %v, want *Blocked naming the baseline", r.err)
+	}
+	if got := r.tofu(); len(got) != 0 {
+		t.Errorf("tofu calls %v after the baseline listing failed: a chain that can only fail applies nothing", laneEvents(got))
+	}
+	if got := r.puts(); len(got) != 0 {
+		t.Errorf("object-store puts %v after the baseline listing failed", slices.Sorted(maps.Keys(got)))
+	}
+	for _, c := range h.api.Calls() {
+		if c.Method != http.MethodGet && !strings.HasSuffix(c.Path, "/oauth2/token") {
+			t.Errorf("API %s %s: a blocked chain only reads", c.Method, c.Path)
+		}
+	}
+	for _, c := range r.list {
+		if c.Method != http.MethodGet && c.Route != "token" {
+			t.Errorf("listing API %s %s: a blocked chain only reads", c.Method, c.Route)
+		}
+	}
+	if rec, ok := readChainBaseline(t, r.runDir); !ok || len(rec.Errors) == 0 {
+		t.Errorf("baseline record %+v (present %t), want it written with the listing errors", rec, ok)
+	}
+	lines := strings.Split(strings.TrimSpace(h.term.String()), "\n")
+	tail := lines[max(0, len(lines)-2):]
+	if len(tail) != 2 || !strings.HasPrefix(tail[0], "LZ-LIVE summary "+r.runID+" fail ") || tail[1] != "record approximate cost for run "+r.runID+" in the PR" {
+		t.Errorf("terminal does not end with the fail summary and the cost reminder; it ends:\n%s", strings.Join(tail, "\n"))
+	}
+}
+
+// A baseline listing cut short by SIGINT is the run's interruption, not a blocked run (T091): no
+// apply, exit 1, not *Blocked, the fail summary.
+func TestChainBaselineInterrupted(t *testing.T) {
+	h := newChainHarness(t)
+	r := h.chain(chainExec{signalAtBaseline: syscall.SIGINT})
+	laneExit(t, r.laneRun, 1)
+	if r.err == nil || !strings.Contains(r.err.Error(), "interrupted") {
+		t.Errorf("err %v, want the interruption", r.err)
+	}
+	if got := r.applies(false); len(got) != 0 {
+		t.Errorf("applied %v after SIGINT during the baseline", got)
+	}
+	if !strings.Contains(h.term.String(), "LZ-LIVE summary "+r.runID+" fail ") {
+		t.Errorf("no fail summary line:\n%s", h.term.String())
+	}
+}
+
+// chainConsumes gives consumer an edge of kind to producer in the harness manifest: no ephemeral
+// stage produces for another in the stage table (stacks/stages.go), so the T091 rows add one.
+func chainConsumes(h *laneHarness, consumer, producer, kind string) {
+	for i := range h.m.Instances {
+		if h.m.Instances[i].ID == consumer {
+			h.m.Instances[i].Edges = append(h.m.Instances[i].Edges, stacks.Edge{Producer: producer, Kind: kind})
+		}
+	}
+}
+
+// T091 (FR-009, FR-011): `destroy -- <producer>` while a stack consuming it (a data or an
+// authority edge) has a record is refused (exit 3, consumer-applied, naming the consumer) before
+// any tofu call, and the producer's state and record stay; a consumer without a record does not
+// block it. `destroy -- all` is still refused by its first retained instance, and the chain's
+// reverse-order destroy-on-exit is unchanged: it destroys the producer after its consumer, also
+// when the consumer's destroy failed and its record stays.
+func TestChainDestroyProducer(t *testing.T) {
+	producer, consumer := "demo-dev-gra11-network", "demo-dev-gra11-runtime"
+	for _, kind := range []string{stacks.EdgeData, stacks.EdgeAuthority} {
+		t.Run("consumer-applied-"+kind, func(t *testing.T) {
+			h := newChainHarness(t)
+			h.steady()
+			chainConsumes(h, consumer, producer, kind)
+			r := h.run(VerbDestroy, producer)
+			laneExit(t, r, 3)
+			laneCondition(t, r, CondConsumerApplied)
+			if r.err == nil || !strings.Contains(r.err.Error(), consumer) {
+				t.Errorf("err %v, want it to name the applied consumer %s", r.err, consumer)
+			}
+			if got := r.tofu(); len(got) != 0 {
+				t.Errorf("tofu calls %v: the refusal comes before any tofu call", laneEvents(got))
+			}
+			if s, ok := h.stateOf(producer); !ok || s.Empty {
+				t.Errorf("state of %s destroyed under its applied consumer", producer)
+			}
+			if len(h.record(producer)) == 0 {
+				t.Errorf("record of %s removed although its destroy was refused", producer)
+			}
+		})
+	}
+	t.Run("consumer-not-applied", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.steady()
+		chainConsumes(h, consumer, producer, stacks.EdgeData)
+		if err := os.Remove(filepath.Join(h.recordsDir(), consumer+".json")); err != nil {
+			t.Fatal(err)
+		}
+		r := h.run(VerbDestroy, producer)
+		laneExit(t, r, 0)
+		if got := r.applies(true); !slices.Equal(got, []string{producer}) {
+			t.Errorf("destroyed %v, want [%s] (its consumer has no record)", got, producer)
+		}
+		if got := r.events("lock"); !slices.Equal(got, []string{"tenant-demo"}) {
+			t.Errorf("locks taken %v, want tenant-demo", got)
+		}
+	})
+	// The consumers' run locks are held too (a consumer applied by another run between the check
+	// and the destroy would be orphaned): an account-scope consumer adds the account lock.
+	t.Run("consumer-locks", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.steady()
+		chainConsumes(h, "account-governance", producer, stacks.EdgeAuthority)
+		if err := os.Remove(filepath.Join(h.recordsDir(), "account-governance.json")); err != nil {
+			t.Fatal(err)
+		}
+		r := h.run(VerbDestroy, producer)
+		laneExit(t, r, 0)
+		if got := r.events("lock"); !slices.Equal(got, []string{"account", "tenant-demo"}) {
+			t.Errorf("locks taken %v, want account and tenant-demo (the producer's and its consumer's)", got)
+		}
+	})
+	t.Run("destroy-all", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.steady()
+		chainConsumes(h, consumer, producer, stacks.EdgeData)
+		r := h.run(VerbDestroy, TargetAll)
+		laneCondition(t, r, CondRetained)
+		if got := r.tofu(); len(got) != 0 {
+			t.Errorf("tofu calls %v after destroy -- all was refused", laneEvents(got))
+		}
+	})
+	t.Run("chain-consumer-destroy-fails", func(t *testing.T) {
+		h := newChainHarness(t)
+		// An authority edge: it orders the consumer after the producer and selects nothing, so the
+		// chain applies as before.
+		chainConsumes(h, consumer, producer, stacks.EdgeAuthority)
+		h.setStack(consumer, func(s *laneStack) { s.DestroyExit = 1 })
+		r := h.chain(chainExec{})
+		laneExit(t, r.laneRun, 1)
+		var ref *Refusal
+		if errors.As(r.err, &ref) {
+			t.Errorf("err %v: the chain's destroy-on-exit refuses nothing for a consumer", r.err)
+		}
+		if got := r.applies(true); !slices.Equal(got, chainDestroyOrder) {
+			t.Errorf("destroy applies %v, want %v (reverse run order, the producer after its failed consumer)", got, chainDestroyOrder)
+		}
+		if s, ok := h.stateOf(producer); !ok || !s.Empty {
+			t.Errorf("state of %s not destroyed by the chain", producer)
+		}
+		if len(h.record(consumer)) == 0 {
+			t.Errorf("record of %s removed although its destroy failed", consumer)
+		}
+	})
 }
