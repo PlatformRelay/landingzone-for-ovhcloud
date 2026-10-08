@@ -29,8 +29,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +103,7 @@ type laneRunner struct {
 	binding Binding
 	bound   map[string]bool // client ids bound in this run
 	code    map[string]string
+	passes  int // selections run so far
 }
 
 // accountFile reads one of the bound account's own files, which bootstrap:account writes: missing,
@@ -177,32 +180,19 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	if err != nil {
 		return err
 	}
-	// Every credential is bound against this (Bind refuses an incomplete binding, and account.env
-	// naming another account than its directory: the credentials of the directory's account then
-	// answer that account, not the named one).
+	// Every credential is bound against this. The binding is the run's account: an account.env
+	// naming another account is refused here, since credentials of that other account copied
+	// beside it would pass the binding (review r1).
 	r.binding = Binding{AccountID: acc["LZ_ACCOUNT_ID"], Endpoint: acc["OVH_ENDPOINT"], Org: acc["LZ_ORG"]}
+	if r.binding.AccountID != o.Account {
+		return refuse(CondAccount, "account.env of %s names account %q", o.Account, r.binding.AccountID)
+	}
 	if r.account, err = BoundAccountFromEnv(acc); err != nil {
 		return err
 	}
-	sel, err := r.selected()
+	ids, err := r.acted()
 	if err != nil {
 		return err
-	}
-	var ids []string
-	if o.Target == TargetAll {
-		for _, s := range sel {
-			if in, _ := m.Row(s.ID); in.Stage != "bootstrap" {
-				ids = append(ids, s.ID)
-			}
-		}
-	} else {
-		in, _ := m.Row(o.Target)
-		for _, e := range in.Edges {
-			if e.Kind == stacks.EdgeData && slices.ContainsFunc(sel, func(s stacks.Selected) bool { return s.ID == e.Producer }) {
-				return refuse(CondProducerSelected, "%s consumes %s, which is selected and not applied", o.Target, e.Producer)
-			}
-		}
-		ids = []string{o.Target}
 	}
 	if len(ids) == 0 {
 		fmt.Fprintf(term, "LZ-LIVE %s nothing selected\n", o.Verb)
@@ -216,6 +206,15 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
+	// Selection again under the locks (review r1): another run that held them between the first
+	// selection and HoldRun may have applied, so the set the locks cover may be stale.
+	again, err := r.acted()
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(again, ids) {
+		return refuse(CondLocked, "the selection changed while the run locks were taken (%v, now %v): another run applied meanwhile; run again", ids, again)
+	}
 	if r.home, err = scratchHome(); err != nil {
 		return err
 	}
@@ -231,11 +230,39 @@ func Apply(ctx context.Context, o ApplyOptions) (err error) {
 	return nil
 }
 
+// acted returns the stacks the run acts on, in run order: the selected set without
+// account-bootstrap for `all`; for `-- <instance>` that instance, refused while a producer it
+// consumes is selected.
+func (r *laneRunner) acted() ([]string, error) {
+	m := r.o.Manifest
+	sel, err := r.selected()
+	if err != nil {
+		return nil, err
+	}
+	if r.o.Target != TargetAll {
+		in, _ := m.Row(r.o.Target)
+		for _, e := range in.Edges {
+			if e.Kind == stacks.EdgeData && slices.ContainsFunc(sel, func(s stacks.Selected) bool { return s.ID == e.Producer }) {
+				return nil, refuse(CondProducerSelected, "%s consumes %s, which is selected and not applied", r.o.Target, e.Producer)
+			}
+		}
+		return []string{r.o.Target}, nil
+	}
+	var ids []string
+	for _, s := range sel {
+		if in, _ := m.Row(s.ID); in.Stage != "bootstrap" {
+			ids = append(ids, s.ID)
+		}
+	}
+	return ids, nil
+}
+
 // selected runs stacks.Select over the current code digests, the resolved-reference digests and
 // the published artefacts (read with each producer's own S3 keys; a producer whose keys do not
 // exist yet has published nothing) against the records.
 func (r *laneRunner) selected() ([]stacks.Selected, error) {
 	o, m := r.o, r.o.Manifest
+	r.passes++ // each selection adapts into its own fresh directories
 	records, err := stacks.ReadRecords(o.Records, m)
 	if err != nil {
 		return nil, err
@@ -286,7 +313,7 @@ func (r *laneRunner) selected() ([]stacks.Selected, error) {
 		// resolved references would need stacks to expose that digest on its own.)
 		if !data {
 			ins, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: in.ID, Schemas: o.Schemas, Account: r.account,
-				Dir: filepath.Join(o.RunDir, "select", in.ID)})
+				Dir: filepath.Join(o.RunDir, "select", strconv.Itoa(r.passes), in.ID)})
 			if err != nil {
 				return nil, err
 			}
@@ -359,9 +386,10 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if err := r.tofu(ctx, child, id, dir, r.term, initArgs...); err != nil {
 		return err
 	}
-	// The saved plan holds the root's variable values (the passphrase among them): removed when the
-	// stack is done, whatever happened.
-	plan := filepath.Join(o.RunDir, "plan-"+id+".tfplan")
+	// The saved plan holds the root's variable values (the passphrase among them): it lives in the
+	// run's scratch HOME outside the checkout (review r1) and is removed when the stack is done,
+	// whatever happened.
+	plan := filepath.Join(r.home, "plan-"+id+".tfplan")
 	defer func() { err = errors.Join(err, removeFiles(plan)) }()
 	args := []string{"plan", "-input=false", "-out=" + plan}
 	for _, f := range inputs.Files {
@@ -411,7 +439,15 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 }
 
 type sensitiveOut struct {
-	Value json.RawMessage `json:"value"`
+	Sensitive bool            `json:"sensitive"`
+	Value     json.RawMessage `json:"value"`
+}
+
+// sensitiveOutputs carry the secrets the lane writes: each must be a sensitive output, or Publish
+// (which drops only sensitive outputs) would publish it (review r1).
+var sensitiveOutputs = map[string][]string{
+	"account-governance": {"platform_deployer_secret", "tenant_deployer_secrets"},
+	"tenant-state":       {"tenant_s3", "platform_s3"},
 }
 
 // credentialFiles writes the credential files a stack's outputs carry (data-model *Account binding
@@ -422,6 +458,11 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 	var outs map[string]sensitiveOut
 	if err := json.Unmarshal(out, &outs); err != nil {
 		return errors.New("tofu output -json does not decode")
+	}
+	for _, name := range sensitiveOutputs[in.Stage] {
+		if o, ok := outs[name]; ok && !o.Sensitive {
+			return fmt.Errorf("%s output %s is not sensitive: it would be published", in.Stage, name)
+		}
 	}
 	acct := filepath.Join("accounts", r.o.Account)
 	files := map[string]map[string]string{}
@@ -485,7 +526,12 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 		}
 	}
 	for rel, values := range files {
-		if err := WriteCredentialFile(r.o.ConfigRoot, rel, values); err != nil {
+		if err := checkCredentialValues(values); err != nil {
+			return fmt.Errorf("%s outputs for %s: %w", in.Stage, rel, err)
+		}
+	}
+	for _, rel := range slices.Sorted(maps.Keys(files)) {
+		if err := WriteCredentialFile(r.o.ConfigRoot, rel, files[rel]); err != nil {
 			return err
 		}
 	}

@@ -143,13 +143,10 @@ func credentialDir(root, rel string) (string, string, error) {
 	return dir, parts[len(parts)-1], nil
 }
 
-// WriteCredentialFile writes values as sorted KEY=value lines to <root>/<rel>, mode 0600,
-// creating missing directories below root with mode 0700. rel must stay below root without
-// passing through a symlink; a symlink at the target itself is replaced, never followed. The file
-// is written to a temporary name and renamed, so a reader never sees it partly written.
-func WriteCredentialFile(root, rel string, values map[string]string) error {
-	var b strings.Builder
-	keys := make([]string, 0, len(values))
+// checkCredentialValues is what WriteCredentialFile requires of values: variable-name keys, values
+// without a line break, NUL or surrounding whitespace (a read would trim it). A caller writing
+// several files checks them all first, so none is replaced when a later one would be refused.
+func checkCredentialValues(values map[string]string) error {
 	for k, v := range values {
 		if !envKey.MatchString(k) {
 			return fmt.Errorf("credential key %q is not a variable name", k)
@@ -160,6 +157,21 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 		if strings.TrimSpace(v) != v {
 			return fmt.Errorf("credential %s: value has surrounding whitespace, which a read trims", k)
 		}
+	}
+	return nil
+}
+
+// WriteCredentialFile writes values as sorted KEY=value lines to <root>/<rel>, mode 0600,
+// creating missing directories below root with mode 0700. rel must stay below root without
+// passing through a symlink; a symlink at the target itself is replaced, never followed. The file
+// is written to a temporary name and renamed, so a reader never sees it partly written.
+func WriteCredentialFile(root, rel string, values map[string]string) error {
+	if err := checkCredentialValues(values); err != nil {
+		return err
+	}
+	var b strings.Builder
+	keys := make([]string, 0, len(values))
+	for k := range values {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
