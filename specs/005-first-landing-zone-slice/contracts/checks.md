@@ -100,8 +100,10 @@ lz-live plan|apply|destroy --reviewed-sha <sha> <instance|all>
 lz-live chain     --reviewed-sha <sha> <instance|all> [--deadline <dur>]
 ```
 The guard runs first, before any credential is read. Exit codes: 0 pass (also with recorded known
-deviations); 1 fail; 2 blocked (missing prerequisite or producer artefact); 3 refused (guard, lock,
-binding, retained-resource protection, an existing admin under `bootstrap --fresh-account`). Every verb that applies (`probe`, `bootstrap`, `apply`,
+deviations); 1 fail; 2 blocked (missing prerequisite or producer artefact; a `chain` whose baseline
+listing failed, before any apply, T091); 3 refused (guard, lock, binding, retained-resource
+protection, `destroy -- <producer>` while a stack consuming it is applied (`consumer-applied`,
+T091), an existing admin under `bootstrap --fresh-account`). Every verb that applies (`probe`, `bootstrap`, `apply`,
 `destroy`, `chain`) plans to a file, passes it through `protect.go` and applies only that file; a
 destroy (`destroy`, the chain's and the probes' destroy-on-exit) is a saved `plan -destroy` (T047). Output lines are `LZ-LIVE <phase> <instance> <status>
 <detail>`; no secret, no raw plan JSON. Every run prints its run id and, at the end,
