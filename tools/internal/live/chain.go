@@ -23,7 +23,8 @@ package live
 // directory), and fails on any leftover or error; the run ends with summary.json, the summary line
 // and the cost reminder (contracts/checks.md `lz-live`). `destroy -- <instance>` is refused
 // (consumer-applied) while a stack consuming it has a record (T091); the destroy-on-exit has no
-// such check, as it destroys consumers before their producers.
+// such check: it destroys ephemeral consumers before their producers (a retained consumer of an
+// ephemeral producer would not be; no stage of today's table is one, evidence/T091.md gap 1).
 
 import (
 	"bytes"
@@ -344,7 +345,8 @@ func readBaseline(runDir, runID string) (baselineRecord, error) {
 // destroyOne is `destroy -- <ephemeral instance>`: the run locks of that instance and of every
 // stack consuming it (a data or an authority edge), then, refused while any such consumer has a
 // record (T091: its resources would be orphaned; destroy it first), destroyStack. The chain's
-// destroy-on-exit calls destroyStack directly: it destroys consumers before their producers.
+// destroy-on-exit calls destroyStack directly: it destroys ephemeral consumers before their
+// producers.
 func (r *laneRunner) destroyOne(ctx context.Context) (err error) {
 	o, m := r.o, r.o.Manifest
 	var consumers []string
@@ -361,15 +363,19 @@ func (r *laneRunner) destroyOne(ctx context.Context) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
-	records, err := stacks.ReadRecords(o.Records, m)
-	if err != nil {
-		return err
-	}
+	// Only the consumers' records count (review r1: another stack's broken record must not stop
+	// this cleanup). A consumer's record file that exists is a record, decodable or not (fail
+	// closed); one that cannot be checked is an error.
 	var applied []string
 	for _, id := range consumers {
-		if _, ok := records[id]; ok {
-			applied = append(applied, id)
+		_, err := os.Stat(filepath.Join(o.Records, id+".json"))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
 		}
+		if err != nil {
+			return err
+		}
+		applied = append(applied, id)
 	}
 	if len(applied) > 0 {
 		return refuse(CondConsumerApplied, "destroy -- %s would orphan its applied consumers %s; destroy them first", o.Target, strings.Join(applied, ", "))

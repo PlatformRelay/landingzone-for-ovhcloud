@@ -1402,6 +1402,35 @@ func TestChainDestroyProducer(t *testing.T) {
 			t.Errorf("locks taken %v, want tenant-demo", got)
 		}
 	})
+	// Review r1: only the consumers' records count. Another stack's undecodable record does not
+	// stop the cleanup of a producer nobody consumes; a consumer's record that does not decode is
+	// still a record (applied: refused, fail closed).
+	t.Run("unrelated-record-undecodable", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.steady()
+		if err := os.WriteFile(filepath.Join(h.recordsDir(), "demo-state.json"), []byte("not a record"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r := h.run(VerbDestroy, producer)
+		laneExit(t, r, 0)
+		if got := r.applies(true); !slices.Equal(got, []string{producer}) {
+			t.Errorf("destroyed %v, want [%s] (another stack's record has nothing to do with it)", got, producer)
+		}
+	})
+	t.Run("consumer-record-undecodable", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.steady()
+		chainConsumes(h, consumer, producer, stacks.EdgeData)
+		if err := os.WriteFile(filepath.Join(h.recordsDir(), consumer+".json"), []byte("not a record"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r := h.run(VerbDestroy, producer)
+		laneExit(t, r, 3)
+		laneCondition(t, r, CondConsumerApplied)
+		if got := r.tofu(); len(got) != 0 {
+			t.Errorf("tofu calls %v: the refusal comes before any tofu call", laneEvents(got))
+		}
+	})
 	// The consumers' run locks are held too (a consumer applied by another run between the check
 	// and the destroy would be orphaned): an account-scope consumer adds the account lock.
 	t.Run("consumer-locks", func(t *testing.T) {
