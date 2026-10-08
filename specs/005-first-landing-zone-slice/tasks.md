@@ -429,8 +429,13 @@ Independent test: V008 offline; V009 owner session.
   - Verify: `task test:bootstrap`: T042 and T056 controls green with each named guard's mutant killed, including G7 (bootstrap part: apply without `protect.go`); the `state` phase applies only the saved plan file the guard admitted.
   - Evidence: `evidence/T057.md`; PR; initial status `not-run`.
 
+- [ ] T089 [US4] Add the live S3 object store in tools/internal/live/objectstore.go and wire the state, publish and verify phases into `lz-live bootstrap` in tools/cmd/lz-live/bootstrap.go, test first in tools/internal/live/objectstore_test.go
+  - Requirements: FR-010, FR-012; ADRs: 0008, 0009, 0018, 0024. Depends on: T057.
+  - Verify: `task test:bootstrap` then `task test:live-lane`: a minimal SigV4 client (GET, PUT, HEAD only; any other method refused before any request) passes the published AWS Signature Version 4 test-suite vectors that apply to GET/PUT with a fixed clock; requests carry no secret in URL, headers other than Authorization, logs or errors; answers are size-capped and server text is never echoed; the endpoint is derived from the region and refused unless it matches the OVHcloud Object Storage host pattern (UNVERIFIED until T044); `lz-live bootstrap` passes `Rest: live.NewBootstrapState(...)` with this store, proven by a fake S3 server in the bootstrap tests; no new third-party dependency.
+  - Evidence: `evidence/T089.md`; PR; initial status `not-run`.
+
 - [ ] T044 [US4] Owner session: bootstrap the current sandbox account twice with `task bootstrap:account`, recorded in evidence/T044.md
-  - Requirements: FR-008, FR-012, SC-004; ADRs: 0009. Depends on: T057, T010, T039.
+  - Requirements: FR-008, FR-012, SC-004; ADRs: 0009. Depends on: T057, T010, T039, T089.
   - Verify: Owner session in the dedicated owner clone `~/Projects/PlatformRelay/lz-live` (D92; `live.env`: `LZ_OWNER_CHECKOUT` its canonical absolute path, `LZ_AGENT_WORKTREE_ROOT` the existing agent worktree root, `/home/koni/Projects/PlatformRelay/worktrees` on the maintainer's workstation; quickstart *Owner session*), `task bootstrap:account` with `--reviewed-sha`: first run binds the account (`account.env`, account read from `GET /auth/details`), creates the passphrase file, reports `admin` `unchanged` (existing `lz-sandbox-admin` works and matches; no import, no new client) and records the admin client and policy ids in `account.env` for the leftover exemption, passes the `state` plan through the retained-resource guard, creates the account state bucket, `state.env` and the bootstrap artefact; the owner retires the one-off config's ownership of the admin client and policy with the printed `tofu state rm` commands (research R13); second run reports every phase `unchanged` and a no-change plan; the state object in the bucket is not plaintext JSON; nothing secret on the terminal.
   - Evidence: `evidence/T044.md`; PR (run id, approximate cost); initial status `not-run`.
 
