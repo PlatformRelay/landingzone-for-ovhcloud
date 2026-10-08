@@ -279,7 +279,11 @@ passphrase protects disposable probe state for the run's lifetime only.
    missing reference (echo on, project ids are not secret), so a fresh run never stops before the
    admin credential exists (P22).
 3. `passphrase` — create `state-passphrase.env` with 32 random bytes if absent; never overwrite.
-   Runs before anything writes encrypted state.
+   Runs before anything writes encrypted state. When encrypted bootstrap state
+   (`accounts/<account>/state/*.tfstate`) exists without the file, the phase refuses
+   (`passphrase-lost`, exit 3) and names the file to restore: a new passphrase beside state it
+   cannot read would only make the loss permanent, and the remote states in the account bucket use
+   the same passphrase (coordinator decision 2026-10-08, T057).
 4. `admin` — two separate facts: *credential works* (`sandbox.env` authenticates; `GET /auth/details` answers
    for the bound account) and *admin present as expected* (the client exists; its policy grants
    exactly `account:apiovh:iam/*`, `account:apiovh:me/*`, `publicCloudProject:apiovh:*` on the
@@ -305,6 +309,21 @@ passphrase protects disposable probe state for the run's lifetime only.
    exists but is not in state, import it by name (`service_name/region/name`,
    `cloud_project_storage.md` Import); a name taken by another account fails with the `spec.org`
    override message. Writes `state.env` from sensitive outputs through the credential writer.
+   **Missing account bucket** (coordinator decision 2026-10-08, T057): created only when nothing
+   records it. When the bootstrap state or `state.env` says it existed, the phase refuses
+   (`state-bucket-lost`, exit 3) with the recovery steps (restore the bucket and its objects under
+   the same name; or, deliberately starting over, remove what the lost states managed, then
+   `state.env` and the bootstrap state, and re-run). T056 had recommended recreating it as the
+   repair path; the coordinator chose the refusal because the bucket holds every remote state of
+   the account: recreating it silently would let the next apply create again resources that still
+   exist, with no state to find them. The published artefact cannot vouch for the bucket (it lives
+   in it), so the records are the local ones.
+   **Platform S3 users outside the state** (decision 2026-10-08, T057): a user this run created
+   before the bucket's create failed on a taken name is deleted again in the same run with the
+   admin credential (`DELETE /cloud/project/{serviceName}/user/{userId}`), as `admin` deletes a
+   client it could not complete; one it cannot delete is named. Users with the platform user's
+   description that no state knows (an earlier bootstrap whose local state was lost) are named in
+   the `state` detail on every run and never deleted automatically: their keys may still be in use.
 6. `publish` — `bootstrap` outputs to `artifacts/account-bootstrap/outputs.json` in the account bucket.
 7. `verify` — `tofu init` + `plan` of `account-governance` against the bucket; lock round-trip.
 8. `revoke` (fresh account only) — `GET /auth/currentCredential` then

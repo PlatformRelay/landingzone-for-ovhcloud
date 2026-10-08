@@ -16,8 +16,9 @@ import (
 // host guard admitted the run, the bootstrap phases (internal/live) run against the account the
 // credential names, with the org and project references of the checkout's stacks/deployments.yaml.
 // The operator's terminal is opened only under --fresh-account, for the root keys (echo off) and
-// missing project references (echo on). The state, publish and verify phases arrive with
-// T056/T057.
+// missing project references (echo on). The state, publish and verify phases (internal/live
+// NewBootstrapState, T057) are not wired here yet: they need a live S3 ObjectStore for the account
+// bucket, which no task has built (evidence/T057.md, gap), so this entry still stops after admin.
 
 // bootstrapEndpoint is the only endpoint the bootstrap serves: the admin policy's URNs are the eu
 // form (urn:v1:eu:…, research R13), and the sandbox is on ovh-eu (AGENTS.md).

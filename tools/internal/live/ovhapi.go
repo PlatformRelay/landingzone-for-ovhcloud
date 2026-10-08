@@ -72,7 +72,8 @@ func sendHeader(a API, req *http.Request, what string, out any) (http.Header, er
 // maxPages bounds a paginated v2 listing; a longer one is an error, never cut short.
 const maxPages = 100
 
-// bearerClient reads the API as an OAuth2 client (identify and the admin checks): GET only.
+// bearerClient reads the API as an OAuth2 client (identify, the admin checks, the state phase's
+// reads); its only write is the state phase's delete of a platform S3 user that run created.
 type bearerClient struct {
 	api API
 	tok string
@@ -98,6 +99,17 @@ func newBearer(ctx context.Context, a API, c Credential) (bearerClient, error) {
 func (b bearerClient) get(ctx context.Context, path string, out any) error {
 	_, err := b.page(ctx, path, "", out)
 	return err
+}
+
+// delete sends DELETE path; the answer is discarded.
+func (b bearerClient) delete(ctx context.Context, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, apiBase(b.api, path)+path, nil)
+	if err != nil {
+		return fmt.Errorf("DELETE %s: bad request", path)
+	}
+	req.Header.Set("Authorization", "Bearer "+b.tok)
+	req.Header.Set("Accept", "application/json")
+	return send(b.api, req, "DELETE "+path, nil)
 }
 
 func (b bearerClient) page(ctx context.Context, path, cursor string, out any) (http.Header, error) {

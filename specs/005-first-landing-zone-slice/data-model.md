@@ -242,7 +242,7 @@ disagrees with the credential or the manifest.
 | `accounts/<account>/account.env` | `LZ_ACCOUNT_ID`, `OVH_ENDPOINT`, `LZ_ORG`, `LZ_PROJECT_ID_<REF>`, `LZ_ADMIN_CLIENT_ID`, `LZ_ADMIN_POLICY_ID` (leftover exemption, research R12) | bootstrap `identify` (binding; project ids prompted under `--fresh-account`, else filled by the owner) and `admin` (admin ids) |
 | `accounts/<account>/sandbox.env` | a previous account's admin credential, moved there on migration | bootstrap `identify` on `--fresh-account` |
 | `accounts/<account>/state-passphrase.env` | `TF_VAR_state_passphrase` | bootstrap `passphrase`, once |
-| `accounts/<account>/state.env` | platform S3 keys for the account bucket | bootstrap `state` |
+| `accounts/<account>/state.env` | platform S3 keys for the account bucket; with the bootstrap state, the record that the bucket exists (a missing bucket it records is refused, `state-bucket-lost`, research R13) | bootstrap `state` |
 | `accounts/<account>/platform-deployer.env` | platform OAuth2 client | live lane after `account-governance` apply |
 | `accounts/<account>/tenants/<t>/deployer.env` | tenant OAuth2 client | live lane after `account-governance` apply |
 | `accounts/<account>/tenants/<t>/state.env` | tenant S3 keys for its bucket | live lane after `tenant-state` apply |
