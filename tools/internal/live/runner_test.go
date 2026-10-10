@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -54,6 +55,10 @@ type tofuStack struct {
 	// child's HOME whose content holds any of ScanFor, as "<path>|<file mode>|<directory mode>".
 	ScanRoots []string `json:"scan_roots"`
 	ScanFor   []string `json:"scan_for"`
+	// DestroyPlanErrors/DestroyErrors (T095): the n-th `plan -destroy` / destroy apply of the stack
+	// prints the n-th entry on stderr and fails (exit 1); later calls behave as configured otherwise.
+	DestroyPlanErrors []string `json:"destroy_plan_errors"`
+	DestroyErrors     []string `json:"destroy_errors"`
 }
 
 // planChange is one resource change the fake plan holds.
@@ -83,6 +88,17 @@ type tofuCall struct {
 	DataDir  string   `json:"data_dir"`          // the data directory tofu used (TF_DATA_DIR, else <root>/.terraform), symlinks resolved
 	Locked   bool     `json:"locked"`            // the stack's state lock was held by another writer (HoldLock)
 	Holders  []string `json:"holders"`           // files holding any of ScanFor at the time of the call (ScanRoots)
+	At       int64    `json:"at"`                // when the call was logged (UnixNano)
+}
+
+// nthCall counts the calls of one kind of a stack (a counter file next to the fake) and returns
+// this call's index, from 0.
+func nthCall(bin, stack, kind string) int {
+	f := filepath.Join(bin, "count-"+stack+"-"+kind)
+	raw, _ := os.ReadFile(f)
+	n, _ := strconv.Atoi(string(raw))
+	_ = os.WriteFile(f, []byte(strconv.Itoa(n+1)), 0o600)
+	return n
 }
 
 // Backend model of the fake tofu (T073), as host tofu 1.10.3 behaves offline on a provider-free
@@ -165,6 +181,7 @@ func logCall(dir, name string, c tofuCall) {
 		c.Env = os.Environ()
 		c.Pgrp = syscall.Getpgrp()
 	}
+	c.At = time.Now().UnixNano()
 	line, _ := json.Marshal(c)
 	if f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintln(f, string(line))
@@ -329,6 +346,13 @@ func fakeTofu(args []string) int {
 			}
 		}
 		call.Plan = resolve(out)
+		if has("-destroy") && len(st.DestroyPlanErrors) > 0 {
+			if n := nthCall(bin, call.Stack, "destroy-plan"); n < len(st.DestroyPlanErrors) {
+				logCall(bin, "tofu.log", call)
+				fmt.Fprintln(os.Stderr, st.DestroyPlanErrors[n])
+				return 1
+			}
+		}
 		if st.PlanExit != 0 {
 			logCall(bin, "tofu.log", call)
 			fmt.Fprintln(os.Stderr, "Error: fake plan failure")
@@ -390,6 +414,12 @@ func fakeTofu(args []string) int {
 				}
 			}
 			logCall(bin, "tofu.log", call)
+			if len(st.DestroyErrors) > 0 {
+				if n := nthCall(bin, call.Stack, "destroy"); n < len(st.DestroyErrors) {
+					fmt.Fprintln(os.Stderr, st.DestroyErrors[n])
+					return 1
+				}
+			}
 			if st.DestroyExit != 0 {
 				fmt.Fprintf(os.Stderr, "Error: fake destroy failure token=%s\n", secret)
 				return st.DestroyExit
@@ -2483,3 +2513,423 @@ type fakeTB struct{ testing.TB }
 func (fakeTB) Helper()                        {}
 func (fakeTB) Fatal(a ...any)                 { panic(fmt.Sprint(a...)) }
 func (fakeTB) Fatalf(format string, a ...any) { panic(fmt.Sprintf(format, a...)) }
+
+// ---------------------------------------------------------------- T095
+
+// Companion destroy (T095; T010 run 20261010T173007Z-637a lost its tenant identity to a transient
+// OAuth2 500 on the companion's destroy plan, and the root's destroy then removed the identity,
+// leaving the companion's resources out of every cleanup's reach). The companion's destroy — its
+// `plan -destroy`, the judged plan and its apply, as one unit (a saved plan is stale after a
+// failed apply) — is retried on a transient failure: a 5xx, an OAuth2 token fetch failure or a
+// connection reset, never when the output names a 4xx; a bounded number of attempts, with backoff,
+// never waiting past the destroy deadline. When it still fails, the root is not destroyed at all
+// (coordinator choice, evidence/T095.md decision 1): the identities, the companion's state bucket
+// and its S3 credential stay, the run ends `fail` naming the kept root and `--cleanup <run-id>`,
+// and the leftover check reports the kept root's resources like any other (decision 2). A cleanup
+// re-reads the identity from the root's state, binds it, destroys the companion and then the root,
+// and keeps the root again while the companion cannot be destroyed.
+
+const (
+	errOAuth500  = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/network/private": oauth2: cannot fetch token: 500 Internal Server Error` + "\nResponse: {\"message\":\"Internal server error\"}"
+	errAPI503    = `Error: calling Delete /cloud/project/p1/network/private/pn-1: OVHcloud API error (status code 503): Server::ServiceUnavailable: "Service unavailable" (X-OVH-Query-Id: EU.ext-1)`
+	errReset     = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": read tcp 10.0.0.2:51234->192.0.2.10:443: read: connection reset by peer`
+	errAPI403    = `Error: calling Delete /cloud/project/p1/network/private/pn-1: OVHcloud API error (status code 403): Client::Forbidden: "This call has not been granted" (X-OVH-Query-Id: EU.ext-2)`
+	errOAuth401  = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": oauth2: cannot fetch token: 401 Unauthorized` + "\nResponse: {\"error\":\"invalid_client\"}"
+	errOAuthCode = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": oauth2: "invalid_client" "Client authentication failed"`
+	// A transport failure on the token endpoint, and a token answer whose status has no reason phrase.
+	errOAuthDial = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": Post "https://www.ovh.com/auth/oauth2/token": dial tcp: lookup www.ovh.com: i/o timeout`
+	errOAuthBare = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": oauth2: cannot fetch token: 520` + "\nResponse: "
+	// Review r1: a bare 4xx token status is a 4xx; a number in a response body is no status.
+	errOAuth401Bare = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": oauth2: cannot fetch token: 401` + "\nResponse: denied"
+	errLocked       = `Error: Delete "https://eu.api.ovh.com/1.0/cloud/project/p1/storage/b1": 423 Locked`
+	errOAuth500Body = `Error: Get "https://eu.api.ovh.com/1.0/cloud/project/p1/region": oauth2: cannot fetch token: 500 Internal Server Error` + "\nResponse: failed deleting resource 400 Test Network"
+)
+
+// destroyCalls counts stack's destroy plans and destroy applies in calls, and returns the times of
+// its destroy plans.
+func destroyCalls(calls []tofuCall, stack string) (plans, applies int, at []time.Time) {
+	for _, c := range calls {
+		switch {
+		case c.Stack == stack && c.Cmd == "plan" && slices.Contains(c.Args, "-destroy"):
+			plans++
+			at = append(at, time.Unix(0, c.At))
+		case c.Stack == stack && c.Cmd == "destroy":
+			applies++
+		}
+	}
+	return plans, applies, at
+}
+
+// companionRetryProbe is identityProbe whose companion fails its destroy plans and applies as
+// given, with a Bind that counts its calls and short backoff.
+func (w *runWorld) companionRetryProbe(t *testing.T, root string, planErrs, destroyErrs []string, binds *int) Probe {
+	t.Helper()
+	p := w.identityProbe(t, root, tofuStack{DestroyPlanErrors: planErrs, DestroyErrors: destroyErrs})
+	p.Bind = func(context.Context, Credential) error { *binds++; return nil }
+	p.Run.companionBackoff = []time.Duration{300 * time.Millisecond, 600 * time.Millisecond}
+	return p
+}
+
+// checkKeptRoot pins a run (or cleanup) whose companion could not be destroyed: it failed, the root
+// was neither planned for destroy nor destroyed, the probe's state and passphrase stay, the summary
+// names the kept root and the cleanup command, and no file keeps a probe secret.
+func checkKeptRoot(t *testing.T, w *runWorld, root string, err error, calls []tofuCall) {
+	t.Helper()
+	if ExitCode(err) == 0 {
+		t.Error("a run whose companion could not be destroyed exited 0")
+	}
+	if plans, applies, _ := destroyCalls(calls, "p"); plans+applies > 0 {
+		t.Errorf("the root was planned for destroy %d times and destroyed %d times: it holds the identity the companion's resources need", plans, applies)
+	}
+	_, state, pass := probeFiles(t, root)
+	if !exists(state) || !exists(pass) {
+		t.Errorf("root kept: state kept %v, passphrase kept %v; want both, for --cleanup", exists(state), exists(pass))
+	}
+	sum := w.summary(t)
+	msg, _ := sum["error"].(string)
+	if sum["outcome"] != "fail" || !strings.Contains(msg, "--cleanup 20261006T120000Z-a1b2") || !strings.Contains(msg, "kept") {
+		t.Errorf("summary %v: want outcome fail and an error naming the kept root and --cleanup 20261006T120000Z-a1b2", sum)
+	}
+	for _, dir := range []string{root, w.runDir, w.stacks} {
+		if left := holders([]string{dir}, identitySecrets); len(left) > 0 {
+			t.Errorf("%v hold a probe secret", left)
+		}
+	}
+}
+
+// cleanupAfter clears the companion's scripted failures and runs --cleanup: it must bind the
+// identity again, destroy the companion and then the root, and remove the probe's files.
+func cleanupAfter(t *testing.T, w *runWorld, p Probe, root string, binds *int) {
+	t.Helper()
+	st := w.scenario.Stacks["companion"]
+	st.DestroyPlanErrors, st.DestroyErrors, st.DestroyExit = nil, nil, 0
+	w.scenario.Stacks["companion"] = st
+	w.save(t)
+	before := len(w.calls(t, "tofu.log"))
+	*binds = 0
+	if err := p.Cleanup(context.Background()); err != nil {
+		t.Fatalf("cleanup: %v\n%s", err, w.term)
+	}
+	calls := w.calls(t, "tofu.log")[before:]
+	if *binds == 0 {
+		t.Error("cleanup did not bind the identity again")
+	}
+	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"companion", "p"}) {
+		t.Errorf("cleanup destroys %v, want [companion p]", got)
+	}
+	_, state, pass := probeFiles(t, root)
+	if exists(state) || exists(pass) {
+		t.Errorf("after a passing cleanup: state kept %v, passphrase kept %v", exists(state), exists(pass))
+	}
+}
+
+func TestProbeCompanionDestroyRetry(t *testing.T) {
+	// Retried, then destroyed: the run passes, the companion is destroyed before the root.
+	for _, c := range []struct {
+		name                   string
+		planErrs, destroyErrs  []string
+		wantPlans, wantApplies int
+	}{
+		{"plan-oauth2-500", []string{errOAuth500}, nil, 2, 1},
+		{"apply-5xx", nil, []string{errAPI503}, 2, 2},
+		{"connection-reset", []string{errReset, errReset}, nil, 3, 1},
+		{"oauth2-token-transport", []string{errOAuthDial}, nil, 2, 1},
+		{"oauth2-token-bare-status", []string{errOAuthBare}, nil, 2, 1},
+		{"5xx-with-number-in-body", []string{errOAuth500Body}, nil, 2, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds int
+			p := w.companionRetryProbe(t, root, c.planErrs, c.destroyErrs, &binds)
+			if err := p.Start(context.Background()); err != nil {
+				t.Fatalf("Start: %v (a transient failure of the companion's destroy is retried)\n%s", err, w.term)
+			}
+			calls := w.calls(t, "tofu.log")
+			plans, applies, _ := destroyCalls(calls, "companion")
+			if plans != c.wantPlans || applies != c.wantApplies {
+				t.Errorf("companion: %d destroy plans and %d destroy applies, want %d and %d", plans, applies, c.wantPlans, c.wantApplies)
+			}
+			last := -1
+			for i, call := range calls {
+				if call.Stack == "companion" && (call.Cmd == "destroy" || call.Cmd == "plan" && slices.Contains(call.Args, "-destroy")) {
+					last = i
+				}
+			}
+			for i, call := range calls {
+				if call.Stack == "p" && call.Cmd == "plan" && slices.Contains(call.Args, "-destroy") && i < last {
+					t.Error("the root was planned for destroy before the companion's last destroy attempt")
+				}
+			}
+			if _, rootApplies, _ := destroyCalls(calls, "p"); rootApplies != 1 {
+				t.Errorf("the root was destroyed %d times, want once", rootApplies)
+			}
+		})
+	}
+
+	// Never retried, or retried until the bound: the root is kept, then --cleanup completes.
+	for _, c := range []struct {
+		name                  string
+		planErrs, destroyErrs []string
+		wantPlans             int
+	}{
+		{"4xx-api-403", []string{errAPI403, errAPI403, errAPI403}, nil, 1},
+		{"4xx-oauth2-401", []string{errOAuth401, errOAuth401, errOAuth401}, nil, 1},
+		{"4xx-oauth2-bare-status", []string{errOAuth401Bare, errOAuth401Bare, errOAuth401Bare}, nil, 1},
+		{"4xx-oauth2-error-code", []string{errOAuthCode, errOAuthCode, errOAuthCode}, nil, 1},
+		{"4xx-uncommon-with-5xx", []string{errAPI503 + "\n" + errLocked, errAPI503, errAPI503}, nil, 1},
+		{"4xx-with-5xx", []string{errAPI503 + "\n" + errAPI403, errAPI503, errAPI503}, nil, 1},
+		{"4xx-apply", nil, []string{errAPI403, errAPI403, errAPI403}, 1},
+		{"persistent-5xx", []string{errOAuth500, errAPI503, errOAuth500, errOAuth500}, nil, 3},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds int
+			p := w.companionRetryProbe(t, root, c.planErrs, c.destroyErrs, &binds)
+			err := p.Start(context.Background())
+			calls := w.calls(t, "tofu.log")
+			plans, _, at := destroyCalls(calls, "companion")
+			if plans != c.wantPlans {
+				t.Errorf("companion: %d destroy plans, want %d", plans, c.wantPlans)
+			}
+			// Backoff: each retry waits at least the configured time after the attempt before.
+			for i := 1; i < len(at) && i <= len(p.Run.companionBackoff); i++ {
+				if gap := at[i].Sub(at[i-1]); gap < p.Run.companionBackoff[i-1] {
+					t.Errorf("retry %d came %v after the attempt before, want at least %v", i, gap, p.Run.companionBackoff[i-1])
+				}
+			}
+			checkKeptRoot(t, w, root, err, calls)
+			cleanupAfter(t, w, p, root, &binds)
+		})
+	}
+
+	// A wait that would end after the destroy deadline is not started.
+	t.Run("backoff-beyond-deadline", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds int
+		p := w.companionRetryProbe(t, root, []string{errOAuth500, errOAuth500}, nil, &binds)
+		p.Run.Deadline = 20 * time.Second
+		p.Run.companionBackoff = []time.Duration{time.Minute}
+		start := time.Now()
+		err := p.Start(context.Background())
+		if took := time.Since(start); took > 15*time.Second {
+			t.Errorf("the run took %v: it waited for a retry the deadline did not leave time for", took)
+		}
+		calls := w.calls(t, "tofu.log")
+		if plans, _, _ := destroyCalls(calls, "companion"); plans != 1 {
+			t.Errorf("companion: %d destroy plans, want 1", plans)
+		}
+		checkKeptRoot(t, w, root, err, calls)
+	})
+
+	// --cleanup keeps the root again while the companion cannot be destroyed; a later one completes.
+	t.Run("cleanup-fails-then-passes", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds int
+		p := w.companionRetryProbe(t, root, nil, []string{errAPI403, errAPI403}, &binds)
+		err := p.Start(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log"))
+		before := len(w.calls(t, "tofu.log"))
+		err = p.Cleanup(context.Background())
+		calls := w.calls(t, "tofu.log")[before:]
+		if _, applies, _ := destroyCalls(calls, "companion"); applies != 1 {
+			t.Errorf("cleanup: the companion's destroy was applied %d times, want once", applies)
+		}
+		checkKeptRoot(t, w, root, err, calls)
+		cleanupAfter(t, w, p, root, &binds)
+	})
+
+	// A cleanup retries a transient failure of the companion's destroy as the run does.
+	t.Run("cleanup-retries", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds int
+		p := w.companionRetryProbe(t, root, nil, []string{errAPI403, errAPI503}, &binds)
+		err := p.Start(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log"))
+		before := len(w.calls(t, "tofu.log"))
+		if err := p.Cleanup(context.Background()); err != nil {
+			t.Fatalf("cleanup: %v (its companion destroy failed once with a 503)\n%s", err, w.term)
+		}
+		calls := w.calls(t, "tofu.log")[before:]
+		if _, applies, _ := destroyCalls(calls, "companion"); applies != 2 {
+			t.Errorf("cleanup: the companion's destroy was applied %d times, want twice", applies)
+		}
+		if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"companion", "companion", "p"}) {
+			t.Errorf("cleanup destroys %v, want [companion companion p]", got)
+		}
+	})
+
+	// A cleanup whose binding of the identity fails (an API error, not a refusal) keeps the root
+	// too: the companion was never reached.
+	t.Run("cleanup-bind-fails", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds int
+		p := w.companionRetryProbe(t, root, []string{errAPI403}, nil, &binds)
+		err := p.Start(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log"))
+		failing := p
+		failing.Bind = func(context.Context, Credential) error {
+			return errors.New("GET /auth/details: 503 Service Unavailable")
+		}
+		before := len(w.calls(t, "tofu.log"))
+		err = failing.Cleanup(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log")[before:])
+		cleanupAfter(t, w, p, root, &binds)
+	})
+
+	// Review r1: a binding refusal at cleanup (account.env edited since the run) is no reason to
+	// destroy the root of a companion that ran: the root is kept.
+	t.Run("cleanup-bind-refused", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds int
+		p := w.companionRetryProbe(t, root, []string{errAPI403}, nil, &binds)
+		err := p.Start(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log"))
+		failing := p
+		failing.Bind = func(context.Context, Credential) error {
+			return refuse(CondAccount, "credential account %q, bound %q", "other", "this")
+		}
+		before := len(w.calls(t, "tofu.log"))
+		err = failing.Cleanup(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log")[before:])
+		cleanupAfter(t, w, p, root, &binds)
+	})
+
+	// Review r2: an output of the wrong shape depends on the published values only — the run refused
+	// it before the companion ran — so a cleanup refuses it again and still destroys the root.
+	t.Run("cleanup-wrong-shape-destroys-root", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		p := w.identityProbe(t, root, tofuStack{})
+		bad := filepath.Join(w.bin, "outputs-bad.json")
+		if err := os.WriteFile(bad, []byte(`{"companion_env":{"sensitive":true,"type":"number","value":1}}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		st := w.scenario.Stacks["p"]
+		st.Outputs, st.DestroyExit = bad, 1
+		w.scenario.Stacks["p"] = st
+		w.save(t)
+		if err := p.Start(context.Background()); ExitCode(err) == 0 {
+			t.Fatal("a run whose root destroy failed exited 0")
+		}
+		st.DestroyExit = 0
+		w.scenario.Stacks["p"] = st
+		w.save(t)
+		before := len(w.calls(t, "tofu.log"))
+		_ = p.Cleanup(context.Background())
+		if got := sequence(w.calls(t, "tofu.log")[before:], "destroy"); !slices.Equal(got, []string{"p"}) {
+			t.Errorf("cleanup destroys %v, want [p]: the companion never ran", got)
+		}
+	})
+
+	// The kept root's resources are leftovers of the run: the leftover check is not told to spare
+	// them. The listed probe client (seed oauth2-client) is reported.
+	t.Run("kept-root-is-leftover", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds int
+		p := w.companionRetryProbe(t, root, []string{errAPI403}, nil, &binds)
+		p.Run.Leftovers, _ = cleanCheck(t, "oauth2-client")
+		err := p.Start(context.Background())
+		checkKeptRoot(t, w, root, err, w.calls(t, "tofu.log"))
+		var rep Report
+		readJSON(t, filepath.Join(w.runDir, "leftovers.json"), &rep)
+		if rep.Outcome != "fail" || !slices.ContainsFunc(rep.Leftovers, func(l Leftover) bool { return l.Type == "ovh_me_api_oauth2_client" }) {
+			t.Errorf("leftovers.json %+v: want the kept probe client reported as a leftover", rep)
+		}
+	})
+}
+
+// TestDiagnosticLinesBounded (T095 review r1): a stream line longer than errLimit is dropped, not
+// buffered, and the next diagnostic line is still kept, decoded, across split writes.
+func TestDiagnosticLinesBounded(t *testing.T) {
+	d := &diagnosticLines{}
+	long := bytes.Repeat([]byte("x"), errLimit/2)
+	for i := 0; i < 3; i++ {
+		if n, _ := d.Write(long); n != len(long) {
+			t.Fatalf("Write returned %d, want %d", n, len(long))
+		}
+	}
+	if len(d.part) > errLimit {
+		t.Errorf("a %d-byte line without newline is buffered (%d bytes): want it dropped past %d", 3*len(long), len(d.part), errLimit)
+	}
+	// A line of exactly errLimit bytes is kept (review r2).
+	exact := `{"type":"diagnostic","diagnostic":{"summary":"exact","detail":"`
+	exact += strings.Repeat("y", errLimit-len(exact)-3) + `"}}`
+	_, _ = d.Write([]byte("\n" + exact + "\n"))
+	if !strings.Contains(d.kept.String(), "exact") {
+		t.Errorf("a diagnostic line of exactly %d bytes was dropped", errLimit)
+	}
+	d.kept.Reset()
+	line := `{"@level":"error","type":"diagnostic","diagnostic":{"severity":"error","summary":"refused","detail":"status code 400: body"}}` + "\n"
+	_, _ = d.Write([]byte("\n" + line[:20]))
+	_, _ = d.Write([]byte(line[20:]))
+	if got := d.kept.String(); !strings.Contains(got, "diagnostic error: refused") || !strings.Contains(got, "status code 400: body") || strings.Contains(got, "xxx") {
+		t.Errorf("kept %q: want the decoded diagnostic only", got)
+	}
+}
+
+// TestRunnerErrorRecord (T095, T094 gap 1): a refused API call's answer reaches the run record. A
+// failed tofu call's stderr, and the error diagnostics of a failed `apply -json` (whose detail
+// holds the API's answer and reaches the terminal only as its one-line summary), are appended to
+// errors.txt in the run record, redacted.
+func TestRunnerErrorRecord(t *testing.T) {
+	w := newRunWorld(t)
+	raw, err := os.ReadFile(filepath.Join("testdata", "tofu", "apply-fail.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const body = `OVHcloud API error (status code 400): Client::BadRequest: \"s3:GetObjectVersion is not valid\"`
+	if !strings.Contains(string(raw), "Error running command 'exit 1'") {
+		t.Fatal("fixture apply-fail.jsonl changed: no diagnostic detail to replace")
+	}
+	// Review r1: a secret JSON escapes differently ("<" as <, `"` as \") must not survive
+	// redaction in its escaped form.
+	const odd = `odd<"SECRET\&>7c41`
+	esc, _ := json.Marshal(odd)
+	oddEscaped := strings.Trim(string(esc), `"`)
+	stream := filepath.Join(w.bin, "apply-fail-body.jsonl")
+	if err := os.WriteFile(stream, []byte(strings.ReplaceAll(string(raw), "Error running command 'exit 1'", body+" token="+seedSecret+" odd="+oddEscaped)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := w.stack(t, "a", true, tofuStack{DestroyErrors: []string{"Error: fake destroy refusal marker"}})
+	b := w.stack(t, "b", true, tofuStack{ApplyStream: stream, ApplyExit: 1})
+	r := w.runner(t, a, b)
+	r.Creds = maps.Clone(r.Creds)
+	r.Creds["TF_VAR_odd_secret"] = odd
+	if err, _ := execute(t, r); err == nil {
+		t.Fatal("a run whose apply failed passed")
+	}
+	rec, err := os.ReadFile(filepath.Join(w.runDir, "errors.txt"))
+	if err != nil {
+		t.Fatalf("no errors.txt in the run record: %v", err)
+	}
+	for _, want := range []string{"s3:GetObjectVersion is not valid", "fake-tofu-stderr-marker", "fake destroy refusal marker"} {
+		if !strings.Contains(string(rec), want) {
+			t.Errorf("errors.txt lacks %q:\n%s", want, rec)
+		}
+	}
+	for _, s := range []string{seedSecret, odd, oddEscaped, "SECRET"} {
+		if strings.Contains(string(rec), s) {
+			t.Errorf("errors.txt holds %q: a secret not redacted", s)
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(w.runDir, "errors.txt")); err == nil && fi.Mode().Perm() != 0o600 {
+		t.Errorf("errors.txt mode %o, want 600", fi.Mode().Perm())
+	}
+}

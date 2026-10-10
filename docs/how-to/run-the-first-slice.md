@@ -17,8 +17,8 @@ references:
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
-    blob: 7b9f28ec9d3cb46b5d0fca97182b09fc9c531f0a
-last_verified: bd701bd8f885a609e6c163f7e2cef9ff9774bb51
+    blob: 73eb4003e5834e0d2f90b18b17ba2c91671c1e04
+last_verified: 0472de1d3773a6363dcfca70ad6f9082d292f80a
 ---
 
 # Run the first slice on an OVHcloud account
@@ -338,6 +338,11 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   `task live:probe -- --reviewed-sha "$S" --cleanup <run-id>`. Its state and passphrase under
   `accounts/<account>/state/probes/<run-id>/` are deleted only when the destroy and the
   leftover check both pass. Never delete them by hand while a resource may exist.
+- A two-stage probe (`storage-iam`) whose companion could not be destroyed keeps its root, and
+  with it the identity the companion's resources need; the run's error names the kept root and
+  the `--cleanup <run-id>` to run, and the leftover check reports both as leftovers until then
+  ([probe run sheet](../../tests/live/probes/README.md#two-stage-runs-t010)). A failed tofu call's
+  output is in the run record's `errors.txt`.
 - To look by hand (read only), use the API console or the `ovhcloud` subcommand of the kind,
   e.g. `ovhcloud cloud project list` (AGENTS.md *Tools*). Per-kind CLI coverage is UNVERIFIED,
   and there is no generic `ovhcloud api get` (P18 refuted, evidence T009). The kinds and API
