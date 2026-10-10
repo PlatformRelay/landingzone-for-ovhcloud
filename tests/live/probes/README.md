@@ -26,8 +26,9 @@ S=<reviewed sha>
 Every run prints `LZ-LIVE run <run-id> start probe tests/live/probes/<root>` first. Its record is
 `.local/live/<run-id>/` in the clone: `plan-<root>.txt` (rendered plan), `inventory.jsonl`,
 `listings/<type>.json` (one file per leftover kind listed), `leftovers.json`, `summary.json`
-(`outcome`, `plan_only`, `error`), and `errors.txt` when a tofu call failed (its stderr, and a
-failed apply's diagnostics decoded to plain text, redacted). Copy the run id, the outcome and the observations into the
+(`outcome`, `plan_only`, `error`), `errors.txt` when a tofu call failed (its stderr, and a
+failed apply's diagnostics decoded to plain text, redacted), and `observations.json` for a root
+with a check (`state-backend`, row 7b). Copy the run id, the outcome and the observations into the
 task's evidence file, never the record itself (it may hold ids and the account e-mail).
 
 ## What every root shares
@@ -70,8 +71,9 @@ task's evidence file, never the record itself (it may hold ids and the account e
 | 4 | `alerting` | P10 | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/alerting` | apply creates the alert; destroy removes it; `GET /cloud/project/<p>/alerting` no longer lists its id | apply or destroy error | destroy-on-exit (automatic) |
 | 5 | `network` | P12 | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/network` | network `lzprobe-network-<run-id>` in GRA11 and subnet `10.250.0.0/24` (no gateway, DHCP) created without any vRack step and destroyed; no line item on the bill (P12 cost) | apply asks for a vRack or a gateway; a charge appears | destroy-on-exit |
 | 6 | `iam` | P7, P8 (object), P15 (URN) | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/iam` | client `lzprobe-iam-<run-id>` and policy of the same name created by the admin and deleted on destroy (P7); the policy accepts the client's `identity` URN (P8, object half); the project URN accepts the key `lzprobe-p15:run-id` (P15); after destroy that key is gone and other project tags are unchanged | 403 on client or policy create (P7: extend the admin policy, R13); policy rejects the identity URN; tag key refused | destroy-on-exit |
-| 7 | `state-backend` | P13, P14 (bucket), P15 (bucket), P1–P3 infrastructure | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/state-backend` | versioned bucket `lzprobe-state-<run-id>` in GRA with tag `lz:run-id` (P15 bucket half); S3 user `lzprobe-state-<run-id>` with one credential and a bucket-scoped S3 policy; all destroyed, bucket included (P14, empty bucket) | tag key refused; versioning not enabled; destroy leaves the bucket | destroy-on-exit |
-| 7a | `state-backend` (S3 policy Deny) | T016 Deny (UNVERIFIED) | T010 | row 7's command (one run) | the apply creates `ovh_cloud_project_user_s3_policy.probe` with the `DenyGivenActions` statement of `components/state-backend` (eleven actions, `Resource = ["*"]`, including the patterns `s3:DeleteObjectVersion*`, `s3:PutBucketPolicy*`, `s3:DeleteBucketPolicy*`; T094, after run 20261010T172836Z-5bcc refused the earlier list); `GET /cloud/project/<p>/user/<u>/policy` returns the Allow statement's six actions and the Deny statement's eleven, each verbatim (patterns neither dropped nor expanded); keep the response body in the record | the policy create is refused (record the whole 400 body and compare it with `tests/fixtures/ovhcloud/s3-policy-actions.json`), or the returned policy drops or rewrites an action: record which, and the state-backend Deny list is changed to match before any `bootstrap` apply. Whether the Deny is *enforced*, and what the `*` patterns match, is not observed here (needs S3 calls with the credential; see `evidence/T094.md` of spec 005) | destroy-on-exit (with row 7) |
+| 7 | `state-backend` | P13, P14 (bucket), P15 (bucket), P1–P3 infrastructure | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/state-backend` | versioned bucket `lzprobe-state-<run-id>` in GRA with tag `lz:run-id` (P15 bucket half); S3 user `lzprobe-state-<run-id>` with one credential and a bucket-scoped S3 policy; the janitor user `lzprobe-state-janitor-<run-id>` (row 7b's undo) with one credential and `s3:*` on that bucket only; all destroyed, bucket included (P14, empty bucket: row 7b's undo leaves no version) | tag key refused; versioning not enabled; destroy leaves the bucket | destroy-on-exit |
+| 7a | `state-backend` (S3 policy Deny) | T016 Deny (UNVERIFIED) | T010 | row 7's command (one run) | the apply creates `ovh_cloud_project_user_s3_policy.probe` with the `DenyGivenActions` statement of `components/state-backend` (eleven actions, `Resource = ["*"]`, including the patterns `s3:DeleteObjectVersion*`, `s3:PutBucketPolicy*`, `s3:DeleteBucketPolicy*`; T094, after run 20261010T172836Z-5bcc refused the earlier list); `GET /cloud/project/<p>/user/<u>/policy` returns the Allow statement's six actions and the Deny statement's eleven, each verbatim (patterns neither dropped nor expanded); keep the response body in the record | the policy create is refused (record the whole 400 body and compare it with `tests/fixtures/ovhcloud/s3-policy-actions.json`), or the returned policy drops or rewrites an action: record which, and the state-backend Deny list is changed to match before any `bootstrap` apply. Whether the Deny is *enforced*, and what the `*` patterns match, is row 7b's observation (T096; `evidence/T094.md` of spec 005, *Pattern semantics*) | destroy-on-exit (with row 7) |
+| 7b | `state-backend` (Deny enforced, T096) | T094 Deny patterns (UNVERIFIED until this run) | T010 | row 7's command (one run) | after the apply, lz-live's check runs with the state user's credential and writes `observations.json` (`check: state-backend-deny`) with seven observations, each `as_expected: true` and `findings: []`: `put-v1`, `put-v2` (PutObject of `lz-deny-check/probe.tflock`, 200, two distinct version ids), `get` (200), `delete-older-version` (DeleteObject with the first version's `versionId`: refused, 403 `AccessDenied`), `put-bucket-policy` (refused, 403 `AccessDenied`), `suspend-versioning` (PutBucketVersioning Suspended: refused, 403 `AccessDenied`), `delete-current` (DeleteObject without `versionId`, 2xx); the terminal shows `LZ-LIVE undo removed 3 versions; bucket empty` before the destroy | `delete-older-version` observed `allowed`: the `s3:DeleteObjectVersion*` Deny is inert on OVHcloud, a finding for the owner (ADR-0009), not a probe failure — `bootstrap` (T044) waits for that decision; `put-bucket-policy` refused with `NotImplemented`: record it (T094 *Pattern semantics* 6); any backend step (`put-v1`, `put-v2`, `get`, `delete-current`) refused: the policy blocks the S3 backend, `bootstrap` must not apply it (rerun once first: how soon a new S3 policy takes effect is UNVERIFIED); an observation `not-run` or `no-answer` (the run fails): the observation is incomplete, rerun | destroy-on-exit: the check's undo first (janitor), then the root; a failed undo keeps the root, `--cleanup <run-id>` undoes again |
 | 8 | `storage-iam` | P9, P26, P25 (objects) | T010 | `task live:probe -- --reviewed-sha $S tests/live/probes/storage-iam` | client and policy `lzprobe-storage-iam-<run-id>` with exactly the 13 R6 actions on the project URN; buckets `lzprobe-p25a-…`/`lzprobe-p25b-…` tagged `lz:tenant = lzprobe-a|b`; client and policy `lzprobe-p25-<run-id>` with the `resource.Tag(lz:tenant)` condition accepted; all destroyed | policy create refuses an action name or the condition key with `:` (record, P25 then refuted for that form) | destroy-on-exit |
 
 Runs 1–3 are T009's; their leftover checks also produce T009's listings (`listings/<type>.json`
@@ -184,10 +186,29 @@ apply reported no resource operation, or the companion stopped before its apply)
 Whether a denied read inside a `check` block is a warning rather than an error is believed
 (Terraform semantics), UNVERIFIED for OpenTofu 1.13 until this run; record what the run printed.
 
+**The state-backend check (row 7b).** lz-live reads the root's sensitive output `deny_check`
+(bucket, region, the state user's and the janitor's S3 keys) from `tofu output -json` into memory
+only — no file, no argv, no child environment — and redacts every key from the run's output and
+record. The check signs with lz-live's own SigV4 client, keeps of each answer only the status and
+the S3 error code, and never prints a key. A finding (an answer other than the expected one) is
+listed in `observations.json` under `findings` and printed as `LZ-LIVE finding <step>`; it does not
+fail the run. Before the root's destroy, on every way out (pass, failure, Ctrl-C, deadline) and on
+`--cleanup`, the janitor deletes a bucket policy if one is set, re-enables versioning if it is not
+`Enabled`, deletes every version and delete marker and lists the bucket again: anything left keeps
+the root, with the identities, for `--cleanup`. The janitor's rights rest on the pattern `s3:*`,
+accepted by OVHcloud but, like every pattern, UNVERIFIED in effect: if its first call
+(`GetBucketPolicy`) is refused with 403 on the run and again on `--cleanup`, the check can never
+empty the bucket. Then, in the Control Panel, delete every object version of
+`lzprobe-state-<run-id>`, the bucket and the users `lzprobe-state-<run-id>` and
+`lzprobe-state-janitor-<run-id>`; look again by hand (*Leftover listing per matrix kind*); only then
+delete `accounts/<account>/state/probes/<run-id>/`; record it in T010's evidence. Copy `observations.json`'s observations (step,
+observed, status, code) and its findings into T010's evidence.
+
 Still not run by any root (T010 records them `not-run`):
 
-- P14 (versions): two object versions written to the `state-backend` bucket before its destroy,
-  to see whether destroy removes noncurrent versions too (the root's bucket is empty).
+- P14 (versions): object versions left in the `state-backend` bucket at its destroy, to see whether
+  destroy removes noncurrent versions too (row 7b's undo empties the bucket first, so its destroy
+  observes only the empty-bucket half).
 - P8 (usage): the `iam` client reads `GET /cloud/project/<p>` and is denied
   `GET /cloud/project/<p>/region`.
 - P9 (IAM write denied): the negative IAM write is V010's.

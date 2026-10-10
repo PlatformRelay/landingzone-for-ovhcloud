@@ -11,7 +11,11 @@ import (
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/state"
 )
+
+// checkedRoot is the one probe root with a check after its apply (T096).
+const checkedRoot = "state-backend"
 
 // `lz-live probe` (spec 005 FR-011, research R12 *Probe state*, contracts/checks.md): after the
 // host guard admitted the run, a probe root under tests/live/probes/ of the reviewed checkout runs
@@ -218,6 +222,11 @@ func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs)
 	pr := live.Probe{Run: r, ConfigRoot: cfg, Account: account, Bind: func(ctx context.Context, c live.Credential) error {
 		return live.Bind(ctx, api, c, b, b.Org)
 	}}
+	// T096: the state-backend probe observes its S3 user's Deny statement after the apply and
+	// undoes its writes before the destroy, on a start and on a cleanup; no other root has a check.
+	if filepath.Base(root) == checkedRoot {
+		pr.Check = state.Check(state.Options{HTTP: d.S3HTTP})
+	}
 	rel, _ := filepath.Rel(checkout, root)
 	if p.cleanup != "" {
 		fmt.Fprintf(d.Stdout, "LZ-LIVE run %s start cleanup %s\n", runID, rel)
