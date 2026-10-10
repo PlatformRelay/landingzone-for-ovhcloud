@@ -75,7 +75,8 @@ variables {
     unlabelled  = []
   }
   network = {
-    cidr = "10.20.0.0/24"
+    cidr    = "10.20.0.0/24"
+    vlan_id = 10
   }
 }
 
@@ -133,8 +134,8 @@ run "network_in_the_project_and_region" {
   }
 
   assert {
-    condition     = try(module.island.vlan_id, null) == 0
-    error_message = "vlan_id defaults to 0 when the network row has none"
+    condition     = try(module.island.vlan_id, null) == 10
+    error_message = "the network carries the network row's vlan_id"
   }
 
   assert {
@@ -200,7 +201,7 @@ run "cidr_private_slash24_admitted" {
   command = plan
 
   variables {
-    network = { cidr = "10.250.0.0/24" }
+    network = { cidr = "10.250.0.0/24", vlan_id = 10 }
   }
 
   assert {
@@ -213,7 +214,7 @@ run "cidr_private_slash16_admitted" {
   command = plan
 
   variables {
-    network = { cidr = "10.250.0.0/16" }
+    network = { cidr = "10.250.0.0/16", vlan_id = 10 }
   }
 
   assert {
@@ -226,7 +227,7 @@ run "cidr_first_slash16_of_172_16_admitted" {
   command = plan
 
   variables {
-    network = { cidr = "172.16.0.0/16" }
+    network = { cidr = "172.16.0.0/16", vlan_id = 10 }
   }
 
   assert {
@@ -239,7 +240,7 @@ run "cidr_last_slash16_of_172_16_admitted" {
   command = plan
 
   variables {
-    network = { cidr = "172.31.0.0/16" }
+    network = { cidr = "172.31.0.0/16", vlan_id = 10 }
   }
 
   assert {
@@ -252,12 +253,45 @@ run "cidr_whole_192_168_admitted" {
   command = plan
 
   variables {
-    network = { cidr = "192.168.0.0/16" }
+    network = { cidr = "192.168.0.0/16", vlan_id = 10 }
   }
 
   assert {
     condition     = output.cidr == "192.168.0.0/16" && try(module.island.cidr, null) == "192.168.0.0/16"
     error_message = "192.168.0.0/16 is the whole RFC 1918 block and is admitted"
+  }
+}
+
+# VLAN id range (T098): a project holds one private network per VLAN id (T010 run
+# 20261010T184645Z-f7de: 400 `A private network already exists for this vlan ID`), so the id is
+# required and bounded to 0..4000: the API admits 0..4095, 0 meaning no VLAN
+# (cloud.json `cloud.ProjectNetworkPrivateCreation.vlanId`), the Control Panel 0..4000 (vRack
+# guide, public-cloud/network-services/vrack.mdx). Both ends are admitted; one past either end and
+# a fraction are refused.
+
+run "vlan_id_zero_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24", vlan_id = 0 }
+  }
+
+  assert {
+    condition     = try(module.island.vlan_id, null) == 0
+    error_message = "VLAN id 0 (the lower bound) is admitted and reaches the network"
+  }
+}
+
+run "vlan_id_4000_admitted" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24", vlan_id = 4000 }
+  }
+
+  assert {
+    condition     = try(module.island.vlan_id, null) == 4000
+    error_message = "VLAN id 4000 (the upper bound) is admitted and reaches the network"
   }
 }
 
@@ -287,7 +321,7 @@ run "cidr_not_an_address_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "not-a-cidr/24" }
+    network = { cidr = "not-a-cidr/24", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -297,7 +331,7 @@ run "cidr_without_prefix_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "10.20.0.0" }
+    network = { cidr = "10.20.0.0", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -307,7 +341,7 @@ run "cidr_with_host_bits_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "10.20.0.1/24" }
+    network = { cidr = "10.20.0.1/24", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -317,7 +351,7 @@ run "cidr_ipv6_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "fd00::/24" }
+    network = { cidr = "fd00::/24", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -327,7 +361,7 @@ run "cidr_too_small_for_a_pool_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "10.20.0.0/30" }
+    network = { cidr = "10.20.0.0/30", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -340,7 +374,7 @@ run "cidr_whole_address_space_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "0.0.0.0/0" }
+    network = { cidr = "0.0.0.0/0", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -350,7 +384,7 @@ run "cidr_public_range_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "8.8.8.0/24" }
+    network = { cidr = "8.8.8.0/24", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -360,7 +394,7 @@ run "cidr_just_past_10_slash8_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "11.0.0.0/16" }
+    network = { cidr = "11.0.0.0/16", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -370,7 +404,7 @@ run "cidr_just_before_172_16_slash12_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "172.15.0.0/16" }
+    network = { cidr = "172.15.0.0/16", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -380,7 +414,7 @@ run "cidr_just_past_172_16_slash12_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "172.32.0.0/16" }
+    network = { cidr = "172.32.0.0/16", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -390,7 +424,7 @@ run "cidr_just_past_192_168_slash16_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "192.169.0.0/16" }
+    network = { cidr = "192.169.0.0/16", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -400,7 +434,7 @@ run "cidr_private_but_larger_than_slash16_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "10.0.0.0/15" }
+    network = { cidr = "10.0.0.0/15", vlan_id = 10 }
   }
 
   expect_failures = [var.network]
@@ -410,7 +444,57 @@ run "cidr_whole_10_slash8_rejected" {
   command = plan
 
   variables {
-    network = { cidr = "10.0.0.0/8" }
+    network = { cidr = "10.0.0.0/8", vlan_id = 10 }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "vlan_id_negative_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24", vlan_id = -1 }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "vlan_id_past_4000_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24", vlan_id = 4001 }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "vlan_id_fraction_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24", vlan_id = 1.5 }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "vlan_id_missing_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24" }
+  }
+
+  expect_failures = [var.network]
+}
+
+run "vlan_id_null_rejected" {
+  command = plan
+
+  variables {
+    network = { cidr = "10.20.0.0/24", vlan_id = null }
   }
 
   expect_failures = [var.network]

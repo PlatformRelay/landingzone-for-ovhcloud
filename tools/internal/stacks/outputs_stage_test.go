@@ -698,7 +698,7 @@ func pinProjectPlan(t testing.TB, c string, data []byte) {
 
 // The fixture of run published_outputs_match_the_schema (stages/project-network/tests/unit.tftest.hcl):
 // the demo/dev project's published values (its URN with the `eu` part the run gives), region GRA11,
-// the network row 10.20.0.0/24 without a vlan_id, and the ids the run's overrides give.
+// the network row 10.20.0.0/24 with vlan_id 10 (required since T098), and the ids the run's overrides give.
 const (
 	pnModule     = "module.island.module.network."
 	pnNetwork    = pnModule + "ovh_cloud_project_network_private.this"
@@ -754,8 +754,8 @@ func pinProjectNetworkPlan(t testing.TB, data []byte) {
 	if got := strs(t, byAddress[pnNetwork], "regions"); !reflect.DeepEqual(got, []string{pnRegion}) {
 		t.Errorf("network regions %v, want exactly [%s]", got, pnRegion)
 	}
-	if network["name"] != "lz-demo-dev-gra11-pn-main" || network["vlan_id"] != float64(0) {
-		t.Errorf("network name %v, vlan_id %v, want lz-demo-dev-gra11-pn-main and 0", network["name"], network["vlan_id"])
+	if network["name"] != "lz-demo-dev-gra11-pn-main" || network["vlan_id"] != float64(10) {
+		t.Errorf("network name %v, vlan_id %v, want lz-demo-dev-gra11-pn-main and 10", network["name"], network["vlan_id"])
 	}
 
 	subnet := byAddress[pnSubnet].Change.After

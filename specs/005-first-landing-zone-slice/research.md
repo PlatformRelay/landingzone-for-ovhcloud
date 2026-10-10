@@ -176,7 +176,7 @@ envelope (ADR-0017) with an `object-storage` capability; no `network` capability
 
 ## R9 Network
 **Decision**: `ovh_cloud_project_network_private` (regions `[GRA11]`, `vlan_id` from the manifest's IPAM
-row, default 0) + `ovh_cloud_project_network_private_subnet` (CIDR from input, no gateway, DHCP on).
+row, required, 0..4000, distinct per project: DUPLICATE_VLAN, T098) + `ovh_cloud_project_network_private_subnet` (CIDR from input, no gateway, DHCP on).
 **Evidence**: `cloud_project_network_private.md`, `cloud_project_network_private_subnet.md`; IAM
 action names in `api/v1/cloud.json`. Neither resource carries tags: listed as `none` in the
 applicability table; the name carries the instance (P12 for cost/vRack).

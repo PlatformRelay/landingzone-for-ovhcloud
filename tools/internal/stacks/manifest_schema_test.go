@@ -3,9 +3,11 @@ package stacks
 import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
+	"fmt"
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -28,6 +30,8 @@ type manifestSchemaNode struct {
 	Const                json.RawMessage               `json:"const"` // raw, so `"const": null` is seen
 	Enum                 []string                      `json:"enum"`
 	Pattern              string                        `json:"pattern"`
+	Minimum              *int                          `json:"minimum"` // T098: mirrored by manifestRanges
+	Maximum              *int                          `json:"maximum"`
 	Required             []string                      `json:"required"`
 	Properties           map[string]manifestSchemaNode `json:"properties"`
 	AdditionalProperties json.RawMessage               `json:"additionalProperties"`
@@ -45,9 +49,10 @@ func manifestAgree(node manifestSchemaNode, t reflect.Type, path string, visited
 		"const": len(node.Const) > 0, "enum": node.Enum != nil, "pattern": node.Pattern != "",
 		"required": node.Required != nil, "properties": node.Properties != nil,
 		"additionalProperties": len(node.AdditionalProperties) > 0, "items": node.Items != nil,
+		"minimum": node.Minimum != nil, "maximum": node.Maximum != nil,
 	}
 	allowed := map[reflect.Kind]string{reflect.String: "const enum pattern", reflect.Slice: "items",
-		reflect.Struct: "required properties additionalProperties"}[t.Kind()]
+		reflect.Struct: "required properties additionalProperties", reflect.Int: "minimum maximum"}[t.Kind()]
 	for k, on := range set {
 		if on && !strings.Contains(" "+allowed+" ", " "+k+" ") {
 			diffs = append(diffs, path+": keyword "+k+" not mirrored by the code for "+t.Kind().String())
@@ -84,6 +89,11 @@ func manifestAgree(node manifestSchemaNode, t reflect.Type, path string, visited
 	case reflect.Int:
 		if node.Type != "integer" {
 			diffs = append(diffs, path+": schema type "+node.Type+", code int")
+		}
+		visited[path] = true
+		r, ok := manifestRanges[path]
+		if !ok || node.Minimum == nil || node.Maximum == nil || *node.Minimum != r[0] || *node.Maximum != r[1] {
+			diffs = append(diffs, fmt.Sprintf("%s: range %s..%s in the schema, %v (ranged %v) in code", path, bound(node.Minimum), bound(node.Maximum), r, ok))
 		}
 	case reflect.Slice:
 		if node.Type != "array" || node.Items == nil {
@@ -128,6 +138,13 @@ func manifestAgree(node manifestSchemaNode, t reflect.Type, path string, visited
 	return diffs
 }
 
+func bound(b *int) string {
+	if b == nil {
+		return "none"
+	}
+	return strconv.Itoa(*b)
+}
+
 // TestManifestSchemaMatchesTypes: the schema and the code agree on every property, required set,
 // type, closed object, header constant, pattern and enum; every string of the document has exactly
 // one value rule, and the code holds no rule for a path the document does not have.
@@ -143,6 +160,11 @@ func TestManifestSchemaMatchesTypes(t *testing.T) {
 	for path := range manifestRules {
 		if !visited[path] {
 			t.Errorf("manifestRules has %s, which is no string of the document", path)
+		}
+	}
+	for path := range manifestRanges {
+		if !visited[path] {
+			t.Errorf("manifestRanges has %s, which is no number of the document", path)
 		}
 	}
 }

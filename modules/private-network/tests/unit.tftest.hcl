@@ -67,6 +67,7 @@ variables {
   name       = "lz-demo-dev-gra11-pn-main"
   region     = "GRA11"
   cidr       = "10.20.0.0/24"
+  vlan_id    = 10
 }
 
 run "one_network_in_the_given_region" {
@@ -88,8 +89,8 @@ run "one_network_in_the_given_region" {
   }
 
   assert {
-    condition     = ovh_cloud_project_network_private.this.vlan_id == 0
-    error_message = "vlan_id defaults to 0"
+    condition     = ovh_cloud_project_network_private.this.vlan_id == 10
+    error_message = "the network carries the given vlan_id"
   }
 }
 
@@ -158,7 +159,7 @@ run "outputs_read_from_the_resources" {
   assert {
     condition = (
       output.project_id == "0123456789abcdef0123456789abcdef" && output.name == "lz-demo-dev-gra11-pn-main"
-      && jsonencode(output.regions) == jsonencode(["GRA11"]) && output.vlan_id == 0
+      && jsonencode(output.regions) == jsonencode(["GRA11"]) && output.vlan_id == 10
     )
     error_message = "project_id, name, regions and vlan_id are the network's"
   }
@@ -287,6 +288,39 @@ run "cidr_whole_192_168_admitted" {
   assert {
     condition     = ovh_cloud_project_network_private_subnet.this.network == "192.168.0.0/16" && output.cidr == "192.168.0.0/16"
     error_message = "192.168.0.0/16 is the whole RFC 1918 block and is admitted"
+  }
+}
+
+# VLAN id range (T098): a project holds one private network per VLAN id (T010 run
+# 20261010T184645Z-f7de: 400 `A private network already exists for this vlan ID`), so the id is
+# required and bounded to 0..4000: the API admits 0..4095, 0 meaning no VLAN
+# (cloud.json `cloud.ProjectNetworkPrivateCreation.vlanId`), the Control Panel 0..4000 (vRack
+# guide, public-cloud/network-services/vrack.mdx). Both ends are admitted; one past either end and
+# a fraction are refused.
+
+run "vlan_id_zero_admitted" {
+  command = plan
+
+  variables {
+    vlan_id = 0
+  }
+
+  assert {
+    condition     = ovh_cloud_project_network_private.this.vlan_id == 0
+    error_message = "VLAN id 0 (the lower bound) is admitted and reaches the network"
+  }
+}
+
+run "vlan_id_4000_admitted" {
+  command = plan
+
+  variables {
+    vlan_id = 4000
+  }
+
+  assert {
+    condition     = ovh_cloud_project_network_private.this.vlan_id == 4000
+    error_message = "VLAN id 4000 (the upper bound) is admitted and reaches the network"
   }
 }
 
@@ -443,4 +477,34 @@ run "blank_project_id_rejected" {
   }
 
   expect_failures = [var.project_id]
+}
+
+run "vlan_id_negative_rejected" {
+  command = plan
+
+  variables {
+    vlan_id = -1
+  }
+
+  expect_failures = [var.vlan_id]
+}
+
+run "vlan_id_past_4000_rejected" {
+  command = plan
+
+  variables {
+    vlan_id = 4001
+  }
+
+  expect_failures = [var.vlan_id]
+}
+
+run "vlan_id_fraction_rejected" {
+  command = plan
+
+  variables {
+    vlan_id = 1.5
+  }
+
+  expect_failures = [var.vlan_id]
 }

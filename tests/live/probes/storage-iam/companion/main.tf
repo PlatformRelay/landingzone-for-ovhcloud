@@ -19,10 +19,41 @@ locals {
   }
 }
 
+# VLAN id (T098): a project holds one private network per VLAN id (T010 run
+# 20261010T184645Z-f7de: 400 `A private network already exists for this vlan ID`, every probe
+# network on VLAN 0). The probe takes the first id of its own range 3000..3999 (disjoint
+# from the network probe's 2000..2999, inside the 0..4000 the modules admit), starting
+# at 3000 + the run id's four hex digits mod 1000 and wrapping, that no other network of the
+# project holds: a leftover or an applied concurrent run is skipped. Once its own network exists
+# (matched by name) the probe keeps that network's id, so a re-plan never moves it (vlan_id forces
+# a replacement). Two plans racing before either applies may pick one id, and a leftover of the
+# same run id is taken for its own; the API then refuses the create (the 400 above), so two
+# networks never share an id. Listing needs `network/private/get` (cloud.json), which the tenant
+# allowlist holds.
+data "ovh_cloud_project_network_privates" "existing" {
+  service_name = var.project_id
+}
+
+locals {
+  vlan_start = parseint(substr(var.run_id, 17, 4), 16)
+  vlan_taken = toset([for n in data.ovh_cloud_project_network_privates.existing.networks : n.vlan_id])
+  vlan_free  = [for k in range(1000) : 3000 + (local.vlan_start + k) % 1000 if !contains(local.vlan_taken, 3000 + (local.vlan_start + k) % 1000)]
+  vlan_own   = [for n in data.ovh_cloud_project_network_privates.existing.networks : n.vlan_id if n.name == local.name]
+  vlan_id    = try(local.vlan_own[0], local.vlan_free[0], null)
+}
+
 resource "ovh_cloud_project_network_private" "p9" {
   service_name = var.project_id
   name         = local.name
   regions      = ["GRA11"]
+  vlan_id      = local.vlan_id
+
+  lifecycle {
+    precondition {
+      condition     = local.vlan_id != null
+      error_message = "every VLAN id of 3000..3999 is taken in the project: clear leftover probe networks (task live:probe -- --cleanup <run-id>)."
+    }
+  }
 }
 
 resource "ovh_cloud_project_network_private_subnet" "p9" {
