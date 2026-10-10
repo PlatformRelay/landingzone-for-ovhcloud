@@ -60,6 +60,9 @@ func (f *checkS3) serve(rw http.ResponseWriter, r *http.Request) {
 		deny()
 	case who == "state" && (q.Has("versionId") || q.Has("policy") || q.Has("versioning")):
 		deny()
+	// T099: every version is locked (governance); the janitor deletes one only with the bypass.
+	case who == "janitor" && q.Has("versionId") && r.Header.Get("X-Amz-Bypass-Governance-Retention") != "true":
+		deny()
 	case r.Method == http.MethodPut && !q.Has("policy") && !q.Has("versioning"):
 		f.versions++
 		rw.Header().Set("X-Amz-Version-Id", fmt.Sprintf("v%d", f.versions))
@@ -135,8 +138,8 @@ func TestProbeEntryCheck(t *testing.T) {
 			Observations []map[string]any `json:"observations"`
 			Findings     []string         `json:"findings"`
 		}
-		if json.Unmarshal(raw, &rec) != nil || rec.Check != "state-backend-deny" || len(rec.Observations) != 7 || len(rec.Findings) != 0 {
-			t.Errorf("observations.json %s: want the state-backend check's seven observations, no finding", raw)
+		if json.Unmarshal(raw, &rec) != nil || rec.Check != "state-backend-deny" || len(rec.Observations) != 10 || len(rec.Findings) != 0 {
+			t.Errorf("observations.json %s: want the state-backend check's ten observations (T099), no finding", raw)
 		}
 		var who []string
 		for _, s := range f.seen {

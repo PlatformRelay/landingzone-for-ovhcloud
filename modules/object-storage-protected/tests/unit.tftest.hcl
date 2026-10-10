@@ -16,6 +16,8 @@ variables {
   project_id = "0123456789abcdef0123456789abcdef"
   region     = "GRA"
   name       = "lz-demo-bkt-state"
+  # T099: the component's default (components/state-backend `state_retention_days`).
+  retention_days = 7
   tags = {
     "lz:managed-by" = "opentofu"
     "lz:managed-in" = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/tenant-state/demo"
@@ -163,4 +165,129 @@ run "tags_null_value_rejected" {
   }
 
   expect_failures = [var.tags]
+}
+
+# T099 (D104): state history is protected by S3 Object Lock in governance mode. OVHcloud enables the
+# lock only at bucket creation (docs.ovhcloud.com storage-and-backup/object-storage/
+# s3-managing-object-lock.mdx:140, :153; provider cloud_project_storage.md:12-14), so it is part of
+# the bucket from the first apply; the default rule locks every new object version for
+# `retention_days` days (same guide :51, :160). Governance, not compliance: a holder of
+# s3:BypassGovernanceRetention (never a state user) can still empty the bucket (same guide :57-59).
+run "object_lock_governance_default" {
+  command = plan
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.status == "enabled"
+    error_message = "a state bucket is created with Object Lock enabled"
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.rule.mode == "governance"
+    error_message = "the default retention is in governance mode"
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.rule.period == "P7D"
+    error_message = "the default retention is retention_days days, as an ISO 8601 duration"
+  }
+}
+
+run "object_lock_output_is_the_bucket_s" {
+  command = plan
+
+  assert {
+    condition = output.object_lock == {
+      status = ovh_cloud_project_storage.this.object_lock.status
+      mode   = ovh_cloud_project_storage.this.object_lock.rule.mode
+      period = ovh_cloud_project_storage.this.object_lock.rule.period
+    } && output.object_lock.period == "P7D"
+    error_message = "output object_lock is the bucket's own lock configuration"
+  }
+}
+
+run "object_lock_period_follows_the_input" {
+  command = plan
+
+  variables {
+    retention_days = 30
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.rule.period == "P30D" && ovh_cloud_project_storage.this.object_lock.rule.mode == "governance"
+    error_message = "another retention is applied as given, still in governance mode"
+  }
+}
+
+# The mode is not an input: a run setting one (a test variable the module does not declare is
+# ignored) must not turn the lock into compliance mode or off.
+run "object_lock_mode_not_switchable" {
+  command = plan
+
+  variables {
+    object_lock_mode   = "compliance"
+    object_lock_status = "disabled"
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.status == "enabled" && ovh_cloud_project_storage.this.object_lock.rule.mode == "governance"
+    error_message = "Object Lock stays enabled in governance mode whatever the caller passes"
+  }
+}
+
+# Bounds: at least one day (same guide :51, "a minimum of one day"); at most 365 (the guide sets no
+# maximum; a longer retention is an owner decision, evidence/T099.md *Design* 2); whole days only.
+run "retention_one_day_admitted" {
+  command = plan
+
+  variables {
+    retention_days = 1
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.rule.period == "P1D"
+    error_message = "one day, the guide's minimum, is admitted"
+  }
+}
+
+run "retention_365_days_admitted" {
+  command = plan
+
+  variables {
+    retention_days = 365
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.this.object_lock.rule.period == "P365D"
+    error_message = "365 days, the upper bound, is admitted"
+  }
+}
+
+run "retention_zero_refused" {
+  command = plan
+
+  variables {
+    retention_days = 0
+  }
+
+  expect_failures = [var.retention_days]
+}
+
+run "retention_above_365_refused" {
+  command = plan
+
+  variables {
+    retention_days = 366
+  }
+
+  expect_failures = [var.retention_days]
+}
+
+run "retention_fraction_refused" {
+  command = plan
+
+  variables {
+    retention_days = 1.5
+  }
+
+  expect_failures = [var.retention_days]
 }

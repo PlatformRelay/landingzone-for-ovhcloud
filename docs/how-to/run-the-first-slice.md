@@ -17,7 +17,7 @@ references:
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
-    blob: 505fa76013639d16aa626b4c4700c356855be051
+    blob: d93b6e372b63e43365c0b0beb29049c714edacf9
 last_verified: 0472de1d3773a6363dcfca70ad6f9082d292f80a
 ---
 
@@ -157,6 +157,14 @@ On the first run, `identify` writes `account.env` and stops with exit 2, naming 
 run the same command again. `admin` checks that the `sandbox.env` credential works and that the
 admin client and policy match what is expected. `state` applies `account-bootstrap`, which
 creates the account state bucket or imports an existing one by name, and writes `state.env`.
+Every state bucket is created with S3 Object Lock, governance mode, 7 days by default
+(`components/state-backend` input `state_retention_days`, spec 005 T099). Object Lock can only be
+set when a bucket is created, so an existing bucket without it would have to be replaced
+(`terraform-provider-ovh/docs/resources/cloud_project_storage.md:12-14`), which `prevent_destroy`
+and the retained-resource guard refuse: such a bucket is not adopted, and a deployment whose state
+bucket was applied before this change can no longer plan it. Moving one to a new bucket (new
+bucket, state copied, old bucket removed by hand) is an owner decision; none existed when the lock
+was introduced (the account bootstrap had not been applied).
 `publish` and `verify` follow. A second run must report every phase after `guard` (which always
 reports `ran`) as `unchanged` (V009). The bootstrap has no run id and writes no run record: its
 `LZ-LIVE` lines are the record, so copy them into the evidence.
@@ -292,7 +300,12 @@ before that file is applied. It refuses (exit 3):
 
 **No verb tears down the retained instances.** The state buckets and the project carry
 `prevent_destroy`, and every verb refuses to delete them. Removing them is a manual Control
-Panel task outside this guide.
+Panel task outside this guide. A state bucket's object versions are locked in governance mode for
+its retention (7 days by default): until then only a credential holding
+`s3:BypassGovernanceRetention`, sending the `x-amz-bypass-governance-retention` header, can delete
+them; the state users cannot. No such credential is provisioned for the state buckets (only the
+probe's janitor holds one, for its own bucket): create a one-off S3 user with that permission on
+the bucket, and remove it afterwards, or wait for the retention to end.
 
 ## Read a run record
 
@@ -344,7 +357,7 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   ([probe run sheet](../../tests/live/probes/README.md#two-stage-runs-t010)). A failed tofu call's
   output is in the run record's `errors.txt`.
 - The `state-backend` probe's Deny check writes `observations.json` to the run record and empties
-  its bucket before the destroy; if it cannot, the root is kept and the error names the
+  its bucket (locked for a day, emptied with the governance bypass) before the destroy; if it cannot, the root is kept and the error names the
   `--cleanup <run-id>` that empties the bucket and destroys the root (row 7b of the
   [probe run sheet](../../tests/live/probes/README.md#runs)).
 - To look by hand (read only), use the API console or the `ovhcloud` subcommand of the kind,

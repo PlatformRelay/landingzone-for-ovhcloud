@@ -6,7 +6,8 @@ package live
 // store's gate stays GET, PUT and HEAD, and this checker is a separate client with its own gate: a
 // closed set of named S3 operations, each with its method and sub-resource fixed. A DELETE is only
 // DeleteObject on an object key (with an optional versionId) or DeleteBucketPolicy on `?policy`;
-// a bucket is never deleted. It shares the store's endpoint rule, name checks, SigV4 signer,
+// a bucket is never deleted. Only a versioned DeleteObject may carry the governance bypass header
+// (T099: the probe bucket is locked in governance mode). It shares the store's endpoint rule, name checks, SigV4 signer,
 // redirect refusal, size cap and quiet transport errors, and keeps of an answer only the status,
 // the S3 error code when it is well-formed, a well-formed x-amz-version-id and, for the two
 // listings its caller parses, the capped body; no error carries answer text or a key.
@@ -49,6 +50,11 @@ type S3Call struct {
 	Key       string // object operations only
 	VersionID string // DeleteObject only
 	Body      []byte // PutObject, PutBucketPolicy, PutBucketVersioning only
+	// Bypass sends `x-amz-bypass-governance-retention: true` (spec 005 T099): a versioned
+	// DeleteObject only, which then deletes a version locked in governance mode if the credential
+	// holds s3:BypassGovernanceRetention (docs.ovhcloud.com storage-and-backup/object-storage/
+	// s3-managing-object-lock.mdx:57-59, :241-255).
+	Bypass bool
 }
 
 // s3OpSpec fixes an operation's request: method, sub-resource (`?versions`, `?policy`,
@@ -135,6 +141,9 @@ func (c *S3Checker) Do(ctx context.Context, call S3Call) (S3Answer, error) {
 		}
 		q.Set("versionId", call.VersionID)
 	}
+	if call.Bypass && (call.Op != S3DeleteObject || call.VersionID == "") {
+		return S3Answer{}, fmt.Errorf("S3 check: %s with the governance bypass refused (a versioned DeleteObject only)", call.Op)
+	}
 	switch {
 	case spec.body && spec.sub != "" && len(call.Body) == 0:
 		return S3Answer{}, fmt.Errorf("S3 check: %s without a body", call.Op)
@@ -160,6 +169,9 @@ func (c *S3Checker) Do(ctx context.Context, call S3Call) (S3Answer, error) {
 	if spec.body && spec.sub != "" {
 		sum := md5.Sum(call.Body)
 		signed.Set("Content-Md5", base64.StdEncoding.EncodeToString(sum[:]))
+	}
+	if call.Bypass {
+		signed.Set("X-Amz-Bypass-Governance-Retention", "true")
 	}
 	for k, v := range signed {
 		if k != "Host" {

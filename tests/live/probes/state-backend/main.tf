@@ -16,6 +16,16 @@ resource "ovh_cloud_project_storage" "probe" {
   versioning = {
     status = "enabled"
   }
+  # T099 (D104): locked as a state bucket is (modules/object-storage-protected), for one day, the
+  # minimum (docs.ovhcloud.com storage-and-backup/object-storage/s3-managing-object-lock.mdx:51):
+  # the check observes the retention, and the janitor's bypass empties the bucket before the destroy.
+  object_lock = {
+    status = "enabled"
+    rule = {
+      mode   = "governance"
+      period = "P1D"
+    }
+  }
   tags = {
     "lz:run-id" = local.run_id
   }
@@ -74,7 +84,10 @@ resource "ovh_cloud_project_user_s3_policy" "probe" {
 # the state user's credential, then undoes its writes with the janitor's before the destroy. The
 # janitor exists only for that undo: the state user may not delete versions (if the Deny holds),
 # and the admin has no S3 key. Its policy allows every S3 action on the probe bucket only (`s3:*`
-# is an accepted pattern, tests/fixtures/ovhcloud/s3-policy-actions.json rule 2).
+# is an accepted pattern, tests/fixtures/ovhcloud/s3-policy-actions.json rule 2). T099: it also
+# names s3:BypassGovernanceRetention, the permission the guide names for deleting a version locked
+# in governance mode (s3-managing-object-lock.mdx:57-59, :241-255), since what `s3:*` matches is
+# UNVERIFIED (T094).
 resource "ovh_cloud_project_user" "janitor" {
   service_name = local.project.service_name
   description  = "lzprobe-state-janitor-${local.run_id}"
@@ -93,7 +106,7 @@ resource "ovh_cloud_project_user_s3_policy" "janitor" {
     Statement = [{
       Sid      = "ProbeStateBucketJanitor"
       Effect   = "Allow"
-      Action   = ["s3:*"]
+      Action   = ["s3:*", "s3:BypassGovernanceRetention"]
       Resource = ["arn:aws:s3:::${local.bucket}", "arn:aws:s3:::${local.bucket}/*"]
     }]
   })

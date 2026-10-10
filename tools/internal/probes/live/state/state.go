@@ -6,18 +6,21 @@
 // lz-live runs it on tests/live/probes/state-backend after the root's apply (live.ProbeCheck):
 //
 //   - Observe, with the state user's credential: two PUTs of one object (two versions), a GET, a
-//     DELETE of the older version by its versionId, a bucket-policy PUT, a versioning PUT
-//     (Suspended), a DELETE without versionId. Each answer is an observation: expected, observed
-//     (allowed = 2xx, refused = any other status), status, S3 error code. A refusal is as expected
-//     only with AccessDenied. An answer other than the expected one is a finding: recorded,
-//     listed and printed, never an error — an accepted versioned DELETE is the owner's to judge
-//     (ADR-0009). Observe fails only when a step could not run: no answer, or no two distinct
-//     version ids to address the older version by.
-//   - Undo, with the janitor's credential (`s3:*` on the probe bucket only): delete the bucket
-//     policy if one is set, enable versioning if it is not Enabled, delete every version and
-//     delete marker in the bucket, then list again; anything left is an error, and lz-live keeps
-//     the root for `--cleanup`. It needs nothing from Observe, so it also runs after an
-//     interrupted Observe and on a cleanup.
+//     DELETE of the older version by its versionId, the same with the governance bypass (T099), a
+//     bucket-policy PUT, a versioning PUT (Suspended), a DELETE without versionId; then, with the
+//     janitor's (T099), a DELETE of the newer version without and with the bypass: the bucket
+//     carries Object Lock in governance mode, so the first is refused while the retention holds
+//     and the second is allowed. Each answer is an observation: expected, observed (allowed = 2xx,
+//     refused = any other status), status, S3 error code. A refusal is as expected only with
+//     AccessDenied. An answer other than the expected one is a finding: recorded, listed and
+//     printed, never an error — an accepted versioned DELETE is the owner's to judge (ADR-0009).
+//     Observe fails only when a step could not run: no answer, or no two distinct version ids to
+//     address a version by.
+//   - Undo, with the janitor's credential (`s3:*` and s3:BypassGovernanceRetention on the probe
+//     bucket only): delete the bucket policy if one is set, enable versioning if it is not
+//     Enabled, delete every version and delete marker in the bucket with the governance bypass,
+//     then list again; anything left is an error, and lz-live keeps the root for `--cleanup`. It
+//     needs nothing from Observe, so it also runs after an interrupted Observe and on a cleanup.
 //
 // The credentials come from the root's sensitive output deny_check; lz-live has added them to its
 // redactor. Nothing here prints or records a key or the server's text: of an answer only the
@@ -93,6 +96,8 @@ const (
 	refused  = "refused"
 	notRun   = "not-run"
 	noAnswer = "no-answer"
+	// skipped: the step's version was already deleted by an earlier step of the run (review r1).
+	skipped = "skipped"
 )
 
 // s3 is the one method of live.S3Checker the check uses.
@@ -110,11 +115,11 @@ func Check(o Options) *live.ProbeCheck {
 			return err
 		},
 		Observe: func(ctx context.Context, env map[string]string, term io.Writer) ([]byte, error) {
-			st, _, err := o.open(env)
+			st, jan, err := o.open(env)
 			if err != nil {
 				return nil, err
 			}
-			rec, err := observe(ctx, st, env["bucket"], term)
+			rec, err := observe(ctx, map[string]s3{"state": st, "janitor": jan}, env["bucket"], term)
 			raw, jerr := json.Marshal(rec)
 			return raw, errors.Join(err, jerr)
 		},
@@ -159,16 +164,19 @@ func (o Options) open(env map[string]string) (state, janitor s3, err error) {
 	return state, janitor, nil
 }
 
-// step is one observation to make.
+// step is one observation to make: by whom (state or janitor), and which of the two written
+// versions its call addresses by id (0: none).
 type step struct {
 	name     string
+	who      string
 	call     live.S3Call
+	version  int
 	expected string
 }
 
-// observe makes the seven observations in order; every step runs (unless the context ended or the
+// observe makes the ten observations in order; every step runs (unless the context ended or the
 // step needs version ids it does not have), so one failure does not hide the others.
-func observe(ctx context.Context, st s3, bucket string, term io.Writer) (Record, error) {
+func observe(ctx context.Context, clients map[string]s3, bucket string, term io.Writer) (Record, error) {
 	rec := Record{Check: "state-backend-deny", Object: Object, Observations: []Observation{}, Findings: []string{}}
 	obj := func(op live.S3Op, body []byte) live.S3Call {
 		return live.S3Call{Op: op, Bucket: bucket, Key: Object, Body: body}
@@ -178,27 +186,42 @@ func observe(ctx context.Context, st s3, bucket string, term io.Writer) (Record,
 	policy := []byte(`{"Version":"2012-10-17","Statement":[{"Sid":"LzProbeHarmless","Effect":"Deny","Principal":"*","Action":"s3:PutBucketCORS","Resource":"arn:aws:s3:::` + bucket + `"}]}`)
 	suspend := []byte(`<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Suspended</Status></VersioningConfiguration>`)
 	var versions []string
+	deleted := map[int]bool{} // versions (1, 2) an allowed versioned DELETE of this run removed
 	var errs []error
+	bypass := obj(live.S3DeleteObject, nil)
+	bypass.Bypass = true
 	for _, s := range []step{
-		{"put-v1", obj(live.S3PutObject, []byte("lz-deny-check v1\n")), allowed},
-		{"put-v2", obj(live.S3PutObject, []byte("lz-deny-check v2\n")), allowed},
-		{"get", obj(live.S3GetObject, nil), allowed},
-		{"delete-older-version", obj(live.S3DeleteObject, nil), refused},
-		{"put-bucket-policy", live.S3Call{Op: live.S3PutBucketPolicy, Bucket: bucket, Body: policy}, refused},
-		{"suspend-versioning", live.S3Call{Op: live.S3PutBucketVersioning, Bucket: bucket, Body: suspend}, refused},
-		{"delete-current", obj(live.S3DeleteObject, nil), allowed},
+		{"put-v1", "state", obj(live.S3PutObject, []byte("lz-deny-check v1\n")), 0, allowed},
+		{"put-v2", "state", obj(live.S3PutObject, []byte("lz-deny-check v2\n")), 0, allowed},
+		{"get", "state", obj(live.S3GetObject, nil), 0, allowed},
+		{"delete-older-version", "state", obj(live.S3DeleteObject, nil), 1, refused},
+		// T099: the state user may not bypass the governance retention (its Deny on
+		// s3:BypassGovernanceRetention, and no grant of it).
+		{"delete-older-version-bypass", "state", bypass, 1, refused},
+		{"put-bucket-policy", "state", live.S3Call{Op: live.S3PutBucketPolicy, Bucket: bucket, Body: policy}, 0, refused},
+		{"suspend-versioning", "state", live.S3Call{Op: live.S3PutBucketVersioning, Bucket: bucket, Body: suspend}, 0, refused},
+		{"delete-current", "state", obj(live.S3DeleteObject, nil), 0, allowed},
+		// T099: the retention holds even for the janitor's `s3:*` unless it asks for the bypass,
+		// which it may (s3:BypassGovernanceRetention). The newer version, so that what the state
+		// user may have deleted does not decide these answers.
+		{"janitor-delete-locked", "janitor", obj(live.S3DeleteObject, nil), 2, refused},
+		{"janitor-delete-bypass", "janitor", bypass, 2, allowed},
 	} {
-		o := Observation{Step: s.name, Operation: string(s.call.Op), Credential: "state", Expected: s.expected, Observed: notRun}
+		o := Observation{Step: s.name, Operation: string(s.call.Op), Credential: s.who, Expected: s.expected, Observed: notRun}
 		switch {
 		case ctx.Err() != nil:
 			errs = append(errs, fmt.Errorf("%s: not run: %w", s.name, ctx.Err()))
-		case s.name == "delete-older-version" && (len(versions) != 2 || versions[0] == versions[1] || versions[0] == "null"):
+		case s.version > 0 && (len(versions) != 2 || versions[0] == versions[1] || slices.Contains(versions, "null")):
 			errs = append(errs, fmt.Errorf("%s: not run: the two PUTs answered no two distinct version ids (is the bucket versioned?)", s.name))
+		case s.version > 0 && deleted[s.version]:
+			// Review r1: an earlier step of this run deleted the version (the lock was not in force,
+			// itself a finding); a DELETE of it now would say nothing about the bypass.
+			o.Observed = skipped
 		default:
-			if s.name == "delete-older-version" {
-				s.call.VersionID = versions[0]
+			if s.version > 0 {
+				s.call.VersionID = versions[s.version-1]
 			}
-			a, err := st.Do(ctx, s.call)
+			a, err := clients[s.who].Do(ctx, s.call)
 			if err != nil {
 				o.Observed = noAnswer
 				errs = append(errs, fmt.Errorf("%s: %w", s.name, err))
@@ -209,6 +232,9 @@ func observe(ctx context.Context, st s3, bucket string, term io.Writer) (Record,
 				o.Observed = allowed
 				if s.call.Op == live.S3PutObject && a.VersionID != "" {
 					versions = append(versions, a.VersionID)
+				}
+				if s.version > 0 {
+					deleted[s.version] = true
 				}
 			}
 			o.AsExpected = o.Observed == s.expected && (s.expected != refused || a.Code == "AccessDenied")
@@ -315,7 +341,8 @@ func undo(ctx context.Context, jan s3, bucket string, term io.Writer) error {
 		return fmt.Errorf("undo: %d versions in the bucket, more than the check writes (%d); none deleted", len(entries), maxVersions)
 	}
 	for i, e := range entries {
-		d, err := jan.Do(ctx, live.S3Call{Op: live.S3DeleteObject, Bucket: bucket, Key: e.Key, VersionID: e.VersionID})
+		// T099: the probe bucket locks every version (governance): each DELETE asks for the bypass.
+		d, err := jan.Do(ctx, live.S3Call{Op: live.S3DeleteObject, Bucket: bucket, Key: e.Key, VersionID: e.VersionID, Bypass: true})
 		if err != nil {
 			// The key is the server's text, and the client's error names it: only the position.
 			return fmt.Errorf("undo: DeleteObject of listed version %d of %d: refused or no answer", i+1, len(entries))

@@ -22,9 +22,17 @@ import (
 
 // T096 against a fake S3 endpoint: a versioned bucket whose two users answer as the probe root's
 // policies say — the state user (the state-backend Allow and Deny statements) and the janitor
-// (`s3:*` on the bucket). Knobs turn the fake into the worlds the live run may meet: the Deny's
-// version pattern inert, bucket policies not implemented, a backend action refused, no version ids,
-// failures during the undo. No test calls the OVHcloud API or reads ~/.config/ovh-lz/.
+// (`s3:*` and s3:BypassGovernanceRetention on the bucket). Knobs turn the fake into the worlds the
+// live run may meet: the Deny's version pattern inert, bucket policies not implemented, a backend
+// action refused, no version ids, failures during the undo. No test calls the OVHcloud API or
+// reads ~/.config/ovh-lz/.
+//
+// T099: the bucket carries Object Lock with a default governance retention, as the probe root
+// creates it. A versioned DELETE of a locked version is refused 403 AccessDenied unless it carries
+// `x-amz-bypass-governance-retention: true` and its sender holds s3:BypassGovernanceRetention
+// (docs.ovhcloud.com storage-and-backup/object-storage/s3-managing-object-lock.mdx:57-59, :241-255,
+// :309-326); delete markers carry no retention. Knobs: the lock not in force, the state user able
+// to bypass, the janitor unable to.
 
 const (
 	stateAK   = "AKSTATEFAKE00001"
@@ -47,9 +55,11 @@ type version struct {
 	marker  bool
 }
 
-// seen is one request: who sent it, which operation, which version id.
+// seen is one request: who sent it, which operation, which version id, whether it asked for the
+// governance bypass.
 type seen struct {
 	who, op, versionID string
+	bypass             bool
 }
 
 type fakeBucket struct {
@@ -75,6 +85,9 @@ type fakeBucket struct {
 	wrongRoot             bool // the listing answer is well-formed XML of another kind (review r1)
 	versioningWrongRoot   bool // the versioning answer is well-formed XML of another kind
 	keepVersions          bool // DELETE of a version answers 204 and removes nothing
+	lockInert             bool // T099: Object Lock not in force (no lock, or retention ignored)
+	stateMayBypass        bool // T099: the state user's bypass is honoured (its Deny inert)
+	janitorMayNotBypass   bool // T099: the janitor's bypass is refused (its grant inert)
 }
 
 func newFakeBucket(t *testing.T) *fakeBucket {
@@ -149,7 +162,8 @@ func (f *fakeBucket) serve(rw http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.log = append(f.log, seen{who: who, op: op, versionID: q.Get("versionId")})
+	bypass := r.Header.Get("X-Amz-Bypass-Governance-Retention") == "true"
+	f.log = append(f.log, seen{who: who, op: op, versionID: q.Get("versionId"), bypass: bypass})
 	if who == "" || b != bucket || op == "" {
 		errorAnswer(rw, 403, "SignatureDoesNotMatch")
 		return
@@ -219,6 +233,13 @@ func (f *fakeBucket) serve(rw http.ResponseWriter, r *http.Request) {
 		errorAnswer(rw, 404, "NoSuchKey")
 	case "DeleteObject":
 		if v := q.Get("versionId"); v != "" {
+			// T099: a locked version (not a delete marker) goes only with an honoured bypass.
+			locked := !f.lockInert && slices.ContainsFunc(f.versions, func(x version) bool { return x.key == key && x.id == v && !x.marker })
+			mayBypass := who == "janitor" && !f.janitorMayNotBypass || who == "state" && f.stateMayBypass
+			if locked && !(bypass && mayBypass) {
+				errorAnswer(rw, 403, "AccessDenied")
+				return
+			}
 			if !f.keepVersions {
 				f.versions = slices.DeleteFunc(f.versions, func(x version) bool { return x.key == key && x.id == v })
 			}
@@ -323,6 +344,7 @@ type wantStep struct {
 	status                       int
 	code                         string
 	asExpected                   bool
+	credential                   string
 }
 
 func wantSteps(t *testing.T, got []Observation, want []wantStep) {
@@ -332,28 +354,35 @@ func wantSteps(t *testing.T, got []Observation, want []wantStep) {
 	}
 	for i, w := range want {
 		g := got[i]
-		if g.Step != w.name || g.Operation != w.op || g.Credential != "state" || g.Expected != w.expected || g.Observed != w.observed ||
+		if g.Step != w.name || g.Operation != w.op || g.Credential != w.credential || g.Expected != w.expected || g.Observed != w.observed ||
 			g.Status != w.status || g.Code != w.code || g.AsExpected != w.asExpected {
-			t.Errorf("observation %d = %+v, want %+v (credential state)", i, g, w)
+			t.Errorf("observation %d = %+v, want %+v", i, g, w)
 		}
 	}
 }
 
-// enforced is the expected record when OVHcloud enforces the Deny.
+// enforced is the expected record when OVHcloud enforces the Deny and the Object Lock (T099: the
+// state user is also refused the bypass; the janitor is refused a locked version without the
+// bypass and allowed it with).
 var enforced = []wantStep{
-	{"put-v1", "PutObject", "allowed", "allowed", 200, "", true},
-	{"put-v2", "PutObject", "allowed", "allowed", 200, "", true},
-	{"get", "GetObject", "allowed", "allowed", 200, "", true},
-	{"delete-older-version", "DeleteObject", "refused", "refused", 403, "AccessDenied", true},
-	{"put-bucket-policy", "PutBucketPolicy", "refused", "refused", 403, "AccessDenied", true},
-	{"suspend-versioning", "PutBucketVersioning", "refused", "refused", 403, "AccessDenied", true},
-	{"delete-current", "DeleteObject", "allowed", "allowed", 204, "", true},
+	{"put-v1", "PutObject", "allowed", "allowed", 200, "", true, "state"},
+	{"put-v2", "PutObject", "allowed", "allowed", 200, "", true, "state"},
+	{"get", "GetObject", "allowed", "allowed", 200, "", true, "state"},
+	{"delete-older-version", "DeleteObject", "refused", "refused", 403, "AccessDenied", true, "state"},
+	{"delete-older-version-bypass", "DeleteObject", "refused", "refused", 403, "AccessDenied", true, "state"},
+	{"put-bucket-policy", "PutBucketPolicy", "refused", "refused", 403, "AccessDenied", true, "state"},
+	{"suspend-versioning", "PutBucketVersioning", "refused", "refused", 403, "AccessDenied", true, "state"},
+	{"delete-current", "DeleteObject", "allowed", "allowed", 204, "", true, "state"},
+	{"janitor-delete-locked", "DeleteObject", "refused", "refused", 403, "AccessDenied", true, "janitor"},
+	{"janitor-delete-bypass", "DeleteObject", "allowed", "allowed", 204, "", true, "janitor"},
 }
 
-// TestObserveEnforced: the Deny enforced. The state user writes two versions of one object, reads
-// it, is refused the versioned DELETE of the older version, the bucket-policy PUT and the
-// versioning suspension, and deletes the object without a version id; every answer is recorded,
-// no finding; the writes are still there for Undo, which then empties the bucket.
+// TestObserveEnforced: the Deny and the Object Lock enforced. The state user writes two versions
+// of one object, reads it, is refused the versioned DELETE of the older version (with and without
+// the governance bypass), the bucket-policy PUT and the versioning suspension, and deletes the
+// object without a version id; then the janitor is refused the newer version without the bypass
+// (retention holds even for `s3:*`) and deletes it with the bypass. Every answer is recorded, no
+// finding; the rest is still there for Undo, which then empties the bucket with the bypass.
 func TestObserveEnforced(t *testing.T) {
 	f := newFakeBucket(t)
 	rec, raw, term, err := runObserve(t, f, testEnv())
@@ -365,21 +394,25 @@ func TestObserveEnforced(t *testing.T) {
 	}
 	wantSteps(t, rec.Observations, enforced)
 	reqs := f.requests()
-	var ops []string
+	var got []seen
 	for _, r := range reqs {
-		if r.who != "state" {
-			t.Errorf("Observe sent %s with the %s credential, want the state user's only", r.op, r.who)
-		}
-		ops = append(ops, r.op)
+		got = append(got, seen{who: r.who, op: r.op, versionID: r.versionID, bypass: r.bypass})
 	}
-	if want := []string{"PutObject", "PutObject", "GetObject", "DeleteObject", "PutBucketPolicy", "PutBucketVersioning", "DeleteObject"}; !slices.Equal(ops, want) {
-		t.Errorf("requests %v, want %v", ops, want)
+	// The versioned DELETEs of the state user name the older version (the first PUT's id), the
+	// janitor's the newer one (the second PUT's), so that what the state user may have deleted does
+	// not decide the janitor's answers; delete-current names none. Only the two *-bypass steps ask
+	// for the bypass.
+	want := []seen{
+		{"state", "PutObject", "", false}, {"state", "PutObject", "", false}, {"state", "GetObject", "", false},
+		{"state", "DeleteObject", "v001.x+y/z=", false}, {"state", "DeleteObject", "v001.x+y/z=", true},
+		{"state", "PutBucketPolicy", "", false}, {"state", "PutBucketVersioning", "", false}, {"state", "DeleteObject", "", false},
+		{"janitor", "DeleteObject", "v002.x+y/z=", false}, {"janitor", "DeleteObject", "v002.x+y/z=", true},
 	}
-	// The versioned DELETE names the older version (the first PUT's id), the last DELETE none.
-	if len(reqs) == 7 && (reqs[3].versionID != "v001.x+y/z=" || reqs[6].versionID != "") {
-		t.Errorf("DELETE version ids %q and %q, want the first PUT's (v001.x+y/z=) and none", reqs[3].versionID, reqs[6].versionID)
+	if !slices.Equal(got, want) {
+		t.Errorf("requests\n%v\nwant\n%v", got, want)
 	}
-	for _, line := range []string{"LZ-LIVE observe delete-older-version refused 403 AccessDenied", "LZ-LIVE observe put-v1 allowed 200"} {
+	for _, line := range []string{"LZ-LIVE observe delete-older-version refused 403 AccessDenied", "LZ-LIVE observe put-v1 allowed 200",
+		"LZ-LIVE observe janitor-delete-bypass allowed 204"} {
 		if !strings.Contains(term, line) {
 			t.Errorf("terminal lacks %q:\n%s", line, term)
 		}
@@ -389,8 +422,8 @@ func TestObserveEnforced(t *testing.T) {
 	}
 	noLeak(t, "record", string(raw))
 	noLeak(t, "terminal", term)
-	if vs, _, _ := f.state(); len(vs) != 3 {
-		t.Errorf("after Observe the bucket holds %v, want two versions and a delete marker (Undo removes them)", vs)
+	if vs, _, _ := f.state(); len(vs) != 2 || vs[0].id != "v001.x+y/z=" || !vs[1].marker {
+		t.Errorf("after Observe the bucket holds %v, want the older version and a delete marker (Undo removes them)", vs)
 	}
 
 	before := len(f.requests())
@@ -406,8 +439,12 @@ func TestObserveEnforced(t *testing.T) {
 		if r.who != "janitor" {
 			t.Errorf("Undo sent %s with the %s credential, want the janitor's only", r.op, r.who)
 		}
+		// T099: every version Undo deletes may be locked: each DELETE asks for the bypass.
+		if r.op == "DeleteObject" && (r.versionID == "" || !r.bypass) {
+			t.Errorf("Undo's DeleteObject (version %q, bypass %v): want a version id and the governance bypass", r.versionID, r.bypass)
+		}
 	}
-	if !strings.Contains(uterm, "LZ-LIVE undo removed 3 versions; bucket empty") {
+	if !strings.Contains(uterm, "LZ-LIVE undo removed 2 versions; bucket empty") {
 		t.Errorf("undo terminal %q, want the count and the empty bucket", uterm)
 	}
 	noLeak(t, "undo terminal", uterm)
@@ -416,27 +453,50 @@ func TestObserveEnforced(t *testing.T) {
 // TestObserveFindings: an answer other than the expected one is a finding — recorded, listed,
 // printed — and not an error: the run reports it to the owner (ADR-0009) instead of failing.
 func TestObserveFindings(t *testing.T) {
+	// T099: the worlds of the lock. With the Deny inert (T010 run 20261010T201153Z-ffbf) the lock
+	// alone refuses the state user's versioned DELETE: no finding. Without the lock in force, the
+	// versioned DELETEs go through: findings. A bypass honoured for the state user, or refused for
+	// the janitor: findings (the latter also leaves Undo unable to empty the bucket).
+	allowedState := func(name string) wantStep {
+		return wantStep{name, "DeleteObject", "refused", "allowed", 204, "", false, "state"}
+	}
 	cases := []struct {
-		name     string
-		knob     func(*fakeBucket)
-		step     int
-		observed wantStep
-		finding  string
+		name      string
+		knob      func(*fakeBucket)
+		steps     map[int]wantStep
+		findings  []string
+		undoFails bool
 	}{
-		{"deny-inert", func(f *fakeBucket) { f.denyInert = true }, 3,
-			wantStep{"delete-older-version", "DeleteObject", "refused", "allowed", 204, "", false}, "delete-older-version"},
-		{"policy-not-implemented", func(f *fakeBucket) { f.policyNotImplemented = true }, 4,
-			wantStep{"put-bucket-policy", "PutBucketPolicy", "refused", "refused", 501, "NotImplemented", false}, "put-bucket-policy"},
-		{"policy-accepted", func(f *fakeBucket) { f.stateMayPutPolicy = true }, 4,
-			wantStep{"put-bucket-policy", "PutBucketPolicy", "refused", "allowed", 204, "", false}, "put-bucket-policy"},
-		{"versioning-suspended", func(f *fakeBucket) { f.stateMaySetVersioning = true }, 5,
-			wantStep{"suspend-versioning", "PutBucketVersioning", "refused", "allowed", 200, "", false}, "suspend-versioning"},
-		{"versioning-refused-otherwise", func(f *fakeBucket) { f.fail["state PutBucketVersioning"] = 500 }, 5,
-			wantStep{"suspend-versioning", "PutBucketVersioning", "refused", "refused", 500, "InternalError", false}, "suspend-versioning"},
-		{"get-refused", func(f *fakeBucket) { f.refuse["state GetObject"] = 403 }, 2,
-			wantStep{"get", "GetObject", "allowed", "refused", 403, "AccessDenied", false}, "get"},
-		{"delete-current-refused", func(f *fakeBucket) { f.refuse["state DeleteObject"] = 403; f.denyInert = true }, 6,
-			wantStep{"delete-current", "DeleteObject", "allowed", "refused", 403, "AccessDenied", false}, "delete-current"},
+		{"deny-inert-lock-holds", func(f *fakeBucket) { f.denyInert = true }, nil, nil, false},
+		// Review r1: a bypass step whose version an earlier step of the run already deleted says
+		// nothing about the bypass: skipped (no request, no finding, no error), not a finding.
+		{"lock-inert", func(f *fakeBucket) { f.lockInert = true; f.denyInert = true },
+			map[int]wantStep{3: allowedState("delete-older-version"), 4: {"delete-older-version-bypass", "DeleteObject", "refused", "skipped", 0, "", false, "state"},
+				8: {"janitor-delete-locked", "DeleteObject", "refused", "allowed", 204, "", false, "janitor"},
+				9: {"janitor-delete-bypass", "DeleteObject", "allowed", "skipped", 0, "", false, "janitor"}},
+			[]string{"delete-older-version", "janitor-delete-locked"}, false},
+		{"lock-inert-deny-holds", func(f *fakeBucket) { f.lockInert = true },
+			map[int]wantStep{8: {"janitor-delete-locked", "DeleteObject", "refused", "allowed", 204, "", false, "janitor"},
+				9: {"janitor-delete-bypass", "DeleteObject", "allowed", "skipped", 0, "", false, "janitor"}},
+			[]string{"janitor-delete-locked"}, false},
+		{"state-may-bypass", func(f *fakeBucket) { f.denyInert = true; f.stateMayBypass = true },
+			map[int]wantStep{4: allowedState("delete-older-version-bypass")}, []string{"delete-older-version-bypass"}, false},
+		{"janitor-may-not-bypass", func(f *fakeBucket) { f.janitorMayNotBypass = true },
+			map[int]wantStep{9: {"janitor-delete-bypass", "DeleteObject", "allowed", "refused", 403, "AccessDenied", false, "janitor"}},
+			[]string{"janitor-delete-bypass"}, true},
+		{"policy-not-implemented", func(f *fakeBucket) { f.policyNotImplemented = true },
+			map[int]wantStep{5: {"put-bucket-policy", "PutBucketPolicy", "refused", "refused", 501, "NotImplemented", false, "state"}}, []string{"put-bucket-policy"}, false},
+		{"policy-accepted", func(f *fakeBucket) { f.stateMayPutPolicy = true },
+			map[int]wantStep{5: {"put-bucket-policy", "PutBucketPolicy", "refused", "allowed", 204, "", false, "state"}}, []string{"put-bucket-policy"}, false},
+		{"versioning-suspended", func(f *fakeBucket) { f.stateMaySetVersioning = true },
+			map[int]wantStep{6: {"suspend-versioning", "PutBucketVersioning", "refused", "allowed", 200, "", false, "state"}}, []string{"suspend-versioning"}, false},
+		{"versioning-refused-otherwise", func(f *fakeBucket) { f.fail["state PutBucketVersioning"] = 500 },
+			map[int]wantStep{6: {"suspend-versioning", "PutBucketVersioning", "refused", "refused", 500, "InternalError", false, "state"}}, []string{"suspend-versioning"}, false},
+		{"get-refused", func(f *fakeBucket) { f.refuse["state GetObject"] = 403 },
+			map[int]wantStep{2: {"get", "GetObject", "allowed", "refused", 403, "AccessDenied", false, "state"}}, []string{"get"}, false},
+		// A refused DeleteObject with no version id refuses the versioned ones too in this world.
+		{"delete-current-refused", func(f *fakeBucket) { f.refuse["state DeleteObject"] = 403; f.denyInert = true },
+			map[int]wantStep{7: {"delete-current", "DeleteObject", "allowed", "refused", 403, "AccessDenied", false, "state"}}, []string{"delete-current"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -447,17 +507,32 @@ func TestObserveFindings(t *testing.T) {
 				t.Fatalf("Observe: %v (a finding is no error)", err)
 			}
 			want := slices.Clone(enforced)
-			want[c.step] = c.observed
-			// A refused DeleteObject with no version id refuses the versioned one too in this world.
-			if c.name == "delete-current-refused" {
-				want[3] = wantStep{"delete-older-version", "DeleteObject", "refused", "refused", 403, "AccessDenied", true}
+			for i, s := range c.steps {
+				want[i] = s
 			}
 			wantSteps(t, rec.Observations, want)
-			if !slices.Equal(rec.Findings, []string{c.finding}) {
-				t.Errorf("findings %v, want [%s]", rec.Findings, c.finding)
+			skipped := 0
+			for _, w := range want {
+				if w.observed == "skipped" {
+					skipped++
+					if !strings.Contains(term, "LZ-LIVE observe "+w.name+" skipped") {
+						t.Errorf("terminal does not report %s skipped:\n%s", w.name, term)
+					}
+				}
 			}
-			if !strings.Contains(term, "LZ-LIVE finding "+c.finding) {
-				t.Errorf("terminal does not report the finding %s:\n%s", c.finding, term)
+			if n := len(f.requests()); n != len(want)-skipped {
+				t.Errorf("%d requests, want %d (a skipped step sends none)", n, len(want)-skipped)
+			}
+			if !slices.Equal(rec.Findings, append([]string{}, c.findings...)) {
+				t.Errorf("findings %v, want %v", rec.Findings, c.findings)
+			}
+			for _, fd := range c.findings {
+				if !strings.Contains(term, "LZ-LIVE finding "+fd+":") {
+					t.Errorf("terminal does not report the finding %s:\n%s", fd, term)
+				}
+			}
+			if len(c.findings) == 0 && strings.Contains(term, "LZ-LIVE finding") {
+				t.Errorf("terminal reports a finding:\n%s", term)
 			}
 			noLeak(t, "record", string(raw))
 			noLeak(t, "terminal", term)
@@ -470,15 +545,38 @@ func TestObserveFindings(t *testing.T) {
 				!strings.Contains(string(policy), `"Resource":"arn:aws:s3:::`+bucket+`"`)) {
 				t.Errorf("bucket policy %s: want a Deny on the probe bucket that grants nothing", policy)
 			}
-			// Whatever the state user changed, Undo restores: no policy, versioning Enabled, empty.
-			if _, err := runUndo(t, f, testEnv()); err != nil {
-				t.Fatalf("Undo: %v", err)
+			// Whatever the state user changed, Undo restores: no policy, versioning Enabled, empty —
+			// unless the janitor's bypass is refused: then a locked version stays and Undo fails.
+			_, uerr := runUndo(t, f, testEnv())
+			if c.undoFails {
+				if uerr == nil {
+					t.Fatal("Undo passed although a locked version could not be deleted")
+				}
+				return
+			}
+			if uerr != nil {
+				t.Fatalf("Undo: %v", uerr)
 			}
 			if vs, policy, versioning := f.state(); len(vs) != 0 || policy != nil || versioning != "Enabled" {
 				t.Errorf("after Undo: versions %v, policy %q, versioning %s", vs, policy, versioning)
 			}
 		})
 	}
+}
+
+// versionSteps: the four steps that address a version by its id (T099: two of them the janitor's),
+// each observed as given.
+func versionSteps(observed string) map[string]string {
+	m := map[string]string{}
+	for _, s := range []string{"delete-older-version", "delete-older-version-bypass", "janitor-delete-locked", "janitor-delete-bypass"} {
+		m[s] = observed
+	}
+	return m
+}
+
+func with(a, b map[string]string) map[string]string {
+	maps.Copy(a, b)
+	return a
 }
 
 // TestObserveIncomplete: a step that cannot run (no version to delete, no answer) is recorded
@@ -492,16 +590,16 @@ func TestObserveIncomplete(t *testing.T) {
 		errHas  string
 		minReqs int
 	}{
-		{"no-version-ids", func(f *fakeBucket) { f.noVersionIDs = true },
-			map[string]string{"delete-older-version": "not-run"}, "delete-older-version", 6},
-		{"bucket-not-versioned", func(f *fakeBucket) { f.versioning = "Suspended" },
-			map[string]string{"delete-older-version": "not-run"}, "delete-older-version", 6},
-		{"one-version-id", func(f *fakeBucket) { f.sameVersionID = true },
-			map[string]string{"delete-older-version": "not-run"}, "delete-older-version", 6},
+		{"no-version-ids", func(f *fakeBucket) { f.noVersionIDs = true }, versionSteps("not-run"), "delete-older-version", 6},
+		{"bucket-not-versioned", func(f *fakeBucket) { f.versioning = "Suspended" }, versionSteps("not-run"), "delete-older-version", 6},
+		{"one-version-id", func(f *fakeBucket) { f.sameVersionID = true }, versionSteps("not-run"), "delete-older-version", 6},
 		{"put-refused", func(f *fakeBucket) { f.refuse["state PutObject"] = 403 },
-			map[string]string{"put-v1": "refused", "put-v2": "refused", "delete-older-version": "not-run"}, "delete-older-version", 6},
+			with(versionSteps("not-run"), map[string]string{"put-v1": "refused", "put-v2": "refused"}), "delete-older-version", 6},
 		{"hang-up", func(f *fakeBucket) { f.hangup["state PutBucketPolicy"] = true },
-			map[string]string{"put-bucket-policy": "no-answer"}, "put-bucket-policy", 7},
+			map[string]string{"put-bucket-policy": "no-answer"}, "put-bucket-policy", 10},
+		// T099: the janitor's steps run with their own credential and fail on their own.
+		{"janitor-hang-up", func(f *fakeBucket) { f.hangup["janitor DeleteObject"] = true },
+			map[string]string{"janitor-delete-locked": "no-answer", "janitor-delete-bypass": "no-answer"}, "janitor-delete-bypass", 10},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -564,15 +662,30 @@ func TestUndo(t *testing.T) {
 		if vs, _, _ := f.state(); len(vs) != 0 {
 			t.Errorf("after Undo %v remain; the probe bucket must be empty", vs)
 		}
+		// T099: locked versions (the fake locks every version) go only with the bypass, on each.
+		n := 0
+		for _, r := range f.requests() {
+			if r.op == "DeleteObject" {
+				n++
+				if !r.bypass || r.who != "janitor" {
+					t.Errorf("DeleteObject of version %q by %s, bypass %v: want the janitor with the bypass", r.versionID, r.who, r.bypass)
+				}
+			}
+		}
+		if n != 3 {
+			t.Errorf("%d DeleteObject, want 3", n)
+		}
 	})
 	failing := map[string]func(*fakeBucket){
-		"delete-fails":          func(f *fakeBucket) { f.fail["janitor DeleteObject"] = 500 },
-		"delete-refused":        func(f *fakeBucket) { f.refuse["janitor DeleteObject"] = 403 },
-		"versions-remain":       func(f *fakeBucket) { f.keepVersions = true },
-		"listing-truncated":     func(f *fakeBucket) { f.truncated = true },
-		"listing-garbage":       func(f *fakeBucket) { f.garbage = true },
-		"listing-wrong-root":    func(f *fakeBucket) { f.wrongRoot = true },
-		"versioning-wrong-root": func(f *fakeBucket) { f.versioningWrongRoot = true },
+		// T099: the janitor's bypass refused: the locked version stays, the DELETE is named.
+		"delete-locked-bypass-refused": func(f *fakeBucket) { f.janitorMayNotBypass = true },
+		"delete-fails":                 func(f *fakeBucket) { f.fail["janitor DeleteObject"] = 500 },
+		"delete-refused":               func(f *fakeBucket) { f.refuse["janitor DeleteObject"] = 403 },
+		"versions-remain":              func(f *fakeBucket) { f.keepVersions = true },
+		"listing-truncated":            func(f *fakeBucket) { f.truncated = true },
+		"listing-garbage":              func(f *fakeBucket) { f.garbage = true },
+		"listing-wrong-root":           func(f *fakeBucket) { f.wrongRoot = true },
+		"versioning-wrong-root":        func(f *fakeBucket) { f.versioningWrongRoot = true },
 		// Review r1: a listed entry without a version id would only add a delete marker.
 		"entry-without-version": func(f *fakeBucket) { f.versions = append(f.versions, version{key: Object, id: ""}) },
 		// Review r1: listed keys are the server's text; no error may carry them.
