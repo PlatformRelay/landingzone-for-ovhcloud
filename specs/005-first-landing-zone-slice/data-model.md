@@ -85,6 +85,16 @@ Rules (FR-006):
   tenant, an environment of one tenant or a region of one environment named twice, and one project
   ref on two environments (two `project` stacks would own one project), are `DUPLICATE_NAME`. Every other string has a pattern or an enum in the schema; the decoder applies
   the same rules.
+- Network rows (T098): `vlan_id` is required, an integer from 0 to 4000 (the API admits 0..4095,
+  0 meaning no VLAN, `cloud.ProjectNetworkPrivateCreation.vlanId`; the Control Panel 0..4000, vRack
+  guide), else `INVALID_VALUE`. A project holds one private network per VLAN id (T010: 400 `A
+  private network already exists for this vlan ID`), so two networks of one environment with one
+  id are `DUPLICATE_VLAN`; other environments own other projects and may repeat it. A region
+  without a network row holds none. The check is per environment because an environment owns one
+  project and, with `network/island`, one vRack; two refs resolving to one project id are not
+  seen here, and a shared vRack (`account-fabric`) would need it per vRack (UNVERIFIED whether
+  VLAN ids are scoped per vRack). The live probes take 2000..3999 in the state project, skipping
+  ids its networks already hold.
 - Scope per stage (table below): account stages forbid `tenant/environment/region`; account-tenant
   (`tenant-state`) requires `tenant` and forbids the others; `project` requires `tenant, environment`,
   forbids `region`; regional stages require all three. Named tenants, environments and regions must

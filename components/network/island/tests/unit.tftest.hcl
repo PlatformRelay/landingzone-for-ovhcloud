@@ -69,6 +69,7 @@ variables {
   project_id      = "0123456789abcdef0123456789abcdef"
   project_regions = ["GRA11"]
   cidr            = "10.20.0.0/24"
+  vlan_id         = 10
 }
 
 run "one_network_in_the_given_region_and_project" {
@@ -85,8 +86,8 @@ run "one_network_in_the_given_region_and_project" {
   }
 
   assert {
-    condition     = output.vlan_id == 0 && try(module.network.vlan_id, null) == 0
-    error_message = "vlan_id defaults to 0"
+    condition     = output.vlan_id == 10 && try(module.network.vlan_id, null) == 10
+    error_message = "the network carries the given vlan_id"
   }
 }
 
@@ -250,6 +251,39 @@ run "cidr_whole_192_168_admitted" {
   }
 }
 
+# VLAN id range (T098): a project holds one private network per VLAN id (T010 run
+# 20261010T184645Z-f7de: 400 `A private network already exists for this vlan ID`), so the id is
+# required and bounded to 0..4000: the API admits 0..4095, 0 meaning no VLAN
+# (cloud.json `cloud.ProjectNetworkPrivateCreation.vlanId`), the Control Panel 0..4000 (vRack
+# guide, public-cloud/network-services/vrack.mdx). Both ends are admitted; one past either end and
+# a fraction are refused.
+
+run "vlan_id_zero_admitted" {
+  command = plan
+
+  variables {
+    vlan_id = 0
+  }
+
+  assert {
+    condition     = try(module.network.vlan_id, null) == 0
+    error_message = "VLAN id 0 (the lower bound) is admitted and reaches the network"
+  }
+}
+
+run "vlan_id_4000_admitted" {
+  command = plan
+
+  variables {
+    vlan_id = 4000
+  }
+
+  assert {
+    condition     = try(module.network.vlan_id, null) == 4000
+    error_message = "VLAN id 4000 (the upper bound) is admitted and reaches the network"
+  }
+}
+
 # Refusals, last.
 
 run "region_outside_the_project_regions_rejected" {
@@ -394,4 +428,34 @@ run "cidr_whole_10_slash8_rejected" {
   }
 
   expect_failures = [var.cidr]
+}
+
+run "vlan_id_negative_rejected" {
+  command = plan
+
+  variables {
+    vlan_id = -1
+  }
+
+  expect_failures = [var.vlan_id]
+}
+
+run "vlan_id_past_4000_rejected" {
+  command = plan
+
+  variables {
+    vlan_id = 4001
+  }
+
+  expect_failures = [var.vlan_id]
+}
+
+run "vlan_id_fraction_rejected" {
+  command = plan
+
+  variables {
+    vlan_id = 1.5
+  }
+
+  expect_failures = [var.vlan_id]
 }

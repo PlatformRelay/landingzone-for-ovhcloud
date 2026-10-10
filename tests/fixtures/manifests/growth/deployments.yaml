@@ -1,5 +1,7 @@
 # Growth manifest fixture (005 T033, SC-002): two tenants x two environments x two regions, and
 # two runtime slots (blue, green) in demo/dev/GRA11. spec.scope is absent: platform is the default.
+# VLAN ids differ between the regions of one environment (one project, T098) and repeat across
+# environments (other projects).
 {
   "apiVersion": "lz.platformrelay.dev/v1alpha1",
   "kind": "Deployments",
@@ -22,7 +24,7 @@
             "project": {"mode": "adopt", "ref": "DEMO_DEV"},
             "regions": [
               {"name": "GRA11", "network": {"cidr": "10.20.0.0/24", "vlan_id": 0}},
-              {"name": "SBG5", "network": {"cidr": "10.20.1.0/24", "vlan_id": 0}}
+              {"name": "SBG5", "network": {"cidr": "10.20.1.0/24", "vlan_id": 1}}
             ]
           },
           {
@@ -30,7 +32,7 @@
             "project": {"mode": "reference", "ref": "DEMO_PROD"},
             "regions": [
               {"name": "GRA11", "network": {"cidr": "10.21.0.0/24", "vlan_id": 0}},
-              {"name": "SBG5", "network": {"cidr": "10.21.1.0/24", "vlan_id": 0}}
+              {"name": "SBG5", "network": {"cidr": "10.21.1.0/24", "vlan_id": 1}}
             ]
           }
         ]
@@ -43,7 +45,7 @@
             "project": {"mode": "adopt", "ref": "SHOP_DEV"},
             "regions": [
               {"name": "GRA11", "network": {"cidr": "10.30.0.0/24", "vlan_id": 0}},
-              {"name": "SBG5", "network": {"cidr": "10.30.1.0/24", "vlan_id": 0}}
+              {"name": "SBG5", "network": {"cidr": "10.30.1.0/24", "vlan_id": 1}}
             ]
           },
           {
@@ -51,7 +53,7 @@
             "project": {"mode": "adopt", "ref": "SHOP_PROD"},
             "regions": [
               {"name": "GRA11", "network": {"cidr": "10.31.0.0/24", "vlan_id": 0}},
-              {"name": "SBG5", "network": {"cidr": "10.31.1.0/24", "vlan_id": 0}}
+              {"name": "SBG5", "network": {"cidr": "10.31.1.0/24", "vlan_id": 1}}
             ]
           }
         ]

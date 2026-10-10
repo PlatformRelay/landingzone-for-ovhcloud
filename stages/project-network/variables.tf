@@ -50,10 +50,10 @@ variable "project" {
 }
 
 variable "network" {
-  description = "The region's network row (`spec.tenants[].environments[].regions[].network`): IPv4 `cidr` of the subnet and `vlan_id` (default 0)."
+  description = "The region's network row (`spec.tenants[].environments[].regions[].network`): IPv4 `cidr` of the subnet and `vlan_id`, required, 0..4000, distinct per project."
   type = object({
     cidr    = string
-    vlan_id = optional(number, 0)
+    vlan_id = optional(number)
   })
   nullable = false
 
@@ -70,5 +70,14 @@ variable "network" {
   validation {
     condition     = try(anytrue([for b in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] : cidrcontains(b, var.network.cidr)]), false)
     error_message = "network.cidr must lie inside one RFC 1918 block (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)."
+  }
+
+  # T098: the row's vlan_id is required (a project holds one private network per VLAN id; the
+  # manifest decoder refuses a repeat within an environment, DUPLICATE_VLAN) and bounded to 0..4000
+  # as in modules/private-network. `optional` without a default only so that a row without it is
+  # refused here with this message rather than by type conversion.
+  validation {
+    condition     = try(var.network.vlan_id >= 0 && var.network.vlan_id <= 4000 && floor(var.network.vlan_id) == var.network.vlan_id, false)
+    error_message = "network.vlan_id is required: a whole number from 0 to 4000."
   }
 }

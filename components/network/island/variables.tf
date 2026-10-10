@@ -75,9 +75,18 @@ variable "cidr" {
   }
 }
 
+# A project holds one private network per VLAN id (T098; T010 run 20261010T184645Z-f7de: 400
+# `A private network already exists for this vlan ID`), so the id is required: a default would give
+# every network that omits it the same id. Bounds 0..4000: the API admits 0..4095, 0 meaning no
+# VLAN (API schema cloud.ProjectNetworkPrivateCreation.vlanId), the Control Panel 0..4000 (vRack
+# guide); the narrower holds. That the API refuses 4001..4095 is UNVERIFIED.
 variable "vlan_id" {
-  description = "VLAN id of the network (`regions[].network.vlan_id`, default 0)."
+  description = "VLAN id of the network (`regions[].network.vlan_id`), 0..4000, distinct per project."
   type        = number
-  default     = 0
   nullable    = false
+
+  validation {
+    condition     = var.vlan_id >= 0 && var.vlan_id <= 4000 && floor(var.vlan_id) == var.vlan_id
+    error_message = "vlan_id must be a whole number from 0 to 4000."
+  }
 }

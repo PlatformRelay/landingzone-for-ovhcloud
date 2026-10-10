@@ -55,7 +55,7 @@ const (
 // Refusal codes of DecodeManifest. When a document breaks several rules, the code of the first
 // group in this order is reported: decoding (syntax, duplicate key, unknown or missing field,
 // then a JSON type mismatch as INVALID_VALUE; keys in sorted order, so the code is stable),
-// header, values (value rules, then duplicate names), per-row rules (stage not implemented, slot,
+// header, values (value rules, then duplicate names and VLAN ids in document order), per-row rules (stage not implemented, slot,
 // scope), duplicate id, duplicate scope, composition (platform rows, tenant-state, tenant scope),
 // producers, shared state project.
 const (
@@ -81,6 +81,20 @@ const (
 // region of one environment named twice in spec.tenants, or one project ref on two environments
 // (two project stacks would own one project).
 const CodeDuplicateName = "DUPLICATE_NAME"
+
+// CodeDuplicateVLAN belongs to the values group: two region networks of one environment with one
+// VLAN id. An environment owns one project, and a project holds one private network per VLAN id
+// (T098; T010 run 20261010T184645Z-f7de: 400 `A private network already exists for this vlan ID`).
+const CodeDuplicateVLAN = "DUPLICATE_VLAN"
+
+// VLAN id bounds of a network row: the API admits 0..4095, 0 meaning no VLAN (API schema
+// cloud.ProjectNetworkPrivateCreation.vlanId), the Control Panel 0..4000 (vRack guide,
+// public-cloud/network-services/vrack.mdx); the narrower holds (T098). modules/private-network,
+// components/network/island and stages/project-network apply the same bounds.
+const (
+	VLANIDMin = 0
+	VLANIDMax = 4000
+)
 
 // ManifestError is the error of a refused manifest; Code is one of the Code constants.
 type ManifestError struct {
@@ -303,6 +317,12 @@ var manifestRules = func() map[string]valueRule {
 	return rules
 }()
 
+// manifestRanges holds the inclusive range of every number in the document, keyed as manifestRules;
+// the schema carries the same `minimum` and `maximum`.
+var manifestRanges = map[string][2]int{
+	"spec.tenants[].environments[].regions[].network.vlan_id": {VLANIDMin, VLANIDMax},
+}
+
 // rulePatterns are manifestRules' patterns, compiled once.
 var rulePatterns = func() map[string]*regexp.Regexp {
 	compiled := map[string]*regexp.Regexp{}
@@ -346,8 +366,9 @@ func decodeError(err error) error {
 	return refuseManifest(CodeManifestSyntax, "%s", msg)
 }
 
-// checkValues applies manifestRules to every string of the decoded document, in a fixed order.
-// A string without a rule outside the header is refused: no free-form string crosses the boundary.
+// checkValues applies manifestRules to every string and manifestRanges to every number of the
+// decoded document, in a fixed order. A string without a rule outside the header, or a number
+// without a range, is refused: no free-form value crosses the boundary.
 func checkValues(v any, path string) error {
 	switch v := v.(type) {
 	case map[string]any:
@@ -383,6 +404,14 @@ func checkValues(v any, path string) error {
 			return refuseManifest(CodeInvalidValue, "%s: %q is not one of %s", path, v, strings.Join(rule.Enum, ", "))
 		case rule.Pattern != "" && !rulePatterns[path].MatchString(v):
 			return refuseManifest(CodeInvalidValue, "%s: %q does not match %s", path, v, rule.Pattern)
+		}
+	case float64:
+		r, ok := manifestRanges[path]
+		switch {
+		case !ok:
+			return refuseManifest(CodeInvalidValue, "%s: no value rule", path)
+		case v < float64(r[0]) || v > float64(r[1]):
+			return refuseManifest(CodeInvalidValue, "%s: %v is outside %d..%d", path, v, r[0], r[1])
 		}
 	}
 	return nil
@@ -457,11 +486,21 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 			}
 			projectOwner[e.Project.Ref] = t.Name + "/" + e.Name
 			env := Environment{Name: e.Name, ProjectMode: e.Project.Mode, ProjectRef: e.Project.Ref}
+			vlanOwner := map[int]string{} // per environment: one project
 			for _, r := range e.Regions {
 				if where[[3]string{t.Name, e.Name, r.Name}] {
 					return nil, refuseManifest(CodeDuplicateName, "region %s/%s/%s named twice", t.Name, e.Name, r.Name)
 				}
 				where[[3]string{t.Name, e.Name, r.Name}] = true
+				// A region without a network row has an empty CIDR (cidr is required and patterned
+				// when the row exists) and creates no private network.
+				if r.Network.CIDR != "" {
+					if other, taken := vlanOwner[r.Network.VlanID]; taken {
+						return nil, refuseManifest(CodeDuplicateVLAN, "vlan_id %d of %s/%s/%s is also %s's: project %s holds one private network per VLAN id",
+							r.Network.VlanID, t.Name, e.Name, r.Name, other, e.Project.Ref)
+					}
+					vlanOwner[r.Network.VlanID] = r.Name
+				}
 				env.Regions = append(env.Regions, r.Name)
 			}
 			tenant.Environments = append(tenant.Environments, env)
