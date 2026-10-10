@@ -117,16 +117,34 @@ run "deny_check_published" {
       Statement = [{
         Sid      = "ProbeStateBucketJanitor"
         Effect   = "Allow"
-        Action   = ["s3:*"]
+        Action   = ["s3:*", "s3:BypassGovernanceRetention"]
         Resource = ["arn:aws:s3:::lzprobe-state-20261006t120000z-ab12", "arn:aws:s3:::lzprobe-state-20261006t120000z-ab12/*"]
       }]
     }
-    error_message = "the janitor's policy allows S3 on the probe bucket only"
+    error_message = "the janitor's policy allows S3, the governance bypass named, on the probe bucket only"
   }
 
   assert {
     condition     = ovh_cloud_project_user_s3_policy.janitor.user_id == ovh_cloud_project_user.janitor.id && ovh_cloud_project_user_s3_credential.janitor.user_id == ovh_cloud_project_user.janitor.id
     error_message = "the janitor's credential and policy belong to the janitor"
+  }
+}
+
+# Spec 005 T099 (D104): the probe bucket is locked as a state bucket is (modules/object-storage-
+# protected: Object Lock, governance), for one day, the guide's minimum (docs.ovhcloud.com
+# storage-and-backup/object-storage/s3-managing-object-lock.mdx:51), so the check observes the
+# retention and the janitor's bypass before the destroy.
+run "bucket_locked_in_governance_mode" {
+  command = plan
+
+  assert {
+    condition     = ovh_cloud_project_storage.probe.object_lock.status == "enabled" && ovh_cloud_project_storage.probe.object_lock.rule.mode == "governance"
+    error_message = "the probe bucket is created with Object Lock in governance mode"
+  }
+
+  assert {
+    condition     = ovh_cloud_project_storage.probe.object_lock.rule.period == "P1D"
+    error_message = "the probe bucket's default retention is one day"
   }
 }
 

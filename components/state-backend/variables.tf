@@ -43,3 +43,18 @@ variable "s3_users" {
   type        = set(string)
   nullable    = false
 }
+
+variable "state_retention_days" {
+  description = "Days every state object version stays locked (S3 Object Lock, governance mode; T099): a whole number from 1 to 365, default 7."
+  type        = number
+  default     = 7
+  nullable    = false
+
+  # 1: docs.ovhcloud.com storage-and-backup/object-storage/s3-managing-object-lock.mdx:51 ("a
+  # minimum of one day and no maximum limit"); 365: ours (spec 005 T099), a longer retention is an
+  # owner decision. Default 7: a short week of history (D104 asks for a short default).
+  validation {
+    condition     = var.state_retention_days == floor(var.state_retention_days) && var.state_retention_days >= 1 && var.state_retention_days <= 365
+    error_message = "state_retention_days: a whole number of days from 1 to 365."
+  }
+}

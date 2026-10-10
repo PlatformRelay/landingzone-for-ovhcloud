@@ -448,3 +448,65 @@ run "tenant_credentials_and_unlabelled_per_user" {
     error_message = "each user's user, credential and policy are listed under its key"
   }
 }
+
+# T099 (D104): the state bucket's Object Lock retention comes from `state_retention_days`, default 7
+# (short: a week of state history; evidence/T099.md *Design* 2). Read through the bucket module's
+# `object_lock` output, which is the resource's own attribute (module test
+# `object_lock_output_is_the_bucket_s`).
+run "retention_default_seven_days" {
+  command = plan
+
+  assert {
+    condition     = module.bucket.object_lock == { status = "enabled", mode = "governance", period = "P7D" }
+    error_message = "by default the state bucket is locked in governance mode for 7 days"
+  }
+}
+
+run "retention_follows_the_input" {
+  command = plan
+
+  variables {
+    tenant               = "demo"
+    instance             = "demo-state"
+    managed_in           = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/tenant-state/demo"
+    s3_users             = ["tenant", "platform"]
+    state_retention_days = 3
+  }
+
+  assert {
+    condition     = module.bucket.object_lock == { status = "enabled", mode = "governance", period = "P3D" }
+    error_message = "the given retention reaches the bucket, still in governance mode"
+  }
+}
+
+# Bounds: 1 (docs.ovhcloud.com storage-and-backup/object-storage/s3-managing-object-lock.mdx:51, "a
+# minimum of one day") to 365 (no maximum in the guide; decided in evidence/T099.md), whole days.
+run "retention_zero_refused" {
+  command = plan
+
+  variables {
+    state_retention_days = 0
+  }
+
+  expect_failures = [var.state_retention_days]
+}
+
+run "retention_above_365_refused" {
+  command = plan
+
+  variables {
+    state_retention_days = 366
+  }
+
+  expect_failures = [var.state_retention_days]
+}
+
+run "retention_fraction_refused" {
+  command = plan
+
+  variables {
+    state_retention_days = 2.5
+  }
+
+  expect_failures = [var.state_retention_days]
+}

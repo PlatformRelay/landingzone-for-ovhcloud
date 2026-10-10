@@ -60,6 +60,8 @@ module "bucket" {
   region     = var.region
   name       = module.bucket_name.name
   tags       = module.bucket_name.labels
+  # T099: each state version locked (governance) for this many days.
+  retention_days = var.state_retention_days
 }
 
 module "s3_user" {

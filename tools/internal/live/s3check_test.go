@@ -52,6 +52,8 @@ func TestS3CheckerOperations(t *testing.T) {
 		uri        string
 		md5, keeps bool
 	}{
+		// T099: the governance bypass header, signed, on a versioned DeleteObject only.
+		{S3Call{Op: S3DeleteObject, Key: "k", VersionID: vid, Bypass: true}, "DELETE", "/" + s3TestBucket + "/k?versionId=3HL4kqtJlcpXroDTDmJ%2BrmSpXd3dIbrHY", false, false},
 		{S3Call{Op: S3PutObject, Key: "lz-deny-check/probe.tflock", Body: []byte("v1")}, "PUT", "/" + s3TestBucket + "/lz-deny-check/probe.tflock", false, false},
 		{S3Call{Op: S3GetObject, Key: "k"}, "GET", "/" + s3TestBucket + "/k", false, false},
 		{S3Call{Op: S3DeleteObject, Key: "k"}, "DELETE", "/" + s3TestBucket + "/k", false, false},
@@ -64,7 +66,7 @@ func TestS3CheckerOperations(t *testing.T) {
 		{S3Call{Op: S3GetBucketVersioning}, "GET", "/" + s3TestBucket + "?versioning=", false, true},
 	}
 	for _, tc := range cases {
-		t.Run(string(tc.call.Op)+tc.call.VersionID, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s%s-bypass-%v", tc.call.Op, tc.call.VersionID, tc.call.Bypass), func(t *testing.T) {
 			f := newFakeS3(t)
 			answerWith(f, http.StatusOK, "v-1", "<Answer>body</Answer>")
 			c := newTestS3Checker(t, f)
@@ -93,6 +95,16 @@ func TestS3CheckerOperations(t *testing.T) {
 			}
 			if !tc.md5 && md != "" {
 				t.Errorf("Content-MD5 %q on %s", md, tc.call.Op)
+			}
+			// T099: x-amz-bypass-governance-retention (docs.ovhcloud.com storage-and-backup/
+			// object-storage/s3-managing-object-lock.mdx:241-255) only when asked, value true, signed.
+			by := r.Header.Values("X-Amz-Bypass-Governance-Retention")
+			signedBy := strings.Contains(r.Header.Get("Authorization"), "x-amz-bypass-governance-retention")
+			if tc.call.Bypass && (len(by) != 1 || by[0] != "true" || !signedBy) {
+				t.Errorf("bypass header %q (signed %v), want exactly true, signed", by, signedBy)
+			}
+			if !tc.call.Bypass && (len(by) != 0 || signedBy) {
+				t.Errorf("bypass header %q (signed %v) on a call that did not ask for it", by, signedBy)
 			}
 			if got.Status != http.StatusOK || got.Code != "" || got.VersionID != "v-1" {
 				t.Errorf("answer %+v, want status 200, no code, version v-1", got)
@@ -137,6 +149,13 @@ func TestS3CheckerGate(t *testing.T) {
 		"bucket with query":           {Op: S3ListObjectVersions, Bucket: "abc?policy"},
 		"put policy without body":     {Op: S3PutBucketPolicy},
 		"put versioning without body": {Op: S3PutBucketVersioning},
+		// T099: the governance bypass only on a DeleteObject that names a version.
+		"bypass without version":        {Op: S3DeleteObject, Key: "k", Bypass: true},
+		"bypass on PutObject":           {Op: S3PutObject, Key: "k", Body: []byte("x"), Bypass: true},
+		"bypass on GetObject":           {Op: S3GetObject, Key: "k", Bypass: true},
+		"bypass on DeleteBucketPolicy":  {Op: S3DeleteBucketPolicy, Bypass: true},
+		"bypass on PutBucketVersioning": {Op: S3PutBucketVersioning, Body: []byte("x"), Bypass: true},
+		"bypass on ListObjectVersions":  {Op: S3ListObjectVersions, Bypass: true},
 	}
 	for name, call := range refused {
 		t.Run(name, func(t *testing.T) {
