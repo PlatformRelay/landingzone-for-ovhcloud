@@ -1,0 +1,213 @@
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// T096 through the entry: `lz-live probe` runs the state-backend probe's check (package
+// probes/live/state) after the root's apply, with the S3 client lz-live gives it (deps.S3HTTP),
+// writes observations.json to the run record and undoes before the destroy; no other probe root
+// gets a check.
+
+const (
+	checkStateAK = "AKENTRYSTATE0001"
+	checkStateSK = "entry-state-secret-5a4b3c2d1e0f"
+	checkJanAK   = "AKENTRYJANITOR01"
+	checkJanSK   = "entry-janitor-secret-0f1e2d3c4b5a"
+)
+
+// checkS3 is a fake S3 endpoint for the entry: a versioned bucket where the state user is refused
+// what its Deny names; it records who sent which method and query.
+type checkS3 struct {
+	mu       sync.Mutex
+	seen     []string
+	versions int
+}
+
+func (f *checkS3) serve(rw http.ResponseWriter, r *http.Request) {
+	io.Copy(io.Discard, r.Body)
+	who := "unknown"
+	switch {
+	case strings.Contains(r.Header.Get("Authorization"), "Credential="+checkStateAK+"/"):
+		who = "state"
+	case strings.Contains(r.Header.Get("Authorization"), "Credential="+checkJanAK+"/"):
+		who = "janitor"
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen = append(f.seen, who+" "+r.Method+" "+r.URL.RawQuery)
+	q := r.URL.Query()
+	deny := func() {
+		rw.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(rw, "<Error><Code>AccessDenied</Code></Error>")
+	}
+	switch {
+	case who == "unknown":
+		deny()
+	case who == "state" && (q.Has("versionId") || q.Has("policy") || q.Has("versioning")):
+		deny()
+	case r.Method == http.MethodPut && !q.Has("policy") && !q.Has("versioning"):
+		f.versions++
+		rw.Header().Set("X-Amz-Version-Id", fmt.Sprintf("v%d", f.versions))
+	case r.Method == http.MethodDelete:
+		rw.WriteHeader(http.StatusNoContent)
+	case q.Has("versions"):
+		fmt.Fprint(rw, `<ListVersionsResult><IsTruncated>false</IsTruncated></ListVersionsResult>`)
+	case q.Has("policy"):
+		rw.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(rw, "<Error><Code>NoSuchBucketPolicy</Code></Error>")
+	case q.Has("versioning"):
+		fmt.Fprint(rw, `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`)
+	default:
+		fmt.Fprint(rw, "object")
+	}
+}
+
+func (w *probeWorld) withS3(t *testing.T) *checkS3 {
+	t.Helper()
+	f := &checkS3{}
+	srv := httptest.NewTLSServer(http.HandlerFunc(f.serve))
+	t.Cleanup(srv.Close)
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	addr := srv.Listener.Addr().String()
+	w.s3 = &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "example.com"},
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		},
+	}}
+	return f
+}
+
+// stateBackendRoot adds the state-backend root to the fake checkout and the outputs it publishes.
+func (w *probeWorld) stateBackendRoot(t *testing.T) {
+	t.Helper()
+	root := filepath.Join(w.checkout, "tests", "live", "probes", "state-backend")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.tf"), []byte("# probe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.publishCheck(t)
+}
+
+func (w *probeWorld) publishCheck(t *testing.T) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"deny_check": map[string]any{"sensitive": true, "type": []any{"map", "string"}, "value": map[string]string{
+		"bucket": "lzprobe-state-20261006t120000z-ab12", "region": "GRA", "state_key_id": checkStateAK, "state_secret": checkStateSK,
+		"janitor_key_id": checkJanAK, "janitor_secret": checkJanSK}}})
+	writePrivate(t, filepath.Join(filepath.Dir(w.git), "outputs.json"), string(raw))
+}
+
+func TestProbeEntryCheck(t *testing.T) {
+	t.Run("state-backend", func(t *testing.T) {
+		w := newProbeWorld(t)
+		f := w.withS3(t)
+		w.stateBackendRoot(t)
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/state-backend")
+		if code != 0 {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		id := runIDOf(t, stdout)
+		raw, err := os.ReadFile(filepath.Join(w.checkout, ".local", "live", id, "observations.json"))
+		if err != nil {
+			t.Fatalf("no observations.json: %v\n%s", err, stdout)
+		}
+		var rec struct {
+			Check        string           `json:"check"`
+			Observations []map[string]any `json:"observations"`
+			Findings     []string         `json:"findings"`
+		}
+		if json.Unmarshal(raw, &rec) != nil || rec.Check != "state-backend-deny" || len(rec.Observations) != 7 || len(rec.Findings) != 0 {
+			t.Errorf("observations.json %s: want the state-backend check's seven observations, no finding", raw)
+		}
+		var who []string
+		for _, s := range f.seen {
+			who = append(who, strings.Fields(s)[0])
+		}
+		if !slices.Contains(who, "state") || !slices.Contains(who, "janitor") || slices.Contains(who, "unknown") {
+			t.Errorf("the fake S3 saw %v: want the state user's and the janitor's signed requests only", f.seen)
+		}
+		// Undo before the destroy: the janitor's last listing comes before the root's destroy plan.
+		calls := subcommands(w.childCalls(t, "tofu.log"))
+		if want := []string{"init", "plan", "show", "show", "apply", "output", "output", "plan-destroy", "show-destroy", "destroy"}; !slices.Equal(calls, want) {
+			t.Errorf("tofu calls %v, want %v", calls, want)
+		}
+		for _, s := range []string{checkStateSK, checkJanSK, checkStateAK, checkJanAK} {
+			if strings.Contains(stdout+stderr+string(raw), s) {
+				t.Errorf("a check credential reached the terminal or the record")
+			}
+			for _, c := range w.childCalls(t, "tofu.log") {
+				if strings.Contains(strings.Join(append(c.Args, c.Env...), " "), s) {
+					t.Errorf("tofu %v ran with a check credential", c.Args)
+				}
+			}
+		}
+		w.noSecret(t, stdout, stderr)
+	})
+
+	// A failed destroy keeps the probe; its cleanup undoes again (the janitor lists the bucket)
+	// before it destroys.
+	t.Run("cleanup", func(t *testing.T) {
+		w := newProbeWorld(t)
+		f := w.withS3(t)
+		w.stateBackendRoot(t)
+		marker := filepath.Join(filepath.Dir(w.git), "destroy-fails")
+		writePrivate(t, marker, "")
+		code, stdout, _ := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/state-backend")
+		if code == 0 {
+			t.Fatal("a probe whose destroy failed exited 0")
+		}
+		id := runIDOf(t, stdout)
+		if err := os.Remove(marker); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		f.seen = nil
+		f.mu.Unlock()
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id)
+		if code != 0 {
+			t.Fatalf("cleanup exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		if len(f.seen) == 0 || !strings.HasPrefix(f.seen[len(f.seen)-1], "janitor GET versions") {
+			t.Errorf("cleanup's S3 requests %v: want the janitor's undo, ending with its listing", f.seen)
+		}
+		w.noSecret(t, stdout, stderr)
+	})
+
+	t.Run("other-root-no-check", func(t *testing.T) {
+		w := newProbeWorld(t)
+		f := w.withS3(t)
+		w.publishCheck(t)
+		code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+		if code != 0 {
+			t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		if calls := subcommands(w.childCalls(t, "tofu.log")); slices.Contains(calls, "output") {
+			t.Errorf("tofu calls %v: a root without a check reads no output", calls)
+		}
+		if len(f.seen) != 0 {
+			t.Errorf("S3 requests %v for a root without a check", f.seen)
+		}
+		if _, err := os.Stat(filepath.Join(w.checkout, ".local", "live", runIDOf(t, stdout), "observations.json")); err == nil {
+			t.Error("observations.json for a root without a check")
+		}
+	})
+}

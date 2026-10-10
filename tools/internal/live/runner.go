@@ -86,6 +86,7 @@ type Runner struct {
 
 	cleanupOnly bool // Probe.Cleanup: destroy every ephemeral stack, plan and apply nothing
 	companion   *companionStage
+	check       *ProbeCheck // Probe.Check, on the run's one stack
 	// companionBackoff are the waits before each retry of the companion's destroy (T095); nil:
 	// defaultCompanionBackoff. Tests shorten them.
 	companionBackoff []time.Duration
@@ -668,6 +669,81 @@ type publishedRefusal struct{ error }
 
 func (p publishedRefusal) Unwrap() error { return p.error }
 
+// checkEnv reads the variables the root published for its check (T096): every output, from
+// `tofu output -json` into memory, then the check's one, a map of strings. Every value whose key
+// is not public is added to the redactor before anyone sees it. A root that publishes no such
+// output has nothing for a check: nil, nil. A refusal that depends on the published values alone
+// is a publishedRefusal.
+func (s *session) checkEnv(ctx context.Context, st Stack) (map[string]string, error) {
+	c := s.r.check
+	var out bytes.Buffer
+	if err := s.tofu(ctx, st, &out, "output", "-json"); err != nil {
+		return nil, err
+	}
+	var all map[string]struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &all); err != nil {
+		return nil, publishedRefusal{fmt.Errorf("tofu output -json of %s is not a map of outputs", st.ID)}
+	}
+	o, ok := all[c.Output]
+	if !ok {
+		return nil, nil
+	}
+	var env map[string]string
+	if err := json.Unmarshal(o.Value, &env); err != nil {
+		return nil, publishedRefusal{fmt.Errorf("output %s of %s is not a map of strings", c.Output, st.ID)}
+	}
+	for k, v := range env {
+		if !slices.Contains(c.Public, k) {
+			s.red.Add(v)
+		}
+	}
+	if c.Validate != nil {
+		if err := c.Validate(env); err != nil {
+			return nil, publishedRefusal{err}
+		}
+	}
+	return env, nil
+}
+
+// observe runs the root's check once after its apply and writes its record, redacted, to
+// observations.json, also when it fails.
+func (s *session) observe(ctx context.Context) error {
+	st := s.r.Stacks[0]
+	env, err := s.checkEnv(ctx, st)
+	if err != nil {
+		return err
+	}
+	if env == nil {
+		return fmt.Errorf("%s publishes no output %s for its check", st.ID, s.r.check.Output)
+	}
+	rec, err := s.r.check.Observe(ctx, env, s.term)
+	if rec != nil {
+		err = errors.Join(err, writeRecord(filepath.Join(s.r.Dir, "observations.json"), []byte(s.red.Redact(string(rec)))))
+	}
+	return err
+}
+
+// undo removes what the root's check may have written, before the root is destroyed. keep reports
+// that writes may remain: the root, which holds the check's credentials, must then stay for
+// `--cleanup`. A root that published nothing for its check, or published what the check refuses,
+// was never observed: nothing to undo, nothing to keep.
+func (s *session) undo(ctx context.Context, st Stack) (keep bool, err error) {
+	env, err := s.checkEnv(ctx, st)
+	if err != nil {
+		var pub publishedRefusal
+		return !errors.As(err, &pub), err
+	}
+	if env == nil {
+		return false, nil
+	}
+	if err := s.r.check.Undo(ctx, env, s.term); err != nil {
+		return true, err
+	}
+	return false, nil
+}
+
 // defaultCompanionBackoff are the waits before the second and third attempt of the companion's
 // destroy (T095): three attempts within about 80 s, well inside the default deadline.
 var defaultCompanionBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
@@ -812,6 +888,9 @@ func (r Runner) Execute(ctx context.Context) error {
 		if runErr == nil && runCtx.Err() == nil && r.companion != nil && !r.PlanOnly {
 			runErr = s.companion(runCtx)
 		}
+		if runErr == nil && runCtx.Err() == nil && r.check != nil && !r.PlanOnly {
+			runErr = s.observe(runCtx)
+		}
 	}
 	if runCtx.Err() != nil {
 		runErr = errors.Join(context.Cause(runCtx), runErr)
@@ -853,6 +932,15 @@ func (r Runner) Execute(ctx context.Context) error {
 		if keepStage && c != nil && st.ID == c.stage.ID {
 			destroyErr = errors.Join(destroyErr, fmt.Errorf("%s kept: its companion %s was not destroyed and needs the identities %s holds; destroy both with --cleanup %s", st.ID, c.stack.ID, st.ID, r.ID))
 			continue
+		}
+		// The check's writes go before the root that holds its credentials (T096).
+		if r.check != nil && st.ID == r.Stacks[0].ID {
+			if keep, e := s.undo(dctx, st); keep {
+				destroyErr = errors.Join(destroyErr, e, fmt.Errorf("%s kept: its check's writes may remain in its bucket; undo and destroy with --cleanup %s", st.ID, r.ID))
+				continue
+			} else if e != nil {
+				destroyErr = errors.Join(destroyErr, e)
+			}
 		}
 		if e := s.destroy(dctx, st); e != nil {
 			destroyErr = errors.Join(destroyErr, e)
@@ -970,6 +1058,28 @@ type Probe struct {
 	// Bind binds a probe identity published for a companion to the run's account (P26) before
 	// the companion runs; nil binds nothing.
 	Bind func(context.Context, Credential) error
+	// Check is the root's check after its apply (T096); nil: none.
+	Check *ProbeCheck
+}
+
+// ProbeCheck is a probe root's check after its apply (T096: the state-backend probe observes its
+// S3 user's Deny statement). The root publishes the check's variables, credentials included, as
+// the sensitive output named Output (a map of strings); lz-live reads it from `tofu output -json`
+// into memory only — no file, no argv, no child environment — and adds every value whose key is
+// not in Public to the run's redactor before the check sees it. Observe runs once, after the
+// root's apply (never in a plan-only run); the record it returns is written, redacted, to
+// observations.json in the run record, also when it fails. Undo runs on every way out before the
+// root is destroyed, and on `--cleanup` from the root's retained state; it must remove whatever
+// Observe may have written, whether or not Observe ran or finished. A root whose Undo fails is
+// kept, not destroyed, for `--cleanup`. Both get the run's redacted terminal.
+type ProbeCheck struct {
+	Output string
+	Public []string
+	// Validate refuses published variables the check cannot use; it depends on them alone, so a
+	// refused root was never observed and is destroyed, not kept (review r1). nil: none.
+	Validate func(env map[string]string) error
+	Observe  func(ctx context.Context, env map[string]string, term io.Writer) (record []byte, err error)
+	Undo     func(ctx context.Context, env map[string]string, term io.Writer) error
 }
 
 // RunIDPattern is the shape of a run id: YYYYMMDDThhmmssZ-<4 hex>.
@@ -1081,6 +1191,7 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 	r.Vars["TF_VAR_state_path"] = state
 	r.Vars["TF_VAR_run_id"] = r.ID
 	r.cleanupOnly = cleanup
+	r.check = p.Check
 	// A companion root (its `companion/` directory) runs after a full apply of the root (never in
 	// a plan-only run: Execute), and is destroyed first on exit and on `--cleanup`.
 	cdir := filepath.Join(r.Stacks[0].Dir, "companion")

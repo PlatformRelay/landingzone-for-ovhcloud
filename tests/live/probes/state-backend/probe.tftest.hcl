@@ -86,6 +86,50 @@ run "policy_carries_the_state_backend_deny" {
   }
 }
 
+# Spec 005 T096: lz-live's Deny check reads output deny_check; its janitor may do anything, but on
+# the probe bucket only, and is named like every probe user (the leftover check matches lzprobe-).
+run "deny_check_published" {
+  command = plan
+
+  assert {
+    condition     = nonsensitive(sort(keys(output.deny_check))) == tolist(["bucket", "janitor_key_id", "janitor_secret", "region", "state_key_id", "state_secret"])
+    error_message = "deny_check publishes exactly the six keys lz-live's check reads"
+  }
+
+  assert {
+    condition     = nonsensitive(output.deny_check.bucket) == "lzprobe-state-20261006t120000z-ab12" && nonsensitive(output.deny_check.region) == "GRA"
+    error_message = "deny_check names the probe bucket and its region"
+  }
+
+  # Review r2: the output waits for both policies (a plan cannot show depends_on, so the file is read).
+  assert {
+    condition     = output.bucket != "" && length(regexall("depends_on = \\[ovh_cloud_project_user_s3_policy.probe, ovh_cloud_project_user_s3_policy.janitor\\]\n}", file("main.tf"))) == 1
+    error_message = "output deny_check depends on both S3 policies"
+  }
+
+  assert {
+    condition     = ovh_cloud_project_user.janitor.description == "lzprobe-state-janitor-20261006T120000Z-ab12" && toset(ovh_cloud_project_user.janitor.role_names) == toset(["objectstore_operator"])
+    error_message = "the janitor is a probe user (lzprobe-state-janitor-<run-id>)"
+  }
+
+  assert {
+    condition = jsondecode(ovh_cloud_project_user_s3_policy.janitor.policy) == {
+      Statement = [{
+        Sid      = "ProbeStateBucketJanitor"
+        Effect   = "Allow"
+        Action   = ["s3:*"]
+        Resource = ["arn:aws:s3:::lzprobe-state-20261006t120000z-ab12", "arn:aws:s3:::lzprobe-state-20261006t120000z-ab12/*"]
+      }]
+    }
+    error_message = "the janitor's policy allows S3 on the probe bucket only"
+  }
+
+  assert {
+    condition     = ovh_cloud_project_user_s3_policy.janitor.user_id == ovh_cloud_project_user.janitor.id && ovh_cloud_project_user_s3_credential.janitor.user_id == ovh_cloud_project_user.janitor.id
+    error_message = "the janitor's credential and policy belong to the janitor"
+  }
+}
+
 run "state_path_inside_checkout_refused" {
   command = plan
 

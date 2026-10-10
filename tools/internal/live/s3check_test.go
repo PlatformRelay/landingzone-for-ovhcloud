@@ -1,0 +1,306 @@
+package live
+
+import (
+	"bytes"
+	"context"
+	"crypto/md5"
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+// T096: the probe check's S3 client (s3check.go). Its gate admits nine named operations, each with
+// its method and sub-resource fixed; every request is signed with the store's SigV4 signer (the
+// fake recomputes each signature from what it received); of an answer it keeps the status, a
+// well-formed S3 error code, a well-formed version id and only the two listings' bodies; errors
+// carry no answer text and no key.
+
+func newTestS3Checker(t *testing.T, f *fakeS3) *S3Checker {
+	t.Helper()
+	c, err := NewS3Checker(S3Options{Region: "gra", Keys: s3TestKeys(), HTTP: f.client(), Now: func() time.Time { return s3TestNow }})
+	if err != nil {
+		t.Fatalf("NewS3Checker: %v", err)
+	}
+	return c
+}
+
+// answerWith makes the fake answer every request with status, the version id header (if any) and
+// body.
+func answerWith(f *fakeS3, status int, version, body string) {
+	f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
+		if version != "" {
+			rw.Header().Set("X-Amz-Version-Id", version)
+		}
+		rw.WriteHeader(status)
+		fmt.Fprint(rw, body)
+		return true
+	}
+}
+
+// TestS3CheckerOperations: each operation goes out with its method, path and sub-resource, signed
+// (the fake verified the signature from the wire), the body sent as given; bucket-configuration
+// PUTs carry a signed Content-MD5 of the body; only ListObjectVersions and GetBucketVersioning
+// return the answer's body.
+func TestS3CheckerOperations(t *testing.T) {
+	const vid = "3HL4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY"
+	cases := []struct {
+		call       S3Call
+		method     string
+		uri        string
+		md5, keeps bool
+	}{
+		{S3Call{Op: S3PutObject, Key: "lz-deny-check/probe.tflock", Body: []byte("v1")}, "PUT", "/" + s3TestBucket + "/lz-deny-check/probe.tflock", false, false},
+		{S3Call{Op: S3GetObject, Key: "k"}, "GET", "/" + s3TestBucket + "/k", false, false},
+		{S3Call{Op: S3DeleteObject, Key: "k"}, "DELETE", "/" + s3TestBucket + "/k", false, false},
+		{S3Call{Op: S3DeleteObject, Key: "k", VersionID: vid}, "DELETE", "/" + s3TestBucket + "/k?versionId=3HL4kqtJlcpXroDTDmJ%2BrmSpXd3dIbrHY", false, false},
+		{S3Call{Op: S3ListObjectVersions}, "GET", "/" + s3TestBucket + "?versions=", false, true},
+		{S3Call{Op: S3PutBucketPolicy, Body: []byte(`{"Statement":[]}`)}, "PUT", "/" + s3TestBucket + "?policy=", true, false},
+		{S3Call{Op: S3GetBucketPolicy}, "GET", "/" + s3TestBucket + "?policy=", false, false},
+		{S3Call{Op: S3DeleteBucketPolicy}, "DELETE", "/" + s3TestBucket + "?policy=", false, false},
+		{S3Call{Op: S3PutBucketVersioning, Body: []byte("<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>")}, "PUT", "/" + s3TestBucket + "?versioning=", true, false},
+		{S3Call{Op: S3GetBucketVersioning}, "GET", "/" + s3TestBucket + "?versioning=", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.call.Op)+tc.call.VersionID, func(t *testing.T) {
+			f := newFakeS3(t)
+			answerWith(f, http.StatusOK, "v-1", "<Answer>body</Answer>")
+			c := newTestS3Checker(t, f)
+			call := tc.call
+			call.Bucket = s3TestBucket
+			got, err := c.Do(context.Background(), call)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			reqs := f.requests()
+			if len(reqs) != 1 {
+				t.Fatalf("%d requests, want 1", len(reqs))
+			}
+			r := reqs[0]
+			if r.Method != tc.method || r.RawPath != tc.uri || r.Host != s3TestHost || !r.SignedOK {
+				t.Errorf("sent %s %s to %s (signature ok %v), want %s %s to %s, signed", r.Method, r.RawPath, r.Host, r.SignedOK, tc.method, tc.uri, s3TestHost)
+			}
+			if !bytes.Equal(r.Body, tc.call.Body) {
+				t.Errorf("body %q, want %q", r.Body, tc.call.Body)
+			}
+			sum := md5.Sum(tc.call.Body)
+			md := r.Header.Get("Content-Md5")
+			signedMD5 := strings.Contains(r.Header.Get("Authorization"), "content-md5")
+			if tc.md5 && (md != base64.StdEncoding.EncodeToString(sum[:]) || !signedMD5) {
+				t.Errorf("Content-MD5 %q (signed %v), want the body's MD5, signed", md, signedMD5)
+			}
+			if !tc.md5 && md != "" {
+				t.Errorf("Content-MD5 %q on %s", md, tc.call.Op)
+			}
+			if got.Status != http.StatusOK || got.Code != "" || got.VersionID != "v-1" {
+				t.Errorf("answer %+v, want status 200, no code, version v-1", got)
+			}
+			if tc.keeps != (string(got.Body) == "<Answer>body</Answer>") || !tc.keeps && got.Body != nil {
+				t.Errorf("body %q kept for %s; only the two listings keep theirs", got.Body, tc.call.Op)
+			}
+		})
+	}
+}
+
+// TestS3CheckerGate: anything outside the nine operations, or an operation with a part it does not
+// take, is refused before any request — above all a DELETE of the bucket or of its sub-resources
+// other than the policy.
+func TestS3CheckerGate(t *testing.T) {
+	long := strings.Repeat("a", 1025)
+	refused := map[string]S3Call{
+		"DeleteBucket":                {Op: "DeleteBucket"},
+		"empty op":                    {Op: ""},
+		"lower-case op":               {Op: "deleteobject", Key: "k"},
+		"PutBucketAcl":                {Op: "PutBucketAcl", Body: []byte("x")},
+		"DeleteBucketLifecycle":       {Op: "DeleteBucketLifecycle"},
+		"object op without key":       {Op: S3DeleteObject},
+		"bucket op with key":          {Op: S3DeleteBucketPolicy, Key: "k"},
+		"list with key":               {Op: S3ListObjectVersions, Key: "k"},
+		"version on GetObject":        {Op: S3GetObject, Key: "k", VersionID: "v1"},
+		"version on PutObject":        {Op: S3PutObject, Key: "k", VersionID: "v1", Body: []byte("x")},
+		"version on bucket op":        {Op: S3DeleteBucketPolicy, VersionID: "v1"},
+		"version with space":          {Op: S3DeleteObject, Key: "k", VersionID: "v 1"},
+		"version with control":        {Op: S3DeleteObject, Key: "k", VersionID: "v\n1"},
+		"version too long":            {Op: S3DeleteObject, Key: "k", VersionID: long},
+		"version non-ASCII":           {Op: S3DeleteObject, Key: "k", VersionID: "vä"},
+		"body on GetObject":           {Op: S3GetObject, Key: "k", Body: []byte("x")},
+		"body on DeleteObject":        {Op: S3DeleteObject, Key: "k", Body: []byte("x")},
+		"body on DeleteBucketPolicy":  {Op: S3DeleteBucketPolicy, Body: []byte("x")},
+		"body on ListObjectVersions":  {Op: S3ListObjectVersions, Body: []byte("x")},
+		"body above the cap":          {Op: S3PutObject, Key: "k", Body: bytes.Repeat([]byte("x"), maxObject+1)},
+		"key with dot-dot":            {Op: S3DeleteObject, Key: "a/../b"},
+		"key with leading slash":      {Op: S3DeleteObject, Key: "/k"},
+		"no bucket":                   {Op: S3ListObjectVersions, Bucket: "-"},
+		"bucket with slash":           {Op: S3ListObjectVersions, Bucket: "a/b"},
+		"bucket with query":           {Op: S3ListObjectVersions, Bucket: "abc?policy"},
+		"put policy without body":     {Op: S3PutBucketPolicy},
+		"put versioning without body": {Op: S3PutBucketVersioning},
+	}
+	for name, call := range refused {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeS3(t)
+			answerWith(f, http.StatusOK, "", "")
+			c := newTestS3Checker(t, f)
+			if call.Bucket == "" {
+				call.Bucket = s3TestBucket
+			}
+			if _, err := c.Do(context.Background(), call); err == nil {
+				t.Error("no refusal")
+			}
+			if n := len(f.requests()); n != 0 {
+				t.Errorf("%d requests before the refusal, want 0", n)
+			}
+		})
+	}
+	// The account bucket's store keeps its own gate: no DELETE (T089), whatever the checker admits.
+	f := newFakeS3(t)
+	s := newTestS3Store(t, f)
+	if _, err := s.request(http.MethodDelete, s3TestBucket, "k", nil); err == nil || len(f.requests()) != 0 {
+		t.Errorf("the store sent a DELETE (%v, %d requests)", err, len(f.requests()))
+	}
+}
+
+// TestS3CheckerAnswers: any status is an answer (no redirect followed, no retry); of a non-2xx
+// answer only a well-formed S3 error code is kept; a malformed version id is dropped; errors (cap,
+// truncation, transport, cancellation) name the operation and never the answer's text, a key, the
+// URL or the host.
+func TestS3CheckerAnswers(t *testing.T) {
+	echo := "SERVERTEXT " + s3TestSK + " " + s3TestAK
+	errorBody := func(code string) string {
+		return "<?xml version=\"1.0\"?><Error><Code>" + code + "</Code><Message>" + echo + "</Message></Error>"
+	}
+	answers := []struct {
+		name, version, body string
+		status              int
+		code, vid           string
+	}{
+		{"denied", "", errorBody("AccessDenied"), 403, "AccessDenied", ""},
+		{"not-implemented", "", errorBody("NotImplemented"), 501, "NotImplemented", ""},
+		{"no-policy", "", errorBody("NoSuchBucketPolicy"), 404, "NoSuchBucketPolicy", ""},
+		{"server-error", "", errorBody("InternalError"), 500, "InternalError", ""},
+		{"code-with-space", "", errorBody("Access Denied"), 403, "unrecognised", ""},
+		{"code-echoing", "", errorBody(s3TestSK), 403, "unrecognised", ""},
+		{"code-too-long", "", errorBody(strings.Repeat("A", 65)), 403, "unrecognised", ""},
+		{"no-xml", "", echo, 403, "unrecognised", ""},
+		{"empty", "", "", 403, "unrecognised", ""},
+		{"redirect", "", errorBody("PermanentRedirect"), 301, "PermanentRedirect", ""},
+		{"no-content", "v-2", "", 204, "", "v-2"},
+		{"version-with-space", "v 2", "", 200, "", ""},
+		{"version-too-long", strings.Repeat("v", 1025), "", 200, "", ""},
+	}
+	for _, a := range answers {
+		t.Run(a.name, func(t *testing.T) {
+			f := newFakeS3(t)
+			answerWith(f, a.status, a.version, a.body)
+			if a.status == 301 {
+				inner := f.fault
+				f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
+					rw.Header().Set("Location", "https://elsewhere.example/"+s3TestBucket+"/k")
+					return inner(rw, r)
+				}
+			}
+			c := newTestS3Checker(t, f)
+			got, err := c.Do(context.Background(), S3Call{Op: S3DeleteObject, Bucket: s3TestBucket, Key: "k", VersionID: "v1"})
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			if got.Status != a.status || got.Code != a.code || got.VersionID != a.vid || got.Body != nil {
+				t.Errorf("answer %+v, want status %d, code %q, version %q, no body", got, a.status, a.code, a.vid)
+			}
+			if n := len(f.requests()); n != 1 {
+				t.Errorf("%d requests, want 1", n)
+			}
+		})
+	}
+	// A listing's error answer keeps no body either.
+	f := newFakeS3(t)
+	answerWith(f, 403, "", errorBody("AccessDenied"))
+	if got, err := newTestS3Checker(t, f).Do(context.Background(), S3Call{Op: S3ListObjectVersions, Bucket: s3TestBucket}); err != nil || got.Body != nil || got.Code != "AccessDenied" {
+		t.Errorf("denied listing: %+v, %v; want code AccessDenied, no body", got, err)
+	}
+
+	faults := map[string]func(rw http.ResponseWriter, r *http.Request){
+		"oversized": func(rw http.ResponseWriter, r *http.Request) {
+			rw.WriteHeader(http.StatusForbidden)
+			rw.Write(bytes.Repeat([]byte("x"), maxObject+1))
+		},
+		"truncated": func(rw http.ResponseWriter, r *http.Request) {
+			rw.Header().Set("Content-Length", "100")
+			rw.WriteHeader(http.StatusOK)
+			rw.Write([]byte(echo[:10]))
+		},
+		"reset": func(rw http.ResponseWriter, r *http.Request) {
+			if conn, _, err := rw.(http.Hijacker).Hijack(); err == nil {
+				conn.Close()
+			}
+		},
+	}
+	for name, fault := range faults {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeS3(t)
+			f.fault = func(rw http.ResponseWriter, r *http.Request) bool { fault(rw, r); return true }
+			_, err := newTestS3Checker(t, f).Do(context.Background(), S3Call{Op: S3ListObjectVersions, Bucket: s3TestBucket})
+			if err == nil {
+				t.Fatal("no error")
+			}
+			noLeak(t, err.Error(), echo)
+			if !strings.Contains(err.Error(), "ListObjectVersions") {
+				t.Errorf("error %q does not name the operation", err)
+			}
+		})
+	}
+	t.Run("cancelled", func(t *testing.T) {
+		f := newFakeS3(t)
+		answerWith(f, 200, "", "")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := newTestS3Checker(t, f).Do(ctx, S3Call{Op: S3GetObject, Bucket: s3TestBucket, Key: "k"})
+		if err == nil || !strings.Contains(err.Error(), "cancelled") {
+			t.Errorf("cancelled context: %v, want an error naming the cancellation", err)
+		}
+		noLeak(t, fmt.Sprint(err), echo)
+	})
+}
+
+func noLeak(t *testing.T, msg, echo string) {
+	t.Helper()
+	for _, bad := range []string{"SERVERTEXT", s3TestSK, s3TestAK, echo[:10], "https://", s3TestHost} {
+		if strings.Contains(msg, bad) {
+			t.Errorf("error %q carries %q", msg, bad)
+		}
+	}
+}
+
+// TestS3CheckerNoSecret: the secret key appears in no request (URL, header, body), the access key
+// only in Authorization.
+func TestS3CheckerNoSecret(t *testing.T) {
+	f := newFakeS3(t)
+	answerWith(f, 200, "v-1", "")
+	c := newTestS3Checker(t, f)
+	for _, call := range []S3Call{
+		{Op: S3PutObject, Key: "k", Body: []byte("v1")},
+		{Op: S3DeleteObject, Key: "k", VersionID: "v-1"},
+		{Op: S3PutBucketPolicy, Body: []byte("{}")},
+	} {
+		call.Bucket = s3TestBucket
+		if _, err := c.Do(context.Background(), call); err != nil {
+			t.Fatalf("%s: %v", call.Op, err)
+		}
+	}
+	s3NoSecretIn(t, f, s3TestSK)
+	for _, r := range f.requests() {
+		h := r.Header.Clone()
+		h.Del("Authorization")
+		if strings.Contains(fmt.Sprintf("%s %s %v %s", r.RawPath, r.RawQuery, h, r.Body), s3TestAK) {
+			t.Errorf("%s %s carries the access key outside Authorization", r.Method, r.Path)
+		}
+	}
+	if _, err := NewS3Checker(S3Options{Region: "gra", Keys: map[string]string{"AWS_ACCESS_KEY_ID": s3TestAK}}); err == nil || strings.Contains(err.Error(), s3TestAK) {
+		t.Errorf("checker without a secret key: %v; want a refusal naming the variable only", err)
+	}
+	if _, err := NewS3Checker(S3Options{Region: "gra11", Keys: s3TestKeys()}); err == nil {
+		t.Error("checker for a region with no Object Storage endpoint: no refusal")
+	}
+}

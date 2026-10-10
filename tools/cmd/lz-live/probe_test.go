@@ -99,6 +99,15 @@ func fakeTofu(args []string) int {
 	}
 	switch sub {
 	case "output":
+		// T096: every output of a root with a check (outputs.json next to the fake).
+		if positional == "" {
+			raw, err := os.ReadFile(filepath.Join(bin, "outputs.json"))
+			if err != nil {
+				return 1
+			}
+			fmt.Println(string(raw))
+			return 0
+		}
 		// T075: what a root publishes for its companion (companion-env.json next to the fake).
 		raw, err := os.ReadFile(filepath.Join(bin, "companion-env.json"))
 		if err != nil || positional != "companion_env" {
@@ -291,6 +300,8 @@ type probeWorld struct {
 	listings map[string]string
 	listed   *[]apiListing
 	lookedUp *[]string
+	// s3 is the S3 client a probe check dials (T096); nil: the default.
+	s3 *http.Client
 }
 
 // newProbeWorld is an admitted host with a sandbox credential bound to probeAccount, one project,
@@ -411,6 +422,7 @@ func (w *probeWorld) run(t *testing.T, args ...string) (int, string, string) {
 			}
 			return live.API{TokenURL: w.api.URL + "/token", BaseURL: w.api.URL + "/v1", HTTP: w.api.Client()}, nil
 		},
+		S3HTTP: w.s3,
 		Now: func() time.Time {
 			if !w.now.IsZero() {
 				return w.now

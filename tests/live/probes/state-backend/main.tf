@@ -2,8 +2,8 @@
 # a versioned probe bucket tagged with the run id, and a cloud project user with one S3
 # credential whose S3 policy covers only that bucket (bucket-level ARNs as in
 # cloud_project_user_s3_policy.md). The two state writers that observe `use_lockfile` and the
-# encrypted state object (P1–P3) are not this root: they need the user's S3 credential, which this
-# root keeps in its encrypted state only (see the run sheet, *Open: second stage*).
+# encrypted state object (P1–P3) are not this root (storage-iam's companion runs them). The user's
+# S3 credential serves lz-live's Deny check (T096, output deny_check, below).
 locals {
   # Bucket names are lowercase and global (P21): the run id, lowercased, keeps them unique.
   bucket = "lzprobe-state-${lower(local.run_id)}"
@@ -68,6 +68,54 @@ resource "ovh_cloud_project_user_s3_policy" "probe" {
       },
     ]
   })
+}
+
+# T096: lz-live's check after the apply (tools/internal/probes/live/state) observes the Deny with
+# the state user's credential, then undoes its writes with the janitor's before the destroy. The
+# janitor exists only for that undo: the state user may not delete versions (if the Deny holds),
+# and the admin has no S3 key. Its policy allows every S3 action on the probe bucket only (`s3:*`
+# is an accepted pattern, tests/fixtures/ovhcloud/s3-policy-actions.json rule 2).
+resource "ovh_cloud_project_user" "janitor" {
+  service_name = local.project.service_name
+  description  = "lzprobe-state-janitor-${local.run_id}"
+  role_names   = ["objectstore_operator"]
+}
+
+resource "ovh_cloud_project_user_s3_credential" "janitor" {
+  service_name = local.project.service_name
+  user_id      = ovh_cloud_project_user.janitor.id
+}
+
+resource "ovh_cloud_project_user_s3_policy" "janitor" {
+  service_name = local.project.service_name
+  user_id      = ovh_cloud_project_user.janitor.id
+  policy = jsonencode({
+    Statement = [{
+      Sid      = "ProbeStateBucketJanitor"
+      Effect   = "Allow"
+      Action   = ["s3:*"]
+      Resource = ["arn:aws:s3:::${local.bucket}", "arn:aws:s3:::${local.bucket}/*"]
+    }]
+  })
+}
+
+# The check's variables, read by lz-live from `tofu output -json` into memory only; every value
+# but bucket and region is redacted from the run's output and record.
+output "deny_check" {
+  description = "Variables of lz-live's Deny check (T096): bucket, region and the state user's and the janitor's S3 keys."
+  sensitive   = true
+  value = {
+    bucket         = ovh_cloud_project_storage.probe.name
+    region         = ovh_cloud_project_storage.probe.region_name
+    state_key_id   = ovh_cloud_project_user_s3_credential.probe.access_key_id
+    state_secret   = ovh_cloud_project_user_s3_credential.probe.secret_access_key
+    janitor_key_id = ovh_cloud_project_user_s3_credential.janitor.access_key_id
+    janitor_secret = ovh_cloud_project_user_s3_credential.janitor.secret_access_key
+  }
+  # Published only once both policies exist (review r2): after an apply that failed on a policy,
+  # the output stays absent, so lz-live neither observes nor undoes with a janitor that has no
+  # rights, and the root is destroyed instead of kept for a cleanup that would meet the same 403.
+  depends_on = [ovh_cloud_project_user_s3_policy.probe, ovh_cloud_project_user_s3_policy.janitor]
 }
 
 output "bucket" {

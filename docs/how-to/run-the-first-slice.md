@@ -17,7 +17,7 @@ references:
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
-    blob: 73eb4003e5834e0d2f90b18b17ba2c91671c1e04
+    blob: 505fa76013639d16aa626b4c4700c356855be051
 last_verified: 0472de1d3773a6363dcfca70ad6f9082d292f80a
 ---
 
@@ -343,6 +343,10 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   the `--cleanup <run-id>` to run, and the leftover check reports both as leftovers until then
   ([probe run sheet](../../tests/live/probes/README.md#two-stage-runs-t010)). A failed tofu call's
   output is in the run record's `errors.txt`.
+- The `state-backend` probe's Deny check writes `observations.json` to the run record and empties
+  its bucket before the destroy; if it cannot, the root is kept and the error names the
+  `--cleanup <run-id>` that empties the bucket and destroys the root (row 7b of the
+  [probe run sheet](../../tests/live/probes/README.md#runs)).
 - To look by hand (read only), use the API console or the `ovhcloud` subcommand of the kind,
   e.g. `ovhcloud cloud project list` (AGENTS.md *Tools*). Per-kind CLI coverage is UNVERIFIED,
   and there is no generic `ovhcloud api get` (P18 refuted, evidence T009). The kinds and API
