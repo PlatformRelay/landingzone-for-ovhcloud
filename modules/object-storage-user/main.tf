@@ -4,7 +4,10 @@
 # s3-identity-and-access-management.mdx:116-125). Every S3 user may list all buckets of the account
 # by default; the policy denies it explicitly (same guide, :145 and :150-158). The caller may add
 # one unconditioned Deny on every resource for the actions it names (`deny_actions`); the
-# state-backend component names its list.
+# state-backend component names its list. Every action is one OVHcloud accepts
+# (tests/fixtures/ovhcloud/s3-policy-actions.json, T094): there is no s3:GetObjectVersion, so the
+# policy grants no version read; whether a GET with a versionId is authorised as s3:GetObject is
+# UNVERIFIED.
 resource "ovh_cloud_project_user" "this" {
   service_name = var.project_id
   description  = var.description
@@ -37,7 +40,6 @@ resource "ovh_cloud_project_user_s3_policy" "this" {
           "s3:ListBucket",
           "s3:GetBucketLocation",
           "s3:ListBucketVersions",
-          "s3:GetObjectVersion",
           "s3:ListMultipartUploadParts",
           "s3:ListBucketMultipartUploads",
           "s3:AbortMultipartUpload",

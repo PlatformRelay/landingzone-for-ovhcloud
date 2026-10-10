@@ -13,9 +13,10 @@
 # The actions an S3 state backend with `use_lockfile` needs: s3:GetObject, s3:PutObject,
 # s3:DeleteObject, s3:ListBucket (s3-conditional-writes.mdx:287: no permission beyond PutObject and
 # DeleteObject for conditional writes). Every allowed action is an object or listing action of the
-# read-write example (plus the version reads a versioned state bucket needs): no bucket
-# configuration action (versioning, lifecycle, policy, deletion) and no s3:DeleteObjectVersion, so
-# the credential cannot undo the protected bucket's versioning or purge old state versions.
+# read-write example (plus s3:ListBucketVersions): no bucket configuration action (versioning,
+# lifecycle, policy, deletion) and no version delete, so the policy grants nothing that undoes the
+# protected bucket's versioning or purges old state versions. No s3:GetObjectVersion: OVHcloud
+# refuses that name (T094, tests/fixtures/ovhcloud/s3-policy-actions.json).
 # The secret is checked against the module's other outputs; an output added later is not seen
 # here (outputs cannot be enumerated in a test).
 
@@ -110,7 +111,7 @@ run "policy_allows_only_the_given_buckets" {
   assert {
     condition = length(setsubtract(
       flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:GetObjectVersion", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
     )) == 0
     error_message = "two buckets: every allowed action is an object or listing action"
   }
@@ -137,7 +138,7 @@ run "policy_actions_state_backend_no_wildcard" {
   assert {
     condition = length(setsubtract(
       flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:GetObjectVersion", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
     )) == 0
     error_message = "every allowed action is an object or listing action: no bucket configuration, no s3:DeleteObjectVersion"
   }
@@ -184,13 +185,13 @@ run "deny_actions_one_unconditioned_deny" {
   command = plan
 
   variables {
-    deny_actions = ["s3:DeleteObjectVersion", "s3:PutBucketVersioning"]
+    deny_actions = ["s3:PutBucketCORS", "s3:PutBucketVersioning"]
   }
 
   assert {
     condition = anytrue([
       for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement :
-      lookup(s, "Effect", "") == "Deny" && toset(flatten([lookup(s, "Action", [])])) == toset(["s3:DeleteObjectVersion", "s3:PutBucketVersioning"]) && flatten([lookup(s, "Resource", [])]) == ["*"] && length(setsubtract(keys(s), ["Sid", "Effect", "Action", "Resource"])) == 0
+      lookup(s, "Effect", "") == "Deny" && toset(flatten([lookup(s, "Action", [])])) == toset(["s3:PutBucketCORS", "s3:PutBucketVersioning"]) && flatten([lookup(s, "Resource", [])]) == ["*"] && length(setsubtract(keys(s), ["Sid", "Effect", "Action", "Resource"])) == 0
     ])
     error_message = "one Deny statement refuses exactly the given actions on every resource, with no Condition, NotAction, NotResource, Principal or NotPrincipal"
   }
@@ -206,14 +207,84 @@ run "deny_actions_one_unconditioned_deny" {
   }
 }
 
-run "deny_actions_wildcard_rejected" {
+# T094: OVHcloud accepts a named action or an `s3:` pattern ending in `*` of at most 256 characters
+# (tests/fixtures/ovhcloud/s3-policy-actions.json); some actions to deny exist only as a pattern
+# (object versions, bucket policy). A Deny only narrows, so a trailing `*` is admitted; a bare
+# `s3:*`, a `*` or `?` inside the name and a pattern over 256 characters are not.
+run "deny_actions_trailing_pattern_accepted" {
   command = plan
 
   variables {
-    deny_actions = ["s3:Delete*"]
+    deny_actions = ["s3:DeleteObjectVersion*", "s3:PutBucketVersioning"]
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement :
+      lookup(s, "Effect", "") == "Deny" && flatten([lookup(s, "Action", [])]) == ["s3:DeleteObjectVersion*", "s3:PutBucketVersioning"] && flatten([lookup(s, "Resource", [])]) == ["*"]
+    ])
+    error_message = "a pattern ending in * reaches the Deny statement as given"
+  }
+
+  assert {
+    condition = alltrue([
+      for a in flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]) : !strcontains(a, "*")
+    ])
+    error_message = "with a Deny pattern, no allowed action is a wildcard"
+  }
+}
+
+run "deny_actions_bare_wildcard_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:*"]
   }
 
   expect_failures = [var.deny_actions]
+}
+
+run "deny_actions_inner_wildcard_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:Delete*Version"]
+  }
+
+  expect_failures = [var.deny_actions]
+}
+
+run "deny_actions_question_mark_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:DeleteObjectVersio?"]
+  }
+
+  expect_failures = [var.deny_actions]
+}
+
+run "deny_actions_pattern_over_256_rejected" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:${join("", [for i in range(253) : "A"])}*"]
+  }
+
+  expect_failures = [var.deny_actions]
+}
+
+run "deny_actions_pattern_of_256_accepted" {
+  command = plan
+
+  variables {
+    deny_actions = ["s3:${join("", [for i in range(252) : "A"])}*"]
+  }
+
+  assert {
+    condition     = length(flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Deny"])) == 2
+    error_message = "a 256-character pattern is admitted"
+  }
 }
 
 run "deny_actions_other_service_rejected" {

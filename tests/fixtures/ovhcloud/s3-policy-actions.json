@@ -1,0 +1,21 @@
+{
+  "provenance": {
+    "source": "OVHcloud API, 400 answer to POST /cloud/project/<project>/user/<user>/policy (ovh_cloud_project_user_s3_policy create, provider ovh 2.21.0)",
+    "date": "2026-10-10",
+    "run_id": "20261010T172836Z-5bcc",
+    "record": "specs/005-first-landing-zone-slice/evidence/T010.md, run 7 (row 7a refuted)",
+    "message": "feature not implemented yet: ... 's3:GetObjectVersion' is not valid under any of the given schemas",
+    "transcription": "The two schemas are quoted verbatim from the answer, as relayed by the coordinator in the T094 dispatch (2026-10-10). The run directory keeps no copy of the response body (its summary.json records only `tofu apply state-backend: exit status 1`); the re-run of T010 row 7 should keep the body.",
+    "applies_to": "each element of a statement's Action in an S3 user policy",
+    "rule": "an action is accepted when it is valid under any of the schemas"
+  },
+  "schemas": [
+    {
+      "pattern": "^s3:(AbortMultipartUpload|BypassGovernanceRetention|CreateBucket|DeleteBucket|DeleteBucketTagging|DeleteBucketWebsite|DeleteIntelligentTieringConfiguration|DeleteObject|DeleteObjectTagging|GetBucketAcl|GetBucketCORS|GetBucketLocation|GetBucketLogging|GetBucketObjectLockConfiguration|GetBucketTagging|GetBucketVersioning|GetBucketWebsite|GetEncryptionConfiguration|GetIntelligentTieringConfiguration|GetLifecycleConfiguration|GetObject|GetObjectAcl|GetObjectAttributes|GetObjectLegalHold|GetObjectRetention|GetObjectTagging|GetReplicationConfiguration|ListAllMyBuckets|ListBucket|ListBucketMultipartUploads|ListBucketVersions|ListMultipartUploadParts|PutBucketAcl|PutBucketCORS|PutBucketLogging|PutBucketObjectLockConfiguration|PutBucketTagging|PutBucketVersioning|PutBucketWebsite|PutEncryptionConfiguration|PutIntelligentTieringConfiguration|PutLifecycleConfiguration|PutObject|PutObjectAcl|PutObjectLegalHold|PutObjectRetention|PutObjectTagging|PutReplicationConfiguration|RestoreObject)$"
+    },
+    {
+      "pattern": "^s3:.*\\*$",
+      "maxLength": 256
+    }
+  ]
+}

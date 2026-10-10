@@ -8,16 +8,24 @@
 locals {
   # Coordinator decision 2026-10-07 (T014 review): a state backend needs none of these, so each
   # user's policy denies them: purging old state versions, suspending versioning, and changing or
-  # deleting the bucket. Names from docs.ovhcloud.com storage-and-backup/object-storage/
-  # s3-identity-and-access-management.mdx *List of supported actions* (:263-317); DeleteObjectVersion,
-  # PutBucketPolicy and DeleteBucketPolicy are not in that list, so whether OVHcloud accepts and
-  # enforces a Deny on them is UNVERIFIED (T010, probe root tests/live/probes/state-backend).
+  # deleting the bucket. T094: only actions OVHcloud accepts, i.e. one of its 49 named actions or an
+  # `s3:` pattern ending in `*` (400 answer of T010 run 20261010T172836Z-5bcc, recorded in
+  # tests/fixtures/ovhcloud/s3-policy-actions.json; the named ones are also docs.ovhcloud.com
+  # storage-and-backup/object-storage/s3-identity-and-access-management.mdx *List of supported
+  # actions*). Named where a name exists. Object versions and bucket policy have no named action, so
+  # they are denied by prefix patterns; that OVHcloud accepts these follows from its rule, what they
+  # match when a request is evaluated is UNVERIFIED (re-run of T010 row 7, evidence/T094.md).
+  # Bucket policies are not implemented on OVHcloud yet (same guide, *user policy evaluation*); the
+  # two policy patterns keep the intent for when they are. Object lock: its configuration and the
+  # governance-retention bypass, which would let a locked version be deleted.
   deny_actions = [
-    "s3:DeleteObjectVersion",
+    "s3:DeleteObjectVersion*",
+    "s3:BypassGovernanceRetention",
     "s3:PutBucketVersioning",
-    "s3:PutBucketPolicy",
-    "s3:DeleteBucketPolicy",
+    "s3:PutBucketObjectLockConfiguration",
     "s3:PutLifecycleConfiguration",
+    "s3:PutBucketPolicy*",
+    "s3:DeleteBucketPolicy*",
     "s3:PutBucketCORS",
     "s3:PutEncryptionConfiguration",
     "s3:PutBucketAcl",

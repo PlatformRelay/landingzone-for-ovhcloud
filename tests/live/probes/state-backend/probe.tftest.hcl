@@ -54,8 +54,9 @@ run "names_carry_prefix_and_run_id" {
 
 # Spec 005 T016: the probe user's policy carries the state-backend users' Deny statement verbatim
 # (components/state-backend `deny_actions`, modules/object-storage-user `DenyGivenActions`), so T010
-# observes whether OVHcloud accepts a policy naming s3:DeleteObjectVersion, s3:PutBucketPolicy and
-# s3:DeleteBucketPolicy (absent from its supported-action list: UNVERIFIED until then).
+# observes whether OVHcloud accepts it and keeps every action, the three `s3:...*` patterns included
+# (T094: the earlier list was refused by run 20261010T172836Z-5bcc; what the patterns match when a
+# request is evaluated stays UNVERIFIED after that run).
 run "policy_carries_the_state_backend_deny" {
   command = plan
 
@@ -66,11 +67,13 @@ run "policy_carries_the_state_backend_deny" {
         Sid    = "DenyGivenActions"
         Effect = "Deny"
         Action = [
-          "s3:DeleteObjectVersion",
+          "s3:DeleteObjectVersion*",
+          "s3:BypassGovernanceRetention",
           "s3:PutBucketVersioning",
-          "s3:PutBucketPolicy",
-          "s3:DeleteBucketPolicy",
+          "s3:PutBucketObjectLockConfiguration",
           "s3:PutLifecycleConfiguration",
+          "s3:PutBucketPolicy*",
+          "s3:DeleteBucketPolicy*",
           "s3:PutBucketCORS",
           "s3:PutEncryptionConfiguration",
           "s3:PutBucketAcl",

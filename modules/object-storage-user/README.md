@@ -17,11 +17,13 @@ module "state_user" {
 ## Policy
 
 - **Allow** object and listing actions (`s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`,
-  `s3:ListBucket`, `s3:GetBucketLocation`, the multipart actions, and the version reads
-  `s3:ListBucketVersions`, `s3:GetObjectVersion`) on `arn:aws:s3:::<bucket>` and
-  `arn:aws:s3:::<bucket>/*` of each given bucket, nothing else. No bucket configuration action and no
-  `s3:DeleteObjectVersion` is allowed by the policy; whether the ACL fallback below still lets the
-  credential suspend versioning or purge old state versions is UNVERIFIED. Form and action set as in the read-write example of docs.ovhcloud.com
+  `s3:ListBucket`, `s3:GetBucketLocation`, the multipart actions, and `s3:ListBucketVersions`) on
+  `arn:aws:s3:::<bucket>` and `arn:aws:s3:::<bucket>/*` of each given bucket, nothing else. No
+  `s3:GetObjectVersion`: OVHcloud refuses the name (T094); whether a versioned GET is authorised as
+  `s3:GetObject` is UNVERIFIED. No bucket configuration action and no version delete is named in an
+  Allow; whether OVHcloud authorises a versioned DELETE as `s3:DeleteObject` (allowed here), and
+  whether the ACL fallback below still lets the
+  credential suspend versioning or purge old state versions, are UNVERIFIED. Form and action set as in the read-write example of docs.ovhcloud.com
   `storage-and-backup/object-storage/s3-identity-and-access-management` (*Read/write access to a
   bucket and its objects*).
 - **Deny** `s3:ListAllMyBuckets` on `*`: every S3 user may list all buckets of the account by default
@@ -29,6 +31,12 @@ module "state_user" {
 - **Deny** the actions in `deny_actions` on `*` (statement `DenyGivenActions`, unconditioned), when
   the caller names any; none by default. `components/state-backend` names the history and
   bucket-configuration writes its state bucket must keep (spec 005 T016).
+- Every action is one OVHcloud accepts: one of 49 named actions, or an `s3:` pattern ending in `*`
+  of at most 256 characters
+  ([`tests/fixtures/ovhcloud/s3-policy-actions.json`](../../tests/fixtures/ovhcloud/s3-policy-actions.json),
+  the 400 answer of T010 run 20261010T172836Z-5bcc). `deny_actions` admits a trailing `*` for an
+  action that exists only as a pattern; what such a pattern matches when a request is evaluated is
+  UNVERIFIED.
 - What an action neither allowed nor denied does falls back to the bucket ACLs (same guide,
   *permissions are evaluated*); what `objectstore_operator` grants there is UNVERIFIED offline (T010).
 
@@ -39,7 +47,7 @@ module "state_user" {
 | `project_id` | string | required | Public Cloud project id (service name) that holds the user and the buckets. |
 | `description` | string | required | User description from `modules/naming` (kind `s3_user`). |
 | `buckets` | list(string) | required | Bucket names the policy allows; at least one, each within the bucket-name charset and length (no wildcard, ARN or path; `a..b` is not refused here). |
-| `deny_actions` | list(string) | `[]` | S3 actions denied on `*` in one unconditioned statement; each `s3:<Action>`, no wildcard. |
+| `deny_actions` | list(string) | `[]` | S3 actions denied on `*` in one unconditioned statement; each `s3:<Action>` or `s3:<Prefix>*` (at most 256 characters); no bare `s3:*`, no inner wildcard. |
 
 ## Outputs
 
