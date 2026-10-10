@@ -32,6 +32,7 @@ locals {
     "publicCloudProject:apiovh:region/storage/edit",
     "publicCloudProject:apiovh:region/storage/delete",
     "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+    "publicCloudProject:apiovh:region/storage/object/get",
   ]
 
   buckets = {

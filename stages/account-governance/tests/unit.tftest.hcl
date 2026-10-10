@@ -212,6 +212,7 @@ run "deployer_policies_scoped_through_the_stage" {
       "publicCloudProject:apiovh:region/storage/edit",
       "publicCloudProject:apiovh:region/storage/delete",
       "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+      "publicCloudProject:apiovh:region/storage/object/get",
     ]), false)
     error_message = "G5: the tenant deployer policy allows exactly the P9 allowlist"
   }

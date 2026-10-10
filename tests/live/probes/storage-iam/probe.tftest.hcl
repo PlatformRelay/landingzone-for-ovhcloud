@@ -75,8 +75,9 @@ run "tenant_allowlist_is_p9_exactly" {
       "publicCloudProject:apiovh:region/storage/edit",
       "publicCloudProject:apiovh:region/storage/delete",
       "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+      "publicCloudProject:apiovh:region/storage/object/get",
     ])
-    error_message = "the tenant policy allows exactly the 13 actions of research R6, nothing else"
+    error_message = "the tenant policy allows exactly the 14 actions of research R6, nothing else"
   }
 
   assert {

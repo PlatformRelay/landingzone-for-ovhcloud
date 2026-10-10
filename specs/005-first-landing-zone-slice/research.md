@@ -119,12 +119,23 @@ with `identities = [client.identity]` (P8); tenant `resources = ["urn:v1:eu:reso
 `publicCloudProject:apiovh:network/private/{create,get,edit,delete,region/create}`,
 `…/network/private/subnet/{create,get,delete}`,
 `…/region/storage/{create,get,edit,delete,bulkDeleteObjects}`, plus read actions the provider needs,
-each added only on an observed denial (T010, T049) and recorded here. Excluded from
+each added only on an observed denial (T010, T049) and recorded here. Added on evidence:
+`…/region/storage/object/get` (T097): the provider lists a bucket's objects before deleting it
+(`GET …/storage/{name}/object`, `cloud.json:59465`), and the tenant identity's destroy of an empty
+probe bucket was refused with 403 `missing IAM permissions:
+publicCloudProject:apiovh:region/storage/object/get` (T010 run 20261010T184645Z-f7de). Like every
+action here it holds on the whole project (KD-1 below), so it also lets a tenant deployer list the
+keys and read the metadata (key, size, etag, version, dates; no content: `cloud.StorageObjectList`,
+`cloud.StorageObject`, `cloud.json:68782,68540`) of every bucket in the project, the state buckets
+and other tenants' buckets included; before it, the tenant saw bucket metadata only. Excluded from
 `region/storage/*` on purpose: `policy/create` (would let a tenant attach storage policies to S3
-users), `presign`, `object/*`, `lifecycle/*`, `multipartUpload/*`, `job/replication/*`. Whether the
-provider's destroy needs `object/delete` or `object/version/delete` on a runtime bucket is
-UNVERIFIED (P14, T010); it is added only on evidence. The OVH IAM resource for these actions is the
-project URN, so no allowlist can exclude the state buckets in a shared project: that is KD-1 (R20).
+users), `presign`, every other `object/*` action, `lifecycle/*`, `multipartUpload/*`,
+`job/replication/*`. Whether the provider's destroy of a bucket that holds objects needs
+`object/delete` or `object/version/delete` (`cloud.json:59618,60282`) besides the allowed
+`bulkDeleteObjects` is UNVERIFIED (P14, T010; the provider docs say only that it removes the
+objects first, `resources/cloud_project_storage.md:10`); it is added only on evidence. The OVH IAM
+resource for these actions is the project URN, so no allowlist can exclude the state buckets in a
+shared project: that is KD-1 (R20).
 Group: `ovh_me_identity_group` for future human tenant members, bound by a read-only policy;
 service-account membership in groups is not relied on. In this slice the group has role `NONE`, no
 members and no policy (coordinator decision 2026-10-07 on T023's decision request 4): with no
