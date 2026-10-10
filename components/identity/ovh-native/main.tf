@@ -13,7 +13,9 @@
 
 locals {
   # P9 allowlist (research R6, tenant allowlist; action names from kb api/v1/cloud.json): private
-  # networks and subnets, and object-storage containers of the tenant's own project. No IAM action,
+  # networks and subnets, and object-storage containers of the tenant's own project, plus
+  # `region/storage/object/get`: the provider lists a bucket's objects before deleting it, and was
+  # refused without it (T010 run 20261010T184645Z-f7de, T097). No IAM action,
   # no `me` action, no `region/storage/policy/create` (R6: it would let a tenant attach storage
   # policies to S3 users) and no wildcard.
   tenant_allow = [
@@ -30,6 +32,7 @@ locals {
     "publicCloudProject:apiovh:region/storage/edit",
     "publicCloudProject:apiovh:region/storage/delete",
     "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+    "publicCloudProject:apiovh:region/storage/object/get",
   ]
 }
 

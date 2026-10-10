@@ -400,6 +400,7 @@ var p9Allowlist = []string{
 	"publicCloudProject:apiovh:region/storage/delete",
 	"publicCloudProject:apiovh:region/storage/edit",
 	"publicCloudProject:apiovh:region/storage/get",
+	"publicCloudProject:apiovh:region/storage/object/get",
 }
 
 // strs returns a planned list or set attribute as sorted strings; anything else fails the test.

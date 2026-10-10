@@ -148,6 +148,7 @@ run "tenant_policy_is_the_p9_allowlist_on_its_project" {
       "publicCloudProject:apiovh:region/storage/edit",
       "publicCloudProject:apiovh:region/storage/delete",
       "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+      "publicCloudProject:apiovh:region/storage/object/get",
     ]), false)
     error_message = "G5: the tenant deployer policy allows exactly the P9 allowlist (research R6), nothing added, nothing dropped"
   }
@@ -223,6 +224,7 @@ run "each_tenant_policy_confined_to_its_own_project" {
       "publicCloudProject:apiovh:region/storage/edit",
       "publicCloudProject:apiovh:region/storage/delete",
       "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+      "publicCloudProject:apiovh:region/storage/object/get",
     ])]), false)
     error_message = "G5: every tenant deployer policy allows exactly the P9 allowlist"
   }
@@ -403,6 +405,7 @@ run "first_tenant_alone" {
         "publicCloudProject:apiovh:region/storage/edit",
         "publicCloudProject:apiovh:region/storage/delete",
         "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+        "publicCloudProject:apiovh:region/storage/object/get",
     ]), false)
     error_message = "one tenant: the first tenant's deployer, policy and group carry their one-tenant values"
   }
@@ -465,6 +468,7 @@ run "second_tenant_leaves_the_first_unchanged" {
         "publicCloudProject:apiovh:region/storage/edit",
         "publicCloudProject:apiovh:region/storage/delete",
         "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
+        "publicCloudProject:apiovh:region/storage/object/get",
     ]), false)
     error_message = "two tenants: the first tenant's deployer, policy and group carry their one-tenant values"
   }
