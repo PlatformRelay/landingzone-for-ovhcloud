@@ -14,12 +14,20 @@
 # `arn:aws:s3:::<bucket>/*` of this component's bucket (form of docs.ovhcloud.com
 # storage-and-backup/object-storage/s3-identity-and-access-management.mdx:116-125), never the
 # account bucket from a tenant bucket, another tenant's bucket or `*`. Coordinator decision
-# (2026-10-07, T014 review): each user's policy also explicitly denies `s3:DeleteObjectVersion`,
-# `s3:PutBucketVersioning`, the bucket-configuration writes (policy, lifecycle, CORS, encryption, ACL)
-# and `s3:DeleteBucket`, unconditioned, on `*` or on the bucket and its objects; a state backend needs
-# none of them. Action names from the same guide's *List of supported actions* (:263-317);
-# `s3:DeleteObjectVersion`, `s3:PutBucketPolicy` and `s3:DeleteBucketPolicy` are not in that list,
-# so whether OVHcloud enforces (or accepts) a Deny on them is UNVERIFIED (T010 probe territory).
+# (2026-10-07, T014 review): each user's policy also explicitly denies deleting object versions,
+# changing versioning, object lock, lifecycle, bucket policy, CORS, encryption or ACL, and deleting
+# the bucket, unconditioned, on `*` or on the bucket and its objects; a state backend needs none of
+# them.
+#
+# Accepted actions (T094): OVHcloud refuses a policy whose Action names anything outside its
+# accepted-action rule (T010 run 20261010T172836Z-5bcc, 400 on `s3:GetObjectVersion`), recorded in
+# tests/fixtures/ovhcloud/s3-policy-actions.json: 49 named actions, or an `s3:` pattern ending in
+# `*` of at most 256 characters. Versions, bucket policy: no named action exists, so the Deny uses the
+# patterns `s3:DeleteObjectVersion*`, `s3:PutBucketPolicy*`, `s3:DeleteBucketPolicy*`; that OVHcloud
+# accepts them follows from the rule, what they match when evaluated is UNVERIFIED (re-run of T010
+# row 7, evidence/T094.md). Every `s3:` action quoted in this component, modules/object-storage-user
+# and the state-backend and storage-iam probe roots, and every action of the rendered policies,
+# must match the rule; no Deny may match what the backend needs.
 #
 # Credentials: the access key id and the secret appear only in the sensitive `s3_credentials`
 # output; the mocked literals below are checked against every other output.
@@ -144,7 +152,7 @@ run "account_policy_confined_to_the_bucket" {
   assert {
     condition = length(setsubtract(
       flatten([for s in jsondecode(output.s3_users["platform"].policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:GetObjectVersion", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
     )) == 0
     error_message = "every allowed action is an object or listing action (no wildcard, no bucket configuration)"
   }
@@ -155,7 +163,7 @@ run "account_policy_denies_history_and_bucket_configuration" {
 
   assert {
     condition = alltrue([
-      for a in ["s3:DeleteObjectVersion", "s3:PutBucketVersioning", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:PutLifecycleConfiguration", "s3:PutBucketCORS", "s3:PutEncryptionConfiguration", "s3:PutBucketAcl", "s3:DeleteBucket"] :
+      for a in ["s3:DeleteObjectVersion*", "s3:BypassGovernanceRetention", "s3:PutBucketVersioning", "s3:PutBucketObjectLockConfiguration", "s3:PutLifecycleConfiguration", "s3:PutBucketPolicy*", "s3:DeleteBucketPolicy*", "s3:PutBucketCORS", "s3:PutEncryptionConfiguration", "s3:PutBucketAcl", "s3:DeleteBucket"] :
       anytrue([
         for s in jsondecode(output.s3_users["platform"].policy).Statement :
         lookup(s, "Effect", "") == "Deny" && length(setintersection(keys(s), ["Condition", "NotAction", "NotResource", "Principal", "NotPrincipal"])) == 0
@@ -163,7 +171,77 @@ run "account_policy_denies_history_and_bucket_configuration" {
         && (contains(flatten([lookup(s, "Resource", [])]), "*") || (contains(flatten([lookup(s, "Resource", [])]), "arn:aws:s3:::lz-bkt-state") && contains(flatten([lookup(s, "Resource", [])]), "arn:aws:s3:::lz-bkt-state/*")))
       ])
     ])
-    error_message = "an unconditioned Deny refuses each of s3:DeleteObjectVersion, s3:PutBucketVersioning, the bucket-configuration writes and s3:DeleteBucket on this bucket and its objects"
+    error_message = "an unconditioned Deny refuses version deletes (s3:DeleteObjectVersion*), retention bypass, the versioning, lock, lifecycle, policy, CORS, encryption and ACL writes and s3:DeleteBucket on this bucket and its objects"
+  }
+}
+
+# T094: OVHcloud's accepted-action rule, as its 400 answer of T010 run 20261010T172836Z-5bcc gives
+# it (tests/fixtures/ovhcloud/s3-policy-actions.json; paths relative to this component, where
+# `tofu test` runs). The fixture's named alternation is checked to hold 49 actions and its digest is
+# pinned, so a truncated, widened or substituted copy fails here. The file reads refer to no
+# configuration object, which `tofu test` refuses in an assert; each such condition is anchored on
+# `output.bucket`.
+run "s3_actions_accepted_by_ovhcloud" {
+  command = plan
+
+  assert {
+    condition = output.bucket == "lz-bkt-state" && (
+      length(split("|", regex("^\\^s3:\\((.*)\\)\\$$", jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[0].pattern)[0])) == 49
+      && sha256(jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[0].pattern) == "d634d2463284e5f85c4d190ef5b8d580ed2533401e3e42d50ab674bb416eb1dd"
+      && jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[1] == { pattern = "^s3:.*\\*$", maxLength = 256 }
+      && length(jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas) == 2
+    )
+    error_message = "the fixture holds OVHcloud's rule: 49 named actions, or an s3: pattern ending in * of at most 256 characters"
+  }
+
+  # Every quoted `s3:` action in the configuration of the four roots (comments that quote an action
+  # count too: stricter, never looser).
+  assert {
+    condition = output.bucket == "lz-bkt-state" && alltrue([
+      for a in flatten([
+        for f in concat(
+          [for n in fileset(".", "*.tf") : "./${n}"],
+          [for n in fileset("../../modules/object-storage-user", "*.tf") : "../../modules/object-storage-user/${n}"],
+          [for n in fileset("../../tests/live/probes/state-backend", "*.tf") : "../../tests/live/probes/state-backend/${n}"],
+          [for n in fileset("../../tests/live/probes/storage-iam", "*.tf") : "../../tests/live/probes/storage-iam/${n}"],
+          [for n in fileset("../../tests/live/probes/storage-iam/companion", "*.tf") : "../../tests/live/probes/storage-iam/companion/${n}"],
+        ) : regexall("\"(s3:[^\"]*)\"", file(f))
+      ]) :
+      can(regex(jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[0].pattern, a))
+      || (can(regex(jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[1].pattern, a)) && length(a) <= jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[1].maxLength)
+    ])
+    error_message = "every s3: action quoted in components/state-backend, modules/object-storage-user and the state-backend and storage-iam probes matches OVHcloud's accepted-action rule"
+  }
+
+  # The scan sees the four roots (not vacuous): the module's allow list, the component's deny list
+  # and both probes' policies.
+  assert {
+    condition = output.bucket == "lz-bkt-state" && alltrue([
+      for d in ["./main.tf", "../../modules/object-storage-user/main.tf", "../../tests/live/probes/state-backend/main.tf", "../../tests/live/probes/storage-iam/main.tf"] :
+      length(regexall("\"(s3:[^\"]*)\"", file(d))) > 0
+    ])
+    error_message = "each scanned root quotes s3: actions"
+  }
+
+  assert {
+    condition = alltrue([
+      for a in flatten([for s in jsondecode(output.s3_users["platform"].policy).Statement : lookup(s, "Action", [])]) :
+      can(regex(jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[0].pattern, a))
+      || (can(regex(jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[1].pattern, a)) && length(a) <= jsondecode(file("../../tests/fixtures/ovhcloud/s3-policy-actions.json")).schemas[1].maxLength)
+    ])
+    error_message = "every action of the rendered policy matches OVHcloud's accepted-action rule"
+  }
+
+  # What the OpenTofu S3 backend with a lock file needs (GetObject, PutObject, DeleteObject on
+  # `<b>/*`, ListBucket on `<b>`) is matched by no Deny action, reading `*` as any characters.
+  assert {
+    condition = alltrue(flatten([
+      for p in ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"] : [
+        for d in flatten([for s in jsondecode(output.s3_users["platform"].policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Deny"]) :
+        !can(regex("^${replace(d, "*", ".*")}$", p))
+      ]
+    ]))
+    error_message = "no Deny action matches s3:GetObject, s3:PutObject, s3:DeleteObject or s3:ListBucket"
   }
 }
 
@@ -286,7 +364,7 @@ run "tenant_users_confined_to_the_tenant_bucket" {
     condition = alltrue([
       for u in ["tenant", "platform"] : length(setsubtract(
         flatten([for s in jsondecode(output.s3_users[u].policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-        ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:GetObjectVersion", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+        ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
       )) == 0
     ])
     error_message = "every user's allowed actions are object or listing actions"
@@ -319,7 +397,7 @@ run "tenant_users_deny_history_and_bucket_configuration" {
   assert {
     condition = alltrue(flatten([
       for u in ["tenant", "platform"] : [
-        for a in ["s3:DeleteObjectVersion", "s3:PutBucketVersioning", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:PutLifecycleConfiguration", "s3:PutBucketCORS", "s3:PutEncryptionConfiguration", "s3:PutBucketAcl", "s3:DeleteBucket"] :
+        for a in ["s3:DeleteObjectVersion*", "s3:BypassGovernanceRetention", "s3:PutBucketVersioning", "s3:PutBucketObjectLockConfiguration", "s3:PutLifecycleConfiguration", "s3:PutBucketPolicy*", "s3:DeleteBucketPolicy*", "s3:PutBucketCORS", "s3:PutEncryptionConfiguration", "s3:PutBucketAcl", "s3:DeleteBucket"] :
         anytrue([
           for s in jsondecode(output.s3_users[u].policy).Statement :
           lookup(s, "Effect", "") == "Deny" && length(setintersection(keys(s), ["Condition", "NotAction", "NotResource", "Principal", "NotPrincipal"])) == 0
@@ -328,7 +406,7 @@ run "tenant_users_deny_history_and_bucket_configuration" {
         ])
       ]
     ]))
-    error_message = "every user's policy denies, unconditioned, s3:DeleteObjectVersion, s3:PutBucketVersioning, the bucket-configuration writes and s3:DeleteBucket"
+    error_message = "every user's policy denies, unconditioned, version deletes, retention bypass, the versioning, lock, lifecycle, policy, CORS, encryption and ACL writes and s3:DeleteBucket"
   }
 }
 
