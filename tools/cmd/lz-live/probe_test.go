@@ -40,6 +40,17 @@ const (
 // symlinks resolved.
 func fakeTofu(args []string) int {
 	bin := filepath.Dir(os.Args[0])
+	// T093: `version -json` answers the version in tofu.version next to the fake (the pin unless a
+	// test writes another), logged apart from the run's calls.
+	if len(args) > 0 && args[0] == "version" {
+		logChildIn(bin, "tofu-version.log", childCall{Args: args})
+		v, err := os.ReadFile(filepath.Join(bin, "tofu.version"))
+		if err != nil {
+			return 1
+		}
+		fmt.Printf("{\"terraform_version\":%q}\n", strings.TrimSpace(string(v)))
+		return 0
+	}
 	sub, out, positional, root := "", "", "", "."
 	for _, a := range args {
 		switch {
@@ -302,6 +313,7 @@ func newProbeWorld(t *testing.T) *probeWorld {
 			t.Fatal(err)
 		}
 	}
+	writePrivate(t, filepath.Join(bin, "tofu.version"), tofuPin(t))
 	writePrivate(t, filepath.Join(w.cfg, "sandbox.env"), "OVH_ENDPOINT=ovh-eu\nOVH_CLIENT_ID=EU.sandboxadmin\nOVH_CLIENT_SECRET="+probeSecret+"\n")
 	writePrivate(t, filepath.Join(w.cfg, "accounts", probeAccount, "account.env"),
 		"LZ_ACCOUNT_ID="+probeAccount+"\nOVH_ENDPOINT=ovh-eu\nLZ_ORG=demo\nLZ_PROJECT_ID_STATE=p1\nLZ_ADMIN_POLICY_ID=pol-admin\n")

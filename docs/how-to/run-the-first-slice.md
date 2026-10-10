@@ -1,9 +1,9 @@
 ---
 references:
   - path: tools/cmd/lz-live/main.go
-    blob: 0860b1daf0dc6ebcc1c98a0d575534fea7ee901a
+    blob: 4aa02c56bf1ec151929c1e0433761a069800afe4
   - path: tools/cmd/lz-live/lane.go
-    blob: ae27bc8fa62bac408849ebe20559f77d71a5605d
+    blob: 13608161952d232cf8649daed1c32562c3ef6536
   - path: tools/internal/live/apply.go
     blob: c658bea8402ce8b9259db0f2f71e6fcee81c9ba0
   - path: tools/internal/live/bootstrap.go
@@ -18,7 +18,7 @@ references:
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
     blob: 01807dbfce2ac559d2573c4735cccec0cea9bf4d
-last_verified: 4817d011585ccad9d42c42eac27470a910148111
+last_verified: 1008164925dc2ae11ab80f6eb8405252525efaea
 ---
 
 # Run the first slice on an OVHcloud account
@@ -58,7 +58,11 @@ MISE_ENV=live mise exec -- task live:plan -- --reviewed-sha "$S" all
 
 The examples below leave out the prefix. Every `task live:*` and `task bootstrap:account`
 target builds `lz-live` from the checkout first (`.local/bin/lz-live`), so Go is needed.
-`bootstrap:account` also needs `tofu` on `PATH`.
+Every `lz-live` verb first resolves OpenTofu at exactly the version `mise.toml` pins: `LZ_TOFU`
+(from the environment, else from `live.env`), else `tofu` on `PATH`. Another version, or none,
+stops the run with exit 2 before any credential is read. If an older `tofu` sits ahead of mise's
+on `PATH`, set `LZ_TOFU` in `live.env` to the absolute path of the pinned binary
+(`mise which tofu`).
 
 Keep `TMPDIR` unset or outside the clone. `lz-live` creates each run's scratch HOME under it
 ([probe run sheet](../../tests/live/probes/README.md#what-every-root-shares)).
@@ -103,13 +107,13 @@ The host guard runs before any credential is read and refuses (exit 3) when any 
 
 Every credential and binding lives under `~/.config/ovh-lz/` with mode 600 (directories 700).
 `lz-live` refuses group- or world-readable files and reads credentials itself. A `.envrc` is not
-needed, and whatever it exports is ignored. The layout
+needed, and whatever it exports is ignored, `LZ_TOFU` apart. The layout
 ([data-model](../../specs/005-first-landing-zone-slice/data-model.md#account-binding-and-local-files-never-in-the-repository))
 has two files at the top level:
 
 | File | Variables | Written by |
 | --- | --- | --- |
-| `live.env` | `LZ_OWNER_CHECKOUT` (canonical absolute path of the owner clone), `LZ_AGENT_WORKTREE_ROOT` (absolute path of an existing directory that holds the agent worktrees) | you, once |
+| `live.env` | `LZ_OWNER_CHECKOUT` (canonical absolute path of the owner clone), `LZ_AGENT_WORKTREE_ROOT` (absolute path of an existing directory that holds the agent worktrees), optional `LZ_TOFU` (absolute path of the pinned OpenTofu) | you, once |
 | `sandbox.env` | `OVH_ENDPOINT`, `OVH_CLIENT_ID`, `OVH_CLIENT_SECRET` of the account's admin service account `lz-sandbox-admin` | existing, or `bootstrap:account --fresh-account` |
 
 The rest sits under `accounts/<account>/`, where `<account>` is the account that

@@ -23,18 +23,15 @@ import (
 
 // lane runs plan, apply, destroy or chain. A TMPDIR inside the checkout is refused first (the
 // children's scratch HOME goes under it); a missing sandbox.env is blocked (exit 2) naming
-// bootstrap:account. deadline is chain's (0: live.DefaultDeadline).
-func lane(ctx context.Context, d deps, checkout, cfg, reviewed, verb, target string, deadline time.Duration) error {
+// bootstrap:account. tofu is the resolved pinned OpenTofu (T093); deadline is chain's (0:
+// live.DefaultDeadline).
+func lane(ctx context.Context, d deps, checkout, cfg, reviewed, tofu, verb, target string, deadline time.Duration) error {
 	if err := live.ScratchOutside(checkout); err != nil {
 		return err
 	}
 	m, _, err := manifestBinding(checkout)
 	if err != nil {
 		return err
-	}
-	tofu, err := d.LookPath("tofu")
-	if err != nil {
-		return fmt.Errorf("tofu: %w", err)
 	}
 	store, err := stateStore(d, m)
 	if err != nil {
