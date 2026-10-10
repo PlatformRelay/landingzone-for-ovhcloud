@@ -137,8 +137,9 @@ func childCall(c tofuCall) bool {
 	return true
 }
 
-// checkIdentityRun pins the clauses every way out shares.
-func checkIdentityRun(t *testing.T, w *runWorld, root string) []tofuCall {
+// checkIdentityRun pins the clauses every way out shares. The destroys are [companion p] unless
+// wantDestroys says otherwise (a companion that could not be destroyed keeps the root, T095).
+func checkIdentityRun(t *testing.T, w *runWorld, root string, wantDestroys ...string) []tofuCall {
 	t.Helper()
 	calls := w.calls(t, "tofu.log")
 	probeDir, _, _ := probeFiles(t, root)
@@ -229,8 +230,11 @@ func checkIdentityRun(t *testing.T, w *runWorld, root string) []tofuCall {
 
 	// On exit the companion is destroyed (under the identity: above) before the root's destroy
 	// removes the identity, and no file holds a probe secret any more.
-	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"companion", "p"}) {
-		t.Errorf("destroys %v, want [companion p]: the companion first, then the root that holds the identity", got)
+	if wantDestroys == nil {
+		wantDestroys = []string{"companion", "p"}
+	}
+	if got := sequence(calls, "destroy"); !slices.Equal(got, wantDestroys) {
+		t.Errorf("destroys %v, want %v: the companion first, then the root that holds the identity", got, wantDestroys)
 	}
 	for _, dir := range []string{root, w.runDir, w.stacks} {
 		if left := holders([]string{dir}, identitySecrets); len(left) > 0 {
@@ -339,18 +343,18 @@ func TestProbeIdentity(t *testing.T) {
 		checkIdentityRun(t, w, root)
 	})
 
-	// A companion that cannot be destroyed (e.g. the P9 allowlist lacks a delete) fails the run;
-	// the root is still destroyed, so the identity does not outlive the run, and the credential goes.
-	// What the companion left is the leftover check's to report.
+	// A companion that cannot be destroyed (e.g. the P9 allowlist lacks a delete) fails the run.
+	// T095: the root is kept, so the identity the companion's resources need outlives the run for
+	// `--cleanup` (TestProbeCompanionDestroyRetry); the credential file still goes (a cleanup
+	// re-reads it from the root's state). Before T095 the root was destroyed here.
 	t.Run("companion-destroy-fails", func(t *testing.T) {
 		withUmask(t)
 		root := tempPrivate(t)
 		w := newRunWorld(t)
 		p := w.identityProbe(t, root, tofuStack{DestroyExit: 1})
-		if err := p.Start(context.Background()); ExitCode(err) == 0 {
-			t.Error("a probe whose companion destroy failed exited 0")
-		}
-		checkIdentityRun(t, w, root)
+		err := p.Start(context.Background())
+		calls := checkIdentityRun(t, w, root, "companion")
+		checkKeptRoot(t, w, root, err, calls)
 	})
 
 	t.Run("interrupt-during-companion", func(t *testing.T) {

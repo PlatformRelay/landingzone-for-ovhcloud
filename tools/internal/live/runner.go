@@ -31,8 +31,9 @@ import (
 // inventory as resources are created. Before the first apply it registers the destroy-on-exit: on
 // success, failure, SIGINT, SIGTERM and deadline expiry it destroys the ephemeral stacks whose
 // apply started, in reverse order, each as a saved `plan -destroy` judged by the same guard and
-// applied as that file (session.destroy), continuing after a refused or failed destroy; then it runs the leftover
-// check and writes summary.json. Every child gets the environment of env.go with a per-run scratch
+// applied as that file (session.destroy), continuing after a refused or failed destroy (except a
+// probe root whose companion was not destroyed, which is kept: Probe); then it runs the leftover
+// check, writes summary.json and, when a tofu call failed, errors.txt (each failed call's output). Every child gets the environment of env.go with a per-run scratch
 // HOME (0700, removed when the run ends; never the caller's HOME, so ~/.ovh.conf,
 // ~/.aws/credentials and the like cannot reach tofu) and a data directory
 // (TF_DATA_DIR) per stack inside it, and every child stream passes through redact.go.
@@ -85,6 +86,9 @@ type Runner struct {
 
 	cleanupOnly bool // Probe.Cleanup: destroy every ephemeral stack, plan and apply nothing
 	companion   *companionStage
+	// companionBackoff are the waits before each retry of the companion's destroy (T095); nil:
+	// defaultCompanionBackoff. Tests shorten them.
+	companionBackoff []time.Duration
 }
 
 // companionStage is a probe root's second stage (T075/T076): after the root's apply, the
@@ -143,6 +147,9 @@ type session struct {
 	writerLog      bytes.Buffer
 	writerInit     error
 	writerRecorded bool
+	// The failed calls' output (recordFailure), written redacted to errors.txt when the run ends.
+	errMu  sync.Mutex
+	errLog bytes.Buffer
 }
 
 // tofuCmd is tofu on st's root with st's data directory (TF_DATA_DIR: backend configuration,
@@ -162,13 +169,131 @@ func (s *session) tofuCmd(ctx context.Context, st Stack, args ...string) *exec.C
 
 func (s *session) tofu(ctx context.Context, st Stack, stdout io.Writer, args ...string) error {
 	cmd := s.tofuCmd(ctx, st, args...)
-	cmd.Stdout, cmd.Stderr = stdout, s.term
+	var stderr capped
+	cmd.Stdout, cmd.Stderr = stdout, io.MultiWriter(s.term, &stderr)
 	err := cmd.Run()
 	killGroup(ctx, cmd)
 	if err != nil {
-		return fmt.Errorf("tofu %s %s: %w", args[0], st.ID, err)
+		s.recordFailure(st, args[0], err, stderr.String())
+		return &tofuFailure{err: fmt.Errorf("tofu %s %s: %w", args[0], st.ID, err), output: stderr.String()}
 	}
 	return nil
+}
+
+// tofuFailure is a failed tofu call with what it printed on stderr (T095): kept in memory, unredacted,
+// to tell a transient API failure from a refusal (transient); its text is the call's error only.
+type tofuFailure struct {
+	err    error
+	output string
+}
+
+func (f *tofuFailure) Error() string { return f.err.Error() }
+func (f *tofuFailure) Unwrap() error { return f.err }
+
+// errLimit bounds what one failed call keeps of its output.
+const errLimit = 1 << 20
+
+// capped keeps the first errLimit bytes written to it.
+type capped struct{ bytes.Buffer }
+
+func (c *capped) Write(p []byte) (int, error) {
+	if room := errLimit - c.Len(); room > 0 {
+		c.Buffer.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
+}
+
+// diagnosticLines keeps the `diagnostic` events of an `apply -json` stream: their detail holds the
+// API's answer, which the terminal shows only as the one-line summary (T094 gap 1). Each is kept
+// decoded, as plain text, so that redaction sees every secret as written, not JSON-escaped (review
+// r1). A line longer than errLimit is dropped, not buffered.
+type diagnosticLines struct {
+	part []byte
+	long bool // the current line passed errLimit: skipped up to its newline
+	kept capped
+}
+
+var diagnosticToken = []byte(`"diagnostic"`)
+
+func (d *diagnosticLines) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		chunk := p
+		if i >= 0 {
+			chunk = p[:i]
+		}
+		if !d.long {
+			d.part = append(d.part, chunk...)
+			if len(d.part) > errLimit {
+				d.part, d.long = nil, true
+			}
+		}
+		if i < 0 {
+			break
+		}
+		if !d.long {
+			d.keep(d.part)
+		}
+		d.part, d.long, p = d.part[:0], false, p[i+1:]
+	}
+	return n, nil
+}
+
+func (d *diagnosticLines) keep(line []byte) {
+	if !bytes.Contains(line, diagnosticToken) {
+		return
+	}
+	var e struct {
+		Type       string `json:"type"`
+		Diagnostic struct {
+			Severity, Summary, Detail, Address string
+		} `json:"diagnostic"`
+	}
+	if json.Unmarshal(line, &e) != nil || e.Type != "diagnostic" {
+		return
+	}
+	g := e.Diagnostic
+	fmt.Fprintf(&d.kept, "diagnostic %s: %s (%s)\n%s\n", g.Severity, g.Summary, g.Address, g.Detail)
+}
+
+// recordFailure appends a failed call's output to the run's error record (errors.txt, written
+// redacted when the run ends), so a refused API call's answer can be read, and captured as a
+// fixture, after the run (T094 gap 1, T095).
+func (s *session) recordFailure(st Stack, sub string, err error, output string) {
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
+	fmt.Fprintf(&s.errLog, "== %s: tofu %s: %v\n%s\n", st.ID, sub, err, strings.TrimRight(output, "\n"))
+}
+
+// Transient API failures (T095) are retried in the companion's destroy: an HTTP 5xx (go-ovh's
+// "status code 503", net/http's "500 Internal Server Error"), an OAuth2 token fetch failure
+// (golang.org/x/oauth2 "cannot fetch token: <status>", or a transport error on the token endpoint)
+// or a connection reset. A 4xx status wins: it is never retried (a refused call, a bad credential,
+// an unknown resource do not heal by waiting). A status counts only in those contexts — after
+// "status code", after "cannot fetch token: ", or before a standard reason phrase — so a number in
+// a response body ("400 Test Network") is no status (review r1).
+var (
+	statusCodeRE  = regexp.MustCompile(`(?i)\bstatus[ _]?code\D{0,3}([1-5][0-9]{2})\b`)
+	tokenStatusRE = regexp.MustCompile(`oauth2: cannot fetch token: ([1-5][0-9]{2})\b`)
+	statusTextRE  = regexp.MustCompile(`(?i)\b([45][0-9]{2}) (bad request|unauthorized|payment required|forbidden|not found|method not allowed|not acceptable|proxy authentication required|request timeout|conflict|gone|length required|precondition failed|request entity too large|content too large|request-uri too long|uri too long|unsupported media type|requested range not satisfiable|range not satisfiable|expectation failed|misdirected request|unprocessable entity|unprocessable content|locked|failed dependency|too early|upgrade required|precondition required|too many requests|request header fields too large|unavailable for legal reasons|internal server error|not implemented|bad gateway|service unavailable|gateway timeout|http version not supported|insufficient storage|network authentication required)\b`)
+	// transientMarks need no status: a transport failure on the token endpoint, a reset connection.
+	transientMarks = []string{`/oauth2/token": `, "connection reset by peer"}
+)
+
+func transient(output string) bool {
+	fiveXX := false
+	for _, re := range []*regexp.Regexp{statusCodeRE, tokenStatusRE, statusTextRE} {
+		for _, m := range re.FindAllStringSubmatch(output, -1) {
+			switch m[1][0] {
+			case '4':
+				return false
+			case '5':
+				fiveXX = true
+			}
+		}
+	}
+	return fiveXX || slices.ContainsFunc(transientMarks, func(m string) bool { return strings.Contains(output, m) })
 }
 
 // killGroup kills what is left of a stopped child's process group (tofu's provider plugins): Go's
@@ -219,7 +344,8 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 	}
 	s.started = append(s.started, st)
 	cmd := s.tofuCmd(ctx, st, "apply", "-json", "-input=false", plan)
-	cmd.Stderr = s.term
+	var stderr capped
+	cmd.Stderr = io.MultiWriter(s.term, &stderr)
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -227,12 +353,13 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("tofu apply %s: %w", st.ID, err)
 	}
-	var reader io.Reader = out
+	diags := &diagnosticLines{}
+	reader := io.TeeReader(out, diags)
 	var second chan error
 	fired := false
 	if c := s.r.companion; c != nil && st.ID == c.stack.ID {
 		second = make(chan error, 1)
-		reader = &applyStartWatch{r: out, fire: func() {
+		reader = &applyStartWatch{r: reader, fire: func() {
 			fired = true
 			go func() { second <- s.secondWriter(ctx, st) }()
 		}}
@@ -260,6 +387,7 @@ func (s *session) stack(ctx context.Context, st Stack) (err error) {
 		}
 	}
 	if werr != nil {
+		s.recordFailure(st, "apply", werr, stderr.String()+diags.kept.String())
 		return errors.Join(fmt.Errorf("tofu apply %s: %w", st.ID, werr), ferr)
 	}
 	return errors.Join(cerr, ferr)
@@ -427,21 +555,21 @@ func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error)
 			Value json.RawMessage `json:"value"`
 		}
 		if err := json.Unmarshal(out.Bytes(), &all); err != nil {
-			return false, fmt.Errorf("tofu output -json of %s is not a map of outputs", c.stage.ID)
+			return false, publishedRefusal{fmt.Errorf("tofu output -json of %s is not a map of outputs", c.stage.ID)}
 		}
 		o, ok := all[companionOutput]
 		if !ok {
 			return false, nil
 		}
 		if err := json.Unmarshal(o.Value, &env); err != nil {
-			return false, fmt.Errorf("output %s of %s is not a map of strings", companionOutput, c.stage.ID)
+			return false, publishedRefusal{fmt.Errorf("output %s of %s is not a map of strings", companionOutput, c.stage.ID)}
 		}
 	} else {
 		if err := s.tofu(ctx, c.stage, &out, "output", "-json", companionOutput); err != nil {
 			return false, err
 		}
 		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-			return false, fmt.Errorf("output %s of %s is not a map of strings", companionOutput, c.stage.ID)
+			return false, publishedRefusal{fmt.Errorf("output %s of %s is not a map of strings", companionOutput, c.stage.ID)}
 		}
 	}
 	secrets := make([]string, 0, len(env))
@@ -461,13 +589,13 @@ func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error)
 	// key, never its value.
 	for _, k := range slices.Sorted(maps.Keys(cred)) {
 		if reservedCompanionName(k) {
-			return false, fmt.Errorf("output %s publishes %s, a name reserved for the run", companionOutput, k)
+			return false, publishedRefusal{fmt.Errorf("output %s publishes %s, a name reserved for the run", companionOutput, k)}
 		}
 	}
 	// Bound as the companion gets them: from the file.
 	ids, err := identities(cred, s.r.Creds["OVH_ENDPOINT"])
 	if err != nil {
-		return false, err
+		return false, publishedRefusal{err}
 	}
 	if c.bind != nil {
 		for _, id := range ids {
@@ -508,17 +636,72 @@ func (s *session) companion(ctx context.Context) (err error) {
 }
 
 // cleanupCompanion is the companion's part of `--cleanup`: the identity re-read from the stage's
-// retained state, the companion initialised afresh and destroyed under it, before the stage.
-func (s *session) cleanupCompanion(ctx context.Context) error {
+// retained state and bound again, the companion initialised afresh and destroyed under it, before
+// the stage. keep reports a companion that may still hold resources (T095): the stage, which holds
+// its identities and its state, must then stay. A refused published environment keeps nothing: the
+// run refused it too, before the companion ran.
+func (s *session) cleanupCompanion(ctx context.Context) (keep bool, err error) {
 	ok, err := s.companionEnv(ctx, true)
-	if err != nil || !ok {
-		return err
+	if err != nil {
+		// Only what depends on the published values alone: a binding or file refusal can arise at
+		// cleanup only (account.env edited, file mode changed) after a companion that ran (review r1).
+		var pub publishedRefusal
+		return !errors.As(err, &pub), err
+	}
+	if !ok {
+		return false, nil
 	}
 	c := s.r.companion.stack
 	if err := s.tofu(ctx, c, s.term, initArgs...); err != nil {
-		return err
+		return true, err
 	}
-	return s.destroy(ctx, c)
+	if err := s.destroyCompanion(ctx, c); err != nil {
+		return true, err
+	}
+	return false, nil
+}
+
+// publishedRefusal is companionEnv's refusal of what a stage published (an output of the wrong shape,
+// a reserved name, a credential that pairs with no identity): it depends on the published values only, so the run refused it too,
+// before the companion ran (T095).
+type publishedRefusal struct{ error }
+
+func (p publishedRefusal) Unwrap() error { return p.error }
+
+// defaultCompanionBackoff are the waits before the second and third attempt of the companion's
+// destroy (T095): three attempts within about 80 s, well inside the default deadline.
+var defaultCompanionBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
+
+// destroyCompanion destroys the companion (session.destroy: plan, judge, apply that plan), retrying
+// the whole destroy — a saved plan is stale once its apply failed — after a transient failure, at
+// most len(backoff) times, each after its wait; a wait that would end after ctx's deadline is not
+// started (T095). Each failed attempt's output is in the run's error record.
+func (s *session) destroyCompanion(ctx context.Context, st Stack) error {
+	backoff := s.r.companionBackoff
+	if backoff == nil {
+		backoff = defaultCompanionBackoff
+	}
+	for attempt := 0; ; attempt++ {
+		err := s.destroy(ctx, st)
+		if err == nil {
+			return nil
+		}
+		err = fmt.Errorf("destroy of %s failed (attempt %d of %d): %w", st.ID, attempt+1, len(backoff)+1, err)
+		var f *tofuFailure
+		if attempt >= len(backoff) || ctx.Err() != nil || !errors.As(err, &f) || !transient(f.output) {
+			return err
+		}
+		wait := backoff[attempt]
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
+			return fmt.Errorf("%w; no retry: the deadline leaves less than %v", err, wait)
+		}
+		fmt.Fprintf(s.term, "LZ-LIVE retry destroy %s in %v: transient API failure (attempt %d of %d)\n", st.ID, wait, attempt+2, len(backoff)+1)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return errors.Join(err, context.Cause(ctx))
+		}
+	}
 }
 
 // destroy destroys st as every destroy of the live lane does (T047, coordinator decision 2: one
@@ -638,29 +821,45 @@ func (r Runner) Execute(ctx context.Context) error {
 	dctx, dcancel := context.WithTimeout(context.WithoutCancel(ctx), deadline)
 	defer dcancel()
 	var destroyErr error
+	// keepStage: the companion was not destroyed, so its stage — the identities it runs under, the
+	// bucket of its state, its S3 credential — is not destroyed either, and `--cleanup` can reach
+	// the companion later (T095; before, the stage's destroy removed the identity and left the
+	// companion's resources out of every cleanup's reach).
+	keepStage := false
 	for i := len(s.started) - 1; i >= 0; i-- {
 		st := s.started[i]
 		if !st.Ephemeral {
 			continue
 		}
+		c := r.companion
 		if r.cleanupOnly {
 			// A fresh process: the root may never have been initialised in this checkout.
 			if e := s.tofu(dctx, st, term, initArgs...); e != nil {
 				destroyErr = errors.Join(destroyErr, e)
 				continue
 			}
-			// The companion first, under the identity the root still holds; the root follows
-			// whatever the companion's outcome, so the identity does not outlive the cleanup.
-			if c := r.companion; c != nil && st.ID == c.stage.ID {
-				destroyErr = errors.Join(destroyErr, s.cleanupCompanion(dctx))
+			// The companion first, under the identity the root still holds.
+			if c != nil && st.ID == c.stage.ID {
+				keep, e := s.cleanupCompanion(dctx)
+				destroyErr, keepStage = errors.Join(destroyErr, e), keep
 			}
+		}
+		if c != nil && st.ID == c.stack.ID {
+			if e := s.destroyCompanion(dctx, st); e != nil {
+				destroyErr, keepStage = errors.Join(destroyErr, e), true
+			}
+			continue
+		}
+		if keepStage && c != nil && st.ID == c.stage.ID {
+			destroyErr = errors.Join(destroyErr, fmt.Errorf("%s kept: its companion %s was not destroyed and needs the identities %s holds; destroy both with --cleanup %s", st.ID, c.stack.ID, st.ID, r.ID))
+			continue
 		}
 		if e := s.destroy(dctx, st); e != nil {
 			destroyErr = errors.Join(destroyErr, e)
 		}
 	}
-	// The probe credential goes once the companion is destroyed (the root's destroy above has
-	// removed the identity it names).
+	// The probe credential goes once the companion is done with (a kept stage still holds it in its
+	// state, where `--cleanup` reads it again).
 	if s.credFile != "" {
 		destroyErr = errors.Join(destroyErr, removeFiles(s.credFile))
 	}
@@ -677,6 +876,12 @@ func (r Runner) Execute(ctx context.Context) error {
 			e = writeRecord(filepath.Join(r.Dir, "listings", typ+".json"), []byte(red.Redact(string(raw))))
 		}
 		recErr = errors.Join(recErr, e)
+	}
+	s.errMu.Lock()
+	errText := s.errLog.String()
+	s.errMu.Unlock()
+	if errText != "" {
+		recErr = errors.Join(recErr, writeRecord(filepath.Join(r.Dir, "errors.txt"), []byte(red.Redact(errText))))
 	}
 	if raw, e := json.Marshal(rep); e != nil {
 		recErr = errors.Join(recErr, e)
@@ -755,7 +960,9 @@ func errString(err error) string {
 // probe directory, every published identity is bound (Bind), and the companion runs with them in
 // place of the admin credential, while a second writer tries its state lock. On every way out the
 // companion is destroyed before the root and companion.env is removed; `--cleanup` re-reads the
-// output from the root's retained state and does the same.
+// output from the root's retained state and does the same. The companion's destroy is retried after
+// a transient API failure (destroyCompanion); a companion that still cannot be destroyed keeps the
+// root, its identities and the companion's state bucket, for `--cleanup` (T095).
 type Probe struct {
 	Run        Runner
 	ConfigRoot string // ~/.config/ovh-lz

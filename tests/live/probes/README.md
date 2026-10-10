@@ -26,7 +26,8 @@ S=<reviewed sha>
 Every run prints `LZ-LIVE run <run-id> start probe tests/live/probes/<root>` first. Its record is
 `.local/live/<run-id>/` in the clone: `plan-<root>.txt` (rendered plan), `inventory.jsonl`,
 `listings/<type>.json` (one file per leftover kind listed), `leftovers.json`, `summary.json`
-(`outcome`, `plan_only`, `error`). Copy the run id, the outcome and the observations into the
+(`outcome`, `plan_only`, `error`), and `errors.txt` when a tofu call failed (its stderr, and a
+failed apply's diagnostics decoded to plain text, redacted). Copy the run id, the outcome and the observations into the
 task's evidence file, never the record itself (it may hold ids and the account e-mail).
 
 ## What every root shares
@@ -145,19 +146,32 @@ under the one `task live:probe` command of its row:
    output goes to `second-writer-storage-iam-companion.txt` in the run record, and its refusal
    does not fail the run.
 3. On every way out the companion is destroyed first (under the identity), then the root (which
-   removes the identities), then `companion.env` is removed.
+   removes the identities), then `companion.env` is removed; a companion that cannot be destroyed
+   keeps the root (below).
 
 `--plan-only` on such a root plans the root only: nothing is applied, so there is no identity and
 the companion does not run. `--cleanup <run-id>` re-reads `companion_env` from the root's retained
 state, binds it again, destroys the companion, then the root, and removes `companion.env`; a root
 that published nothing (its apply failed before) has no companion to destroy.
 
-If the companion's destroy (or its binding) fails, on a run or a cleanup, the root is still
-destroyed, so no probe identity outlives the session. That also removes the identity and the
-`lzprobe-p1-<run-id>` bucket that held the companion's state: a further `--cleanup` cannot reach
-what the companion left. The leftover check lists it (`lzprobe-p9-<run-id>` network, subnet,
-bucket); remove it as the admin in the same session (`ovhcloud`, or the Control Panel) and record
-it in T010's evidence. The second writer's record always exists once the companion stage began: its init output, then
+The companion's destroy (`plan -destroy`, the judged plan, its apply) is retried as a whole after
+a transient API failure — the failed call's output names a 5xx status (also as the OAuth2 token
+answer), a transport failure on the OAuth2 token endpoint or a connection reset, and no 4xx
+status — at most twice, after 20 s and then 60 s, and never
+past the destroy deadline; a 4xx is never retried (T095, after run 20261010T173007Z-637a lost its
+identity to an OAuth2 token 500). If the companion's destroy still fails, on a run or a cleanup,
+**the root is kept, not destroyed**: it holds the identities the companion runs under, the
+`lzprobe-p1-<run-id>` bucket with the companion's state and its S3 credential. The run ends `fail`
+with an error naming the kept root and `--cleanup <run-id>`, and the leftover check reports the
+kept root's resources and the companion's as leftovers (they are, until the cleanup). Run the
+cleanup in the same session: it binds the identity again, destroys the companion, then the root,
+and keeps the root again while the companion still cannot be destroyed, or its identity cannot be
+read or bound. A published environment the run refused (wrong shape, reserved name, unpaired
+credential) never started the companion: then the root is destroyed as before. If the companion can never be destroyed under its identity
+(e.g. the allowlist lacks a delete), remove its resources as the admin, then run `--cleanup`
+(its companion plan should then find nothing to destroy; UNVERIFIED), and record it in T010's evidence.
+
+The second writer's record always exists once the companion stage began: its init output, then
 `second writer exit: …`, or `second writer never started: …` with the reason (the companion's
 apply reported no resource operation, or the companion stopped before its apply).
 
