@@ -197,13 +197,17 @@ func TestBootstrapEntryStateOptions(t *testing.T) {
 	}
 }
 
-// TestBootstrapEntryStateRefusals: without tofu on PATH, or with a manifest whose spec.state.endpoint
-// is not the endpoint its region derives (the S3 backend and the store would diverge), the run
-// stops before the phases start: exit 1, no API call, no terminal.
+// TestBootstrapEntryStateRefusals: without tofu on PATH (blocked, exit 2: T093), or with a
+// manifest whose spec.state.endpoint is not the endpoint its region derives (the S3 backend and
+// the store would diverge; exit 1), the run stops before the phases start: no API call, no
+// terminal.
 func TestBootstrapEntryStateRefusals(t *testing.T) {
-	for name, mutate := range map[string]func(*bootstrapWorld){
-		"no-tofu": func(w *bootstrapWorld) { w.tofu = "" },
-		"endpoint-differs": func(w *bootstrapWorld) {
+	for name, c := range map[string]struct {
+		mutate func(*bootstrapWorld)
+		exit   int
+	}{
+		"no-tofu": {func(w *bootstrapWorld) { w.tofu = "" }, live.BlockedExit},
+		"endpoint-differs": {exit: 1, mutate: func(w *bootstrapWorld) {
 			p := filepath.Join(w.checkout, "stacks", "deployments.yaml")
 			raw, err := os.ReadFile(p)
 			if err != nil {
@@ -212,17 +216,17 @@ func TestBootstrapEntryStateRefusals(t *testing.T) {
 			if err := os.WriteFile(p, []byte(strings.ReplaceAll(string(raw), "https://s3.gra.io.cloud.ovh.net", "https://s3.gra.storage.example")), 0o600); err != nil {
 				t.Fatal(err)
 			}
-		},
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newBootstrapWorld(t)
 			var got live.BootstrapOptions
 			var n int
 			w.boot = captureBoot(&got, &n)
-			mutate(w)
+			c.mutate(w)
 			code, stderr := w.run("bootstrap", "--reviewed-sha", fakeHead)
-			if code != 1 || n != 0 {
-				t.Errorf("exit %d, stderr %q, Bootstrap called %d times; want 1 and never", code, stderr, n)
+			if code != c.exit || n != 0 {
+				t.Errorf("exit %d, stderr %q, Bootstrap called %d times; want %d and never", code, stderr, n, c.exit)
 			}
 			if w.calls.Load() != 0 || w.terminals.Load() != 0 {
 				t.Errorf("%d API calls, %d terminals", w.calls.Load(), w.terminals.Load())

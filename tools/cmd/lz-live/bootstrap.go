@@ -98,15 +98,12 @@ func (noTerminal) ReadSecret(string) (string, error) { return "", errNoTerminal 
 func (noTerminal) ReadLine(string) (string, error)   { return "", errNoTerminal }
 
 // bootstrap runs the phases after the guard admitted the host (live.Run ran it first). What the
-// state phases need (tofu, a consistent spec.state) is checked before any phase starts.
-func bootstrap(ctx context.Context, d deps, checkout, cfg, reviewed string, fresh bool) error {
+// state phases need (a consistent spec.state; tofu, resolved by the caller, T093) is checked
+// before any phase starts.
+func bootstrap(ctx context.Context, d deps, checkout, cfg, reviewed, tofu string, fresh bool) error {
 	m, refs, err := manifestBinding(checkout)
 	if err != nil {
 		return err
-	}
-	tofu, err := d.LookPath("tofu")
-	if err != nil {
-		return fmt.Errorf("tofu: %w", err)
 	}
 	api, err := d.API(bootstrapEndpoint)
 	if err != nil {

@@ -105,8 +105,9 @@ func probeRoot(checkout, root string) (string, error) {
 	return real, nil
 }
 
-// probe runs or cleans up one probe after the guard admitted the run.
-func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error {
+// probe runs or cleans up one probe after the guard admitted the run, with the resolved pinned
+// OpenTofu (T093).
+func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs) error {
 	var root string
 	var err error
 	// Before any credential, file or child: the children's scratch HOME and tofu data directories
@@ -195,10 +196,6 @@ func probe(ctx context.Context, d deps, checkout, cfg string, p probeArgs) error
 		if !slices.ContainsFunc(projects, func(q live.Project) bool { return q.ID == projectID }) {
 			projects = append(projects, live.Project{ID: projectID, URN: projectURN(cred.Endpoint, projectID)})
 		}
-	}
-	tofu, err := d.LookPath("tofu")
-	if err != nil {
-		return fmt.Errorf("tofu: %w", err)
 	}
 	r := live.Runner{
 		ID:        runID,

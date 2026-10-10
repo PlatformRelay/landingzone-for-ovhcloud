@@ -116,6 +116,14 @@ func newWorld(t *testing.T, withLiveEnv bool) world {
 	if err := os.Symlink(self, w.git); err != nil {
 		t.Fatal(err)
 	}
+	// The checkout's opentofu pin (T093: lz-live resolves tofu against it).
+	mise, err := os.ReadFile(filepath.Join("..", "..", "..", "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.checkout, "mise.toml"), mise, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if withLiveEnv {
 		cfg := filepath.Join(w.home, ".config", "ovh-lz")
 		if err := os.MkdirAll(cfg, 0o700); err != nil {
@@ -137,6 +145,14 @@ func (w world) run(args ...string) (int, string) {
 		Git:           w.git,
 		OfflineMarker: w.marker,
 		Stderr:        &stderr,
+		// PATH is the world's bin directory (T093: an admitted run resolves tofu first).
+		LookPath: func(name string) (string, error) {
+			p := filepath.Join(filepath.Dir(w.git), name)
+			if _, err := os.Stat(p); err != nil {
+				return "", err
+			}
+			return p, nil
+		},
 	})
 	return code, stderr.String()
 }
@@ -223,6 +239,7 @@ func TestEntryReadsLiveEnvFromHome(t *testing.T) {
 		t.Fatalf("no live.env: exit %d, stderr %q; want 3 naming live-env", code, stderr)
 	}
 	w = newWorld(t, true)
+	fakeTofuAt(t, filepath.Dir(w.git), tofuPin(t))
 	code, stderr = w.run("chain", "--reviewed-sha", fakeHead, "stage-x")
 	if w.gitCalls(t) == 0 {
 		t.Fatal("admitted without asking git")

@@ -39,7 +39,9 @@ type bootstrapWorld struct {
 
 func newBootstrapWorld(t *testing.T) *bootstrapWorld {
 	t.Helper()
-	w := &bootstrapWorld{world: newWorld(t, true), tofu: "/opt/tofu/bin/tofu"}
+	w := &bootstrapWorld{world: newWorld(t, true)}
+	// T093: a fake tofu at the pinned version on PATH.
+	w.tofu = fakeTofuAt(t, filepath.Dir(w.git), tofuPin(t))
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "stacks", "deployments.yaml"))
 	if err != nil {
 		t.Fatal(err)

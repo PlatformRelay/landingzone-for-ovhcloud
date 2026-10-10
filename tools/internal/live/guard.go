@@ -256,6 +256,19 @@ func (h Host) Check() error {
 	return nil
 }
 
+// Setting returns a non-secret lane setting (T093: LZ_TOFU): the caller's environment wins, else
+// live.env's entry, read as the guard reads it.
+func (h Host) Setting(key string) (string, error) {
+	if v := h.Getenv(key); v != "" {
+		return v, nil
+	}
+	env, err := ReadCredentialFile(h.LiveEnv)
+	if err != nil {
+		return "", err
+	}
+	return env[key], nil
+}
+
 // gitConfig reads one key of the repository's configuration: git config --get exits 1 for an
 // unset key, which is not a failure.
 func (h Host) gitConfig(dir, key string) (string, bool, error) {

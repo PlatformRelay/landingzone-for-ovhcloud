@@ -6,6 +6,7 @@ package stacks
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // PlanOptions configures one offline planning run.
@@ -39,6 +41,48 @@ var tofuPin = regexp.MustCompile(`(?m)^opentofu\s*=\s*"([^"]+)"`)
 // /tcb/tofu, else tofu on PATH. It must report exactly the version root/mise.toml pins; another
 // one is refused, never skipped for the next candidate.
 func PinnedTofu(root string) (string, error) {
+	return ResolveTofu(root, os.Getenv("LZ_TOFU"), TofuTCB, exec.LookPath)
+}
+
+// ResolveTofu is PinnedTofu with its candidates given: lzTofu (LZ_TOFU, wherever the caller read
+// it), the entry's tofu at tcb, and lookPath for tofu on PATH (lz-live, T093).
+// The version probe runs with PATH and a HOME only (no caller export reaches it: an .envrc may
+// export a credential, T093 review r1), and is given versionProbeTimeout.
+func ResolveTofu(root, lzTofu, tcb string, lookPath func(string) (string, error)) (string, error) {
+	pin, err := TofuPin(root)
+	if err != nil {
+		return "", err
+	}
+	path := lzTofu
+	if path == "" {
+		if _, err := os.Stat(tcb); err == nil {
+			path = tcb
+		} else if path, err = lookPath("tofu"); err != nil {
+			return "", fmt.Errorf("no tofu binary (set LZ_TOFU to the pinned %s): %v", pin, err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version", "-json")
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir()}
+	out, err := cmd.Output()
+	var v struct {
+		Version string `json:"terraform_version"`
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s version -json: %v; want the pinned %s; set LZ_TOFU", path, err, pin)
+	}
+	if json.Unmarshal(out, &v) != nil || v.Version != pin {
+		return "", fmt.Errorf("%s reports version %q, want the pinned %s; set LZ_TOFU", path, v.Version, pin)
+	}
+	return path, nil
+}
+
+// versionProbeTimeout bounds `tofu version -json`.
+const versionProbeTimeout = 30 * time.Second
+
+// TofuPin returns the opentofu version root/mise.toml pins.
+func TofuPin(root string) (string, error) {
 	mise, err := os.ReadFile(filepath.Join(root, "mise.toml"))
 	if err != nil {
 		return "", fmt.Errorf("reading the opentofu pin: %w", err)
@@ -47,22 +91,7 @@ func PinnedTofu(root string) (string, error) {
 	if pin == nil {
 		return "", errors.New("mise.toml pins no opentofu version")
 	}
-	path := os.Getenv("LZ_TOFU")
-	if path == "" {
-		if _, err := os.Stat(TofuTCB); err == nil {
-			path = TofuTCB
-		} else if path, err = exec.LookPath("tofu"); err != nil {
-			return "", fmt.Errorf("no tofu binary (set LZ_TOFU to the pinned %s): %v", pin[1], err)
-		}
-	}
-	out, err := exec.Command(path, "version", "-json").Output()
-	var v struct {
-		Version string `json:"terraform_version"`
-	}
-	if err != nil || json.Unmarshal(out, &v) != nil || v.Version != string(pin[1]) {
-		return "", fmt.Errorf("%s reports version %q (%v), want the pinned %s; set LZ_TOFU", path, v.Version, err, pin[1])
-	}
-	return path, nil
+	return string(pin[1]), nil
 }
 
 // offlineTest is the generated mocked test every stack is planned with (research R16).
