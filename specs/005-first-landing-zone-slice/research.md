@@ -115,17 +115,19 @@ per-tenant flock) changes FR-008; the spec and V005/V010 are revised before T038
 written once to the credential file by `lz-live`'s credential writer without echo.
 `discard_client_secret` is not available in 2.21.0 (`CHANGELOG.md:15`). Policies: `ovh_iam_policy`
 with `identities = [client.identity]` (P8); tenant `resources = ["urn:v1:eu:resource:publicCloudProject:<project_id>"]`.
-**Platform deployer**: `publicCloudProject:apiovh:*` plus `account:apiovh:iam/resource/edit` and
-`account:apiovh:iam/resource/get`, on the tenant project URNs only (never the account URN or `*`).
-The IAM-resource actions let the `project` stage set the project's tags through
+**Platform deployer**: `publicCloudProject:apiovh:*` plus `account:apiovh:iam/resource/edit`, on
+the tenant project URNs only (never the account URN or `*`).
+The IAM-resource action lets the `project` stage set the project's tags through
 `ovh_iam_resource_tags` (`PUT /iam/resource/{resourceURN}` requires `iam/resource/edit`,
 `kb/api/v2/iam.json`): without them T049 run 1 was refused with 403 `missing IAM permissions:
 account:apiovh:iam/resource/edit` on the referenced project (T103, D108). The same PUT also
 requires `publicCloudProject:apiovh:iam/resource/tag/add` and `…/tag/remove` to add or remove tags
 (its `longDescription`, `iam.json:916`); `publicCloudProject:apiovh:*` covers them, so a narrower
-platform list must name them. kb lists no action for `GET /iam/resource/{resourceURN}`;
-`iam/resource/get` is granted by D108, and whether OVHcloud knows that name and honours both
-`account:` actions on a project URN is UNVERIFIED until the T049 re-run. If that run is refused
+platform list must name them. kb lists no action for `GET /iam/resource/{resourceURN}`, and
+`account:apiovh:iam/resource/get`, granted with it by D108, made OVHcloud refuse the policy update
+with 400 `unknown action` (T049 run 2), so it is not granted (T104). Whether OVHcloud honours
+`iam/resource/edit` on a project URN, and lets the platform deployer read the tags back through
+that GET with no `get` action, is UNVERIFIED until the T049 re-run. If that run is refused
 again, the next step is an operator decision; the grant is not widened to the account URN.
 **Tenant allowlist (narrowest the API allows, D88)**: from `api/v1/cloud.json`:
 `publicCloudProject:apiovh:network/private/{create,get,edit,delete,region/create}`,

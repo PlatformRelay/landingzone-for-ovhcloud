@@ -32,9 +32,9 @@ maintainer workstation.** Agents and CI never run `task bootstrap:*` or `task li
 **Status (2026-10-13).** Against the current sandbox account, every create→destroy probe has
 passed ([T010](../../specs/005-first-landing-zone-slice/evidence/T010.md)) and the account was
 bootstrapped twice ([T044](../../specs/005-first-landing-zone-slice/evidence/T044.md)). The
-chain (T049) ran once and stopped on a missing platform-deployer permission, since granted
-(T103); the fresh-account path (T045) has not run yet. Expect them to find what the fakes could
-not. See
+chain (T049) ran twice: run 1 stopped on a missing platform-deployer permission, since granted
+(T103); run 2 on an action OVHcloud does not know, since dropped (T104). The fresh-account path
+(T045) has not run yet. Expect them to find what the fakes could not. See
 [What is still unverified](#what-is-still-unverified).
 
 ## Before you start
@@ -434,16 +434,19 @@ evidence gaps.
   - the `/auth/time` offset, root-key revocation through `GET /auth/currentCredential`, and
     created-client propagation (T043);
   - `identify` creating a binding from scratch (T044 found the binding already in place).
-- **Platform deployer and project tags (T103):** T049 run 1 stopped at `demo-dev-project`:
+- **Platform deployer and project tags (T103, T104):** T049 run 1 stopped at `demo-dev-project`:
   `ovh_iam_resource_tags` on the referenced project was refused with 403 `missing IAM permissions:
   account:apiovh:iam/resource/edit`, because the platform deployer held only
-  `publicCloudProject:apiovh:*`. Its policy now also allows `account:apiovh:iam/resource/edit` and
-  `account:apiovh:iam/resource/get` on the tenant project URNs, nothing wider. The next chain run
-  updates the retained `account-governance` policy in place first. Whether OVHcloud accepts
-  `iam/resource/get` (the API schema names no action for that read) and honours both actions on a
-  project URN is UNVERIFIED until that run. If it is refused again, stop and record it for a
-  decision; do not widen the policy to the account URN.
-- **Chain (T049):** run 1 ended at `demo-dev-project` (above). These are UNVERIFIED:
+  `publicCloudProject:apiovh:*`. Its policy now also allows `account:apiovh:iam/resource/edit` on
+  the tenant project URNs, nothing wider. Run 2 was refused at `account-governance` with 400
+  `unknown action: "account:apiovh:iam/resource/get"` (the API schema names no action for that
+  read), so that action is no longer granted (T104). The next chain run updates the retained
+  `account-governance` policy in place first. Whether OVHcloud honours `iam/resource/edit` on a
+  project URN, and lets the platform deployer read the tags back (`GET /iam/resource/{urn}`)
+  without a `get` action, is UNVERIFIED until that run. If it is refused again, stop and record it
+  for a decision; do not widen the policy to the account URN.
+- **Chain (T049):** run 1 ended at `demo-dev-project`, run 2 at `account-governance` (above).
+  These are UNVERIFIED:
   - the lock object's conditional create (`If-None-Match`);
   - the lock-refusal text;
   - the versioning and tag fields;

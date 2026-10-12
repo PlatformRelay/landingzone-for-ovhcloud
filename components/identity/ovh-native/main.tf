@@ -41,12 +41,11 @@ locals {
   # 403 `missing IAM permissions: account:apiovh:iam/resource/edit` without it (T103, D108). The
   # same PUT also requires `publicCloudProject:apiovh:iam/resource/tag/add` and `tag/remove` to add
   # or remove tags (its longDescription): the wildcard covers those, so narrowing it must keep them.
-  # `iam/resource/get` is added with it by D108; kb lists no action for `GET /iam/resource/{urn}`,
-  # so whether OVHcloud knows that name is UNVERIFIED until the T049 re-run.
+  # No `account:apiovh:iam/resource/get`: kb lists no action for `GET /iam/resource/{urn}`, and
+  # OVHcloud refused the policy holding it with 400 `unknown action` (T049 run 2, T104).
   platform_allow = [
     "publicCloudProject:apiovh:*",
     "account:apiovh:iam/resource/edit",
-    "account:apiovh:iam/resource/get",
   ]
 }
 

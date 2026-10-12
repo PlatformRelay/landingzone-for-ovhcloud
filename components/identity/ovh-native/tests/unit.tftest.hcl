@@ -3,7 +3,7 @@
 # *Resolved-reference input*; contracts/checks.md G5). Mocked provider, no credential, no API call.
 #
 # The platform deployer (one OAuth2 client of the `CLIENT_CREDENTIALS` flow) gets one policy:
-# `publicCloudProject:apiovh:*` and `account:apiovh:iam/resource/{edit,get}` (project tags, T103) on
+# `publicCloudProject:apiovh:*` and `account:apiovh:iam/resource/edit` (project tags, T103, T104) on
 # every tenant project URN. Per tenant (`for_each` over `tenants`, keyed by tenant name, so a
 # second tenant leaves the first one's addresses and values unchanged): one deployer, one policy holding exactly the P9 allowlist on that tenant's own project URN, and
 # one identity group with role `NONE` and no members. Guard G5: no tenant resource but its project
@@ -184,10 +184,10 @@ run "tenant_policy_is_the_p9_allowlist_on_its_project" {
   }
 
   assert {
-    condition = try(toset(output.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "account:apiovh:iam/resource/get", "publicCloudProject:apiovh:*"])
+    condition = try(toset(output.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "publicCloudProject:apiovh:*"])
       && toset(output.platform_policy.resources) == toset(["urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"])
     && toset(output.platform_policy.identities) == toset(["urn:v1:eu:identity:credential:xx0000-ovh/oauth2-platform-client-id"]), false)
-    error_message = "one tenant: the platform deployer policy is exactly `publicCloudProject:apiovh:*` plus `account:apiovh:iam/resource/{edit,get}` on that project URN, for the platform deployer only"
+    error_message = "one tenant: the platform deployer policy is exactly `publicCloudProject:apiovh:*` plus `account:apiovh:iam/resource/edit` on that project URN, for the platform deployer only"
   }
 }
 
@@ -243,10 +243,11 @@ run "each_tenant_policy_confined_to_its_own_project" {
 }
 
 # The platform deployer covers `publicCloudProject:apiovh:*` on every tenant project URN, plus
-# `account:apiovh:iam/resource/edit` and `/get` on the same URNs so the project stage can set the
-# project's IAM tags (T049 run 1: 403 `missing IAM permissions: account:apiovh:iam/resource/edit`
-# for `ovh_iam_resource_tags`; T103, D108), for its own identity only; no other IAM action, no
-# `account:apiovh:me/get` (P26).
+# `account:apiovh:iam/resource/edit` on the same URNs so the project stage can set the project's
+# IAM tags (T049 run 1: 403 `missing IAM permissions: account:apiovh:iam/resource/edit` for
+# `ovh_iam_resource_tags`; T103, D108), for its own identity only; no other IAM action, no
+# `account:apiovh:me/get` (P26), and never `account:apiovh:iam/resource/get`, which OVHcloud
+# refuses as an unknown action (T049 run 2: 400 `unknown action`; T104).
 run "platform_policy_covers_the_tenant_projects" {
   command = plan
 
@@ -264,8 +265,13 @@ run "platform_policy_covers_the_tenant_projects" {
   }
 
   assert {
-    condition     = try(toset(output.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "account:apiovh:iam/resource/get", "publicCloudProject:apiovh:*"]), false)
-    error_message = "the platform deployer policy allows exactly `publicCloudProject:apiovh:*`, `account:apiovh:iam/resource/edit` and `account:apiovh:iam/resource/get` (no other IAM action, no `account:apiovh:me/get`)"
+    condition     = try(toset(output.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "publicCloudProject:apiovh:*"]), false)
+    error_message = "the platform deployer policy allows exactly `publicCloudProject:apiovh:*` and `account:apiovh:iam/resource/edit` (no other IAM action, no `account:apiovh:me/get`)"
+  }
+
+  assert {
+    condition     = try(length(output.platform_policy.allow) > 0 && !contains([for a in output.platform_policy.allow : lower(a)], "account:apiovh:iam/resource/get"), false)
+    error_message = "T104: no `account:apiovh:iam/resource/get` in the platform deployer policy (OVHcloud refuses it as an unknown action, T049 run 2)"
   }
 
   assert {
