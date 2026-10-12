@@ -10,9 +10,9 @@
 # the plan. The tenant group has role `NONE` and no members; no S3 user is planned here (moved to
 # tenant-state). The component's tests pin G5 in detail; this file checks that the stage passes the
 # input through unchanged (tenant policy = P9 allowlist on its own project URN, platform policy =
-# `publicCloudProject:apiovh:*` on the tenant project URNs) and its own outputs. No backend or
-# provider configuration: `task test:dependencies` refuses one in a stage, and any resource in a
-# stage (STAGE_RESOURCE).
+# `publicCloudProject:apiovh:*` and `account:apiovh:iam/resource/{edit,get}` on the tenant project
+# URNs, T103) and its own outputs. No backend or provider configuration: `task test:dependencies`
+# refuses one in a stage, and any resource in a stage (STAGE_RESOURCE).
 #
 # Outputs (schemas/outputs/account-governance.schema.json): `platform_deployer {client_id,
 # identity_urn}`, `tenants {<t>: {deployer_client_id, deployer_identity_urn, group_urn}}` and
@@ -230,10 +230,10 @@ run "deployer_policies_scoped_through_the_stage" {
   }
 
   assert {
-    condition = try(toset(module.identity.platform_policy.allow) == toset(["publicCloudProject:apiovh:*"])
+    condition = try(toset(module.identity.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "account:apiovh:iam/resource/get", "publicCloudProject:apiovh:*"])
       && toset(module.identity.platform_policy.resources) == toset(["urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef", "urn:v1:eu:resource:publicCloudProject:fedcba9876543210fedcba9876543210"])
     && toset(module.identity.platform_policy.identities) == toset(["urn:v1:eu:identity:credential:xx0000-ovh/oauth2-platform-client-id"]), false)
-    error_message = "the platform deployer policy covers publicCloudProject:apiovh:* on the tenant project URNs"
+    error_message = "the platform deployer policy covers publicCloudProject:apiovh:* and account:apiovh:iam/resource/{edit,get} on the tenant project URNs"
   }
 }
 

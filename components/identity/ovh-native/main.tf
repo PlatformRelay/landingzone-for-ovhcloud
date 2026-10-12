@@ -1,7 +1,7 @@
 # Identity/ovh-native component (spec 005 T024; FR-002, FR-004, FR-010, FR-013; ADR-0006, ADR-0018;
-# research R6, P9, P26): the platform deployer with `publicCloudProject:apiovh:*` on every tenant
-# project URN, and per tenant (keyed by tenant name, so adding a tenant leaves the others' addresses
-# unchanged) a deployer, its policy holding exactly the P9 allowlist on that tenant's own project
+# research R6, P9, P26): the platform deployer with `publicCloudProject:apiovh:*` and the project
+# IAM-tag actions (T103) on every tenant project URN, and per tenant (keyed by tenant name, so
+# adding a tenant leaves the others' addresses unchanged) a deployer, its policy holding exactly the P9 allowlist on that tenant's own project
 # URN (guard G5) and an identity group with role `NONE` and no members. No `account:apiovh:me/get`:
 # the account binding reads `GET /auth/details` (P26). No group policy in this slice (coordinator
 # decision 2026-10-07): the group has no members, so there is nothing to grant yet.
@@ -33,6 +33,20 @@ locals {
     "publicCloudProject:apiovh:region/storage/delete",
     "publicCloudProject:apiovh:region/storage/bulkDeleteObjects",
     "publicCloudProject:apiovh:region/storage/object/get",
+  ]
+
+  # Platform deployer, on the tenant project URNs only: every project action, plus the project's IAM
+  # tags, which the `project` stage sets through `ovh_iam_resource_tags` (`PUT /iam/resource/{urn}`
+  # requires `account:apiovh:iam/resource/edit`, kb api/v2/iam.json). T049 run 1 was refused with
+  # 403 `missing IAM permissions: account:apiovh:iam/resource/edit` without it (T103, D108). The
+  # same PUT also requires `publicCloudProject:apiovh:iam/resource/tag/add` and `tag/remove` to add
+  # or remove tags (its longDescription): the wildcard covers those, so narrowing it must keep them.
+  # `iam/resource/get` is added with it by D108; kb lists no action for `GET /iam/resource/{urn}`,
+  # so whether OVHcloud knows that name is UNVERIFIED until the T049 re-run.
+  platform_allow = [
+    "publicCloudProject:apiovh:*",
+    "account:apiovh:iam/resource/edit",
+    "account:apiovh:iam/resource/get",
   ]
 }
 
@@ -70,7 +84,7 @@ module "platform_policy" {
   description = "Platform deployer on the tenant projects"
   identities  = [module.platform_deployer.identity]
   resources   = [for t in var.tenants : t.project_urn]
-  allow       = ["publicCloudProject:apiovh:*"]
+  allow       = local.platform_allow
 }
 
 module "tenant_deployer" {
