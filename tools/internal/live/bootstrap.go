@@ -582,14 +582,28 @@ func setDiff(kind string, got, want []string) []string {
 	return out
 }
 
-// recordAdmin records the admin ids in account.env for the leftover exemption (R12).
-func (b *bootstrap) recordAdmin(clientID, policyID string) error {
+// recordAdmin records the admin ids in account.env for the leftover exemption (R12); written
+// reports whether account.env did not hold them yet.
+func (b *bootstrap) recordAdmin(clientID, policyID string) (written bool, err error) {
 	if b.binding["LZ_ADMIN_CLIENT_ID"] == clientID && b.binding["LZ_ADMIN_POLICY_ID"] == policyID {
-		return nil
+		return false, nil
 	}
 	b.binding["LZ_ADMIN_CLIENT_ID"] = clientID
 	b.binding["LZ_ADMIN_POLICY_ID"] = policyID
-	return b.writeBinding()
+	return true, b.writeBinding()
+}
+
+// adminHandOver is printed by the run that adopts an admin it did not create (research R13,
+// T102): on the current sandbox a one-off OpenTofu config created lz-sandbox-admin and still holds
+// it in its state, so a second owner could destroy or rewrite it, and that state keeps the client
+// secret. The runner cannot know that config's directory or addresses for certain: the lines name
+// those of the current sandbox (evidence/T044.md) for the owner to confirm with `tofu state list`.
+// Fixed text: nothing secret.
+var adminHandOver = []string{
+	"hand-over: this run adopted an admin it did not create; if a one-off OpenTofu config created it (on the current sandbox ~/.config/ovh-lz/bootstrap/), retire that config's ownership once, in its directory, after tofu state list shows these addresses:",
+	"  tofu state rm ovh_me_api_oauth2_client.lz_sandbox_admin",
+	"  tofu state rm ovh_iam_policy.lz_sandbox_admin",
+	"then delete the terraform.tfstate.*.backup that tofu state rm writes there and any terraform.tfstate.backup an earlier apply left: they keep the client secret in plain text; tofu output there must show no secret either",
 }
 
 func (b *bootstrap) admin(ctx context.Context) error {
@@ -604,10 +618,16 @@ func (b *bootstrap) admin(ctx context.Context) error {
 		case status == statusAPIError:
 			return b.fail(PhaseAdmin, "the admin check failed: "+d)
 		case status == StatusUnchanged:
-			if err := b.recordAdmin(b.cred.ClientID, policyID); err != nil {
+			adopted, err := b.recordAdmin(b.cred.ClientID, policyID)
+			if err != nil {
 				return b.fail(PhaseAdmin, err.Error())
 			}
 			b.add(PhaseAdmin, StatusUnchanged, "")
+			if adopted {
+				for _, l := range adminHandOver {
+					fmt.Fprintln(b.out, "LZ-LIVE admin bootstrap info "+l)
+				}
+			}
 			return nil
 		case b.root == nil && status == StatusBlocked:
 			return b.block(PhaseAdmin, d+": run with --fresh-account")
@@ -712,7 +732,7 @@ func (b *bootstrap) createAdmin(ctx context.Context) error {
 		return undo("sandbox.env not written (" + err.Error() + "); policy " + p.ID + " stays bound to the deleted client's identity")
 	}
 	b.cred = cred
-	if err := b.recordAdmin(sec.ClientID, p.ID); err != nil {
+	if _, err := b.recordAdmin(sec.ClientID, p.ID); err != nil {
 		return b.fail(PhaseAdmin, err.Error())
 	}
 	b.add(PhaseAdmin, StatusRan, sec.ClientID)

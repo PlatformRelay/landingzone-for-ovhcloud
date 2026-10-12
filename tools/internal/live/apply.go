@@ -35,6 +35,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -115,6 +116,7 @@ type laneRunner struct {
 	inv     *Inventory
 	started []string
 	stop    atomic.Value
+	s3HTTP  *http.Client // the state-object check's S3 client (ChainOptions.S3HTTP)
 	// chain only: the L7 assessments (nil: not judged) and why the assertions were not run.
 	assessments []Assessment
 	notRun      string
@@ -498,8 +500,16 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if _, err := Publish(PublishOptions{Manifest: m, Instance: id, Revision: o.Revision, TofuOutput: out.Bytes(), Schemas: o.Schemas, Account: r.account, Store: store}); err != nil {
 		return err
 	}
-	return WriteRecord(o.Records, id, Record{AppliedAt: time.Now().UTC().Format(time.RFC3339), SourceRevision: o.Revision,
-		CodeDigest: r.code[id], Consumed: inputs.Consumed, Resolved: inputs.Resolved})
+	if err := WriteRecord(o.Records, id, Record{AppliedAt: time.Now().UTC().Format(time.RFC3339), SourceRevision: o.Revision,
+		CodeDigest: r.code[id], Consumed: inputs.Consumed, Resolved: inputs.Resolved}); err != nil {
+		return err
+	}
+	if r.inv != nil {
+		// The chain (T102): the applied stack's state object, once its outputs, credential files,
+		// envelope and record are kept, so a failed check loses none of them.
+		return r.stateObject(ctx, in, s3Of(child.vars))
+	}
+	return nil
 }
 
 type sensitiveOut struct {

@@ -2564,3 +2564,76 @@ func TestBootstrapAdminFreshAdminReadErrors(t *testing.T) {
 		})
 	}
 }
+
+// bsHandOver is the admin hand-over (research R13, T102): the lines a run prints after the admin
+// it adopted, pinned verbatim.
+var bsHandOver = []string{
+	"LZ-LIVE admin bootstrap info hand-over: this run adopted an admin it did not create; if a one-off OpenTofu config created it (on the current sandbox ~/.config/ovh-lz/bootstrap/), retire that config's ownership once, in its directory, after tofu state list shows these addresses:",
+	"LZ-LIVE admin bootstrap info   tofu state rm ovh_me_api_oauth2_client.lz_sandbox_admin",
+	"LZ-LIVE admin bootstrap info   tofu state rm ovh_iam_policy.lz_sandbox_admin",
+	"LZ-LIVE admin bootstrap info then delete the terraform.tfstate.*.backup that tofu state rm writes there and any terraform.tfstate.backup an earlier apply left: they keep the client secret in plain text; tofu output there must show no secret either",
+}
+
+// bsInfoAdmin is the `admin` info lines of stdout from offset from, in order.
+func bsInfoAdmin(h *bsHarness, from int) []string {
+	var out []string
+	for _, l := range strings.Split(h.stdout.String()[from:], "\n") {
+		if strings.HasPrefix(l, "LZ-LIVE admin bootstrap info ") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// TestBootstrapAdminHandOver (T102, T044 gap 1): the run that adopts an admin it did not create
+// (admin unchanged, ids not yet in account.env) prints the hand-over after the admin line; a
+// re-run with the ids recorded, a run on an account whose ids were recorded before, and a run
+// that created the admin print none. Nothing secret is printed.
+func TestBootstrapAdminHandOver(t *testing.T) {
+	t.Run("adopted", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.seedCurrentSandbox()
+		rs, err := h.run(false)
+		if err != nil {
+			t.Fatalf("first run: %v", err)
+		}
+		bsWantStatus(t, rs, PhaseAdmin, StatusUnchanged)
+		if got := bsInfoAdmin(h, 0); !slices.Equal(got, bsHandOver) {
+			t.Errorf("hand-over lines\n%q\nwant\n%q", got, bsHandOver)
+		}
+		out := h.stdout.String()
+		if i, j := strings.Index(out, "LZ-LIVE admin bootstrap unchanged"), strings.Index(out, bsHandOver[0]); i < 0 || j < i {
+			t.Errorf("the hand-over is not printed after the admin line:\n%s", out)
+		}
+		bsNoLeak(t, h, rs, err, map[string][]string{bsOldSecret: {"sandbox.env"}})
+		from := len(h.stdout.String())
+		if _, err := h.run(false); err != nil {
+			t.Fatalf("second run: %v", err)
+		}
+		if got := bsInfoAdmin(h, from); len(got) > 0 {
+			t.Errorf("second run printed the hand-over again: %q", got)
+		}
+	})
+	t.Run("recorded", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.seedPreviousAccount()
+		rs, err := h.run(false)
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		bsWantStatus(t, rs, PhaseAdmin, StatusUnchanged)
+		if got := bsInfoAdmin(h, 0); len(got) > 0 {
+			t.Errorf("hand-over printed for an admin whose ids account.env already held: %q", got)
+		}
+	})
+	t.Run("created", func(t *testing.T) {
+		h := newBSHarness(t)
+		h.term.queueRoot(h.api.rootKey(bsRootFirst))
+		h.answerRefs()
+		rs, err := h.run(true)
+		freshDone(t, h, rs, err, bsRootFirst)
+		if got := bsInfoAdmin(h, 0); len(got) > 0 {
+			t.Errorf("hand-over printed for an admin this run created: %q", got)
+		}
+	})
+}

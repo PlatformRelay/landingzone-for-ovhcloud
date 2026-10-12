@@ -242,6 +242,9 @@ func TestChainEntryOptions(t *testing.T) {
 			if got.Revision != fakeHead || got.Tofu != w.tofu || got.Schemas == nil || got.Locks == nil || got.Store == nil {
 				t.Errorf("revision %q tofu %q schemas %v locks %v store set %t", got.Revision, got.Tofu, got.Schemas, got.Locks, got.Store != nil)
 			}
+			if got.S3HTTP == nil || got.S3HTTP != w.s3 {
+				t.Errorf("S3HTTP %p, want the entry's S3 client %p (the state-object check, T102)", got.S3HTTP, w.s3)
+			}
 			if got.Terminal != io.Writer(&w.stdout) || got.API.BaseURL != w.api.URL+"/v1" {
 				t.Errorf("terminal or API (%q) are not the entry's", got.API.BaseURL)
 			}
