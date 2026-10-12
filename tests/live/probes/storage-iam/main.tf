@@ -11,10 +11,11 @@
 # write its state and lock file there. The companion's destroy leaves its (empty) state object in
 # the bucket; the provider removes a bucket's objects before deleting it
 # (resources/cloud_project_storage.md:10, kb; believed for 2.21.0).
-# The identities are exercised by the companion root (companion/, T075): a provider configured from
-# a resource created in the same run is not supported, so this root publishes their credentials as
-# the sensitive output companion_env, which lz-live hands to the companion in place of the admin
-# credential.
+# The identities are exercised by the companion root (companion/, T075) and by lz-live's storage-iam
+# check (T100): a provider configured from a resource created in the same run is not supported, so
+# this root publishes the tenant identity and the S3 key as the sensitive output companion_env,
+# which lz-live hands to the companion in place of the admin credential, and every identity as the
+# sensitive output iam_check, which lz-live's check reads into memory.
 locals {
   name = "lzprobe-storage-iam-${local.run_id}"
 
@@ -127,15 +128,41 @@ resource "ovh_cloud_project_user_s3_policy" "p1" {
 # The companion's variables (lz-live: companion_env, written 0600 by files.go, never in the
 # checkout, removed on exit). Keys are environment variables of the companion child.
 output "companion_env" {
-  description = "Credentials of the probe identities for the companion root, in place of the admin credential."
+  description = "Credentials of the probe tenant identity and the P1 S3 user for the companion root, in place of the admin credential."
   sensitive   = true
   value = {
-    OVH_CLIENT_ID            = ovh_me_api_oauth2_client.tenant.client_id
-    OVH_CLIENT_SECRET        = ovh_me_api_oauth2_client.tenant.client_secret
-    TF_VAR_p25_client_id     = ovh_me_api_oauth2_client.p25.client_id
-    TF_VAR_p25_client_secret = ovh_me_api_oauth2_client.p25.client_secret
-    AWS_ACCESS_KEY_ID        = ovh_cloud_project_user_s3_credential.p1.access_key_id
-    AWS_SECRET_ACCESS_KEY    = ovh_cloud_project_user_s3_credential.p1.secret_access_key
+    OVH_CLIENT_ID         = ovh_me_api_oauth2_client.tenant.client_id
+    OVH_CLIENT_SECRET     = ovh_me_api_oauth2_client.tenant.client_secret
+    AWS_ACCESS_KEY_ID     = ovh_cloud_project_user_s3_credential.p1.access_key_id
+    AWS_SECRET_ACCESS_KEY = ovh_cloud_project_user_s3_credential.p1.secret_access_key
+  }
+}
+
+# The variables of lz-live's storage-iam check (T100, tools/internal/probes/live/storageiam): read by
+# lz-live from `tofu output -json` into memory only, every value but the public ones (bucket_a,
+# bucket_b, project_id, project_urn, region, run_id, state_bucket, state_key, tenant_identity)
+# redacted. After the companion's apply the check reads bucket A and B with the P25 identity, calls
+# GET /me and attempts POST /v2/iam/policy with the tenant identity, and reads the companion's state
+# object back with the P1 S3 key; an answer other than the expected one fails the run.
+output "iam_check" {
+  description = "Variables of lz-live's storage-iam check: the probe identities, the P1 S3 key and what they act on."
+  sensitive   = true
+  value = {
+    bucket_a             = ovh_cloud_project_storage.p25["a"].name
+    bucket_b             = ovh_cloud_project_storage.p25["b"].name
+    project_id           = local.project.service_name
+    project_urn          = local.project.iam.urn
+    region               = "GRA"
+    run_id               = local.run_id
+    state_bucket         = ovh_cloud_project_storage.p1.name
+    state_key            = "storage-iam-companion.tfstate"
+    tenant_identity      = ovh_me_api_oauth2_client.tenant.identity
+    tenant_client_id     = ovh_me_api_oauth2_client.tenant.client_id
+    tenant_client_secret = ovh_me_api_oauth2_client.tenant.client_secret
+    p25_client_id        = ovh_me_api_oauth2_client.p25.client_id
+    p25_client_secret    = ovh_me_api_oauth2_client.p25.client_secret
+    s3_key_id            = ovh_cloud_project_user_s3_credential.p1.access_key_id
+    s3_secret            = ovh_cloud_project_user_s3_credential.p1.secret_access_key
   }
 }
 

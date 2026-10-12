@@ -107,8 +107,16 @@ run "companion_state_and_published_identity" {
   }
 
   assert {
-    condition     = toset(keys(output.companion_env)) == toset(["OVH_CLIENT_ID", "OVH_CLIENT_SECRET", "TF_VAR_p25_client_id", "TF_VAR_p25_client_secret", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
-    error_message = "companion_env publishes the two probe identities and the S3 keys, nothing else"
+    condition     = toset(keys(output.companion_env)) == toset(["OVH_CLIENT_ID", "OVH_CLIENT_SECRET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+    error_message = "companion_env publishes the tenant identity and the S3 keys, nothing else (T100: the P25 identity is the check's)"
+  }
+
+  # T100: the storage-iam check's variables (tools/internal/probes/live/storageiam: Public and the
+  # three credentials), exactly these keys.
+  assert {
+    condition = toset(keys(output.iam_check)) == toset(["bucket_a", "bucket_b", "project_id", "project_urn", "region", "run_id", "state_bucket", "state_key", "tenant_identity",
+    "p25_client_id", "p25_client_secret", "s3_key_id", "s3_secret", "tenant_client_id", "tenant_client_secret"])
+    error_message = "iam_check publishes the check's nine public values and three credentials, nothing else"
   }
 }
 
@@ -119,7 +127,7 @@ run "companion_env_maps_each_identity" {
 
   override_resource {
     target = ovh_me_api_oauth2_client.tenant
-    values = { client_id = "offline-tenant-id", client_secret = "offline-tenant-secret" }
+    values = { client_id = "offline-tenant-id", client_secret = "offline-tenant-secret", identity = "urn:v1:eu:identity:credential:xx1111-ovh/oauth2-offline-tenant-id" }
   }
 
   override_resource {
@@ -138,15 +146,32 @@ run "companion_env_maps_each_identity" {
   }
 
   assert {
-    condition     = output.companion_env.TF_VAR_p25_client_id == "offline-p25-id" && output.companion_env.TF_VAR_p25_client_secret == "offline-p25-secret"
-    error_message = "TF_VAR_p25_client_id/_secret are the P25 identity's"
-  }
-
-  assert {
     condition     = output.companion_env.AWS_ACCESS_KEY_ID == "offline-s3-access" && output.companion_env.AWS_SECRET_ACCESS_KEY == "offline-s3-secret"
     error_message = "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY are the P1 S3 user's"
   }
 
+  # T100: the check's credentials, each its own identity's.
+  assert {
+    condition     = output.iam_check.tenant_client_id == "offline-tenant-id" && output.iam_check.tenant_client_secret == "offline-tenant-secret" && output.iam_check.tenant_identity == "urn:v1:eu:identity:credential:xx1111-ovh/oauth2-offline-tenant-id"
+    error_message = "iam_check's tenant_client_id/_secret and tenant_identity are the P9 tenant identity's"
+  }
+
+  assert {
+    condition     = output.iam_check.p25_client_id == "offline-p25-id" && output.iam_check.p25_client_secret == "offline-p25-secret"
+    error_message = "iam_check's p25_client_id/_secret are the P25 identity's"
+  }
+
+  assert {
+    condition     = output.iam_check.s3_key_id == "offline-s3-access" && output.iam_check.s3_secret == "offline-s3-secret"
+    error_message = "iam_check's s3_key_id/s3_secret are the P1 S3 user's"
+  }
+
+  # The public values name this run's buckets, the companion's state object (companion/probe.tf
+  # backend key), the project and its URN; the check refuses any other.
+  assert {
+    condition = output.iam_check.bucket_a == "lzprobe-p25a-20261006t120000z-ab12" && output.iam_check.bucket_b == "lzprobe-p25b-20261006t120000z-ab12" && output.iam_check.state_bucket == "lzprobe-p1-20261006t120000z-ab12" && output.iam_check.state_key == "storage-iam-companion.tfstate" && output.iam_check.run_id == "20261006T120000Z-ab12" && output.iam_check.region == "GRA" && output.iam_check.project_id == "0123456789abcdef0123456789abcdef" && output.iam_check.project_urn == "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+    error_message = "iam_check's public values are this run's buckets, state object, region, project and project URN"
+  }
 }
 
 run "state_path_inside_checkout_refused" {

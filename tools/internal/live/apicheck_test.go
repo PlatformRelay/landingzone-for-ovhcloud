@@ -1,0 +1,372 @@
+package live
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// T100: the probe check's OVHcloud API client (apicheck.go). Its gate admits five named operations,
+// each with its method and path fixed and its parameters checked by shape before any request; of
+// an answer it keeps the status, the IAM actions a refusal names, a created policy's uuid and a
+// policy listing's (id, name) pairs; errors carry no answer text, token or secret.
+
+const (
+	apiTestClient  = "EU.apicheckclient"
+	apiTestSecret  = "apicheck-secret-6d5c4b3a2f1e"
+	apiTestToken   = "apicheck-token-0a1b2c3d4e5f"
+	apiTestProject = "0123456789abcdef0123456789abcdef"
+	apiTestPolicy  = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+)
+
+type apiSeen struct {
+	Method, Path, Query, Auth, ContentType string
+	Body                                   []byte
+}
+
+// fakeCheckAPI is the OVHcloud API for the checker: the token endpoint answers the test client, every
+// other request is recorded and answered by answer (nil: 200 `{}`).
+type fakeCheckAPI struct {
+	mu     sync.Mutex
+	seen   []apiSeen
+	tokens int
+	answer func(rw http.ResponseWriter, r *http.Request)
+	srv    *httptest.Server
+}
+
+func newFakeCheckAPI(t *testing.T) *fakeCheckAPI {
+	t.Helper()
+	f := &fakeCheckAPI{}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.URL.Path == "/token" {
+			f.mu.Lock()
+			f.tokens++
+			f.mu.Unlock()
+			q, _ := urlValues(string(body))
+			if q["client_id"] != apiTestClient || q["client_secret"] != apiTestSecret {
+				rw.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprintf(rw, `{"access_token":%q}`, apiTestToken)
+			return
+		}
+		f.mu.Lock()
+		f.seen = append(f.seen, apiSeen{r.Method, r.URL.EscapedPath(), r.URL.RawQuery, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), body})
+		answer := f.answer
+		f.mu.Unlock()
+		if answer == nil {
+			fmt.Fprint(rw, "{}")
+			return
+		}
+		answer(rw, r)
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func urlValues(s string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, kv := range strings.Split(s, "&") {
+		k, v, _ := strings.Cut(kv, "=")
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (f *fakeCheckAPI) api() API {
+	return API{TokenURL: f.srv.URL + "/token", BaseURL: f.srv.URL + "/v1"}
+}
+
+func (f *fakeCheckAPI) requests() []apiSeen {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.seen)
+}
+
+func newTestAPIChecker(t *testing.T, f *fakeCheckAPI) *APIChecker {
+	t.Helper()
+	c, err := NewAPIChecker(context.Background(), f.api(), Credential{Endpoint: "ovh-eu", ClientID: apiTestClient, ClientSecret: apiTestSecret})
+	if err != nil {
+		t.Fatalf("NewAPIChecker: %v", err)
+	}
+	return c
+}
+
+// apiNoLeak: an error names no answer text, token, secret or URL.
+func apiNoLeak(t *testing.T, msg string) {
+	t.Helper()
+	for _, bad := range []string{"SERVERTEXT", apiTestToken, apiTestSecret, "http://", "127.0.0.1"} {
+		if strings.Contains(msg, bad) {
+			t.Errorf("error %q carries %q", msg, bad)
+		}
+	}
+}
+
+// TestAPICheckerOperations: each operation goes out with its method and path (v1 or v2), the
+// identity's bearer token, a body only for CreatePolicy (JSON content type).
+func TestAPICheckerOperations(t *testing.T) {
+	policy := []byte(`{"name":"lzprobe-p9-write-x"}`)
+	cases := []struct {
+		call         APICall
+		method, path string
+	}{
+		{APICall{Op: APIGetStorage, Project: apiTestProject, Region: "GRA", Name: "lzprobe-p25a-20261012t072729z-0646"}, "GET", "/v1/cloud/project/" + apiTestProject + "/region/GRA/storage/lzprobe-p25a-20261012t072729z-0646"},
+		{APICall{Op: APIGetMe}, "GET", "/v1/me"},
+		{APICall{Op: APICreatePolicy, Body: policy}, "POST", "/v2/iam/policy"},
+		{APICall{Op: APIListPolicies, Name: "lzprobe-p9-write-a"}, "GET", "/v2/iam/policy"},
+		{APICall{Op: APIDeletePolicy, ID: apiTestPolicy}, "DELETE", "/v2/iam/policy/" + apiTestPolicy},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.call.Op), func(t *testing.T) {
+			f := newFakeCheckAPI(t)
+			if tc.call.Op == APIListPolicies {
+				f.answer = func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, "[]") }
+			}
+			got, err := newTestAPIChecker(t, f).Do(context.Background(), tc.call)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			if got.Status != http.StatusOK {
+				t.Errorf("status %d, want 200", got.Status)
+			}
+			reqs := f.requests()
+			if len(reqs) != 1 {
+				t.Fatalf("%d requests, want 1", len(reqs))
+			}
+			r := reqs[0]
+			if r.Method != tc.method || r.Path != tc.path || r.Auth != "Bearer "+apiTestToken {
+				t.Errorf("sent %s %s (auth %q), want %s %s with the bearer token", r.Method, r.Path, r.Auth, tc.method, tc.path)
+			}
+			if tc.call.Op == APICreatePolicy {
+				if string(r.Body) != string(policy) || r.ContentType != "application/json" {
+					t.Errorf("body %q (%s), want the policy as JSON", r.Body, r.ContentType)
+				}
+			} else if len(r.Body) != 0 {
+				t.Errorf("body %q on %s", r.Body, tc.call.Op)
+			}
+		})
+	}
+}
+
+// TestAPICheckerGate: anything outside the five operations, or an operation with a part it does
+// not take or a part of the wrong shape, is refused before any request.
+func TestAPICheckerGate(t *testing.T) {
+	ok := APICall{Op: APIGetStorage, Project: apiTestProject, Region: "GRA", Name: "lzprobe-p25a-x"}
+	with := func(edit func(*APICall)) APICall { c := ok; edit(&c); return c }
+	refused := map[string]APICall{
+		"unknown op":              {Op: "DeleteStorage", Project: apiTestProject, Region: "GRA", Name: "b-1"},
+		"empty op":                {},
+		"project not hex":         with(func(c *APICall) { c.Project = "../../me" }),
+		"project short":           with(func(c *APICall) { c.Project = "0123" }),
+		"region lower":            with(func(c *APICall) { c.Region = "gra" }),
+		"region with slash":       with(func(c *APICall) { c.Region = "GRA/../x" }),
+		"name not a bucket":       with(func(c *APICall) { c.Name = "A/../../me" }),
+		"name empty":              with(func(c *APICall) { c.Name = "" }),
+		"storage with id":         with(func(c *APICall) { c.ID = apiTestPolicy }),
+		"storage with body":       with(func(c *APICall) { c.Body = []byte("{}") }),
+		"me with project":         {Op: APIGetMe, Project: apiTestProject},
+		"me with name":            {Op: APIGetMe, Name: "b-1"},
+		"me with body":            {Op: APIGetMe, Body: []byte("{}")},
+		"create without body":     {Op: APICreatePolicy},
+		"create with bad JSON":    {Op: APICreatePolicy, Body: []byte("{")},
+		"create with id":          {Op: APICreatePolicy, Body: []byte("{}"), ID: apiTestPolicy},
+		"create too big":          {Op: APICreatePolicy, Body: []byte(`"` + strings.Repeat("x", 64<<10) + `"`)},
+		"list with id":            {Op: APIListPolicies, Name: "lzprobe-p9-write-a", ID: apiTestPolicy},
+		"list without name":       {Op: APIListPolicies},
+		"list with a spaced name": {Op: APIListPolicies, Name: "lzprobe p9"},
+		"list with body":          {Op: APIListPolicies, Name: "lzprobe-p9-write-a", Body: []byte("{}")},
+		"delete without id":       {Op: APIDeletePolicy},
+		"delete with a path id":   {Op: APIDeletePolicy, ID: "../policy"},
+		"delete with upper uuid":  {Op: APIDeletePolicy, ID: strings.ToUpper(apiTestPolicy)},
+		"delete with body":        {Op: APIDeletePolicy, ID: apiTestPolicy, Body: []byte("{}")},
+		"delete with project":     {Op: APIDeletePolicy, ID: apiTestPolicy, Project: apiTestProject},
+		"storage without project": with(func(c *APICall) { c.Project = "" }),
+	}
+	for name, call := range refused {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeCheckAPI(t)
+			if _, err := newTestAPIChecker(t, f).Do(context.Background(), call); err == nil {
+				t.Error("no refusal")
+			}
+			if n := len(f.requests()); n != 0 {
+				t.Errorf("%d requests before the refusal, want 0", n)
+			}
+		})
+	}
+}
+
+// TestAPICheckerAnswers: any status is an answer (no redirect followed); a refusal keeps only the
+// action-shaped tokens it names; a created policy keeps its uuid; a listing reads every page and
+// keeps (id, name); errors (oversized, unexpected listing, too many pages, transport) carry no
+// answer text.
+func TestAPICheckerAnswers(t *testing.T) {
+	echo := "SERVERTEXT " + apiTestToken + " " + apiTestSecret
+	forbidden := func(message, byIAM string) string {
+		b, _ := json.Marshal(map[string]any{"class": "Client::Forbidden", "message": message,
+			"details": map[string]string{"unauthorizedActionsByAuthentication": "", "unauthorizedActionsByIAM": byIAM}})
+		return string(b)
+	}
+	answers := []struct {
+		name, body string
+		status     int
+		actions    []string
+	}{
+		// kb manage-and-operate/iam/troubleshooting.mdx:21-31.
+		{"details", forbidden("User not granted for this request "+echo, "vps:apiovh:reboot"), 403, []string{"vps:apiovh:reboot"}},
+		// T010 rows 10 and 14: the message names the action.
+		{"message", `{"class":"Client::Forbidden","message":"missing IAM permissions: publicCloudProject:apiovh:region/storage/get"}`, 403, []string{"publicCloudProject:apiovh:region/storage/get"}},
+		{"both-deduplicated", forbidden("missing IAM permissions: account:apiovh:me/get", "account:apiovh:me/get"), 403, []string{"account:apiovh:me/get"}},
+		{"several", forbidden("missing IAM permissions: account:apiovh:iam/policy/create, account:apiovh:me/get", ""), 403, []string{"account:apiovh:iam/policy/create", "account:apiovh:me/get"}},
+		{"echo-dropped", forbidden(echo, echo+" x:apiovh:"+apiTestToken), 403, nil},
+		{"no-json", echo, 403, nil},
+		{"empty", "", 403, nil},
+		{"not-found", `{"class":"Client::NotFound","message":"` + echo + `"}`, 404, nil},
+		{"redirect", "", 302, nil},
+	}
+	for _, a := range answers {
+		t.Run(a.name, func(t *testing.T) {
+			f := newFakeCheckAPI(t)
+			f.answer = func(rw http.ResponseWriter, r *http.Request) {
+				if a.status == 302 {
+					rw.Header().Set("Location", "https://elsewhere.example/v1/me")
+				}
+				rw.WriteHeader(a.status)
+				fmt.Fprint(rw, a.body)
+			}
+			got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIGetMe})
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			if got.Status != a.status || !slices.Equal(got.Actions, a.actions) || got.ID != "" || got.Policies != nil {
+				t.Errorf("answer %+v, want status %d, actions %v, nothing else", got, a.status, a.actions)
+			}
+			if n := len(f.requests()); n != 1 {
+				t.Errorf("%d requests, want 1 (no redirect followed)", n)
+			}
+		})
+	}
+
+	t.Run("created-id", func(t *testing.T) {
+		for body, want := range map[string]string{
+			`{"id":"` + apiTestPolicy + `","name":"x"}`: apiTestPolicy,
+			`{"id":"` + echo + `"}`:                     "",
+			`{}`:                                        "",
+			echo:                                        "",
+		} {
+			f := newFakeCheckAPI(t)
+			f.answer = func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, body) }
+			got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APICreatePolicy, Body: []byte("{}")})
+			if err != nil || got.Status != 200 || got.ID != want {
+				t.Errorf("create answered %q: %+v, %v; want id %q", body, got, err, want)
+			}
+		}
+	})
+
+	t.Run("listing-pages", func(t *testing.T) {
+		f := newFakeCheckAPI(t)
+		f.answer = func(rw http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Pagination-Cursor") == "" {
+				rw.Header().Set("X-Pagination-Cursor-Next", "c2")
+				fmt.Fprintf(rw, `[{"id":%q,"name":"lzprobe-p9-write-a","identities":["x"]}]`, apiTestPolicy)
+				return
+			}
+			if r.Header.Get("X-Pagination-Cursor") != "c2" {
+				rw.WriteHeader(400)
+				return
+			}
+			// Review r1: foreign policies of any shape (a name with a space or non-ASCII, a
+			// non-uuid id; iam.json puts no pattern on name) are skipped, never an error.
+			fmt.Fprint(rw, `[{"id":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","name":"other"},{"id":"not-a-uuid","name":"My policy é"},`+
+				`{"id":"6ba7b810-9dad-11d1-80b4-00c04fd430c9","name":"lzprobe-p9-write-a"},{"id":"6ba7b810-9dad-11d1-80b4-00c04fd430ca","name":"lzprobe-p9-write-ab"}]`)
+		}
+		got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIListPolicies, Name: "lzprobe-p9-write-a"})
+		want := []APIPolicy{{apiTestPolicy, "lzprobe-p9-write-a"}, {"6ba7b810-9dad-11d1-80b4-00c04fd430c9", "lzprobe-p9-write-a"}}
+		if err != nil || got.Status != 200 || !slices.Equal(got.Policies, want) {
+			t.Errorf("listing %+v, %v; want the named policies of both pages %v", got, err, want)
+		}
+	})
+
+	t.Run("listing-refused", func(t *testing.T) {
+		f := newFakeCheckAPI(t)
+		f.answer = func(rw http.ResponseWriter, r *http.Request) {
+			rw.WriteHeader(403)
+			fmt.Fprint(rw, forbidden("missing IAM permissions: account:apiovh:iam/policy/get", ""))
+		}
+		got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIListPolicies, Name: "lzprobe-p9-write-a"})
+		if err != nil || got.Status != 403 || got.Policies != nil || !slices.Equal(got.Actions, []string{"account:apiovh:iam/policy/get"}) {
+			t.Errorf("refused listing %+v, %v; want status 403, the action, no policies", got, err)
+		}
+	})
+
+	faults := map[string]func(rw http.ResponseWriter, r *http.Request){
+		"oversized": func(rw http.ResponseWriter, r *http.Request) {
+			rw.WriteHeader(403)
+			fmt.Fprint(rw, strings.Repeat("x", maxBody+1))
+		},
+		"listing-not-a-list": func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, `{"message":"`+echo+`"}`) },
+		// The named policy without a usable id cannot be deleted: an error, not a skip.
+		"listing-bad-id": func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(rw, `[{"id":"`+echo+`","name":"lzprobe-p9-write-a"}]`)
+		},
+		"listing-name-not-a-string": func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, `[{"id":"x","name":1}]`) },
+		// Review r1: `null` is no listing (two of them read as empty would pass the undo).
+		"listing-null":         func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, "null") },
+		"listing-null-entries": func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, "[null]") },
+		"listing-endless": func(rw http.ResponseWriter, r *http.Request) {
+			rw.Header().Set("X-Pagination-Cursor-Next", "again")
+			fmt.Fprint(rw, "[]")
+		},
+		"reset": func(rw http.ResponseWriter, r *http.Request) {
+			if conn, _, err := rw.(http.Hijacker).Hijack(); err == nil {
+				conn.Close()
+			}
+		},
+	}
+	for name, fault := range faults {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeCheckAPI(t)
+			f.answer = fault
+			_, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIListPolicies, Name: "lzprobe-p9-write-a"})
+			if err == nil {
+				t.Fatal("no error")
+			}
+			apiNoLeak(t, err.Error())
+			if !strings.Contains(err.Error(), "/iam/policy") {
+				t.Errorf("error %q does not name the request", err)
+			}
+		})
+	}
+}
+
+// TestAPICheckerToken: a refused credential is an error naming the token endpoint, never a value;
+// the secret goes only to the token endpoint, the token only in Authorization.
+func TestAPICheckerToken(t *testing.T) {
+	f := newFakeCheckAPI(t)
+	_, err := NewAPIChecker(context.Background(), f.api(), Credential{Endpoint: "ovh-eu", ClientID: apiTestClient, ClientSecret: "wrong-" + apiTestSecret})
+	if err == nil || !strings.Contains(err.Error(), "token endpoint") {
+		t.Errorf("refused credential: %v, want an error naming the token endpoint", err)
+	}
+	apiNoLeak(t, fmt.Sprint(err))
+	c := newTestAPIChecker(t, f)
+	for _, call := range []APICall{{Op: APIGetMe}, {Op: APICreatePolicy, Body: []byte(`{"name":"x"}`)}, {Op: APIDeletePolicy, ID: apiTestPolicy}} {
+		if _, err := c.Do(context.Background(), call); err != nil {
+			t.Fatalf("%s: %v", call.Op, err)
+		}
+	}
+	for _, r := range f.requests() {
+		if strings.Contains(r.Path+r.Query+string(r.Body), apiTestSecret) || strings.Contains(r.Path+r.Query+string(r.Body), apiTestToken) {
+			t.Errorf("%s %s carries the secret or the token outside Authorization", r.Method, r.Path)
+		}
+	}
+	if f.tokens != 2 {
+		t.Errorf("%d token requests, want one per checker (2)", f.tokens)
+	}
+}

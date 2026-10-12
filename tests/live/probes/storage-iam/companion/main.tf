@@ -1,22 +1,14 @@
-# Observations of the probe identities (T010, through lz-live's second stage):
+# Observation of the tenant identity (T010, through lz-live's second stage):
 # - P9 usage: the tenant identity (narrowed R6 allowlist) creates and destroys a private network,
 #   a subnet and a bucket. A denied create fails the apply: the action it names is the finding.
-# - P26 tenant half: the provider authenticates the tenant identity through GET /auth/details at
-#   configuration (provider docs index.md:211), and GET /me (account:apiovh:me/get) is denied.
-# - P25 evaluation: the tag-conditioned identity reads bucket A (lz:tenant = lzprobe-a) and is
-#   denied bucket B (lz:tenant = lzprobe-b), both created by storage-iam.
-# A denial expected by a check block is reported as a warning naming the failed read, not an
-# error (check-block scoped data sources; believed, UNVERIFIED for OpenTofu 1.13); a check that
-# fails with its own error_message is the refutation. Read both P25 warnings: bucket B's is the
-# expected denial, but a warning on bucket A (the P25 identity denied its own tenant's bucket)
-# refutes P25 as well.
+# - P26 tenant half, binding: the provider authenticates the tenant identity through
+#   GET /auth/details at configuration (provider docs index.md:211).
+# The reads whose answer decides a premise (P25 bucket A allowed and bucket B denied, P26 GET /me
+# denied) and the P9 IAM-write denial are lz-live's storage-iam check after this root's apply
+# (T100, tools/internal/probes/live/storageiam), not check blocks here: a refused read in a check
+# block is only a warning, and T010 run 20261012T072729Z-0646 passed over a refused bucket-A read.
 locals {
   name = "lzprobe-p9-${var.run_id}"
-
-  buckets = {
-    a = "lzprobe-p25a-${lower(var.run_id)}"
-    b = "lzprobe-p25b-${lower(var.run_id)}"
-  }
 }
 
 # VLAN id (T098): a project holds one private network per VLAN id (T010 run
@@ -73,43 +65,6 @@ resource "ovh_cloud_project_storage" "p9" {
   name         = lower(local.name)
   tags = {
     "lz:run-id" = var.run_id
-  }
-}
-
-check "p26_me_denied" {
-  data "ovh_me" "tenant" {}
-
-  assert {
-    condition     = data.ovh_me.tenant.nichandle == ""
-    error_message = "P26 refuted for the tenant class: GET /me answered for the P9 probe identity."
-  }
-}
-
-check "p25_bucket_a_readable" {
-  data "ovh_cloud_project_storage" "a" {
-    provider     = ovh.p25
-    service_name = var.project_id
-    region_name  = "GRA"
-    name         = local.buckets.a
-  }
-
-  assert {
-    condition     = data.ovh_cloud_project_storage.a.tags["lz:tenant"] == "lzprobe-a"
-    error_message = "P25: the tag-conditioned identity read bucket A, but it does not carry lz:tenant = lzprobe-a."
-  }
-}
-
-check "p25_bucket_b_denied" {
-  data "ovh_cloud_project_storage" "b" {
-    provider     = ovh.p25
-    service_name = var.project_id
-    region_name  = "GRA"
-    name         = local.buckets.b
-  }
-
-  assert {
-    condition     = data.ovh_cloud_project_storage.b.name != local.buckets.b
-    error_message = "P25 refuted: the tag-conditioned identity read bucket B (lz:tenant = lzprobe-b)."
   }
 }
 
