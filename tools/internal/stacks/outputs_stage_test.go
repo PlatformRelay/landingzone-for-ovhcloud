@@ -508,7 +508,9 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 	}
 
 	// G5 on every planned policy: no permissions group, except, deny or expiry beside the actions,
-	// and no IAM, `me`, storage-policy or wildcard action outside the platform's one grant.
+	// and no IAM, `me`, storage-policy or wildcard action outside the platform's grant: the platform
+	// policy alone may hold the wildcard and the two project IAM-tag actions (T103, D108).
+	platformIAM := map[string]bool{"account:apiovh:iam/resource/edit": true, "account:apiovh:iam/resource/get": true}
 	for addr, r := range byAddress {
 		if r.Type != "ovh_iam_policy" {
 			continue
@@ -521,10 +523,11 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 		if conditions := r.Change.After["conditions"]; !empty(conditions) {
 			t.Errorf("%s: conditions %v, want none", addr, conditions)
 		}
+		platformPolicy := addr == "module.platform_policy.ovh_iam_policy.this"
 		for _, a := range strs(t, r, "allow") {
 			lower := strings.ToLower(a)
-			if strings.HasPrefix(lower, "account:") || strings.Contains(lower, "/storage/policy") ||
-				strings.Contains(a, "*") && addr != "module.platform_policy.ovh_iam_policy.this" {
+			if strings.HasPrefix(lower, "account:") && !(platformPolicy && platformIAM[a]) || strings.Contains(lower, "/storage/policy") ||
+				strings.Contains(a, "*") && !platformPolicy {
 				t.Errorf("%s: action %q is outside every deployer grant (G5)", addr, a)
 			}
 		}
@@ -546,11 +549,13 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 		}
 	}
 
-	// Platform deployer policy: publicCloudProject:apiovh:* on exactly the tenant projects, for
-	// the platform deployer only.
+	// Platform deployer policy: publicCloudProject:apiovh:* plus the project's IAM tags
+	// (account:apiovh:iam/resource/{edit,get}, T103) on exactly the tenant projects, for the
+	// platform deployer only.
 	platform := byAddress["module.platform_policy.ovh_iam_policy.this"]
-	if got := strs(t, platform, "allow"); !reflect.DeepEqual(got, []string{"publicCloudProject:apiovh:*"}) {
-		t.Errorf("platform policy allows %v, want [publicCloudProject:apiovh:*]", got)
+	wantAllow := []string{"account:apiovh:iam/resource/edit", "account:apiovh:iam/resource/get", "publicCloudProject:apiovh:*"}
+	if got := strs(t, platform, "allow"); !reflect.DeepEqual(got, wantAllow) {
+		t.Errorf("platform policy allows %v, want %v", got, wantAllow)
 	}
 	if got := strs(t, platform, "resources"); !reflect.DeepEqual(got, []string{demoProjectURN, alphaProjectURN}) {
 		t.Errorf("platform policy resources %v, want exactly the tenant projects", got)
