@@ -394,6 +394,47 @@ type chainExec struct {
 	signalAtObserve os.Signal
 	// productionObserver (T062): ChainOptions.Observer nil, the production collector.
 	productionObserver bool
+	// stateObjects answers the state-object check's GetObject of an instance's state key (T102);
+	// an instance not named gets an encryption envelope.
+	stateObjects map[string]chainStateAnswer
+}
+
+// chainStateAnswer is the fake S3 endpoint's answer to one state object's GetObject.
+type chainStateAnswer struct {
+	status int
+	body   string
+}
+
+// chainEnvelope is a state object as OpenTofu's encryption writes it (capture
+// p4-encryption.txt, evidence/T007.md P4: `encrypted_data`, no `resources`).
+const chainEnvelope = `{"serial":1,"lineage":"0d1f6c2e","meta":{"key_provider.pbkdf2.lz":"e30="},"encrypted_data":"c2VhbGVk","encryption_version":"v0"}`
+
+// chainS3 is the state-object check's fake S3 endpoint: it admits a bucket's keys only
+// (laneBucketKeys), logs every read as an s3get event with the access key, and answers from
+// c.stateObjects or with chainEnvelope.
+func (h *laneHarness) chainS3(c chainExec) *http.Client {
+	f := newFakeS3(h.t)
+	f.secretOf = func(ak string) string {
+		for _, admitted := range laneBucketKeys {
+			if sk, ok := admitted[ak]; ok {
+				return sk
+			}
+		}
+		return ""
+	}
+	f.get = func(ak, bucket, key string) ([]byte, int) {
+		laneAppend(h.world.Log, laneCall{Cmd: "s3get", Stack: bucket + "/" + key, Key: ak})
+		if _, ok := laneBucketKeys[bucket][ak]; !ok {
+			return nil, http.StatusForbidden
+		}
+		for id, a := range c.stateObjects {
+			if in := h.row(id); in.StateBucket == bucket && in.StateKey == key {
+				return []byte(a.body), a.status
+			}
+		}
+		return []byte(chainEnvelope), http.StatusOK
+	}
+	return f.client()
 }
 
 // chainRun is a chain run and what the harness saw while it ran.
@@ -510,7 +551,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
-		Deadline: c.deadline, Signals: sigs, Lister: lister, Observer: observer})
+		Deadline: c.deadline, Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c)})
 	process := streams()
 	close(stop)
 	<-watched

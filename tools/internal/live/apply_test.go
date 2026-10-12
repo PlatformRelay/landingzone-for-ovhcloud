@@ -221,8 +221,9 @@ type laneCall struct {
 }
 
 // laneNotTofu are the logged events that are not a tofu call (store, locks, binding, and the
-// leftover listings of T046, the L7 observer and its trap cleanup of T048).
-var laneNotTofu = []string{"put", "get", "lock", "release", "lock-refused", "bind", "list", "observe", "trap"}
+// leftover listings of T046, the L7 observer and its trap cleanup of T048, the chain's
+// state-object reads of T102).
+var laneNotTofu = []string{"put", "get", "lock", "release", "lock-refused", "bind", "list", "observe", "trap", "s3get"}
 
 func laneAppend(path string, c laneCall) {
 	line, _ := json.Marshal(c)

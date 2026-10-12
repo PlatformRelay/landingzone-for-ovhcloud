@@ -91,8 +91,9 @@ func lane(ctx context.Context, d deps, checkout, cfg, reviewed, tofu, verb, targ
 		}
 		// Signals nil: live.Chain handles SIGINT, SIGTERM and SIGHUP itself (destroy-on-exit);
 		// Lister nil: the leftover check lists through api with the sandbox admin credential;
-		// Observer nil: the production L7 collector (observe.go).
-		return chain(ctx, live.ChainOptions{ApplyOptions: o, Deadline: deadline})
+		// Observer nil: the production L7 collector (observe.go); S3HTTP: the state store's S3
+		// client, for the state-object check after each apply (T102).
+		return chain(ctx, live.ChainOptions{ApplyOptions: o, Deadline: deadline, S3HTTP: d.S3HTTP})
 	}
 	apply := d.Apply
 	if apply == nil {

@@ -16,7 +16,9 @@ package live
 // it before anything runs (G7). Each destroy is a saved `plan -destroy` whose `show -json` passes
 // protect.go before exactly that file is applied; an ephemeral root holds no retained address, so
 // there protect.go refuses only what it cannot read as a complete plan and a plan marked errored,
-// not a retained deletion (the stage check is the retained guard). The inventory is appended as each apply_complete event arrives. Then the leftover
+// not a retained deletion (the stage check is the retained guard). The inventory is appended as each apply_complete event arrives.
+// After each stack's apply its state object is read back with the stack's S3 keys and must hold an
+// encryption envelope, or the stage fails (stateObject, T102). Then the leftover
 // check (leftovers.go) lists every kind with the admin credential, exempts what the retained
 // instances' states hold (`tofu show -json`, nested modules included) and the admin client and
 // policy by recorded id, marks each leftover the baseline record listed (read back from the run
@@ -44,6 +46,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -70,6 +73,8 @@ type ChainOptions struct {
 	// Observer collects the L7 observations once every stack is applied (tests); nil: the
 	// collector (observe.go, T062).
 	Observer Observer
+	// S3HTTP is the state-object check's S3 client (T102; nil: the store's default client).
+	S3HTTP *http.Client
 }
 
 // CondConsumerApplied refuses `destroy -- <producer>` while a stack consuming it has a record
@@ -168,6 +173,7 @@ func (r *laneRunner) ephemeralOf() ([]string, error) {
 
 func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (err error) {
 	o, m := r.o, r.o.Manifest
+	r.s3HTTP = c.S3HTTP
 	eph, err := r.ephemeralOf()
 	if err != nil {
 		return err
@@ -313,6 +319,37 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	}
 	// summary.json and the summary line follow in runLane, after the locks are released.
 	return errors.Join(runErr, destroyErr, leftErr, recErr)
+}
+
+// stateObject is the chain's check of an applied stack's state object (T102, evidence/T044.md gap
+// 2): read back from the manifest's StateBucket/StateKey with the stack's own S3 keys (the
+// authority's state file, as the L7 collector reads it), it must hold an OpenTofu encryption
+// envelope (StateObjectEncrypted). A missing object, a refused or failed read and a state without
+// the envelope fail the stage, naming the key; nothing of the body is kept or printed. A stack
+// without the s3 backend has no remote object. The checker's answer cap (maxObject) applies: a
+// state object above it fails as "not read".
+func (r *laneRunner) stateObject(ctx context.Context, in stacks.Instance, keys map[string]string) error {
+	if in.Backend != "s3" {
+		return nil
+	}
+	where := in.StateBucket + "/" + in.StateKey
+	s3, err := NewS3Checker(S3Options{Region: r.o.Manifest.StateRegion, Keys: keys, HTTP: r.s3HTTP})
+	if err != nil {
+		return fmt.Errorf("%s: state object %s not checked: %w", in.ID, where, err)
+	}
+	a, err := s3.Do(ctx, S3Call{Op: S3GetObject, Bucket: in.StateBucket, Key: in.StateKey})
+	switch {
+	case err != nil:
+		return fmt.Errorf("%s: state object %s not read: %w", in.ID, where, err)
+	case a.Status == http.StatusNotFound:
+		return fmt.Errorf("%s: state object %s is missing after the apply (%d %s)", in.ID, where, a.Status, a.Code)
+	case a.Status < 200 || a.Status > 299:
+		return fmt.Errorf("%s: state object %s: the read was refused (%d %s)", in.ID, where, a.Status, a.Code)
+	}
+	if ok, detail := StateObjectEncrypted(a.Body); !ok {
+		return fmt.Errorf("%s: state object %s is not encrypted: %s", in.ID, where, detail)
+	}
+	return nil
 }
 
 // leftoverCheck is the check of this run without its states and baseline: the listings through the
