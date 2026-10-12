@@ -3,13 +3,13 @@ references:
   - path: tools/cmd/lz-live/main.go
     blob: 4aa02c56bf1ec151929c1e0433761a069800afe4
   - path: tools/cmd/lz-live/lane.go
-    blob: 13608161952d232cf8649daed1c32562c3ef6536
+    blob: 34e5596e6bfacffe7be9c1e71a640d3e45077182
   - path: tools/internal/live/apply.go
-    blob: c658bea8402ce8b9259db0f2f71e6fcee81c9ba0
+    blob: 6f50f0a05333e7dbbb29a045721569f8aa5c7aa5
   - path: tools/internal/live/bootstrap.go
-    blob: 7819586182b0b57b2fecc2af6aa96edc2305f46e
+    blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: aa54c58f0e04e8bb9d23c2ed7ed91b3c33f63a91
+    blob: 84526829da4e0be0e8114344fd4ad2a818818c88
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
@@ -18,7 +18,7 @@ references:
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
     blob: 158337b013192a1694fcec1574c0820c83a218f0
-last_verified: 0472de1d3773a6363dcfca70ad6f9082d292f80a
+last_verified: 8506c66686c29280d543dec48dbe6b324820d438
 ---
 
 # Run the first slice on an OVHcloud account
@@ -29,12 +29,12 @@ bootstrap the account, apply and destroy the stacks, read what a run recorded, a
 Everything here acts on the account and spends credit. **Only the owner runs it, on the
 maintainer workstation.** Agents and CI never run `task bootstrap:*` or `task live:*`.
 
-**Status (2026-10-08).** The commands below exist and are tested offline against fakes. Against a
-real account only plan-only probes have run so far
-([T009](../../specs/005-first-landing-zone-slice/evidence/T009.md),
-[T087](../../specs/005-first-landing-zone-slice/evidence/T087.md)). The bootstrap, apply, chain
-and destroy runs are still open (owner tasks T010, T044, T045, T049). Expect the first real runs
-to find what the fakes could not. See [What is still unverified](#what-is-still-unverified).
+**Status (2026-10-13).** Against the current sandbox account, every create→destroy probe has
+passed ([T010](../../specs/005-first-landing-zone-slice/evidence/T010.md)) and the account was
+bootstrapped twice ([T044](../../specs/005-first-landing-zone-slice/evidence/T044.md)). The
+chain, apply and destroy of the lane stacks (T049) and the fresh-account path (T045) have not
+run yet. Expect them to find what the fakes could not. See
+[What is still unverified](#what-is-still-unverified).
 
 ## Before you start
 
@@ -165,6 +165,14 @@ and the retained-resource guard refuse: such a bucket is not adopted, and a depl
 bucket was applied before this change can no longer plan it. Moving one to a new bucket (new
 bucket, state copied, old bucket removed by hand) is an owner decision; none existed when the lock
 was introduced (the account bootstrap had not been applied).
+When `admin` adopts an admin it did not create (its ids were not yet in `account.env`), it prints
+the hand-over once, as `LZ-LIVE admin bootstrap info` lines: the `tofu state rm` commands for
+`ovh_me_api_oauth2_client.lz_sandbox_admin` and `ovh_iam_policy.lz_sandbox_admin` (research R13).
+Run them in the one-off config's directory (`~/.config/ovh-lz/bootstrap/` on the current
+sandbox) after `tofu state list` shows those addresses; they remove the resources from that
+state only, not from OVHcloud. Then delete the `terraform.tfstate.*.backup` that `tofu state rm`
+writes and any `terraform.tfstate.backup` an earlier apply left: both keep the client secret in
+plain text (T044, T102).
 `publish` and `verify` follow. A second run must report every phase after `guard` (which always
 reports `ran`) as `unchanged` (V009). The bootstrap has no run id and writes no run record: its
 `LZ-LIVE` lines are the record, so copy them into the evidence.
@@ -259,6 +267,10 @@ It does this:
 2. Lists every leftover kind as a baseline. If a baseline listing fails, the run stops before
    any apply with outcome `blocked` (exit 2), and nothing is spent. Run it again later.
 3. Applies the five lane stacks in run order (`account-bootstrap` comes from the bootstrap).
+   After each apply it reads that stack's state object from its bucket with the stack's own S3
+   keys and fails the stage when the object is missing, the read is refused, or the state is
+   plaintext rather than the OpenTofu encryption envelope; the error names the key and prints
+   nothing of the body (T102).
 4. Collects and judges the ten L7 assertions: `bucket-tags`, `deployer-binding`, `kd1-canary`,
    `outputs-schema`, `project-tags`, `state-bucket-versioned`, `state-lock-contention`,
    `state-object-encrypted`, `tenant-iam-write`, `tenant-s3-read`.
@@ -409,21 +421,18 @@ observed on OVHcloud. The source of record is the spec's
 [premises table](../../specs/005-first-landing-zone-slice/spec.md#premises) and each task's
 evidence gaps.
 
-- **P1–P3, the state backend.** These cover the S3 backend with `use_lockfile`, the OVH endpoint
-  flags with OpenTofu 1.13, and client-side state encryption on OVHcloud Object Storage. Owed by
-  T010. Until then, every S3-backed stack is unproven live, and so is the lock round-trip in
-  bootstrap `verify`.
-- **T010 premises:** P7, P8 live, P9, P12–P15, the P26 tenant half, and the optional P25.
-  - P7: the admin can create clients and policies.
-  - P8: the identity URN works in a policy.
-  - P9: the tenant allowlist is enough for network and runtime, and denies IAM writes.
-  - P14: bucket destroy also removes noncurrent versions.
-  - P15: tag keys containing `:` are accepted.
-- **Bootstrap (T044, T045; P22, P23):** never run against an account. The fakes alone encode:
-  - S3 path-style SigV4 and 404-for-missing on the first publish (T089);
+- **P1–P3, the state backend:** observed on a probe bucket (T010 runs 14 and 15): the S3
+  backend with `use_lockfile` (a second writer is refused), and a state object that is the
+  OpenTofu encryption envelope. Not yet observed on a lane stack's state: the first is T049,
+  where the chain's state-object check (T102) runs live for the first time.
+- **P25 refuted** (T010, D107): a tag condition on a project-URN policy does not scope bucket
+  reads. Per-tenant bucket envelopes rely on one project per tenant, not on tags.
+- **Bootstrap, fresh account (T045; P22, P23):** never run. The existing-account path ran twice
+  (T044). The fakes alone encode:
   - the 409 text of a taken bucket name (T057);
   - the `/auth/time` offset, root-key revocation through `GET /auth/currentCredential`, and
-    created-client propagation (T043).
+    created-client propagation (T043);
+  - `identify` creating a binding from scratch (T044 found the binding already in place).
 - **Chain (T049):** never run. These are UNVERIFIED:
   - the lock object's conditional create (`If-None-Match`);
   - the lock-refusal text;
@@ -439,8 +448,11 @@ evidence gaps.
 
 What has been observed live: the host guard, child environment and admin binding through
 `GET /auth/details` (P26 admin half); P5 refuted, so the sandbox project is referenced, not
-adopted; P10 and P11 planned; and the API-client leftover listing passing on a plan-only run
-(T009, T084, T087).
+adopted; the API-client leftover listing (T009, T084, T087); the create→destroy probes for
+P1–P3, P7–P10, P12, P15 and the P26 tenant half (T010; P13's cost and P14's destroy of a bucket
+that still holds noncurrent versions stay open: the probes emptied the bucket first); and the
+account bootstrap on the existing account: state bucket with Object Lock, `state.env`, publish,
+and a second run with every phase after `guard` `unchanged` (T044).
 
 ## Known deviations
 
