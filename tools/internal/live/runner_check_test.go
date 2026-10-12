@@ -424,7 +424,7 @@ func TestProbeCheckRun(t *testing.T) {
 		want             []string
 	}{
 		{"companion-pass", nil, 0, []string{"p apply", "companion apply", "observe", "companion destroy", "undo", "p destroy"}},
-		{"companion-observe-fails", errors.New("p25-read-bucket-a: expected allowed, observed refused 403"), 0, []string{"p apply", "companion apply", "observe", "companion destroy", "undo", "p destroy"}},
+		{"companion-observe-fails", errors.New("p25-read-bucket-a: expected refused, observed allowed 200"), 0, []string{"p apply", "companion apply", "observe", "companion destroy", "undo", "p destroy"}},
 		{"companion-destroy-fails", nil, 1, []string{"p apply", "companion apply", "observe", "undo"}},
 	} {
 		observeErr := tc.observeErr
@@ -432,47 +432,14 @@ func TestProbeCheckRun(t *testing.T) {
 			withUmask(t)
 			root := tempPrivate(t)
 			w := newRunWorld(t)
-			p := w.identityProbe(t, root, tofuStack{DestroyExit: tc.companionDestroy})
-			// The root publishes the check's output beside companion_env.
-			outputs := filepath.Join(w.bin, "outputs-p.json")
-			raw, err := os.ReadFile(outputs)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var all map[string]any
-			if err := json.Unmarshal(raw, &all); err != nil {
-				t.Fatal(err)
-			}
-			all["deny_check"] = map[string]any{"sensitive": true, "type": []any{"map", "string"}, "value": checkEnvWant()}
-			raw, _ = json.Marshal(all)
-			if err := os.WriteFile(outputs, raw, 0o600); err != nil {
-				t.Fatal(err)
-			}
 			h := &checkHooks{observeErr: observeErr}
-			p.Check = h.check(w)
-			err = p.Start(context.Background())
+			p := w.companionCheckProbe(t, root, tofuStack{DestroyExit: tc.companionDestroy}, h)
+			err := p.Start(context.Background())
 			failing := observeErr != nil || tc.companionDestroy != 0
 			if (err != nil) != failing {
 				t.Fatalf("Start: %v, want an error only from Observe or the companion's destroy\n%s", err, w.term)
 			}
-			var order []string
-			for _, c := range w.calls(t, "tofu.log") {
-				var e string
-				switch {
-				case c.Cmd == "observe" || c.Cmd == "undo":
-					e = c.Cmd
-				case c.Cmd == "apply" || c.Cmd == "destroy":
-					e = c.Stack + " " + c.Cmd
-				default:
-					continue
-				}
-				// A destroy retried (T095) counts once; a failed one is not a destroy.
-				if c.Cmd == "destroy" && tc.companionDestroy != 0 && c.Stack == "companion" || len(order) > 0 && order[len(order)-1] == e {
-					continue
-				}
-				order = append(order, e)
-			}
-			if !slices.Equal(order, tc.want) {
+			if order := companionCheckOrder(w.calls(t, "tofu.log"), tc.companionDestroy != 0); !slices.Equal(order, tc.want) {
 				t.Errorf("order %v, want %v", order, tc.want)
 			}
 			if !exists(filepath.Join(w.runDir, "observations.json")) {
@@ -484,6 +451,78 @@ func TestProbeCheckRun(t *testing.T) {
 			noCheckSecret(t, w, root, w.runDir, w.stacks)
 		})
 	}
+
+	// T101 (T100 gap 5): a companion that cannot be destroyed and an undo that fails, together:
+	// both errors reach the run's error, the root is kept for both reasons and never destroyed.
+	t.Run("companion-destroy-and-undo-fail", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		h := &checkHooks{undoErrs: []error{errors.New("policy still listed")}}
+		p := w.companionCheckProbe(t, root, tofuStack{DestroyExit: 1}, h)
+		err := p.Start(context.Background())
+		if err == nil {
+			t.Fatal("a run whose companion destroy and undo failed passed")
+		}
+		if order, want := companionCheckOrder(w.calls(t, "tofu.log"), true), []string{"p apply", "companion apply", "observe", "undo"}; !slices.Equal(order, want) {
+			t.Errorf("order %v, want %v: the undo runs although the companion is kept, the root is not destroyed", order, want)
+		}
+		if plans, applies, _ := destroyCalls(w.calls(t, "tofu.log"), "p"); plans+applies > 0 {
+			t.Errorf("the root was planned for destroy %d times and destroyed %d times", plans, applies)
+		}
+		if _, state, pass := probeFiles(t, root); !exists(state) || !exists(pass) {
+			t.Errorf("state kept %v, passphrase kept %v; want both kept for --cleanup", exists(state), exists(pass))
+		}
+		sum := w.summary(t)
+		msg := fmt.Sprint(sum["error"])
+		for _, want := range []string{"policy still listed", "its check's writes may remain", "was not destroyed", "--cleanup 20261006T120000Z-a1b2"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("summary error %q lacks %q", msg, want)
+			}
+		}
+		if sum["outcome"] != "fail" {
+			t.Errorf("summary %v, want fail", sum)
+		}
+		noCheckSecret(t, w, root, w.runDir, w.stacks)
+	})
+
+	// T101 (T100 gap 5): `--cleanup` of a root with a companion and a check, kept because its
+	// companion could not be destroyed: the companion goes first under the published identity, then
+	// the check's undo, then the root; nothing is observed or applied again.
+	t.Run("cleanup-companion-and-check", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		h := &checkHooks{}
+		p := w.companionCheckProbe(t, root, tofuStack{DestroyExit: 1}, h)
+		if err := p.Start(context.Background()); err == nil {
+			t.Fatal("a run whose companion could not be destroyed passed")
+		}
+		st := w.scenario.Stacks["companion"]
+		st.DestroyExit = 0
+		w.scenario.Stacks["companion"] = st
+		w.save(t)
+		before := len(w.calls(t, "tofu.log"))
+		if err := p.Cleanup(context.Background()); err != nil {
+			t.Fatalf("cleanup: %v\n%s", err, w.term)
+		}
+		after := w.calls(t, "tofu.log")[before:]
+		if order, want := companionCheckOrder(after, false), []string{"companion destroy", "undo", "p destroy"}; !slices.Equal(order, want) {
+			t.Errorf("cleanup order %v, want %v", order, want)
+		}
+		for _, c := range after {
+			if c.Cmd == "observe" || c.Cmd == "plan" && !slices.Contains(c.Args, "-destroy") {
+				t.Errorf("cleanup ran %s %v: it must only undo and destroy", c.Cmd, c.Args)
+			}
+		}
+		if h.undoCalls != 2 || len(h.envs) != 3 || !maps.Equal(h.envs[2], checkEnvWant()) {
+			t.Errorf("Undo: %d calls, envs %v; want the run's and the cleanup's, with the published output", h.undoCalls, h.envs)
+		}
+		if _, state, pass := probeFiles(t, root); exists(state) || exists(pass) {
+			t.Error("a passing cleanup kept the probe's files")
+		}
+		noCheckSecret(t, w, root, w.runDir, w.stacks)
+	})
 
 	t.Run("no-check-no-output-call", func(t *testing.T) {
 		root := tempPrivate(t)
@@ -499,4 +538,50 @@ func TestProbeCheckRun(t *testing.T) {
 			t.Error("observations.json without a check")
 		}
 	})
+}
+
+// companionCheckProbe is the storage-iam shape: a root with a companion (identityProbe) that also
+// publishes the check's output beside companion_env, and h's check.
+func (w *runWorld) companionCheckProbe(t *testing.T, root string, companion tofuStack, h *checkHooks) Probe {
+	t.Helper()
+	p := w.identityProbe(t, root, companion)
+	outputs := filepath.Join(w.bin, "outputs-p.json")
+	raw, err := os.ReadFile(outputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all map[string]any
+	if err := json.Unmarshal(raw, &all); err != nil {
+		t.Fatal(err)
+	}
+	all["deny_check"] = map[string]any{"sensitive": true, "type": []any{"map", "string"}, "value": checkEnvWant()}
+	raw, _ = json.Marshal(all)
+	if err := os.WriteFile(outputs, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p.Check = h.check(w)
+	return p
+}
+
+// companionCheckOrder is the order of applies, observe, undo and destroys by stack; a destroy
+// retried (T095) counts once, and with companionFails a companion's destroy is a failed one, not a
+// destroy.
+func companionCheckOrder(calls []tofuCall, companionFails bool) []string {
+	var order []string
+	for _, c := range calls {
+		var e string
+		switch {
+		case c.Cmd == "observe" || c.Cmd == "undo":
+			e = c.Cmd
+		case c.Cmd == "apply" || c.Cmd == "destroy":
+			e = c.Stack + " " + c.Cmd
+		default:
+			continue
+		}
+		if c.Cmd == "destroy" && companionFails && c.Stack == "companion" || len(order) > 0 && order[len(order)-1] == e {
+			continue
+		}
+		order = append(order, e)
+	}
+	return order
 }

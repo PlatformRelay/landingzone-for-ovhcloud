@@ -6,20 +6,30 @@
 //
 // lz-live runs it on tests/live/probes/storage-iam (live.ProbeCheck), after the companion:
 //
-//   - Observe, five observations in order: the P25 identity reads bucket A (allowed: its policy
-//     allows region/storage/get where lz:tenant = lzprobe-a) and bucket B (refused); the P9 tenant
-//     identity calls GET /me (refused, P26) and attempts one IAM write, POST /v2/iam/policy
-//     (refused, P9); the P1 S3 key reads the companion's state object back (an OpenTofu encryption
-//     envelope, not plaintext, P3; the x-amz-server-side-encryption header recorded when present).
-//     A refusal is as expected when it is a 403 that names the step's IAM action or none; one naming
-//     another action is not the denial the step observes. Every answer is recorded; an answer
+//   - Observe, five observations in order: the P25 identity reads bucket A and bucket B, both
+//     refused; the P9 tenant identity calls GET /me (refused, P26) and attempts one IAM write,
+//     POST /v2/iam/policy (refused, P9); the P1 S3 key reads the companion's state object back (an
+//     OpenTofu encryption envelope, not plaintext, P3; the x-amz-server-side-encryption header
+//     recorded when present). Bucket A is refused although the P25 policy allows
+//     region/storage/get where lz:tenant = lzprobe-a: T010 run 20261012T072729Z-0646 saw it refused
+//     403 naming publicCloudProject:apiovh:region/storage/get, P25 is refuted, and coordinator
+//     decision D107 (2026-10-12, T101) makes that refusal the expected answer; an allowed bucket-A
+//     read is a finding saying P25 holds after all (re-open tag-scoped envelopes).
+//     A refusal is as expected when it is a 403 that names the step's IAM action or none (bucket
+//     A's must name it: D107 names the action); one naming another action is not the denial the
+//     step observes. Every answer is recorded; an answer
 //     other than the expected one is a finding: listed, printed as `LZ-LIVE finding`, and Observe's
 //     error, so the run fails naming the step and the refused actions. Each OAuth2 identity is bound
 //     to the run's account (G13) before its first call.
 //   - Undo, with the sandbox admin's credential: deletes every IAM policy named
-//     lzprobe-p9-write-<run id> (the write, should OVHcloud have accepted it) and lists again;
-//     anything left is an error, and lz-live keeps the root for `--cleanup`. It needs nothing from
-//     Observe, so it also runs after an interrupted Observe and on a cleanup.
+//     lzprobe-p9-write-<run id> and every policy id an accepted write returned to this check's
+//     Observe (T101: a listing that lags behind the create, or a name OVHcloud normalised, would
+//     miss it by name), each once, and lists again, keeping the name and those ids (review r2: a
+//     delete acknowledged but not effective under another name); anything left, or a delete
+//     refused (the other deletes are still tried), is an error, and lz-live keeps the root for
+//     `--cleanup`. Undo also runs after an interrupted
+//     Observe and on a cleanup; there, a fresh process, only the name is known (the id is in
+//     observations.json, and the leftover check lists `lzprobe-` policies).
 //
 // The credentials come from the root's sensitive output iam_check; lz-live has added every value
 // whose key is not public to its redactor. Nothing here prints or records a credential, the
@@ -39,6 +49,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
@@ -93,10 +104,11 @@ type Observation struct {
 	Expected   string   `json:"expected"`
 	Observed   string   `json:"observed"`
 	Status     int      `json:"status,omitempty"`
-	Actions    []string `json:"actions,omitempty"` // the IAM actions a refusal named
-	Code       string   `json:"code,omitempty"`    // an S3 refusal's error code
-	SSE        string   `json:"sse,omitempty"`     // the state object's x-amz-server-side-encryption
-	Detail     string   `json:"detail,omitempty"`  // the state object's classification
+	Actions    []string `json:"actions,omitempty"`   // the IAM actions a refusal named
+	Code       string   `json:"code,omitempty"`      // an S3 refusal's error code
+	SSE        string   `json:"sse,omitempty"`       // the state object's x-amz-server-side-encryption
+	Detail     string   `json:"detail,omitempty"`    // the state object's classification
+	PolicyID   string   `json:"policy_id,omitempty"` // the policy an accepted IAM write created
 	AsExpected bool     `json:"as_expected"`
 }
 
@@ -118,8 +130,11 @@ const (
 	noAnswer   = "no-answer"
 )
 
-// Check is the probe check lz-live runs on the storage-iam root.
+// Check is the probe check lz-live runs on the storage-iam root. Its Observe hands the Undo of the
+// same check the ids of the policies an accepted IAM write created.
 func Check(o Options) *live.ProbeCheck {
+	var mu sync.Mutex
+	var written []string
 	return &live.ProbeCheck{
 		Output:   Output,
 		Public:   Public,
@@ -129,6 +144,13 @@ func Check(o Options) *live.ProbeCheck {
 				return nil, err
 			}
 			rec, err := o.observe(ctx, env, term)
+			mu.Lock()
+			for _, ob := range rec.Observations {
+				if ob.PolicyID != "" && !slices.Contains(written, ob.PolicyID) {
+					written = append(written, ob.PolicyID)
+				}
+			}
+			mu.Unlock()
 			raw, jerr := json.Marshal(rec)
 			return raw, errors.Join(err, jerr)
 		},
@@ -136,7 +158,10 @@ func Check(o Options) *live.ProbeCheck {
 			if err := validate(env); err != nil {
 				return err
 			}
-			return o.undo(ctx, env, term)
+			mu.Lock()
+			ids := slices.Clone(written)
+			mu.Unlock()
+			return o.undo(ctx, env, ids, term)
 		},
 	}
 }
@@ -184,12 +209,14 @@ func (o Options) now() time.Time {
 }
 
 // step is one API observation: by whom (p25, tenant), which call, what is expected and which IAM
-// action a refusal of it names.
+// action a refusal of it names. A refusal is the step's when it is a 403 naming its action, or —
+// unless named — no action at all.
 type step struct {
 	name, who string
 	call      live.APICall
 	expected  string
 	action    string
+	named     bool // the refusal must name action (D107 for bucket A)
 }
 
 // observe makes the five observations in order; every step runs (unless the context ended or its
@@ -234,10 +261,12 @@ func (o Options) observe(ctx context.Context, env map[string]string, term io.Wri
 		return rec, err
 	}
 	for _, s := range []step{
-		{"p25-read-bucket-a", "p25", storage(env["bucket_a"]), allowed, readAction},
-		{"p25-read-bucket-b", "p25", storage(env["bucket_b"]), refused, readAction},
-		{"p26-get-me", "tenant", live.APICall{Op: live.APIGetMe}, refused, meAction},
-		{"p9-iam-write", "tenant", live.APICall{Op: live.APICreatePolicy, Body: write}, refused, writeAction},
+		// D107: refused naming region/storage/get, as T010 run 20261012T072729Z-0646 saw (P25
+		// refuted); a 403 naming no action is not that refutation (review r1).
+		{"p25-read-bucket-a", "p25", storage(env["bucket_a"]), refused, readAction, true},
+		{"p25-read-bucket-b", "p25", storage(env["bucket_b"]), refused, readAction, false},
+		{"p26-get-me", "tenant", live.APICall{Op: live.APIGetMe}, refused, meAction, false},
+		{"p9-iam-write", "tenant", live.APICall{Op: live.APICreatePolicy, Body: write}, refused, writeAction, false},
 	} {
 		ob := Observation{Step: s.name, Operation: string(s.call.Op), Credential: s.who, Expected: s.expected, Observed: notRun}
 		if ctx.Err() != nil {
@@ -250,10 +279,9 @@ func (o Options) observe(ctx context.Context, env map[string]string, term io.Wri
 		} else {
 			ob.Status, ob.Actions, ob.Observed = a.Status, a.Actions, refused
 			if a.Status >= 200 && a.Status <= 299 {
-				ob.Observed = allowed
+				ob.Observed, ob.PolicyID = allowed, a.ID
 			}
-			// A refusal is the step's when it is a 403 naming its action, or no action at all.
-			ob.AsExpected = ob.Observed == s.expected && (s.expected != refused || a.Status == http.StatusForbidden && (len(a.Actions) == 0 || slices.Contains(a.Actions, s.action)))
+			ob.AsExpected = ob.Observed == s.expected && (s.expected != refused || a.Status == http.StatusForbidden && (len(a.Actions) == 0 && !s.named || slices.Contains(a.Actions, s.action)))
 		}
 		errs = append(errs, rec.add(ob, term))
 	}
@@ -312,7 +340,12 @@ func (r *Record) add(ob Observation, term io.Writer) error {
 	if ob.Detail != "" {
 		finding += " (" + ob.Detail + ")"
 	}
-	if ob.Step == "p9-iam-write" && ob.Observed == allowed {
+	switch {
+	case ob.Step == "p25-read-bucket-a" && ob.Observed == allowed:
+		finding += "; P25 holds after all: re-open tag-scoped envelopes (D107)"
+	case ob.Step == "p25-read-bucket-a" && ob.Status == http.StatusForbidden && len(ob.Actions) == 0:
+		finding += "; D107 expects a 403 naming " + readAction
+	case ob.Step == "p9-iam-write" && ob.Observed == allowed:
 		finding += "; the undo deletes the policy before the root's destroy"
 	}
 	r.Findings = append(r.Findings, ob.Step)
@@ -334,44 +367,59 @@ func writeBody(env map[string]string, now time.Time) ([]byte, error) {
 	})
 }
 
-// undo deletes, with the admin's credential, every policy named for the run's IAM write, then
-// lists again: one left is an error.
-func (o Options) undo(ctx context.Context, env map[string]string, term io.Writer) error {
+// undo deletes, with the admin's credential, every policy named for the run's IAM write and every
+// id in written (the policies an accepted write created), each once, then lists again: one left of
+// the name or of a written id, under any name, is an error. A failed listing or delete does not stop
+// the other deletes (review r1, r2); every failure is in the error.
+func (o Options) undo(ctx context.Context, env map[string]string, written []string, term io.Writer) error {
 	name := WriteName(env["run_id"])
 	admin, err := live.NewAPIChecker(ctx, o.API, o.Admin)
 	if err != nil {
 		return fmt.Errorf("undo: admin identity: %w", err)
 	}
 	mine := func() ([]live.APIPolicy, error) {
-		a, err := admin.Do(ctx, live.APICall{Op: live.APIListPolicies, Name: name})
+		a, err := admin.Do(ctx, live.APICall{Op: live.APIListPolicies, Name: name, Keep: written})
 		if err != nil {
 			return nil, fmt.Errorf("undo: %w", err)
 		}
 		if a.Status < 200 || a.Status > 299 {
 			return nil, fmt.Errorf("undo: ListPolicies answered %d %s", a.Status, strings.Join(a.Actions, ","))
 		}
-		return slices.DeleteFunc(a.Policies, func(p live.APIPolicy) bool { return p.Name != name }), nil
+		return slices.DeleteFunc(a.Policies, func(p live.APIPolicy) bool { return p.Name != name && !slices.Contains(written, p.ID) }), nil
 	}
-	found, err := mine()
-	if err != nil {
-		return err
-	}
+	found, listErr := mine()
+	var errs []error
+	ids := slices.Clone(written)
 	for _, p := range found {
-		d, err := admin.Do(ctx, live.APICall{Op: live.APIDeletePolicy, ID: p.ID})
-		if err != nil {
-			return fmt.Errorf("undo: %w", err)
-		}
-		if d.Status != http.StatusNotFound && (d.Status < 200 || d.Status > 299) {
-			return fmt.Errorf("undo: DeletePolicy answered %d %s", d.Status, strings.Join(d.Actions, ","))
+		if !slices.Contains(ids, p.ID) {
+			ids = append(ids, p.ID)
 		}
 	}
+	removed := 0
+	for _, id := range ids {
+		d, err := admin.Do(ctx, live.APICall{Op: live.APIDeletePolicy, ID: id})
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("undo: %w", err))
+		case d.Status == http.StatusNotFound:
+			// Expired, or gone already: removed nothing.
+		case d.Status < 200 || d.Status > 299:
+			errs = append(errs, fmt.Errorf("undo: DeletePolicy answered %d %s", d.Status, strings.Join(d.Actions, ",")))
+		default:
+			removed++
+		}
+	}
+	// The second listing decides what is left, also after a failed first one.
 	left, err := mine()
 	if err != nil {
-		return err
+		return errors.Join(append(errs, listErr, err)...)
 	}
 	if len(left) > 0 {
-		return fmt.Errorf("undo: %d policies named %s remain after deleting %d", len(left), name, len(found))
+		errs = append(errs, fmt.Errorf("undo: %d policies named %s remain after deleting %d", len(left), name, removed))
 	}
-	fmt.Fprintf(term, "LZ-LIVE undo removed %d IAM policies named %s\n", len(found), name)
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	fmt.Fprintf(term, "LZ-LIVE undo removed %d IAM policies named %s or created by the write\n", removed, name)
 	return nil
 }

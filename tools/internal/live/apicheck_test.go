@@ -183,6 +183,10 @@ func TestAPICheckerGate(t *testing.T) {
 		"list without name":       {Op: APIListPolicies},
 		"list with a spaced name": {Op: APIListPolicies, Name: "lzprobe p9"},
 		"list with body":          {Op: APIListPolicies, Name: "lzprobe-p9-write-a", Body: []byte("{}")},
+		// T101 review r2: the ids a listing also keeps are uuids, and only a listing takes them.
+		"list keeping a non-uuid": {Op: APIListPolicies, Name: "lzprobe-p9-write-a", Keep: []string{apiTestPolicy, "../x"}},
+		"me keeping an id":        {Op: APIGetMe, Keep: []string{apiTestPolicy}},
+		"delete keeping an id":    {Op: APIDeletePolicy, ID: apiTestPolicy, Keep: []string{apiTestPolicy}},
 		"delete without id":       {Op: APIDeletePolicy},
 		"delete with a path id":   {Op: APIDeletePolicy, ID: "../policy"},
 		"delete with upper uuid":  {Op: APIDeletePolicy, ID: strings.ToUpper(apiTestPolicy)},
@@ -291,6 +295,20 @@ func TestAPICheckerAnswers(t *testing.T) {
 		want := []APIPolicy{{apiTestPolicy, "lzprobe-p9-write-a"}, {"6ba7b810-9dad-11d1-80b4-00c04fd430c9", "lzprobe-p9-write-a"}}
 		if err != nil || got.Status != 200 || !slices.Equal(got.Policies, want) {
 			t.Errorf("listing %+v, %v; want the named policies of both pages %v", got, err, want)
+		}
+	})
+
+	// T101 review r2: a listing also keeps the policies whose id it was asked to keep, whatever
+	// their name (a name OVHcloud normalised), and still skips the others.
+	t.Run("listing-keeps-ids", func(t *testing.T) {
+		f := newFakeCheckAPI(t)
+		f.answer = func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(rw, `[{"id":%q,"name":"renamed"},{"id":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","name":"other"},{"id":"6ba7b810-9dad-11d1-80b4-00c04fd430c9","name":"lzprobe-p9-write-a"}]`, apiTestPolicy)
+		}
+		got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIListPolicies, Name: "lzprobe-p9-write-a", Keep: []string{apiTestPolicy}})
+		want := []APIPolicy{{apiTestPolicy, "renamed"}, {"6ba7b810-9dad-11d1-80b4-00c04fd430c9", "lzprobe-p9-write-a"}}
+		if err != nil || !slices.Equal(got.Policies, want) {
+			t.Errorf("listing %+v, %v; want the kept id and the named policy %v", got, err, want)
 		}
 	})
 

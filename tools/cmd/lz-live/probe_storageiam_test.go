@@ -20,9 +20,10 @@ import (
 // T100 through the entry: `lz-live probe` runs the storage-iam probe's check (package
 // probes/live/storageiam) after the root's apply with lz-live's API client, the bound identities
 // and its S3 client, writes observations.json, and fails the run when an observation differs from
-// the expected one — T010 run 20261012T072729Z-0646's refused bucket-A read above all — while the
-// expected denials pass. Its undo lists the IAM policies with the admin's credential before the
-// destroy.
+// the expected one, while the expected denials pass. Since D107 (T101) the expected denials
+// include the bucket-A read T010 run 20261012T072729Z-0646 saw refused (P25 refuted); a bucket-A
+// read that is allowed fails the run. Its undo lists the IAM policies with the admin's credential
+// before the destroy.
 
 const (
 	iamProject = "0123456789abcdef0123456789abcdef"
@@ -92,9 +93,9 @@ func (w *probeWorld) publishIAMCheck(t *testing.T, runID string) {
 	writePrivate(t, filepath.Join(filepath.Dir(w.git), "outputs.json"), string(raw))
 }
 
-// iamAnswers answers the check's API calls as T010 run 14 did, except where refuseA leaves bucket
-// A readable; every answer records who asked for what.
-func (w *probeWorld) iamAnswers(refuseA bool, seen *[]string) {
+// iamAnswers answers the check's API calls as T010 run 14 did (bucket A refused), except where
+// allowA leaves bucket A readable; every answer records who asked for what.
+func (w *probeWorld) iamAnswers(allowA bool, seen *[]string) {
 	var mu sync.Mutex
 	w.apiHook = func(rw http.ResponseWriter, r *http.Request) bool {
 		who := tokenClients[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
@@ -109,7 +110,7 @@ func (w *probeWorld) iamAnswers(refuseA bool, seen *[]string) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, storage+"lzprobe-p25a-"):
 			*seen = append(*seen, who+" read A")
-			if refuseA {
+			if !allowA {
 				return refuse("publicCloudProject:apiovh:region/storage/get")
 			}
 			fmt.Fprint(rw, `{"name":"a"}`)
@@ -132,15 +133,15 @@ func (w *probeWorld) iamAnswers(refuseA bool, seen *[]string) {
 
 func TestProbeEntryStorageIAM(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		refuseA bool
-	}{{"pass", false}, {"bucket-a-refused", true}} {
+		name   string
+		allowA bool
+	}{{"pass", false}, {"bucket-a-allowed", true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newProbeWorld(t)
 			s3 := w.withIAMS3(t)
 			w.storageIAMRoot(t)
 			var seen []string
-			w.iamAnswers(tc.refuseA, &seen)
+			w.iamAnswers(tc.allowA, &seen)
 			w.publishIAMCheck(t, iamRun)
 			code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/storage-iam")
 			id := runIDOf(t, stdout)
@@ -163,19 +164,21 @@ func TestProbeEntryStorageIAM(t *testing.T) {
 			sum, _ := os.ReadFile(filepath.Join(w.checkout, ".local", "live", id, "summary.json"))
 			var s struct{ Outcome, Error string }
 			_ = json.Unmarshal(sum, &s)
-			if tc.refuseA {
-				if code == 0 || s.Outcome != "fail" || !strings.Contains(s.Error, "p25-read-bucket-a") || !strings.Contains(s.Error, "publicCloudProject:apiovh:region/storage/get") {
-					t.Errorf("exit %d, summary %s: want fail naming p25-read-bucket-a and the refused action", code, sum)
+			if tc.allowA {
+				if code == 0 || s.Outcome != "fail" || !strings.Contains(s.Error, "p25-read-bucket-a: expected refused, observed allowed 200") || !strings.Contains(s.Error, "P25 holds after all") {
+					t.Errorf("exit %d, summary %s: want fail naming p25-read-bucket-a allowed and that P25 holds after all", code, sum)
 				}
-				if !slices.Equal(rec.Findings, []string{"p25-read-bucket-a"}) || !strings.Contains(stdout, "LZ-LIVE finding p25-read-bucket-a: expected allowed, observed refused 403 publicCloudProject:apiovh:region/storage/get") {
-					t.Errorf("findings %v, stdout:\n%s\nwant the refused read as the one finding, printed", rec.Findings, stdout)
+				if !slices.Equal(rec.Findings, []string{"p25-read-bucket-a"}) || !strings.Contains(stdout, "LZ-LIVE finding p25-read-bucket-a: expected refused, observed allowed 200; P25 holds after all") {
+					t.Errorf("findings %v, stdout:\n%s\nwant the allowed read as the one finding, printed", rec.Findings, stdout)
 				}
 			} else {
-				if code != 0 || s.Outcome != "pass" || len(rec.Findings) != 0 {
-					t.Errorf("exit %d, summary %s, findings %v: want pass with the expected denials\n%s\n%s", code, sum, rec.Findings, stdout, stderr)
+				// T010 run 20261012T072729Z-0646's answers, bucket A refused included (D107): pass.
+				if code != 0 || s.Outcome != "pass" || len(rec.Findings) != 0 || !rec.Observations[0].AsExpected ||
+					!slices.Equal(rec.Observations[0].Actions, []string{"publicCloudProject:apiovh:region/storage/get"}) {
+					t.Errorf("exit %d, summary %s, observations %s: want pass with bucket A refused 403 naming region/storage/get\n%s\n%s", code, sum, raw, stdout, stderr)
 				}
 			}
-			// The expected denials pass in both runs.
+			// The other expected denials pass in both runs.
 			for _, o := range rec.Observations[1:] {
 				if !o.AsExpected {
 					t.Errorf("observation %s not as expected: %s", o.Step, raw)

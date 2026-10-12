@@ -10,8 +10,8 @@ package live
 // at maxBody, and keeps of an answer only the status, the IAM actions a refusal names (action-
 // shaped tokens of `details.unauthorizedActionsByIAM` and of the message "missing IAM
 // permissions: …"; kb manage-and-operate/iam/troubleshooting.mdx:21-31, T010 rows 10 and 14), a
-// created policy's uuid and the ids of the listed policies of the asked name. No error carries answer text, a
-// token or a secret.
+// created policy's uuid and the ids of the listed policies of the asked name or of an id asked to
+// be kept (T101). No error carries answer text, a token or a secret.
 
 import (
 	"bytes"
@@ -45,6 +45,8 @@ type APICall struct {
 	Name    string // GetStorage: a bucket name; ListPolicies: the policy name kept
 	ID      string // DeletePolicy: a policy uuid
 	Body    []byte // CreatePolicy: the policy, JSON
+	// Keep (ListPolicies, optional): policy uuids kept whatever their name (T101 review r2).
+	Keep []string
 }
 
 // APIPolicy is one entry of a policy listing.
@@ -108,7 +110,7 @@ func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
 	case APIDeletePolicy:
 		a, _, err = c.send(ctx, http.MethodDelete, "/iam/policy/"+call.ID, nil, "", nil)
 	case APIListPolicies:
-		a, err = c.list(ctx, call.Name)
+		a, err = c.list(ctx, call.Name, call.Keep)
 	}
 	return a, err
 }
@@ -132,8 +134,13 @@ func apiGate(call APICall) error {
 		return fmt.Errorf("API check: operation %q refused", call.Op)
 	}
 	got := parts{call.Project != "", call.Region != "", call.Name != "", call.ID != "", call.Body != nil}
-	if got != want {
+	if got != want || call.Keep != nil && call.Op != APIListPolicies {
 		return fmt.Errorf("API check: %s with the wrong parts", call.Op)
+	}
+	for _, id := range call.Keep {
+		if !apiUUID.MatchString(id) {
+			return fmt.Errorf("API check: %s: a kept id is not a uuid", call.Op)
+		}
 	}
 	switch {
 	case want.project && !apiProject.MatchString(call.Project):
@@ -152,9 +159,10 @@ func apiGate(call APICall) error {
 	return nil
 }
 
-// policyPage collects, over the pages of a listing, the policies named name.
+// policyPage collects, over the pages of a listing, the policies named name or with an id in keep.
 type policyPage struct {
 	name  string
+	keep  []string
 	found []APIPolicy
 }
 
@@ -219,6 +227,9 @@ func (c *APIChecker) send(ctx context.Context, method, path string, body []byte,
 			switch {
 			case e == nil:
 				return APIAnswer{}, "", fmt.Errorf("%s: a listed entry is not a policy", what)
+			case slices.Contains(page.keep, e.ID):
+				// A kept id (a uuid, gated) whatever its name: the run's own write (T101 review r2).
+				page.found = append(page.found, APIPolicy{ID: e.ID, Name: e.Name})
 			case e.Name != page.name:
 			case !apiUUID.MatchString(e.ID):
 				return APIAnswer{}, "", fmt.Errorf("%s: a listed policy of the asked name has no usable id", what)
@@ -233,9 +244,10 @@ func (c *APIChecker) send(ctx context.Context, method, path string, body []byte,
 
 // list reads every page of GET /iam/policy (v2 pagination, kb manage-and-operate/api/apiv2.mdx: the
 // next page's cursor comes in X-Pagination-Cursor-Next and goes back in X-Pagination-Cursor; its
-// absence marks the last page) and keeps the policies named name. A refused page is the answer.
-func (c *APIChecker) list(ctx context.Context, name string) (APIAnswer, error) {
-	page := &policyPage{name: name, found: []APIPolicy{}}
+// absence marks the last page) and keeps the policies named name or with an id in keep. A refused
+// page is the answer.
+func (c *APIChecker) list(ctx context.Context, name string, keep []string) (APIAnswer, error) {
+	page := &policyPage{name: name, keep: keep, found: []APIPolicy{}}
 	cursor := ""
 	for range maxPages {
 		a, next, err := c.send(ctx, http.MethodGet, "/iam/policy", nil, cursor, page)
