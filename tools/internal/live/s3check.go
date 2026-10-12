@@ -9,8 +9,10 @@ package live
 // a bucket is never deleted. Only a versioned DeleteObject may carry the governance bypass header
 // (T099: the probe bucket is locked in governance mode). It shares the store's endpoint rule, name checks, SigV4 signer,
 // redirect refusal, size cap and quiet transport errors, and keeps of an answer only the status,
-// the S3 error code when it is well-formed, a well-formed x-amz-version-id and, for the two
-// listings its caller parses, the capped body; no error carries answer text or a key.
+// the S3 error code when it is well-formed, a well-formed x-amz-version-id, a well-formed
+// x-amz-server-side-encryption (T100) and, for GetObject (T100: the storage-iam check classifies
+// the companion's state object) and the two listings its caller parses, the capped body; no
+// error carries answer text or a key.
 
 import (
 	"bytes"
@@ -69,7 +71,7 @@ type s3OpSpec struct {
 // s3Ops is the checker's gate.
 var s3Ops = map[S3Op]s3OpSpec{
 	S3PutObject:           {method: http.MethodPut, object: true, body: true},
-	S3GetObject:           {method: http.MethodGet, object: true},
+	S3GetObject:           {method: http.MethodGet, object: true, keep: true},
 	S3DeleteObject:        {method: http.MethodDelete, object: true},
 	S3ListObjectVersions:  {method: http.MethodGet, sub: "versions", keep: true},
 	S3PutBucketPolicy:     {method: http.MethodPut, sub: "policy", body: true},
@@ -84,6 +86,8 @@ var (
 	s3VersionID = regexp.MustCompile(`^[\x21-\x7e]+$`)
 	// s3ErrorCode is an S3 error code as AWS documents them (AccessDenied, NoSuchBucketPolicy).
 	s3ErrorCode = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9.]{0,63}$`)
+	// s3SSE is a server-side encryption algorithm name as S3 answers it (AES256, aws:kms).
+	s3SSE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9:_-]{0,31}$`)
 )
 
 // S3Answer is what the checker keeps of an answer.
@@ -91,7 +95,8 @@ type S3Answer struct {
 	Status    int
 	Code      string // a non-2xx answer's S3 error code, or "unrecognised"
 	VersionID string // x-amz-version-id, when well-formed
-	Body      []byte // a 2xx answer to ListObjectVersions or GetBucketVersioning
+	Body      []byte // a 2xx answer to GetObject, ListObjectVersions or GetBucketVersioning
+	SSE       string // x-amz-server-side-encryption, when shaped like an algorithm name (T100)
 }
 
 // S3Checker sends a probe check's S3 calls.
@@ -195,6 +200,9 @@ func (c *S3Checker) Do(ctx context.Context, call S3Call) (S3Answer, error) {
 	a := S3Answer{Status: resp.StatusCode}
 	if v := resp.Header.Get("X-Amz-Version-Id"); validVersionID(v) {
 		a.VersionID = v
+	}
+	if v := resp.Header.Get("X-Amz-Server-Side-Encryption"); s3SSE.MatchString(v) && !strings.Contains(v, s.signer.accessKey) && !strings.Contains(v, s.signer.secret) {
+		a.SSE = v
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		a.Code = s3Code(raw, s.signer.accessKey, s.signer.secret)

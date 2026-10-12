@@ -28,7 +28,7 @@ Every run prints `LZ-LIVE run <run-id> start probe tests/live/probes/<root>` fir
 `listings/<type>.json` (one file per leftover kind listed), `leftovers.json`, `summary.json`
 (`outcome`, `plan_only`, `error`), `errors.txt` when a tofu call failed (its stderr, and a
 failed apply's diagnostics decoded to plain text, redacted), and `observations.json` for a root
-with a check (`state-backend`, row 7b). Copy the run id, the outcome and the observations into the
+with a check (`state-backend`, row 7b; `storage-iam`, rows 8b–8d). Copy the run id, the outcome and the observations into the
 task's evidence file, never the record itself (it may hold ids and the account e-mail).
 
 ## What every root shares
@@ -132,8 +132,8 @@ under the one `task live:probe` command of its row:
 
 1. The root applies under the admin credential and publishes the companion's variables as the
    sensitive output `companion_env` (storage-iam: the P9 tenant identity as `OVH_CLIENT_ID` /
-   `OVH_CLIENT_SECRET`, the P25 identity as `TF_VAR_p25_client_id` / `_secret`, the P1 S3 user's
-   keys as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
+   `OVH_CLIENT_SECRET`, the P1 S3 user's keys as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`;
+   since T100 the P25 identity is the storage-iam check's, below).
 2. `lz-live` reads that output, writes it 0600 to
    `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/companion.env`, refuses (before
    binding anything; the root is still destroyed) a name reserved for the run —
@@ -180,11 +180,33 @@ apply reported no resource operation, or the companion stopped before its apply)
 | # | Root (stage) | Premises | Task | Command | Expected observation (pass) | Refuted when | Destroy step |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 8a | `storage-iam` → `companion` (state) | P1, P2, P3 | T010 | row 8's command (one run) | the companion's `init` and `apply` succeed on the S3 backend in `lzprobe-p1-<run-id>` with the OVHcloud options (P2) and enforced client-side encryption (P3); `second-writer-storage-iam-companion.txt` holds `Error acquiring the state lock` and a non-zero exit (P1) | the S3 backend or the lock file is refused (P2); the second writer's plan succeeds while the apply runs (P1: read the record's exit line) | destroy-on-exit: companion, then root |
-| 8b | `storage-iam` → `companion` (tenant identity) | P9 usage, P26 tenant | T010 | row 8's command | the tenant identity creates and destroys network and bucket `lzprobe-p9-<run-id>` and subnet `10.251.0.0/24` (P9); the binding step passes and check `p26_me_denied` warns that `GET /me` was denied (P26) | a create or delete is denied (the apply or destroy fails naming the action: record it); check `p26_me_denied` fails with "P26 refuted" | destroy-on-exit |
-| 8c | `storage-iam` → `companion` (P25 identity) | P25 evaluation | T010 | row 8's command | check `p25_bucket_a_readable` passes without a warning; check `p25_bucket_b_denied` warns that bucket B was denied | check `p25_bucket_b_denied` fails with "P25 refuted", or `p25_bucket_a_readable` warns (the identity was denied its own tenant's bucket) | destroy-on-exit |
+| 8b | `storage-iam` → `companion` (tenant identity) | P9 usage, P26 tenant | T010 | row 8's command | the tenant identity creates and destroys network and bucket `lzprobe-p9-<run-id>` and subnet `10.251.0.0/24` (P9); the binding step passes; `observations.json` (`check: storage-iam`): `p26-get-me` refused 403 `account:apiovh:me/get` and `p9-iam-write` (`POST /v2/iam/policy`, a harmless policy `lzprobe-p9-write-<run-id>`) refused 403 `account:apiovh:iam/policy/create`, both `as_expected: true`; the terminal shows `LZ-LIVE undo removed 0 IAM policies named lzprobe-p9-write-<run-id>` before the root's destroy | a create or delete is denied (the apply or destroy fails naming the action: record it); `p26-get-me` or `p9-iam-write` observed `allowed` (the run fails; an accepted write is deleted by the undo, which then prints `removed 1`) | destroy-on-exit |
+| 8c | `storage-iam` → check (P25 identity) | P25 evaluation | T010 | row 8's command | `p25-read-bucket-a` allowed (2xx) and `p25-read-bucket-b` refused 403 `publicCloudProject:apiovh:region/storage/get`, both `as_expected: true` | `p25-read-bucket-a` refused (run 20261012T072729Z-0646: 403 `region/storage/get` — the run now fails, `LZ-LIVE finding p25-read-bucket-a: expected allowed, observed refused 403 …`), or `p25-read-bucket-b` allowed | destroy-on-exit |
+| 8d | `storage-iam` → check (state object) | P3 | T010 | row 8's command | `p3-state-object`: the P1 S3 key reads `storage-iam-companion.tfstate` back (200) and it is an OpenTofu encryption envelope (`detail: encryption envelope`, `as_expected: true`); record `sse` if present (the `x-amz-server-side-encryption` answer header: whether OVHcloud sends it on a GET is UNVERIFIED, the probe bucket has no default encryption set) | `observed: plaintext` (a state with `resources`, or no `encrypted_data`) or `unreadable`; refused (the P1 user lacks `s3:GetObject`: record the code) | destroy-on-exit |
 
-Whether a denied read inside a `check` block is a warning rather than an error is believed
-(Terraform semantics), UNVERIFIED for OpenTofu 1.13 until this run; record what the run printed.
+**The storage-iam check (rows 8b–8d, T100).** After the companion's apply, lz-live reads the root's
+sensitive output `iam_check` (the two buckets, the project and its URN, region, run id, the state
+bucket and key, the tenant identity's URN — public — and the tenant, P25 and P1 S3 credentials)
+from `tofu output -json` into memory only and redacts every credential. It binds the P25 and the
+tenant identity to the account (`GET /auth/details`) before using them, then makes five
+observations in order: `p25-read-bucket-a`, `p25-read-bucket-b`, `p26-get-me`, `p9-iam-write`,
+`p3-state-object`. Each keeps only the status, the IAM actions a 403 names
+(`details.unauthorizedActionsByIAM` or the message `missing IAM permissions: …`) or the S3 error
+code, and the SSE header; a refusal counts as expected only when it is a 403 naming the step's
+action or none. **Unlike the state-backend check, every answer other than the expected one fails
+the run** (`LZ-LIVE finding <step>: expected …, observed …`, listed under `findings`, and the run's
+error); P25 refuted therefore makes every storage-iam run `fail` until P25 is redesigned or dropped.
+Before the root's destroy, on every way out and on `--cleanup`, the undo lists `/v2/iam/policy` with
+the sandbox admin's credential, deletes every policy named `lzprobe-p9-write-<run-id>` and lists
+again; one left (or a refused listing) keeps the root for `--cleanup`. The undo also runs when the
+companion could not be destroyed (the root is then kept anyway), and other policies of the account
+are skipped whatever their name. The write also expires an
+hour after the run, and the leftover check lists `lzprobe-` policies. Copy `observations.json`'s
+observations and findings into T010's evidence. The OVHcloud answers the fakes assume (the 403 body,
+the v2 policy listing's pages, the SSE header) are UNVERIFIED until this run.
+
+Before T100 these reads were check blocks in the companion, where a refused read is only an
+OpenTofu warning: run 20261012T072729Z-0646 printed `pass` while bucket A was refused.
 
 **The state-backend check (row 7b).** lz-live reads the root's sensitive output `deny_check`
 (bucket, region, the state user's and the janitor's S3 keys) from `tofu output -json` into memory

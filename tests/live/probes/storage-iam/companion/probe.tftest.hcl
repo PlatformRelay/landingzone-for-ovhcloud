@@ -1,44 +1,24 @@
 # Offline controls of the companion root (T075): mocked providers, plan only, no credential, no
 # API call, no backend.
 
-# The tenant identity (default configuration) answers GET /me with no account and sees no tenant
-# tag; the P25 identity (alias p25) sees bucket A's. A P25 read through the default configuration
-# therefore fails check p25_bucket_a_readable.
+# The P25 reads, GET /me and the IAM write are observed by lz-live's storage-iam check (T100,
+# tools/internal/probes/live/storageiam), not here: the companion holds no check block and no P25
+# identity.
 mock_provider "ovh" {
   mock_data "ovh_cloud_project_network_privates" {
     defaults = { networks = [] }
   }
-  mock_data "ovh_me" {
-    defaults = { nichandle = "" }
-  }
-  mock_data "ovh_cloud_project_storage" {
-    defaults = { tags = { "lz:tenant" = "read-by-the-tenant-identity" } }
-  }
-}
-
-mock_provider "ovh" {
-  alias = "p25"
-
-  mock_data "ovh_cloud_project_storage" {
-    defaults = { tags = { "lz:tenant" = "lzprobe-a" } }
-  }
 }
 
 variables {
-  state_passphrase  = "offline-test-passphrase-not-a-secret"
-  run_id            = "20261006T120000Z-ab12"
-  project_id        = "0123456789abcdef0123456789abcdef"
-  p25_client_id     = "offline-p25-client-id"
-  p25_client_secret = "offline-p25-client-secret-not-a-secret"
+  state_passphrase = "offline-test-passphrase-not-a-secret"
+  run_id           = "20261006T120000Z-ab12"
+  project_id       = "0123456789abcdef0123456789abcdef"
 }
 
 # The tenant identity's resources (P9) carry the prefix and the run id, in the sandbox project.
-# GET /me denied and bucket A read through the P25 identity hold; bucket B is always readable under
-# the mock (its denial cannot be modelled offline).
 run "p9_names_carry_prefix_and_run_id" {
   command = plan
-
-  expect_failures = [check.p25_bucket_b_denied]
 
   assert {
     condition     = ovh_cloud_project_network_private.p9.name == "lzprobe-p9-20261006T120000Z-ab12" && ovh_cloud_project_network_private.p9.service_name == "0123456789abcdef0123456789abcdef" && ovh_cloud_project_network_private.p9.regions == toset(["GRA11"])
@@ -66,8 +46,6 @@ run "p9_names_carry_prefix_and_run_id" {
 run "vlan_id_derived_from_run_id" {
   command = plan
 
-  expect_failures = [check.p25_bucket_b_denied]
-
   variables {
     run_id = "20261006T120000Z-ab12"
   }
@@ -80,8 +58,6 @@ run "vlan_id_derived_from_run_id" {
 
 run "vlan_id_differs_for_another_run_id" {
   command = plan
-
-  expect_failures = [check.p25_bucket_b_denied]
 
   variables {
     run_id = "20261006T120000Z-ab13"
@@ -96,8 +72,6 @@ run "vlan_id_differs_for_another_run_id" {
 run "vlan_id_lowest_of_the_range" {
   command = plan
 
-  expect_failures = [check.p25_bucket_b_denied]
-
   variables {
     run_id = "20261006T120000Z-0000"
   }
@@ -111,8 +85,6 @@ run "vlan_id_lowest_of_the_range" {
 run "vlan_id_highest_of_the_range" {
   command = plan
 
-  expect_failures = [check.p25_bucket_b_denied]
-
   variables {
     run_id = "20261006T120000Z-03e7"
   }
@@ -125,8 +97,6 @@ run "vlan_id_highest_of_the_range" {
 
 run "vlan_id_wraps_into_the_range" {
   command = plan
-
-  expect_failures = [check.p25_bucket_b_denied]
 
   variables {
     run_id = "20261006T120000Z-ffff"
@@ -145,8 +115,6 @@ run "vlan_id_wraps_into_the_range" {
 
 run "vlan_id_skips_an_id_another_network_holds" {
   command = plan
-
-  expect_failures = [check.p25_bucket_b_denied]
 
   variables {
     run_id = "20261006T120000Z-ab12"
@@ -169,8 +137,6 @@ run "vlan_id_skips_an_id_another_network_holds" {
 
 run "vlan_id_skips_a_run_of_taken_ids" {
   command = plan
-
-  expect_failures = [check.p25_bucket_b_denied]
 
   variables {
     run_id = "20261006T120000Z-ab12"
@@ -196,8 +162,6 @@ run "vlan_id_skips_a_run_of_taken_ids" {
 run "vlan_id_kept_for_its_own_network" {
   command = plan
 
-  expect_failures = [check.p25_bucket_b_denied]
-
   variables {
     run_id = "20261006T120000Z-ab12"
   }
@@ -219,8 +183,6 @@ run "vlan_id_kept_for_its_own_network" {
 
 run "vlan_id_kept_when_an_earlier_id_frees" {
   command = plan
-
-  expect_failures = [check.p25_bucket_b_denied]
 
   variables {
     run_id = "20261006T120000Z-ab12"
@@ -246,8 +208,6 @@ run "vlan_id_kept_when_an_earlier_id_frees" {
 run "vlan_id_wraps_past_a_taken_last_id" {
   command = plan
 
-  expect_failures = [check.p25_bucket_b_denied]
-
   variables {
     run_id = "20261006T120000Z-03e7"
   }
@@ -270,8 +230,6 @@ run "vlan_id_wraps_past_a_taken_last_id" {
 run "vlan_id_ignores_ids_outside_its_range" {
   command = plan
 
-  expect_failures = [check.p25_bucket_b_denied]
-
   variables {
     run_id = "20261006T120000Z-ab12"
   }
@@ -290,25 +248,6 @@ run "vlan_id_ignores_ids_outside_its_range" {
     condition     = ovh_cloud_project_network_private.p9.vlan_id == 3794
     error_message = "ids outside the range do not move it: want 3794"
   }
-}
-
-
-# A refuted premise fails its own check: GET /me answered (P26), bucket B readable (P25), bucket A
-# without its tenant tag.
-run "refutations_fail_their_checks" {
-  command = plan
-
-  override_data {
-    target = data.ovh_me.tenant
-    values = { nichandle = "zz00000-ovh" }
-  }
-
-  override_data {
-    target = data.ovh_cloud_project_storage.a
-    values = { tags = { "lz:tenant" = "lzprobe-b" } }
-  }
-
-  expect_failures = [check.p26_me_denied, check.p25_bucket_a_readable, check.p25_bucket_b_denied]
 }
 
 run "run_id_malformed_refused" {

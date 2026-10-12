@@ -55,7 +55,8 @@ func TestS3CheckerOperations(t *testing.T) {
 		// T099: the governance bypass header, signed, on a versioned DeleteObject only.
 		{S3Call{Op: S3DeleteObject, Key: "k", VersionID: vid, Bypass: true}, "DELETE", "/" + s3TestBucket + "/k?versionId=3HL4kqtJlcpXroDTDmJ%2BrmSpXd3dIbrHY", false, false},
 		{S3Call{Op: S3PutObject, Key: "lz-deny-check/probe.tflock", Body: []byte("v1")}, "PUT", "/" + s3TestBucket + "/lz-deny-check/probe.tflock", false, false},
-		{S3Call{Op: S3GetObject, Key: "k"}, "GET", "/" + s3TestBucket + "/k", false, false},
+		// T100: GetObject keeps the object (the storage-iam check classifies the companion's state).
+		{S3Call{Op: S3GetObject, Key: "k"}, "GET", "/" + s3TestBucket + "/k", false, true},
 		{S3Call{Op: S3DeleteObject, Key: "k"}, "DELETE", "/" + s3TestBucket + "/k", false, false},
 		{S3Call{Op: S3DeleteObject, Key: "k", VersionID: vid}, "DELETE", "/" + s3TestBucket + "/k?versionId=3HL4kqtJlcpXroDTDmJ%2BrmSpXd3dIbrHY", false, false},
 		{S3Call{Op: S3ListObjectVersions}, "GET", "/" + s3TestBucket + "?versions=", false, true},
@@ -110,7 +111,7 @@ func TestS3CheckerOperations(t *testing.T) {
 				t.Errorf("answer %+v, want status 200, no code, version v-1", got)
 			}
 			if tc.keeps != (string(got.Body) == "<Answer>body</Answer>") || !tc.keeps && got.Body != nil {
-				t.Errorf("body %q kept for %s; only the two listings keep theirs", got.Body, tc.call.Op)
+				t.Errorf("body %q kept for %s; only GetObject and the two listings keep theirs", got.Body, tc.call.Op)
 			}
 		})
 	}
@@ -238,6 +239,23 @@ func TestS3CheckerAnswers(t *testing.T) {
 	answerWith(f, 403, "", errorBody("AccessDenied"))
 	if got, err := newTestS3Checker(t, f).Do(context.Background(), S3Call{Op: S3ListObjectVersions, Bucket: s3TestBucket}); err != nil || got.Body != nil || got.Code != "AccessDenied" {
 		t.Errorf("denied listing: %+v, %v; want code AccessDenied, no body", got, err)
+	}
+	// T100: x-amz-server-side-encryption (SSE-OMK answers AES256: docs.ovhcloud.com
+	// storage-and-backup/object-storage/s3-encrypt-your-objects-with-sse-c.mdx:143-160) is kept when
+	// it has the shape of an algorithm name, on any answer; anything else is dropped.
+	for header, want := range map[string]string{"AES256": "AES256", "aws:kms": "aws:kms", "": "", "AES 256": "", s3TestSK: "", s3TestAK: "", strings.Repeat("A", 33): ""} {
+		f := newFakeS3(t)
+		f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
+			if header != "" {
+				rw.Header().Set("X-Amz-Server-Side-Encryption", header)
+			}
+			fmt.Fprint(rw, "ciphertext")
+			return true
+		}
+		got, err := newTestS3Checker(t, f).Do(context.Background(), S3Call{Op: S3GetObject, Bucket: s3TestBucket, Key: "k"})
+		if err != nil || got.SSE != want || string(got.Body) != "ciphertext" {
+			t.Errorf("SSE header %q: answer %+v, %v; want SSE %q and the object", header, got, err, want)
+		}
 	}
 
 	faults := map[string]func(rw http.ResponseWriter, r *http.Request){

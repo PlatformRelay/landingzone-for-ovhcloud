@@ -63,7 +63,7 @@ type checkHooks struct {
 	undoErrs    []error // the n-th Undo fails with the n-th entry (nil: passes)
 	undoCalls   int
 	undoCtxErr  []error
-	observeWait bool // Observe waits until its context ends
+	observeWait bool  // Observe waits until its context ends
 	validateErr error // Validate refuses the published variables
 	started     chan struct{}
 }
@@ -411,6 +411,79 @@ func TestProbeCheckRun(t *testing.T) {
 		}
 		noCheckSecret(t, w, root, w.runDir, w.stacks)
 	})
+
+	// T100: storage-iam has a companion and a check. The check observes after the companion's
+	// apply (its state object exists then) and undoes after the companion's destroy, before the
+	// root's; a failed observation still destroys both. Review r1: a companion that cannot be
+	// destroyed keeps the root, but the undo still runs (an accepted IAM write must not wait for
+	// the cleanup).
+	for _, tc := range []struct {
+		name             string
+		observeErr       error
+		companionDestroy int // the companion's destroy exit
+		want             []string
+	}{
+		{"companion-pass", nil, 0, []string{"p apply", "companion apply", "observe", "companion destroy", "undo", "p destroy"}},
+		{"companion-observe-fails", errors.New("p25-read-bucket-a: expected allowed, observed refused 403"), 0, []string{"p apply", "companion apply", "observe", "companion destroy", "undo", "p destroy"}},
+		{"companion-destroy-fails", nil, 1, []string{"p apply", "companion apply", "observe", "undo"}},
+	} {
+		observeErr := tc.observeErr
+		t.Run(tc.name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			p := w.identityProbe(t, root, tofuStack{DestroyExit: tc.companionDestroy})
+			// The root publishes the check's output beside companion_env.
+			outputs := filepath.Join(w.bin, "outputs-p.json")
+			raw, err := os.ReadFile(outputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var all map[string]any
+			if err := json.Unmarshal(raw, &all); err != nil {
+				t.Fatal(err)
+			}
+			all["deny_check"] = map[string]any{"sensitive": true, "type": []any{"map", "string"}, "value": checkEnvWant()}
+			raw, _ = json.Marshal(all)
+			if err := os.WriteFile(outputs, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h := &checkHooks{observeErr: observeErr}
+			p.Check = h.check(w)
+			err = p.Start(context.Background())
+			failing := observeErr != nil || tc.companionDestroy != 0
+			if (err != nil) != failing {
+				t.Fatalf("Start: %v, want an error only from Observe or the companion's destroy\n%s", err, w.term)
+			}
+			var order []string
+			for _, c := range w.calls(t, "tofu.log") {
+				var e string
+				switch {
+				case c.Cmd == "observe" || c.Cmd == "undo":
+					e = c.Cmd
+				case c.Cmd == "apply" || c.Cmd == "destroy":
+					e = c.Stack + " " + c.Cmd
+				default:
+					continue
+				}
+				// A destroy retried (T095) counts once; a failed one is not a destroy.
+				if c.Cmd == "destroy" && tc.companionDestroy != 0 && c.Stack == "companion" || len(order) > 0 && order[len(order)-1] == e {
+					continue
+				}
+				order = append(order, e)
+			}
+			if !slices.Equal(order, tc.want) {
+				t.Errorf("order %v, want %v", order, tc.want)
+			}
+			if !exists(filepath.Join(w.runDir, "observations.json")) {
+				t.Error("no observations.json")
+			}
+			if want := map[bool]string{false: "pass", true: "fail"}[failing]; w.summary(t)["outcome"] != want {
+				t.Errorf("summary %v, want %s", w.summary(t), want)
+			}
+			noCheckSecret(t, w, root, w.runDir, w.stacks)
+		})
+	}
 
 	t.Run("no-check-no-output-call", func(t *testing.T) {
 		root := tempPrivate(t)

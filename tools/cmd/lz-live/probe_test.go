@@ -302,6 +302,9 @@ type probeWorld struct {
 	lookedUp *[]string
 	// s3 is the S3 client a probe check dials (T096); nil: the default.
 	s3 *http.Client
+	// apiHook answers an API request first when it returns true (T100: the storage-iam check's
+	// calls); nil: none.
+	apiHook func(rw http.ResponseWriter, r *http.Request) bool
 }
 
 // newProbeWorld is an admitted host with a sandbox credential bound to probeAccount, one project,
@@ -337,6 +340,9 @@ func newProbeWorld(t *testing.T) *probeWorld {
 	}
 	w.api = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		*w.apiCalls++
+		if w.apiHook != nil && w.apiHook(rw, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/token":
 			_ = r.ParseForm()

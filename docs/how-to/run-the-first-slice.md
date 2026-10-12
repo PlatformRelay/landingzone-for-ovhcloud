@@ -11,13 +11,13 @@ references:
   - path: tools/internal/live/chain.go
     blob: aa54c58f0e04e8bb9d23c2ed7ed91b3c33f63a91
   - path: tools/internal/live/observe.go
-    blob: 8aa5fd34a16cecafed7b4c3a0f6047a025158b55
+    blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
-    blob: d93b6e372b63e43365c0b0beb29049c714edacf9
+    blob: 10d54466cf7b07c8d8448c43b2a3e548397c420a
 last_verified: 0472de1d3773a6363dcfca70ad6f9082d292f80a
 ---
 
@@ -360,6 +360,12 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   its bucket (locked for a day, emptied with the governance bypass) before the destroy; if it cannot, the root is kept and the error names the
   `--cleanup <run-id>` that empties the bucket and destroys the root (row 7b of the
   [probe run sheet](../../tests/live/probes/README.md#runs)).
+- The `storage-iam` probe's check (T100) writes `observations.json` with five observations (P25
+  reads, `GET /me`, an IAM write, the companion's state object read back) and fails the run on any
+  answer other than the expected one, naming the step and the refused IAM actions; before the
+  destroy its undo deletes the IAM write's policy should OVHcloud have accepted it, and keeps the
+  root if it cannot (rows 8b–8d of the
+  [probe run sheet](../../tests/live/probes/README.md#two-stage-runs-t010)).
 - To look by hand (read only), use the API console or the `ovhcloud` subcommand of the kind,
   e.g. `ovhcloud cloud project list` (AGENTS.md *Tools*). Per-kind CLI coverage is UNVERIFIED,
   and there is no generic `ovhcloud api get` (P18 refuted, evidence T009). The kinds and API

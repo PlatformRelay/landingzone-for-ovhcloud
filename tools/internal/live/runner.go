@@ -929,18 +929,24 @@ func (r Runner) Execute(ctx context.Context) error {
 			}
 			continue
 		}
+		// The check's writes go before the root that holds its credentials (T096), also when the
+		// root is kept for its companion (T100 review r1: an IAM write OVHcloud accepted must not
+		// wait for the cleanup).
+		keepCheck := false
+		if r.check != nil && st.ID == r.Stacks[0].ID {
+			var e error
+			keepCheck, e = s.undo(dctx, st)
+			destroyErr = errors.Join(destroyErr, e)
+			if keepCheck {
+				destroyErr = errors.Join(destroyErr, fmt.Errorf("%s kept: its check's writes may remain; undo and destroy with --cleanup %s", st.ID, r.ID))
+			}
+		}
 		if keepStage && c != nil && st.ID == c.stage.ID {
 			destroyErr = errors.Join(destroyErr, fmt.Errorf("%s kept: its companion %s was not destroyed and needs the identities %s holds; destroy both with --cleanup %s", st.ID, c.stack.ID, st.ID, r.ID))
 			continue
 		}
-		// The check's writes go before the root that holds its credentials (T096).
-		if r.check != nil && st.ID == r.Stacks[0].ID {
-			if keep, e := s.undo(dctx, st); keep {
-				destroyErr = errors.Join(destroyErr, e, fmt.Errorf("%s kept: its check's writes may remain in its bucket; undo and destroy with --cleanup %s", st.ID, r.ID))
-				continue
-			} else if e != nil {
-				destroyErr = errors.Join(destroyErr, e)
-			}
+		if keepCheck {
+			continue
 		}
 		if e := s.destroy(dctx, st); e != nil {
 			destroyErr = errors.Join(destroyErr, e)

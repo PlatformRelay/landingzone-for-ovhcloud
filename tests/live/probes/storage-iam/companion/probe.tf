@@ -1,7 +1,7 @@
 # Companion root of storage-iam (spec 005 T075; T008 decision request 1, option A). lz-live runs
 # it after storage-iam's apply, under the probe identity that root publishes (output
-# companion_env: OVH_CLIENT_ID/OVH_CLIENT_SECRET of the P9 tenant identity, the P25 identity as
-# TF_VAR_p25_client_id/_secret, the P1 S3 user's keys as AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY),
+# companion_env: OVH_CLIENT_ID/OVH_CLIENT_SECRET of the P9 tenant identity, the P1 S3 user's keys
+# as AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY),
 # never under the admin credential, and destroys it before storage-iam's destroy removes the
 # identities. Run only through `task live:probe`.
 #
@@ -81,23 +81,5 @@ variable "project_id" {
   }
 }
 
-variable "p25_client_id" {
-  description = "Client id of storage-iam's P25 identity (companion_env TF_VAR_p25_client_id)."
-  type        = string
-  sensitive   = true
-}
-
-variable "p25_client_secret" {
-  description = "Client secret of storage-iam's P25 identity (companion_env TF_VAR_p25_client_secret)."
-  type        = string
-  sensitive   = true
-}
-
 # The default configuration reads OVH_ENDPOINT, OVH_CLIENT_ID and OVH_CLIENT_SECRET (the P9 tenant
-# identity) from the environment (provider docs index.md:51). The P25 identity takes the endpoint
-# from OVH_ENDPOINT too (per-argument fallback: believed, UNVERIFIED).
-provider "ovh" {
-  alias         = "p25"
-  client_id     = var.p25_client_id
-  client_secret = var.p25_client_secret
-}
+# identity) from the environment (provider docs index.md:51).

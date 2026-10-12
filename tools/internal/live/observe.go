@@ -708,22 +708,38 @@ func (c *collector) stateObjects(m *stacks.Manifest) []Observation {
 			out = append(out, errorObs(aObjectEncrypted, subject, err))
 			continue
 		}
-		var doc map[string]json.RawMessage
-		var env struct {
-			Data *string `json:"encrypted_data"`
-		}
-		o := Observation{Assertion: aObjectEncrypted, Subject: subject, Observed: observedHolds, Detail: "encryption envelope"}
-		switch {
-		case json.Unmarshal(raw, &doc) != nil:
-			o.Observed, o.Detail = observedError, "the state object does not decode as JSON"
-		case doc["resources"] != nil:
-			o.Observed, o.Detail = observedViolated, "plaintext state: resources in the object"
-		case json.Unmarshal(raw, &env) != nil || env.Data == nil || *env.Data == "":
-			o.Observed, o.Detail = observedViolated, "no encryption envelope: encrypted_data is not a non-empty string"
-		}
+		o := Observation{Assertion: aObjectEncrypted, Subject: subject}
+		o.Observed, o.Detail = classifyStateObject(raw)
 		out = append(out, o)
 	}
 	return out
+}
+
+// classifyStateObject is the one rule for a state object read back from its bucket (the chain's
+// L7 observation, and the storage-iam probe's check, T100): an OpenTofu encryption envelope
+// (`encrypted_data`, no `resources`: capture p4-encryption.txt, evidence/T007.md P4) holds;
+// anything else that decodes is plaintext. The detail is fixed text, nothing of the object.
+func classifyStateObject(raw []byte) (observed, detail string) {
+	var doc map[string]json.RawMessage
+	var env struct {
+		Data *string `json:"encrypted_data"`
+	}
+	switch {
+	case json.Unmarshal(raw, &doc) != nil:
+		return observedError, "the state object does not decode as JSON"
+	case doc["resources"] != nil:
+		return observedViolated, "plaintext state: resources in the object"
+	case json.Unmarshal(raw, &env) != nil || env.Data == nil || *env.Data == "":
+		return observedViolated, "no encryption envelope: encrypted_data is not a non-empty string"
+	}
+	return observedHolds, "encryption envelope"
+}
+
+// StateObjectEncrypted reports whether a state object holds an OpenTofu encryption envelope
+// (classifyStateObject), with the fixed detail of the answer.
+func StateObjectEncrypted(raw []byte) (bool, string) {
+	observed, detail := classifyStateObject(raw)
+	return observed == observedHolds, detail
 }
 
 // read reads one object with instance id's authority's S3 keys.
