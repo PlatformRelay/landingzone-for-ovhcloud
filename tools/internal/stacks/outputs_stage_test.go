@@ -509,8 +509,9 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 
 	// G5 on every planned policy: no permissions group, except, deny or expiry beside the actions,
 	// and no IAM, `me`, storage-policy or wildcard action outside the platform's grant: the platform
-	// policy alone may hold the wildcard and the two project IAM-tag actions (T103, D108).
-	platformIAM := map[string]bool{"account:apiovh:iam/resource/edit": true, "account:apiovh:iam/resource/get": true}
+	// policy alone may hold the wildcard and the project IAM-tag action (T103, D108); never
+	// `account:apiovh:iam/resource/get`, which OVHcloud refuses as unknown (T049 run 2, T104).
+	platformIAM := map[string]bool{"account:apiovh:iam/resource/edit": true}
 	for addr, r := range byAddress {
 		if r.Type != "ovh_iam_policy" {
 			continue
@@ -550,10 +551,10 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 	}
 
 	// Platform deployer policy: publicCloudProject:apiovh:* plus the project's IAM tags
-	// (account:apiovh:iam/resource/{edit,get}, T103) on exactly the tenant projects, for the
+	// (account:apiovh:iam/resource/edit, T103, T104) on exactly the tenant projects, for the
 	// platform deployer only.
 	platform := byAddress["module.platform_policy.ovh_iam_policy.this"]
-	wantAllow := []string{"account:apiovh:iam/resource/edit", "account:apiovh:iam/resource/get", "publicCloudProject:apiovh:*"}
+	wantAllow := []string{"account:apiovh:iam/resource/edit", "publicCloudProject:apiovh:*"}
 	if got := strs(t, platform, "allow"); !reflect.DeepEqual(got, wantAllow) {
 		t.Errorf("platform policy allows %v, want %v", got, wantAllow)
 	}
