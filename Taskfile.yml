@@ -98,9 +98,8 @@ tasks:
   # repository planned under its generated mocked test with the fixture
   # envelopes of tests/fixtures/outputs/envelopes, on a scratch copy. It plans
   # the committed generated files as they are: their freshness is stacks:check's,
-  # so run both. Reports
-  # `fail: no manifest` until stacks/deployments.yaml exists (005 T039); that
-  # red is the expected result, never a pass.
+  # so run both. Without stacks/deployments.yaml it reports `fail: no manifest`,
+  # never a pass. In the foundation CI targets since 005 T038 closed.
   test:stack-plans:
     desc: Every generated stack planned offline under its mocked test with fixture inputs; NAME_COLLISION on planned bucket names (005 V005, V006)
     cmds:
@@ -139,8 +138,8 @@ tasks:
       - go -C tools run ./cmd/lz-stacks -root .. generate
 
   # Offline: the entry mounts the candidate read-only, so the comparison runs
-  # on a scratch copy. Reports `fail: no manifest` until stacks/deployments.yaml
-  # exists (005 T039); that red is the expected result, never a pass.
+  # on a scratch copy. Without stacks/deployments.yaml it reports
+  # `fail: no manifest`, never a pass.
   stacks:check:
     desc: Reconcile --check and terramate generate on a scratch copy, diffed against the candidate (005 V005)
     cmds:
