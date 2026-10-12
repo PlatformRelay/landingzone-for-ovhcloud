@@ -3,10 +3,11 @@
 #   a subnet and a bucket. A denied create fails the apply: the action it names is the finding.
 # - P26 tenant half, binding: the provider authenticates the tenant identity through
 #   GET /auth/details at configuration (provider docs index.md:211).
-# The reads whose answer decides a premise (P25 bucket A allowed and bucket B denied, P26 GET /me
-# denied) and the P9 IAM-write denial are lz-live's storage-iam check after this root's apply
-# (T100, tools/internal/probes/live/storageiam), not check blocks here: a refused read in a check
-# block is only a warning, and T010 run 20261012T072729Z-0646 passed over a refused bucket-A read.
+# The reads whose answer decides a premise (P25 buckets A and B, P26 GET /me denied) and the P9
+# IAM-write denial are lz-live's storage-iam check after this root's apply (T100,
+# tools/internal/probes/live/storageiam), not check blocks here: a refused read in a check block is
+# only a warning, and T010 run 20261012T072729Z-0646 passed over a refused bucket-A read. That
+# refusal refuted P25; since coordinator decision D107 (T101) both bucket reads are expected refused.
 locals {
   name = "lzprobe-p9-${var.run_id}"
 }

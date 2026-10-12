@@ -17,7 +17,7 @@ references:
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
-    blob: 10d54466cf7b07c8d8448c43b2a3e548397c420a
+    blob: 158337b013192a1694fcec1574c0820c83a218f0
 last_verified: 0472de1d3773a6363dcfca70ad6f9082d292f80a
 ---
 

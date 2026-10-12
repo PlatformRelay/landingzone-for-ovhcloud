@@ -22,12 +22,12 @@ import (
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 )
 
-// T100 against a fake OVHcloud API and a fake S3 endpoint that answer as T010 run
-// 20261012T072729Z-0646 showed, with knobs for the worlds the live run may meet: the P25 identity
-// refused its own bucket (that run: 403 `missing IAM permissions:
-// publicCloudProject:apiovh:region/storage/get`), allowed bucket B, the tenant allowed GET /me or
-// the IAM write, a refusal naming another action or none, the state object plaintext or refused,
-// a failing undo. Refusals follow the 403 body of kb manage-and-operate/iam/troubleshooting.mdx:
+// T100/T101 against a fake OVHcloud API and a fake S3 endpoint that answer as T010 run
+// 20261012T072729Z-0646 showed — the P25 identity refused its own bucket A (403 `missing IAM
+// permissions: publicCloudProject:apiovh:region/storage/get`), which is the expected answer since
+// D107 (P25 refuted) — with knobs for the worlds the live run may meet: bucket A or B allowed, the
+// tenant allowed GET /me or the IAM write (its policy listed late or under another name), a
+// refusal naming another action or none, the state object plaintext or refused, a failing undo. Refusals follow the 403 body of kb manage-and-operate/iam/troubleshooting.mdx:
 // 21-31 (`details.unauthorizedActionsByIAM`) with the message T010 recorded, and echo the request's
 // secrets. No test calls the OVHcloud API or reads ~/.config/ovh-lz/.
 
@@ -93,6 +93,11 @@ type world struct {
 	deleteStatus int
 	keepDeleted  bool
 	listStatus   int
+	listFailOnce bool     // the next listing answers 500
+	deleteFailID string   // the delete of this id answers 500
+	hidden       bool     // an accepted write's policy is not (yet) listed
+	renameTo     string   // an accepted write's policy is listed under this name
+	written      []string // the ids accepted writes created
 	bound        []string // client ids Bind saw, in order
 	bindRefuse   string   // Bind refuses this client id
 }
@@ -107,7 +112,7 @@ var tokens = map[string]string{"tok-tenant": "tenant", "tok-p25": "p25", "tok-ad
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	w := &world{t: t, stateBody: envelope, stateStatus: 200, deleteStatus: 204, listStatus: 200, answers: map[string]answer{
-		"p25 GET /v1/cloud/project/" + project + "/region/GRA/storage/" + bucketA: {200, ""},
+		"p25 GET /v1/cloud/project/" + project + "/region/GRA/storage/" + bucketA: {403, "publicCloudProject:apiovh:region/storage/get"},
 		"p25 GET /v1/cloud/project/" + project + "/region/GRA/storage/" + bucketB: {403, "publicCloudProject:apiovh:region/storage/get"},
 		"tenant GET /v1/me":          {403, "account:apiovh:me/get"},
 		"tenant POST /v2/iam/policy": {403, "account:apiovh:iam/policy/create"},
@@ -163,15 +168,27 @@ func (w *world) serveAPI(rw http.ResponseWriter, r *http.Request) {
 		var p struct{ Name string }
 		_ = json.Unmarshal(body, &p)
 		id := fmt.Sprintf("3f2504e0-4f89-41d3-9a0c-%012d", len(w.policies))
+		if w.renameTo != "" {
+			p.Name = w.renameTo
+		}
 		w.policies = append(w.policies, policy{id, p.Name})
+		w.written = append(w.written, id)
 		fmt.Fprintf(rw, `{"id":%q,"name":%q}`, id, p.Name)
 	case who == "admin" && r.Method == http.MethodGet && r.URL.Path == "/v2/iam/policy":
+		if w.listFailOnce {
+			w.listFailOnce = false
+			refuse(500, "-")
+			return
+		}
 		if w.listStatus != 200 {
 			refuse(w.listStatus, "account:apiovh:iam/policy/get")
 			return
 		}
 		var out []map[string]any
 		for _, p := range w.policies {
+			if w.hidden && slices.Contains(w.written, p.id) {
+				continue
+			}
 			out = append(out, map[string]any{"id": p.id, "name": p.name, "identities": []string{identity}})
 		}
 		if out == nil {
@@ -180,6 +197,10 @@ func (w *world) serveAPI(rw http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(rw).Encode(out)
 	case who == "admin" && r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v2/iam/policy/"):
 		id := strings.TrimPrefix(r.URL.Path, "/v2/iam/policy/")
+		if id == w.deleteFailID {
+			refuse(500, "-")
+			return
+		}
 		if w.deleteStatus == http.StatusNotFound {
 			// Gone already (expired, or deleted meanwhile).
 			w.policies = slices.DeleteFunc(w.policies, func(p policy) bool { return p.id == id })
@@ -316,7 +337,7 @@ func wantSteps(t *testing.T, got []Observation, want []want) {
 }
 
 var expected = []want{
-	{"p25-read-bucket-a", "p25", "allowed", "allowed", 200, true},
+	{"p25-read-bucket-a", "p25", "refused", "refused", 403, true}, // D107: P25 refuted, run 20261012T072729Z-0646
 	{"p25-read-bucket-b", "p25", "refused", "refused", 403, true},
 	{"p26-get-me", "tenant", "refused", "refused", 403, true},
 	{"p9-iam-write", "tenant", "refused", "refused", 403, true},
@@ -345,7 +366,7 @@ func TestObserve(t *testing.T) {
 		wantSteps(t, rec.Observations, expected)
 		// The refusals name their actions; the state object is an encryption envelope with its SSE
 		// header recorded.
-		for i, a := range []string{"", "publicCloudProject:apiovh:region/storage/get", "account:apiovh:me/get", "account:apiovh:iam/policy/create"} {
+		for i, a := range []string{"publicCloudProject:apiovh:region/storage/get", "publicCloudProject:apiovh:region/storage/get", "account:apiovh:me/get", "account:apiovh:iam/policy/create"} {
 			if got := strings.Join(rec.Observations[i].Actions, ","); got != a {
 				t.Errorf("%s actions %q, want %q", rec.Observations[i].Step, got, a)
 			}
@@ -400,19 +421,20 @@ func TestObserve(t *testing.T) {
 		noLeak(t, "record and terminal", string(raw), term)
 	})
 
-	// T010 run 20261012T072729Z-0646: the P25 identity is refused its own tenant's bucket.
-	t.Run("bucket-a-refused", func(t *testing.T) {
+	// D107: T010 run 20261012T072729Z-0646 refuted P25 (bucket A refused); a bucket-A read that is
+	// allowed after all is a finding that says so.
+	t.Run("bucket-a-allowed", func(t *testing.T) {
 		w := newWorld(t)
-		w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketA] = answer{403, "publicCloudProject:apiovh:region/storage/get"}
+		w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketA] = answer{200, ""}
 		rec, raw, term, err := runObserve(t, w, testEnv())
-		if err == nil || !strings.Contains(err.Error(), "p25-read-bucket-a") || !strings.Contains(err.Error(), "publicCloudProject:apiovh:region/storage/get") {
-			t.Fatalf("Observe: %v; want an error naming the step and the refused action", err)
+		if err == nil || !strings.Contains(err.Error(), "p25-read-bucket-a: expected refused, observed allowed 200") || !strings.Contains(err.Error(), "P25 holds after all") {
+			t.Fatalf("Observe: %v; want an error naming the step, the allowed read and that P25 holds after all", err)
 		}
-		wantSteps(t, rec.Observations, with(0, func(w *want) { w.observed, w.status, w.asExpected = "refused", 403, false }))
+		wantSteps(t, rec.Observations, with(0, func(w *want) { w.observed, w.status, w.asExpected = "allowed", 200, false }))
 		if !slices.Equal(rec.Findings, []string{"p25-read-bucket-a"}) {
 			t.Errorf("findings %v, want [p25-read-bucket-a]", rec.Findings)
 		}
-		if !strings.Contains(term, "LZ-LIVE finding p25-read-bucket-a: expected allowed, observed refused 403 publicCloudProject:apiovh:region/storage/get") {
+		if !strings.Contains(term, "LZ-LIVE finding p25-read-bucket-a: expected refused, observed allowed 200; P25 holds after all: re-open tag-scoped envelopes (D107)") {
 			t.Errorf("terminal lacks the finding line:\n%s", term)
 		}
 		// Expected denials stay passes, and the steps after the finding still ran.
@@ -427,6 +449,18 @@ func TestObserve(t *testing.T) {
 		steps []want
 		err   string
 	}{
+		// D107 names the action: a 403 naming another one, or a refusal that is no 403, is not P25's
+		// refutation.
+		"bucket-a-refusal-names-another-action": {func(w *world) {
+			w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketA] = answer{403, "account:apiovh:me/get"}
+		}, with(0, func(w *want) { w.asExpected = false }), "p25-read-bucket-a: expected refused, observed refused 403 account:apiovh:me/get"},
+		// Review r1: a 403 naming no action (a proxy, a token scope) is not D107's refutation either.
+		"bucket-a-refusal-names-no-action": {func(w *world) {
+			w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketA] = answer{403, ""}
+		}, with(0, func(w *want) { w.asExpected = false }), "p25-read-bucket-a: expected refused, observed refused 403; D107 expects a 403 naming publicCloudProject:apiovh:region/storage/get"},
+		"bucket-a-refusal-not-403": {func(w *world) {
+			w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketA] = answer{404, "-"}
+		}, with(0, func(w *want) { w.status, w.asExpected = 404, false }), "p25-read-bucket-a: expected refused, observed refused 404"},
 		"bucket-b-allowed": {func(w *world) {
 			w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketB] = answer{200, ""}
 		}, with(1, func(w *want) { w.observed, w.status, w.asExpected = "allowed", 200, false }), "p25-read-bucket-b: expected refused, observed allowed 200"},
@@ -468,22 +502,126 @@ func TestObserve(t *testing.T) {
 		})
 	}
 
-	// An accepted IAM write is a finding, the run fails, and the undo deletes the policy.
-	t.Run("write-allowed", func(t *testing.T) {
+	// An accepted IAM write is a finding, the run fails, and the undo (the same check, as lz-live
+	// runs it) deletes the policy once: by the id the POST returned and by name (T101, T100 gap 6),
+	// also when the listing does not (yet) show it or shows it under another name.
+	for name, setup := range map[string]func(*world){
+		"write-allowed":          func(*world) {},
+		"write-allowed-unlisted": func(w *world) { w.hidden = true },
+		"write-allowed-renamed":  func(w *world) { w.renameTo = strings.ToLower(writeName) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.writeAllowed = true
+			setup(w)
+			c := Check(w.options())
+			var term bytes.Buffer
+			raw, err := c.Observe(context.Background(), testEnv(), &term)
+			var rec Record
+			if jerr := json.Unmarshal(raw, &rec); jerr != nil {
+				t.Fatalf("record %s: %v", raw, jerr)
+			}
+			if err == nil || !strings.Contains(err.Error(), "p9-iam-write: expected refused, observed allowed 200") || !strings.Contains(err.Error(), "undo deletes") {
+				t.Fatalf("Observe: %v; want the write named as a finding the undo deletes", err)
+			}
+			wantSteps(t, rec.Observations, with(3, func(w *want) { w.observed, w.status, w.asExpected = "allowed", 200, false }))
+			created := w.written[0]
+			if rec.Observations[3].PolicyID != created {
+				t.Errorf("p9-iam-write policy_id %q, want the id the POST returned, %s", rec.Observations[3].PolicyID, created)
+			}
+			noLeak(t, "record, terminal and error", string(raw), term.String(), err.Error())
+			if err := c.Undo(context.Background(), testEnv(), &term); err != nil {
+				t.Fatalf("Undo: %v", err)
+			}
+			if !slices.Equal(w.policies, []policy{{otherPol, "lz-sandbox-admin"}}) {
+				t.Errorf("policies after the undo %v: want only the other policy", w.policies)
+			}
+			var deletes []string
+			for _, c := range w.seen() {
+				if c.method == http.MethodDelete {
+					deletes = append(deletes, c.path)
+				}
+			}
+			if !slices.Equal(deletes, []string{"/v2/iam/policy/" + created}) {
+				t.Errorf("deletes %v, want the created policy once", deletes)
+			}
+			if !strings.Contains(term.String(), "LZ-LIVE undo removed 1 IAM policies named "+writeName+" or created by the write") {
+				t.Errorf("terminal lacks the undo line:\n%s", term.String())
+			}
+		})
+	}
+
+	// Review r1: a listing that fails does not keep the undo from deleting the id it knows; the
+	// second listing decides: failing too, or showing a policy of the name the first one missed, the
+	// undo fails (lz-live keeps the root); clear, it passes.
+	for name, tc := range map[string]struct {
+		setup func(*world)
+		err   string
+	}{
+		"write-allowed-listing-fails":      {func(w *world) { w.listStatus = 500 }, "ListPolicies answered 500"},
+		"write-allowed-listing-fails-once": {func(w *world) { w.listFailOnce = true }, ""},
+		"write-allowed-listing-fails-once-name-left": {func(w *world) {
+			w.listFailOnce = true
+			w.policies = append(w.policies, policy{"3f2504e0-4f89-41d3-9a0c-000000000007", writeName})
+		}, "1 policies named " + writeName + " remain"},
+		// Review r2: a delete acknowledged but not effective, of a policy listed under a normalised
+		// name, is found by its id in the second listing.
+		"write-allowed-renamed-still-listed": {func(w *world) {
+			w.keepDeleted = true
+			w.policies[len(w.policies)-1].name = strings.ToLower(writeName) // the write's, set after Observe
+		}, "1 policies named " + writeName + " remain"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.writeAllowed = true
+			c := Check(w.options())
+			if _, err := c.Observe(context.Background(), testEnv(), io.Discard); err == nil {
+				t.Fatal("an accepted write passed")
+			}
+			created := w.written[0]
+			tc.setup(w)
+			err := c.Undo(context.Background(), testEnv(), io.Discard)
+			if tc.err == "" && err != nil || tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
+				t.Fatalf("Undo: %v; want %q", err, tc.err)
+			}
+			var deletes []string
+			for _, c := range w.seen() {
+				if c.method == http.MethodDelete {
+					deletes = append(deletes, c.path)
+				}
+			}
+			if !slices.Equal(deletes, []string{"/v2/iam/policy/" + created}) {
+				t.Errorf("deletes %v, want the created policy although the listing failed", deletes)
+			}
+			noLeak(t, "error", fmt.Sprint(err))
+		})
+	}
+
+	// Review r2: a refused delete does not stop the others; the undo still fails.
+	t.Run("write-allowed-first-delete-fails", func(t *testing.T) {
 		w := newWorld(t)
 		w.writeAllowed = true
-		rec, raw, term, err := runObserve(t, w, testEnv())
-		if err == nil || !strings.Contains(err.Error(), "p9-iam-write: expected refused, observed allowed 200") || !strings.Contains(err.Error(), "undo deletes") {
-			t.Fatalf("Observe: %v; want the write named as a finding the undo deletes", err)
+		c := Check(w.options())
+		if _, err := c.Observe(context.Background(), testEnv(), io.Discard); err == nil {
+			t.Fatal("an accepted write passed")
 		}
-		wantSteps(t, rec.Observations, with(3, func(w *want) { w.observed, w.status, w.asExpected = "allowed", 200, false }))
-		noLeak(t, "record, terminal and error", string(raw), term, err.Error())
-		if err := Check(w.options()).Undo(context.Background(), testEnv(), io.Discard); err != nil {
-			t.Fatalf("Undo: %v", err)
+		created := w.written[0]
+		w.policies = append(w.policies, policy{"3f2504e0-4f89-41d3-9a0c-000000000007", writeName})
+		w.deleteFailID = created
+		err := c.Undo(context.Background(), testEnv(), io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "DeletePolicy answered 500") {
+			t.Fatalf("Undo: %v; want the refused delete", err)
 		}
-		if !slices.Equal(w.policies, []policy{{otherPol, "lz-sandbox-admin"}}) {
-			t.Errorf("policies after the undo %v: want only the other policy", w.policies)
+		var deletes []string
+		for _, c := range w.seen() {
+			if c.method == http.MethodDelete {
+				deletes = append(deletes, c.path)
+			}
 		}
+		if !slices.Contains(deletes, "/v2/iam/policy/3f2504e0-4f89-41d3-9a0c-000000000007") || !slices.Contains(deletes, "/v2/iam/policy/"+created) {
+			t.Errorf("deletes %v, want both policies tried", deletes)
+		}
+		noLeak(t, "error", err.Error())
 	})
 
 	// G13: an identity is bound before use; one bound to another account makes no call.
@@ -607,6 +745,10 @@ func TestUndo(t *testing.T) {
 			}
 			if tc.err == "" && lists != 2 {
 				t.Errorf("%d listings, want 2 (before and after the deletes)", lists)
+			}
+			// Review r1: a 404 removed nothing, so it does not count.
+			if want := map[string]string{"delete-404": "removed 0 ", "two-of-the-name": "removed 2 "}[name]; want != "" && !strings.Contains(term.String(), want) {
+				t.Errorf("terminal %q lacks %q", term.String(), want)
 			}
 			noLeak(t, "terminal and error", term.String(), fmt.Sprint(err))
 		})

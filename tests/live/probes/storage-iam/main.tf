@@ -5,7 +5,9 @@
 # P25 (T010, optional): two probe buckets that differ only in an `lz:tenant` tag, and a second
 # probe client whose policy allows region/storage/get only under a resource-tag condition naming
 # bucket A's tag. A kept separate from the P9 identity, whose unconditional region/storage/* would
-# hide the condition.
+# hide the condition. P25 is refuted: T010 run 20261012T072729Z-0646 saw bucket A refused 403
+# naming region/storage/get as well; since coordinator decision D107 (T101) the check expects both
+# reads refused, and an allowed bucket-A read fails the run saying P25 holds after all.
 # P1–P3 (T010): the companion's state bucket lzprobe-p1-<run-id> and a cloud project user whose one
 # S3 credential and bucket-scoped S3 policy (as state-backend's) let the companion's S3 backend
 # write its state and lock file there. The companion's destroy leaves its (empty) state object in
@@ -141,9 +143,10 @@ output "companion_env" {
 # The variables of lz-live's storage-iam check (T100, tools/internal/probes/live/storageiam): read by
 # lz-live from `tofu output -json` into memory only, every value but the public ones (bucket_a,
 # bucket_b, project_id, project_urn, region, run_id, state_bucket, state_key, tenant_identity)
-# redacted. After the companion's apply the check reads bucket A and B with the P25 identity, calls
-# GET /me and attempts POST /v2/iam/policy with the tenant identity, and reads the companion's state
-# object back with the P1 S3 key; an answer other than the expected one fails the run.
+# redacted. After the companion's apply the check reads bucket A and B with the P25 identity (both
+# expected refused, D107), calls GET /me and attempts POST /v2/iam/policy with the tenant identity,
+# and reads the companion's state object back with the P1 S3 key; an answer other than the expected
+# one fails the run.
 output "iam_check" {
   description = "Variables of lz-live's storage-iam check: the probe identities, the P1 S3 key and what they act on."
   sensitive   = true
