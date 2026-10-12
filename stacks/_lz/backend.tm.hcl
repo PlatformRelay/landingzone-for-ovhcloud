@@ -1,6 +1,8 @@
 // State backend, client-side encryption and provider of every stack (005 T038;
 // FR-008, ADR-0009, research R5, R16). S3 backend flags per the OVHcloud guide
-// (use-object-storage-terraform-backend-state); their OpenTofu behaviour is premise P1-P3 (T010).
+// (use-object-storage-terraform-backend-state); their OpenTofu behaviour (premises P1-P3) was
+// observed live by T010 with this block's flags and encryption (specs/005-first-landing-zone-slice/evidence/T010.md
+// rows 14-15).
 // Encryption is the P4 shape: PBKDF2 from var.state_passphrase, aes_gcm, state and plan enforced.
 // The provider carries no credential: the live lane supplies it through the environment.
 generate_hcl "_lz_backend.tf" {
