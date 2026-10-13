@@ -20,8 +20,9 @@ each piece with tests that run offline before anything touches an account.
 
 Pre-release. No version has been published.
 
-- **Delivered:** the first slice ([spec 005](specs/005-first-landing-zone-slice/spec.md)): 11 modules,
-  5 components, 6 stages and 6 generated stacks, with naming and labels. Its offline checks pass. Its
+- **Delivered:** the first slice ([spec 005](specs/005-first-landing-zone-slice/spec.md)): the
+  modules, components, stages and generated stacks listed in the
+  [repository map](docs/reference/repository-map.md), with naming and labels. Its offline checks pass. Its
   live apply-and-destroy chain passed once in the maintainer's sandbox account (run
   `20261013T075309Z-443f`, [evidence](specs/005-first-landing-zone-slice/evidence/T049.md)).
 - **Open:** bootstrapping a fresh account (task T045) has not run yet. Tenant state isolation is
@@ -67,6 +68,10 @@ in `LZ_TARGETS` of the same workflow. Applying to a real account
 
 ## Map of the repository
 
+The short version; the [repository map](docs/reference/repository-map.md) has every entry and its
+subdirectories, and the [architecture overview](docs/explanation/architecture-overview.md) shows how
+the layers fit together.
+
 **The landing zone** (what gets deployed)
 
 | Path | What it holds |
@@ -97,6 +102,8 @@ in `LZ_TARGETS` of the same workflow. Applying to a real account
 
 ## Where to go next
 
+- [Documentation index](docs/README.md) — every page, sorted by what you need from it.
+- [Glossary](docs/reference/glossary.md) — the project's terms and ids (stage, stack, KD-1, T049 …).
 - [Architecture decisions](docs/adr/README.md) — start with ADR-0001, 0002, 0004, 0008 and 0009.
 - [Run the first slice](docs/how-to/run-the-first-slice.md) — the maintainer's runbook for a real account.
 - [Specs and delivery status](specs/README.md) — what each spec covers and where it stands.
