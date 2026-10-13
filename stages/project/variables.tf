@@ -1,7 +1,7 @@
 # Inputs of the project stage (spec 005 T027 interface; research R7, R24; data-model *Stage table*,
 # *Per-stage values* `project`, *Resolved-reference input*): one tenant environment's existing
-# Public Cloud project, adopted or referenced, with its labels, regions and optional budget alert and
-# quota guard. `project_id` is the resolved reference of the environment (`LZ_PROJECT_ID_<REF>`,
+# Public Cloud project, adopted or referenced, with its regions and optional budget alert and quota
+# guard (its IAM tags are set by account-governance, T105). `project_id` is the resolved reference of the environment (`LZ_PROJECT_ID_<REF>`,
 # written by the live lane, KD-3), never a manifest value. No backend or provider configuration:
 # the generated stack owns both.
 

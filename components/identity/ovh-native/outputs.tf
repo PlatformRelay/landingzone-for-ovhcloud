@@ -37,6 +37,14 @@ output "tenants" {
   } }
 }
 
+output "project_tags" {
+  description = "Per tenant: the IAM tags set on its project, `urn` and `tags`, read from modules/iam-resource-tags (T105)."
+  value = { for t in keys(var.tenants) : t => {
+    urn  = module.project_tags[t].urn
+    tags = module.project_tags[t].tags
+  } }
+}
+
 output "unlabelled" {
   description = "Addresses of the component's resources whose API carries no tags (OAuth2 clients, policies, groups; research R14)."
   value = concat(

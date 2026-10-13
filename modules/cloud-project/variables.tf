@@ -1,7 +1,7 @@
 # Inputs of the cloud-project module (spec 005; research R7: adopt or reference mode).
 
 variable "mode" {
-  description = "`adopt`: the existing project is managed (imported by the stack) as `ovh_cloud_project`; `reference`: the project itself is only read (its IAM tags are still managed)."
+  description = "`adopt`: the existing project is managed (imported by the stack) as `ovh_cloud_project`; `reference`: the project is only read."
   type        = string
   nullable    = false
 
@@ -42,17 +42,6 @@ variable "plan" {
     pricing_mode = string
   })
   default = null
-}
-
-variable "tags" {
-  description = "IAM resource tags for the project URN, exactly as given: the labels output of modules/naming. A null value is refused."
-  type        = map(string)
-  nullable    = false
-
-  validation {
-    condition     = alltrue([for k, v in var.tags : v != null])
-    error_message = "tags: a null value is refused."
-  }
 }
 
 variable "budget_alert" {

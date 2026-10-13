@@ -222,6 +222,10 @@ stack. The same resolved ids check every `project` artefact the adapter reads (K
 | `lz:release` | `unreleased` | constant until ADR-0010's release train exists (D87) |
 | `lz:run-id` | live run id; `none` offline | live lane, `ignore_changes` |
 Extra labels: map input; keys in the set above are rejected.
+The `lz:managed-in` and `lz:instance` values are those of the stack that sets the labels. A tenant
+project's labels (IAM resource tags on its URN) are set by `account-governance` under the admin,
+not by the `project` stage, whose platform deployer may not tag it (research R6, D109, T105): they
+carry `lz:tenant` of that tenant and the `account-governance` path and instance id.
 
 ## Naming template (data input to `modules/naming`)
 ```hcl

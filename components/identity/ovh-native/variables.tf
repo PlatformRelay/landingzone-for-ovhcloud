@@ -1,8 +1,9 @@
 # Inputs of the identity/ovh-native component (spec 005 T023 interface; research R6, data-model
 # *Resolved-reference input*): the platform deployer, and per tenant a deployer, its policy and an
-# identity group. Names come from modules/naming inside the component (a stage may not call naming,
-# ADR-0002); none of these resources carries tags (research R14), so `instance` and `managed_in`
-# only feed the naming call.
+# identity group, and the IAM tags of its project (T105). Names and labels come from modules/naming
+# inside the component (a stage may not call naming, ADR-0002); of these resources only the
+# tenant projects carry tags (research R14), so `instance` and `managed_in` feed the names and
+# the projects' `lz:instance` and `lz:managed-in` labels.
 
 variable "org" {
   description = "Organisation discriminator, the first naming segment (`spec.org`, `lz`, D87)."

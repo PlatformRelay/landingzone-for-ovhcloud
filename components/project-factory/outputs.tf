@@ -17,8 +17,8 @@ output "project_urn" {
 }
 
 output "labels" {
-  description = "Tags the project URN carries: the modules/naming label set of this scope, read from the tags resource."
-  value       = module.project.tags
+  description = "The modules/naming label set of this scope. Not set on the project by this component: account-governance tags the project under the admin (T105)."
+  value       = module.labels.labels
 }
 
 output "budget_alert_id" {

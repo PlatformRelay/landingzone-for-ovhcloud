@@ -33,16 +33,9 @@ data "ovh_cloud_project" "this" {
 }
 
 locals {
-  # The project's own URN in either mode; never built from the id.
+  # The project's own URN in either mode; never built from the id. The project's IAM tags are set
+  # by the account-governance stage under the admin (modules/iam-resource-tags, D109, T105).
   urn = var.mode == "adopt" ? ovh_cloud_project.this[0].urn : data.ovh_cloud_project.this[0].iam.urn
-}
-
-# Labels on the project URN in both modes. Destroying this resource removes only the keys in
-# `tags`; the project and its other tags are untouched (iam_resource_tags.md, Notes), so it needs
-# no `prevent_destroy`.
-resource "ovh_iam_resource_tags" "this" {
-  urn  = local.urn
-  tags = var.tags
 }
 
 # Optional budget alert (P10): a separate API object (`/cloud/project/{p}/alerting`) that a
