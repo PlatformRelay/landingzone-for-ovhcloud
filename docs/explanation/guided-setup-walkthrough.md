@@ -1,11 +1,14 @@
 ---
 references:
   - path: specs/004-guided-preconfiguration/spec.md
-    blob: 93c57d281070feafcdfc089602b3e57ff1a647fd
-last_verified: 3a1f06584f6a987bfd13d6a4de1168cf59b5f4fe
+    blob: 60625c665de3df67b97e61142f23c475ea8ee361
+last_verified: d43334baa5aa2ec4d17fda0cb57e028282d2ec4b
 ---
 
-# Explore repository preconfiguration
+# Guided setup: a design walkthrough
+
+> **Design walkthrough.** The setup helper described here does not exist yet; this page explains
+> the planned journey ([ADR-0023](../adr/0023-guided-repository-preconfiguration.md)).
 
 Start with what you want to learn or build. The planned setup helper will explain the choices,
 suggest a starting point and help you see what changes when you choose something else. You

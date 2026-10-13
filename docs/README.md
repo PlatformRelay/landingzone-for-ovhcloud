@@ -17,9 +17,9 @@ Every page under `docs/`, sorted by what you need from it. Words you do not know
 - **Running the slice against an account?** Only the maintainer does this today. Follow the
   [runbook](how-to/run-the-first-slice.md), and read
   [ADR-0009](adr/0009-state-backend-bootstrap-and-credentials.md) for state and credentials first.
-- **Contributing?** Read `AGENTS.md` at the repository root for the working rules, the
-  [repository map](reference/repository-map.md) to find your way, and the
-  [first implementation guide](how-to/first-implementation.md) for how work is picked and closed.
+- **Contributing?** Read the [contributing guide](../.github/CONTRIBUTING.md) for how work is
+  picked, checked and merged, `AGENTS.md` at the repository root for the working rules, and the
+  [repository map](reference/repository-map.md) to find your way.
 
 ## Tutorials (learn by doing)
 
@@ -29,16 +29,14 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
 
 - [Run the first slice on an OVHcloud account](how-to/run-the-first-slice.md) — bootstrap,
   apply and destroy the stacks, read a run's record, clean up. Maintainer only.
-- [Start the first implementation](how-to/first-implementation.md) — how a contributor selects
-  bounded work from the specs and what evidence closes it.
-- [Explore repository preconfiguration](how-to/preconfigure-repository.md) — a written walkthrough
-  of the planned guided setup; nothing to run yet.
 
 ## Reference (look things up)
 
 - [Glossary](reference/glossary.md) — the project's terms and id families (Tnnn, Vnnn, KD-n …).
 - [Repository map](reference/repository-map.md) — every top-level entry, with module, component,
   stage and stack counts.
+- [Verification status](reference/verification-status.md) — what the first slice has and has not
+  shown on OVHcloud, its known deviations (KD-n) and what it leaves out.
 - [Patterns catalogue](reference/patterns-catalogue.md) — the small rules (LZ-xxx-nnn) and what
   enforces each.
 - [Upstream reference map](reference/upstream-reference-map.md) — what OVHcloud's
@@ -52,6 +50,8 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
   not delivered yet.
 - [Naming and labelling design](explanation/naming-and-labelling-design.md) — how names and
   labels are built, and the options that were compared.
+- [Guided setup walkthrough](explanation/guided-setup-walkthrough.md) — a design walkthrough of
+  the planned setup helper; nothing to run yet.
 
 ## Decisions
 
@@ -62,5 +62,6 @@ and credentials).
 ## Known issues
 
 The [known issues](known-issues/README.md) page lists verified findings and accepted limitations
-(KI-nnn). The design deviations of the first slice (KD-n) are in
-[spec 005](../specs/005-first-landing-zone-slice/spec.md#known-deviations).
+(KI-nnn). The design deviations of the first slice (KD-n) are in the
+[verification status](reference/verification-status.md#known-deviations) and, as the source of
+record, in [spec 005](../specs/005-first-landing-zone-slice/spec.md#known-deviations).

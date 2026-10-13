@@ -98,7 +98,7 @@ the layers fit together.
 | --- | --- |
 | `docs/` | Architecture decision records (ADRs), how-tos, explanations, references and known issues. |
 | `specs/` | The delivery record: one folder per feature with its spec, plan, tasks and evidence. You do not need it to use the landing zone. |
-| `AGENTS.md` | Working rules for contributors, human or automated. |
+| `AGENTS.md`, `.github/CONTRIBUTING.md` | Working rules for contributors, human or automated; how to contribute. |
 
 ## Where to go next
 

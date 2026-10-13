@@ -10,6 +10,13 @@ review findings are applied rather than logged in detail, and the merge records 
 live in the maintainers' harness. Historisation (superseded-by links, dated revision notes) starts
 with the first public release.
 
+**Start here.** New to the project? Read these five first, in this order:
+[0001](0001-scope-positioning-and-unofficial-status.md) (scope),
+[0002](0002-repository-structure.md) (repository structure),
+[0004](0004-staged-roots-and-output-contracts.md) (stacks and state),
+[0008](0008-testing-strategy.md) (testing) and
+[0009](0009-state-backend-bootstrap-and-credentials.md) (state and credentials).
+
 ## Index
 
 | ADR | Title | Status |

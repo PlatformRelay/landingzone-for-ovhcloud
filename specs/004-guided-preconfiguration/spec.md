@@ -123,7 +123,7 @@ unsupported tuple, missing tool, long helper run, symlink destination, secret-li
 ## Implementation surface
 `tools/cmd/lz-configure/`, `tools/internal/configure/`, `schemas/configure-session.schema.json`,
 `harness/configure/{steps,checks,limits}.yaml`, `tests/fixtures/configure/`, `Taskfile.yml`,
-`docs/how-to/preconfigure-repository.md`. One tools Go module created by 001/T001; no second module.
+`docs/explanation/guided-setup-walkthrough.md`. One tools Go module created by 001/T001; no second module.
 
 ## Dependencies and stop conditions
 Phase 001 T001 pins tools; its T007 report/evidence contract supports local integration.

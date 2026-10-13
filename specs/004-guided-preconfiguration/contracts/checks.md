@@ -4,7 +4,7 @@ None of the commands below is implemented by the early written journey (T014). D
 authorizes prose, a bounded renderer experiment and a minimal in-memory controller only.
 Prototype implementation/execution waits for actual 001/T003 safety/capture qualification
 and review of the exact experiment. There is no public prototype launch command yet.
-See the [early walkthrough](../../../docs/how-to/preconfigure-repository.md).
+See the [early walkthrough](../../../docs/explanation/guided-setup-walkthrough.md).
 
 ## Active prototype interaction contract (not yet implemented)
 
