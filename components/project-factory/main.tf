@@ -1,7 +1,8 @@
 # Project-factory component (spec 005 T028; FR-002, FR-004; research R7, R14; KD-3): one existing
 # Public Cloud project, adopted (managed at module.project.ovh_cloud_project.this[0], where the stack
-# imports it) or referenced (only read), its labels on the project URN, the optional budget alert
-# and the optional quota guard.
+# imports it) or referenced (only read), the optional budget alert and the optional quota guard.
+# The project's IAM tags are not set here: the platform deployer that applies this component was
+# refused the tag PUT (T049 run 3), so account-governance sets them under the admin (D109, T105).
 #
 # modules/cloud-project is called exactly once, unkeyed and by relative source: a second call would
 # manage or read a second project, and count or for_each would key the import target
@@ -10,7 +11,9 @@
 # for an existing project, so an import plans a replacement (prevent_destroy refuses it) and the
 # sandbox uses reference mode.
 
-# Labels only: the project's name is not set by this slice (kind `project`, modules/naming).
+# Labels only: the project's name is not set by this slice (kind `project`, modules/naming). Since
+# T105 no resource of this component carries them; they are published as the scope's label set
+# (`labels`), and the stage's naming inputs stay in use for later labelled resources.
 module "labels" {
   source      = "../../modules/naming"
   org         = var.org
@@ -29,7 +32,6 @@ module "project" {
   ovh_subsidiary = var.ovh_subsidiary
   description    = var.description
   plan           = var.plan
-  tags           = module.labels.labels
   budget_alert   = var.budget_alert
 }
 

@@ -115,20 +115,30 @@ per-tenant flock) changes FR-008; the spec and V005/V010 are revised before T038
 written once to the credential file by `lz-live`'s credential writer without echo.
 `discard_client_secret` is not available in 2.21.0 (`CHANGELOG.md:15`). Policies: `ovh_iam_policy`
 with `identities = [client.identity]` (P8); tenant `resources = ["urn:v1:eu:resource:publicCloudProject:<project_id>"]`.
-**Platform deployer**: `publicCloudProject:apiovh:*` plus `account:apiovh:iam/resource/edit`, on
-the tenant project URNs only (never the account URN or `*`).
-The IAM-resource action lets the `project` stage set the project's tags through
-`ovh_iam_resource_tags` (`PUT /iam/resource/{resourceURN}` requires `iam/resource/edit`,
-`kb/api/v2/iam.json`): without them T049 run 1 was refused with 403 `missing IAM permissions:
-account:apiovh:iam/resource/edit` on the referenced project (T103, D108). The same PUT also
-requires `publicCloudProject:apiovh:iam/resource/tag/add` and `…/tag/remove` to add or remove tags
-(its `longDescription`, `iam.json:916`); `publicCloudProject:apiovh:*` covers them, so a narrower
-platform list must name them. kb lists no action for `GET /iam/resource/{resourceURN}`, and
-`account:apiovh:iam/resource/get`, granted with it by D108, made OVHcloud refuse the policy update
-with 400 `unknown action` (T049 run 2), so it is not granted (T104). Whether OVHcloud honours
-`iam/resource/edit` on a project URN, and lets the platform deployer read the tags back through
-that GET with no `get` action, is UNVERIFIED until the T049 re-run. If that run is refused
-again, the next step is an operator decision; the grant is not widened to the account URN.
+**Platform deployer**: `publicCloudProject:apiovh:*` on the tenant project URNs only (never the
+account URN or `*`), and no `account:` action.
+**Who tags the projects (D109, T105)**: `account-governance`, under the admin
+(`account:apiovh:iam/*` and `publicCloudProject:apiovh:*`, the `lz-sandbox-admin` policy in
+AGENTS.md, P7), sets each tenant project's IAM tags through `ovh_iam_resource_tags`
+(`modules/iam-resource-tags`, called by `components/identity/ovh-native`); the `project` stage sets
+none. `PUT /iam/resource/{resourceURN}` requires `account:apiovh:iam/resource/edit`, and
+`publicCloudProject:apiovh:iam/resource/tag/add` and `…/tag/remove` to add or remove tags (its
+`longDescription`, `kb/api/v2/iam.json:916`), so an admin re-created on a fresh account needs both
+families. The project stage, applied by the platform deployer, was refused the PUT twice: T049
+run 1 with 403 `missing IAM permissions: account:apiovh:iam/resource/edit` (T103 then granted that
+action on the project URNs, D108), and run 3 with the same 403 while that grant was in place, so
+OVHcloud does not evaluate that `account:` action against the project (most likely against the
+account URN; UNVERIFIED). In between, run 2 failed earlier, at the `account-governance` policy
+update, with 400 `unknown action` for `account:apiovh:iam/resource/get`, which kb names for no
+route (T104 dropped it). Granting `iam/resource/edit` on the account URN would likely widen the
+platform deployer's tagging beyond the tenant projects (UNVERIFIED: the per-resource `tag/add` and
+`tag/remove` grants may still bound it), so the owner moved the tagging to the admin's stage
+instead and T105 took the T103 grant back. The tag set is the `modules/naming` label set of the tenant at the
+`account-governance` instance: the keys the project stage set (`lz:managed-by`, `lz:managed-in`,
+`lz:instance`, `lz:release`, `lz:tenant`, R14), with `lz:managed-in` and `lz:instance` naming
+`account-governance`, the stack that manages the tags. That the admin's tag PUT and the L7
+read-back (`GET /iam/resource/{urn}`, no IAM action in kb) succeed on a project URN is UNVERIFIED
+until the T049 re-run.
 **Tenant allowlist (narrowest the API allows, D88)**: from `api/v1/cloud.json`:
 `publicCloudProject:apiovh:network/private/{create,get,edit,delete,region/create}`,
 `…/network/private/subnet/{create,get,delete}`,
@@ -169,8 +179,8 @@ in the `project` stack only when the manifest says `adopt`. `modules/cloud-proje
 and `plan` arguments are filled from the probe's `-generate-config-out` result (P5). The project id is
 not secret; no import id in this slice carries a secret.
 **Fallback if P5 refutes** (import plans a replacement or an update that re-orders): `reference` mode —
-`data "ovh_cloud_project"` read plus `ovh_iam_resource_tags` on the project URN for labels; the
-project resource is not managed. Decision recorded in `decisions.md` by the operator. Switching an
+`data "ovh_cloud_project"` read; the project resource is not managed. Its labels are set by
+`account-governance` in either mode (R6, T105). Decision recorded in `decisions.md` by the operator. Switching an
 already adopted project to `reference` is an operator runbook step (state removal outside the live
 lane, which refuses a forget), never a `removed` block in code (`modules/cloud-project/README.md`, T026).
 **Premise gate**: T025–T028 build and test both modes offline under a recorded waiver (no cloud
@@ -257,7 +267,7 @@ check (G9). *Retained* rows are exempt when the resource is in a retained instan
 | `ovh_me_api_oauth2_client` | OAuth2 client | `/me/api/oauth2/client` | account-governance (retained), probes (ephemeral) | per instance | name prefix |
 | `ovh_iam_policy` | IAM policy | `/iam/policy` (v2) | account-governance (retained), probes incl. P25 (ephemeral) | per instance | name prefix |
 | `ovh_me_identity_group` | identity group | `/me/identity/group` | account-governance | retained | name prefix |
-| `ovh_iam_resource_tags` | IAM resource tags (a property of the project URN) | `GET /iam/resource/{urn}` (tags in the response) on the project URN; `/iam/resource/{urn}/tag` has no GET in kb/api | project (retained; the platform deployer needs `account:apiovh:iam/resource/edit` on the project URN, R6, T103), probes (ephemeral `lzprobe-` keys) | per instance | `lz:run-id` key |
+| `ovh_iam_resource_tags` | IAM resource tags (a property of the project URN) | `GET /iam/resource/{urn}` (tags in the response) on the project URN; `/iam/resource/{urn}/tag` has no GET in kb/api | account-governance (retained; set under the admin, the platform deployer holds no `account:` action, R6, T105), probes (ephemeral `lzprobe-` keys) | per instance | `lz:run-id` key |
 | `ovh_cloud_project_alerting` (optional, P10) | project alert | `/cloud/project/{p}/alerting` | project when `budget_alert.enabled`, alerting probe | retained (project); probe ephemeral | id from inventory, name prefix |
 | `ovh_cloud_quota` (optional, P11) | quota setting (a property of the project, no object to leave behind) | read through the project's quota (`api/v2/publicCloud.json:5530`) | project when `quota_guard.enabled`, quota probe (plan only) | retained with the project; nothing to list as a leftover | — |
 | `ovh_cloud_project` | the adopted project | — | project (adopt; `reference` mode creates none) | retained, never destroyed | exempt by id |

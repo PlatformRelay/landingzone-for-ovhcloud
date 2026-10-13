@@ -3,10 +3,14 @@
 # *Resolved-reference input*; contracts/checks.md G5). Mocked provider, no credential, no API call.
 #
 # The platform deployer (one OAuth2 client of the `CLIENT_CREDENTIALS` flow) gets one policy:
-# `publicCloudProject:apiovh:*` and `account:apiovh:iam/resource/edit` (project tags, T103, T104) on
-# every tenant project URN. Per tenant (`for_each` over `tenants`, keyed by tenant name, so a
-# second tenant leaves the first one's addresses and values unchanged): one deployer, one policy holding exactly the P9 allowlist on that tenant's own project URN, and
-# one identity group with role `NONE` and no members. Guard G5: no tenant resource but its project
+# `publicCloudProject:apiovh:*` on every tenant project URN, and no `account:` action (T105 took back
+# the T103 tag grant: OVHcloud does not authorise tagging a project through
+# `account:apiovh:iam/resource/edit` granted on the project URN, T049 run 3). Per tenant (`for_each`
+# over `tenants`, keyed by tenant name, so a second tenant leaves the first one's addresses and
+# values unchanged): one deployer, one policy holding exactly the P9 allowlist on that tenant's own
+# project URN, one identity group with role `NONE` and no members, and the IAM tags of the tenant's
+# project (modules/iam-resource-tags with the modules/naming label set of the tenant at this
+# instance; set here, under the admin, D109, T105). Guard G5: no tenant resource but its project
 # URN (never `*`), no `account:apiovh:iam/` action, no `region/storage/*` or
 # `region/storage/policy/create`, no wildcard action, and no `account:apiovh:me/get` (the account
 # binding uses `GET /auth/details`, P26; the action is added to both deployer policies only if P26
@@ -184,10 +188,10 @@ run "tenant_policy_is_the_p9_allowlist_on_its_project" {
   }
 
   assert {
-    condition = try(toset(output.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "publicCloudProject:apiovh:*"])
+    condition = try(toset(output.platform_policy.allow) == toset(["publicCloudProject:apiovh:*"])
       && toset(output.platform_policy.resources) == toset(["urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"])
     && toset(output.platform_policy.identities) == toset(["urn:v1:eu:identity:credential:xx0000-ovh/oauth2-platform-client-id"]), false)
-    error_message = "one tenant: the platform deployer policy is exactly `publicCloudProject:apiovh:*` plus `account:apiovh:iam/resource/edit` on that project URN, for the platform deployer only"
+    error_message = "one tenant: the platform deployer policy is exactly `publicCloudProject:apiovh:*` on that project URN, for the platform deployer only"
   }
 }
 
@@ -242,12 +246,11 @@ run "each_tenant_policy_confined_to_its_own_project" {
   }
 }
 
-# The platform deployer covers `publicCloudProject:apiovh:*` on every tenant project URN, plus
-# `account:apiovh:iam/resource/edit` on the same URNs so the project stage can set the project's
-# IAM tags (T049 run 1: 403 `missing IAM permissions: account:apiovh:iam/resource/edit` for
-# `ovh_iam_resource_tags`; T103, D108), for its own identity only; no other IAM action, no
-# `account:apiovh:me/get` (P26), and never `account:apiovh:iam/resource/get`, which OVHcloud
-# refuses as an unknown action (T049 run 2: 400 `unknown action`; T104).
+# The platform deployer covers `publicCloudProject:apiovh:*` on every tenant project URN, for its
+# own identity only, and holds no `account:` action at all: no `account:apiovh:me/get` (P26) and no
+# IAM-tag action. The project stage no longer tags the project: T049 run 3 was refused with 403
+# `missing IAM permissions: account:apiovh:iam/resource/edit` with that action granted on the
+# project URN, so the admin tags the projects in account-governance (D109, T105).
 run "platform_policy_covers_the_tenant_projects" {
   command = plan
 
@@ -265,13 +268,13 @@ run "platform_policy_covers_the_tenant_projects" {
   }
 
   assert {
-    condition     = try(toset(output.platform_policy.allow) == toset(["account:apiovh:iam/resource/edit", "publicCloudProject:apiovh:*"]), false)
-    error_message = "the platform deployer policy allows exactly `publicCloudProject:apiovh:*` and `account:apiovh:iam/resource/edit` (no other IAM action, no `account:apiovh:me/get`)"
+    condition     = try(toset(output.platform_policy.allow) == toset(["publicCloudProject:apiovh:*"]), false)
+    error_message = "the platform deployer policy allows exactly `publicCloudProject:apiovh:*`"
   }
 
   assert {
-    condition     = try(length(output.platform_policy.allow) > 0 && !contains([for a in output.platform_policy.allow : lower(a)], "account:apiovh:iam/resource/get"), false)
-    error_message = "T104: no `account:apiovh:iam/resource/get` in the platform deployer policy (OVHcloud refuses it as an unknown action, T049 run 2)"
+    condition     = try(length(output.platform_policy.allow) > 0 && alltrue([for a in output.platform_policy.allow : !startswith(lower(a), "account:")]), false)
+    error_message = "T105: no `account:` action in the platform deployer policy (the admin tags the projects, D109; T049 run 3)"
   }
 
   assert {
@@ -291,6 +294,75 @@ run "platform_policy_covers_the_tenant_projects" {
     condition = try(output.platform_deployer.client_id == "platform-client-id"
     && output.platform_deployer.identity_urn == "urn:v1:eu:identity:credential:xx0000-ovh/oauth2-platform-client-id", false)
     error_message = "platform_deployer carries the platform client's own client id and identity URN"
+  }
+}
+
+# T105 (D109): each tenant's project carries the modules/naming label set of that tenant at this
+# instance (`lz:managed-by`, `lz:managed-in`, `lz:instance`, `lz:release`, `lz:tenant`, the keys the
+# project stage set before), on that tenant's own project URN, through one tag resource per tenant.
+run "each_tenant_project_tagged_with_its_label_set" {
+  command = plan
+
+  variables {
+    tenants = {
+      demo = {
+        project_id  = "0123456789abcdef0123456789abcdef"
+        project_urn = "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+      }
+      alpha = {
+        project_id  = "fedcba9876543210fedcba9876543210"
+        project_urn = "urn:v1:ca:resource:publicCloudProject:fedcba9876543210fedcba9876543210"
+      }
+    }
+  }
+
+  assert {
+    condition     = try(join(",", sort(keys(output.project_tags))) == "alpha,demo", false)
+    error_message = "one project tag set per tenant, keyed by tenant name"
+  }
+
+  assert {
+    condition = try(output.project_tags["demo"].urn == "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+    && output.project_tags["alpha"].urn == "urn:v1:ca:resource:publicCloudProject:fedcba9876543210fedcba9876543210", false)
+    error_message = "each tenant's tags are on its own project URN, as given in tenants"
+  }
+
+  assert {
+    condition = try(output.project_tags["demo"].tags == tomap({
+      "lz:managed-by" = "opentofu"
+      "lz:managed-in" = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/account-governance"
+      "lz:instance"   = "account-governance"
+      "lz:release"    = "unreleased"
+      "lz:tenant"     = "demo"
+      }) && output.project_tags["alpha"].tags == tomap({
+      "lz:managed-by" = "opentofu"
+      "lz:managed-in" = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/account-governance"
+      "lz:instance"   = "account-governance"
+      "lz:release"    = "unreleased"
+      "lz:tenant"     = "alpha"
+    }), false)
+    error_message = "each project carries exactly the label set of its tenant at this instance"
+  }
+}
+
+# The tag values follow the inputs (not constants).
+run "project_tags_follow_the_inputs" {
+  command = plan
+
+  variables {
+    instance   = "other-governance"
+    managed_in = "example.org/forge//stacks/account/other-governance"
+  }
+
+  assert {
+    condition = try(output.project_tags["demo"].tags == tomap({
+      "lz:managed-by" = "opentofu"
+      "lz:managed-in" = "example.org/forge//stacks/account/other-governance"
+      "lz:instance"   = "other-governance"
+      "lz:release"    = "unreleased"
+      "lz:tenant"     = "demo"
+    }), false)
+    error_message = "the project labels follow instance and managed_in"
   }
 }
 

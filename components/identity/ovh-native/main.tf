@@ -1,13 +1,23 @@
 # Identity/ovh-native component (spec 005 T024; FR-002, FR-004, FR-010, FR-013; ADR-0006, ADR-0018;
-# research R6, P9, P26): the platform deployer with `publicCloudProject:apiovh:*` and the project
-# IAM-tag actions (T103) on every tenant project URN, and per tenant (keyed by tenant name, so
-# adding a tenant leaves the others' addresses unchanged) a deployer, its policy holding exactly the P9 allowlist on that tenant's own project
-# URN (guard G5) and an identity group with role `NONE` and no members. No `account:apiovh:me/get`:
-# the account binding reads `GET /auth/details` (P26). No group policy in this slice (coordinator
-# decision 2026-10-07): the group has no members, so there is nothing to grant yet.
+# research R6, P9, P26): the platform deployer with `publicCloudProject:apiovh:*` on every tenant
+# project URN, and per tenant (keyed by tenant name, so adding a tenant leaves the others' addresses
+# unchanged) a deployer, its policy holding exactly the P9 allowlist on that tenant's own project
+# URN (guard G5), an identity group with role `NONE` and no members, and the IAM tags of the
+# tenant's project. No `account:apiovh:me/get`: the account binding reads `GET /auth/details`
+# (P26). No group policy in this slice (coordinator decision 2026-10-07): the group has no members,
+# so there is nothing to grant yet.
 #
-# Names come from modules/naming. None of these resources carries tags (research R14); outputs.tf
-# lists them in `unlabelled`. The policy contents and the group role in the outputs are read from
+# The project tags are set here because this component runs under the admin
+# (`account:apiovh:iam/*` and `publicCloudProject:apiovh:*`: the tag PUT needs
+# `account:apiovh:iam/resource/edit` and `publicCloudProject:apiovh:iam/resource/tag/{add,remove}`,
+# kb api/v2/iam.json): the platform deployer, which applies the project stage, was refused the
+# tag PUT with `account:apiovh:iam/resource/edit` granted on the project URN (T049 run 3), so
+# the owner moved the tagging here (D109, T105). The tag set is the modules/naming label set of the
+# tenant at this instance (`lz:managed-by`, `lz:managed-in`, `lz:instance`, `lz:release`,
+# `lz:tenant`, the keys the project stage set before).
+#
+# Names come from modules/naming. None of the deployer, policy or group resources carries tags
+# (research R14); outputs.tf lists them in `unlabelled`. The policy contents and the group role in the outputs are read from
 # the modules' outputs, which read the resources; the stage's captured plan pins the planned
 # resources themselves (tools/internal/stacks, TestOutputsAccountGovernanceStagePlan).
 
@@ -35,17 +45,13 @@ locals {
     "publicCloudProject:apiovh:region/storage/object/get",
   ]
 
-  # Platform deployer, on the tenant project URNs only: every project action, plus the project's IAM
-  # tags, which the `project` stage sets through `ovh_iam_resource_tags` (`PUT /iam/resource/{urn}`
-  # requires `account:apiovh:iam/resource/edit`, kb api/v2/iam.json). T049 run 1 was refused with
-  # 403 `missing IAM permissions: account:apiovh:iam/resource/edit` without it (T103, D108). The
-  # same PUT also requires `publicCloudProject:apiovh:iam/resource/tag/add` and `tag/remove` to add
-  # or remove tags (its longDescription): the wildcard covers those, so narrowing it must keep them.
-  # No `account:apiovh:iam/resource/get`: kb lists no action for `GET /iam/resource/{urn}`, and
-  # OVHcloud refused the policy holding it with 400 `unknown action` (T049 run 2, T104).
+  # Platform deployer, on the tenant project URNs only: every project action and no `account:`
+  # action. T103 added `account:apiovh:iam/resource/edit` so the project stage could tag the
+  # project; T049 run 3 was refused with 403 `missing IAM permissions:
+  # account:apiovh:iam/resource/edit` with that grant in place, so the tags moved to this component
+  # under the admin and the grant was taken back (D109, T105).
   platform_allow = [
     "publicCloudProject:apiovh:*",
-    "account:apiovh:iam/resource/edit",
   ]
 }
 
@@ -109,4 +115,24 @@ module "tenant_group" {
   name        = module.tenant_name["${each.key}/identity_group"].name
   description = "Members of tenant ${each.key}"
   role        = "NONE"
+}
+
+# Labels only (kind `project`, as components/project-factory reads them): the project's name is not
+# set by this slice.
+module "project_labels" {
+  source     = "../../../modules/naming"
+  for_each   = var.tenants
+  org        = var.org
+  tenant     = each.key
+  kind       = "project"
+  role       = "main"
+  instance   = var.instance
+  managed_in = var.managed_in
+}
+
+module "project_tags" {
+  source   = "../../../modules/iam-resource-tags"
+  for_each = var.tenants
+  urn      = each.value.project_urn
+  tags     = module.project_labels[each.key].labels
 }

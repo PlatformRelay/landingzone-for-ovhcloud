@@ -1,8 +1,9 @@
 # Cloud project module (spec 005 T025; FR-002, FR-004; ADR-0003, ADR-0005, ADR-0006; research R7,
 # premise waiver R23: P5 is unqualified until T009, so both modes are tested offline). Mocked
 # provider, no credential, no API call. Attribute names from the pinned ovh 2.21.0 schema
-# (`ovh_cloud_project`, data `ovh_cloud_project`, `ovh_iam_resource_tags`,
-# `ovh_cloud_project_alerting`).
+# (`ovh_cloud_project`, data `ovh_cloud_project`, `ovh_cloud_project_alerting`). The project's IAM
+# tags are not set here: account-governance sets them under the admin (modules/iam-resource-tags,
+# D109, T105); the project stage's captured plans refuse a tag resource in either mode.
 #
 # Plan runs only. In adopt mode the project carries a literal `prevent_destroy`: an apply run's
 # cleanup destroy is refused and leaves errored_test.tfstate in the module directory (T013), and
@@ -18,7 +19,7 @@
 # through try() so a moved address fails the assertion instead of erroring.
 
 mock_provider "ovh" {
-  # The adopted project's computed URN and id are known on plan here, so the tags' target can be
+  # The adopted project's computed URN and id are known on plan here, so the `urn` output can be
   # compared; the referenced project's URN differs, so a cross-wired URN fails. Neither URN is
   # `urn:v1:eu:resource:publicCloudProject:<project_id>` (other region segments), so a module that
   # builds the URN from the id instead of reading it fails too (review r1).
@@ -52,14 +53,6 @@ variables {
     duration     = "P1M"
     plan_code    = "project.2018"
     pricing_mode = "default"
-  }
-  tags = {
-    "lz:managed-by"  = "opentofu"
-    "lz:managed-in"  = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/demo/dev/project"
-    "lz:instance"    = "demo-dev-project"
-    "lz:tenant"      = "demo"
-    "lz:environment" = "dev"
-    "lz:release"     = "unreleased"
   }
 }
 
@@ -187,27 +180,6 @@ run "adopt_no_invented_plan" {
   }
 }
 
-run "adopt_tags_the_project_urn" {
-  command = plan
-
-  assert {
-    condition     = ovh_iam_resource_tags.this.urn == "urn:v1:ca:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
-    error_message = "the tags target the adopted project's URN"
-  }
-
-  assert {
-    condition = ovh_iam_resource_tags.this.tags == tomap({
-      "lz:managed-by"  = "opentofu"
-      "lz:managed-in"  = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/demo/dev/project"
-      "lz:instance"    = "demo-dev-project"
-      "lz:tenant"      = "demo"
-      "lz:environment" = "dev"
-      "lz:release"     = "unreleased"
-    })
-    error_message = "the project URN carries exactly the given tags"
-  }
-}
-
 run "adopt_outputs" {
   command = plan
 
@@ -243,40 +215,6 @@ run "reference_manages_no_project" {
   }
 }
 
-run "reference_tags_the_project_urn" {
-  command = plan
-
-  variables {
-    mode       = "reference"
-    project_id = "fedcba9876543210fedcba9876543210"
-    tags = {
-      "lz:managed-by"  = "opentofu"
-      "lz:managed-in"  = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/demo/prod/project"
-      "lz:instance"    = "demo-prod-project"
-      "lz:tenant"      = "demo"
-      "lz:environment" = "prod"
-      "lz:release"     = "v0.1.0"
-    }
-  }
-
-  assert {
-    condition     = ovh_iam_resource_tags.this.urn == "urn:v1:us:resource:publicCloudProject:fedcba9876543210fedcba9876543210"
-    error_message = "the tags target the read project's URN (data source iam.urn)"
-  }
-
-  assert {
-    condition = ovh_iam_resource_tags.this.tags == tomap({
-      "lz:managed-by"  = "opentofu"
-      "lz:managed-in"  = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/demo/prod/project"
-      "lz:instance"    = "demo-prod-project"
-      "lz:tenant"      = "demo"
-      "lz:environment" = "prod"
-      "lz:release"     = "v0.1.0"
-    })
-    error_message = "another tag set is applied exactly: nothing added, nothing dropped"
-  }
-}
-
 run "reference_outputs" {
   command = plan
 
@@ -307,8 +245,8 @@ run "alert_off_by_default" {
   }
 
   assert {
-    condition     = ovh_iam_resource_tags.this.urn == "urn:v1:ca:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
-    error_message = "the project is still tagged without an alert"
+    condition     = output.urn == "urn:v1:ca:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+    error_message = "the project's URN is still read without an alert"
   }
 }
 
@@ -382,7 +320,7 @@ run "alert_disabled_explicitly" {
   }
 
   assert {
-    condition     = length(ovh_cloud_project_alerting.this) == 0 && ovh_iam_resource_tags.this.urn == "urn:v1:ca:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+    condition     = length(ovh_cloud_project_alerting.this) == 0 && output.urn == "urn:v1:ca:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
     error_message = "a disabled alert with values set creates no alert"
   }
 }
@@ -407,19 +345,6 @@ run "empty_project_id_rejected" {
   }
 
   expect_failures = [var.project_id]
-}
-
-run "tags_null_value_rejected" {
-  command = plan
-
-  variables {
-    tags = {
-      "lz:managed-by" = "opentofu"
-      "lz:tenant"     = null
-    }
-  }
-
-  expect_failures = [var.tags]
 }
 
 # A blank email passes the provider's schema; the module refuses it (a missing one too).

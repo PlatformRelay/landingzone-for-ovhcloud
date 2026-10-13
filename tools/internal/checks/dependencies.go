@@ -91,9 +91,9 @@ type retainedPackage struct {
 
 // retainedModules are the library packages whose resources outlive every run.
 // The state bucket package keeps every resource. The project package keeps
-// only its project (spec 005 T026): the budget alert stays switchable, and
-// destroying the IAM tags removes only the configured keys
-// (iam_resource_tags.md Notes).
+// only its project (spec 005 T026): the budget alert stays switchable. The
+// project's IAM tags live in modules/iam-resource-tags (T105), whose destroy
+// removes only the configured keys (iam_resource_tags.md Notes).
 var retainedModules = map[string]retainedPackage{
 	"modules/object-storage-protected": {},
 	"modules/cloud-project":            {kept: []string{"ovh_cloud_project"}, single: "ovh_cloud_project"},

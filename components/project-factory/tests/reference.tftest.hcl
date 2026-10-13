@@ -9,7 +9,7 @@
 # project: a managed `ovh_cloud_project` without an import would order one (cloud_project.md). Tripwire:
 # the mock default on the non-computed `deletion_protection` of `ovh_cloud_project` is inert unless a
 # project is planned, and then fails the run (`Non-computed field … is not allowed to be overridden`,
-# observed tofu 1.13.0, T023). The project is still labelled through its IAM tags.
+# observed tofu 1.13.0, T023). The project's IAM tags are set by account-governance (T105), not here.
 
 mock_provider "ovh" {
   mock_resource "ovh_cloud_project" {

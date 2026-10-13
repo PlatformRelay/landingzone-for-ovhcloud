@@ -28,7 +28,7 @@ testrun=published_outputs_match_the_schema
 case "$capture_case" in
   bootstrap) stage=bootstrap; dirs="stages/bootstrap components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
   tenant-state) stage=tenant-state; dirs="stages/tenant-state components/state-backend modules/naming modules/object-storage-protected modules/object-storage-user" ;;
-  account-governance) stage=account-governance; dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group" ;;
+  account-governance) stage=account-governance; dirs="stages/account-governance components/identity/ovh-native modules/naming modules/iam-service-account modules/iam-policy modules/identity-group modules/iam-resource-tags" ;;
   project | project-reference) stage=project; dirs="stages/project components/project-factory modules/naming modules/cloud-project modules/cloud-quota" ;;
   project-network) stage=project-network; dirs="stages/project-network components/network/island modules/naming modules/private-network" ;;
   runtime | runtime-slot) stage=runtime; dirs="stages/runtime components/runtime/managed-only modules/naming modules/object-storage" ;;

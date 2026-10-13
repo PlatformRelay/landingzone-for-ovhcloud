@@ -38,7 +38,7 @@ const repoRoot = "../../.."
 var stagePlans = map[string][]string{
 	"bootstrap":          {"stages/bootstrap", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user"},
 	"tenant-state":       {"stages/tenant-state", "components/state-backend", "modules/naming", "modules/object-storage-protected", "modules/object-storage-user"},
-	"account-governance": {"stages/account-governance", "components/identity/ovh-native", "modules/naming", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group"},
+	"account-governance": {"stages/account-governance", "components/identity/ovh-native", "modules/naming", "modules/iam-service-account", "modules/iam-policy", "modules/identity-group", "modules/iam-resource-tags"},
 	"project":            {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
 	"project-reference":  {"stages/project", "components/project-factory", "modules/naming", "modules/cloud-project", "modules/cloud-quota"},
 	"project-network":    {"stages/project-network", "components/network/island", "modules/naming", "modules/private-network"},
@@ -453,9 +453,17 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 	publishedEnvelope(t, expectation("account-governance", "account-governance"), doc, secrets,
 		[]string{"platform_deployer", "tenants", "unlabelled"})
 
-	// Inventory: one platform client and policy, and per tenant one client, policy and group
-	// (1+T, 1+T, T for T = 2), all created, no other managed resource. That also refuses any group
-	// member, S3 user or group policy (decision request 4: none in this slice).
+	// Inventory: one platform client and policy, and per tenant one client, policy, group and
+	// project tag set (1+T, 1+T, T, T for T = 2), all created, no other managed resource. That also
+	// refuses any group member, S3 user or group policy (decision request 4: none in this slice).
+	// The addresses of `want` keep the layout the retained live state has (T049 run 1 applied the
+	// platform's and the `demo` ones); T105 adds only the tag addresses beside them. This capture
+	// plans from empty, so it pins address stability, not the live plan's actions: those follow
+	// from it (tags added, platform policy updated in place) and are observed in the T049 re-run.
+	tagged := map[string]string{
+		`module.project_tags["alpha"].ovh_iam_resource_tags.this`: alphaProjectURN,
+		`module.project_tags["demo"].ovh_iam_resource_tags.this`:  demoProjectURN,
+	}
 	want := map[string]string{
 		"module.platform_deployer.ovh_me_api_oauth2_client.this":        "lz-sa-platform-deployer",
 		"module.platform_policy.ovh_iam_policy.this":                    "lz-pol-platform-deployer",
@@ -481,15 +489,37 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 			t.Errorf("%s: actions %v, want [create]", r.Address, r.Change.Actions)
 		}
 	}
-	if wantTypes := map[string]int{"ovh_me_api_oauth2_client": 3, "ovh_iam_policy": 3, "ovh_me_identity_group": 2}; !reflect.DeepEqual(perType, wantTypes) {
+	if wantTypes := map[string]int{"ovh_me_api_oauth2_client": 3, "ovh_iam_policy": 3, "ovh_me_identity_group": 2, "ovh_iam_resource_tags": 2}; !reflect.DeepEqual(perType, wantTypes) {
 		t.Errorf("planned resources per type %v, want exactly %v", perType, wantTypes)
 	}
-	if got := slices.Sorted(maps.Keys(byAddress)); !reflect.DeepEqual(got, slices.Sorted(maps.Keys(want))) {
-		t.Fatalf("planned addresses %v, want %v", got, slices.Sorted(maps.Keys(want)))
+	wantAddrs := slices.Sorted(maps.Keys(want))
+	wantAddrs = slices.Sorted(slices.Values(append(wantAddrs, slices.Collect(maps.Keys(tagged))...)))
+	if got := slices.Sorted(maps.Keys(byAddress)); !reflect.DeepEqual(got, wantAddrs) {
+		t.Fatalf("planned addresses %v, want %v", got, wantAddrs)
 	}
 	for addr, name := range want {
 		if got := byAddress[addr].Change.After["name"]; got != name {
 			t.Errorf("%s: name %v, want %q", addr, got, name)
+		}
+	}
+
+	// Project tags (T105, D109): the admin sets each tenant project's IAM tags here, exactly the
+	// label set of that tenant at this instance, on that tenant's own project URN.
+	for addr, urn := range tagged {
+		tenant := strings.TrimSuffix(strings.TrimPrefix(addr, `module.project_tags["`), `"].ovh_iam_resource_tags.this`)
+		after := byAddress[addr].Change.After
+		if after["urn"] != urn {
+			t.Errorf("%s: tags on %v, want tenant %s's project %s", addr, after["urn"], tenant, urn)
+		}
+		labels := map[string]any{
+			"lz:managed-by": "opentofu",
+			"lz:managed-in": "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/account-governance",
+			"lz:instance":   "account-governance",
+			"lz:release":    "unreleased",
+			"lz:tenant":     tenant,
+		}
+		if !reflect.DeepEqual(after["tags"], labels) {
+			t.Errorf("%s: tags %v, want exactly the label set %v", addr, after["tags"], labels)
 		}
 	}
 
@@ -508,10 +538,9 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 	}
 
 	// G5 on every planned policy: no permissions group, except, deny or expiry beside the actions,
-	// and no IAM, `me`, storage-policy or wildcard action outside the platform's grant: the platform
-	// policy alone may hold the wildcard and the project IAM-tag action (T103, D108); never
-	// `account:apiovh:iam/resource/get`, which OVHcloud refuses as unknown (T049 run 2, T104).
-	platformIAM := map[string]bool{"account:apiovh:iam/resource/edit": true}
+	// and no IAM, `me`, storage-policy or wildcard action outside the platform's one grant: no
+	// `account:` action on any policy, the platform's included (T105 undid the T103 tag grant; the
+	// admin tags the projects in this stage, D109).
 	for addr, r := range byAddress {
 		if r.Type != "ovh_iam_policy" {
 			continue
@@ -524,11 +553,10 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 		if conditions := r.Change.After["conditions"]; !empty(conditions) {
 			t.Errorf("%s: conditions %v, want none", addr, conditions)
 		}
-		platformPolicy := addr == "module.platform_policy.ovh_iam_policy.this"
 		for _, a := range strs(t, r, "allow") {
 			lower := strings.ToLower(a)
-			if strings.HasPrefix(lower, "account:") && !(platformPolicy && platformIAM[a]) || strings.Contains(lower, "/storage/policy") ||
-				strings.Contains(a, "*") && !platformPolicy {
+			if strings.HasPrefix(lower, "account:") || strings.Contains(lower, "/storage/policy") ||
+				strings.Contains(a, "*") && addr != "module.platform_policy.ovh_iam_policy.this" {
 				t.Errorf("%s: action %q is outside every deployer grant (G5)", addr, a)
 			}
 		}
@@ -550,13 +578,11 @@ func pinAccountGovernancePlan(t testing.TB, data []byte) {
 		}
 	}
 
-	// Platform deployer policy: publicCloudProject:apiovh:* plus the project's IAM tags
-	// (account:apiovh:iam/resource/edit, T103, T104) on exactly the tenant projects, for the
-	// platform deployer only.
+	// Platform deployer policy: publicCloudProject:apiovh:* on exactly the tenant projects, for
+	// the platform deployer only (T105: the T103 tag grant is taken back).
 	platform := byAddress["module.platform_policy.ovh_iam_policy.this"]
-	wantAllow := []string{"account:apiovh:iam/resource/edit", "publicCloudProject:apiovh:*"}
-	if got := strs(t, platform, "allow"); !reflect.DeepEqual(got, wantAllow) {
-		t.Errorf("platform policy allows %v, want %v", got, wantAllow)
+	if got := strs(t, platform, "allow"); !reflect.DeepEqual(got, []string{"publicCloudProject:apiovh:*"}) {
+		t.Errorf("platform policy allows %v, want [publicCloudProject:apiovh:*]", got)
 	}
 	if got := strs(t, platform, "resources"); !reflect.DeepEqual(got, []string{demoProjectURN, alphaProjectURN}) {
 		t.Errorf("platform policy resources %v, want exactly the tenant projects", got)
@@ -585,15 +611,6 @@ const (
 	pfImportTarget = pfModule + "project.ovh_cloud_project.this[0]"
 )
 
-// pfLabels is the label set of the captured scope (data-model *Label set*).
-var pfLabels = map[string]any{
-	"lz:managed-by": "opentofu",
-	"lz:managed-in": "github.com/platformrelay/landingzone-for-ovhcloud//stacks/tenants/demo/dev/project",
-	"lz:instance":   "demo-dev-project",
-	"lz:tenant":     "demo",
-	"lz:release":    "unreleased",
-}
-
 // managedByAddress indexes a plan's managed resources by address and refuses any change but a
 // create (the stack's import turns the adopted project's create into an import, T037).
 func managedByAddress(t testing.TB, msg testPlan) map[string]plannedResource {
@@ -614,17 +631,11 @@ func managedByAddress(t testing.TB, msg testPlan) map[string]plannedResource {
 	return out
 }
 
-// projectCommon pins what both modes plan beside the project: the label set on the project's own
-// URN, the alert and the quota guard with the given values, all on the bound project.
+// projectCommon pins what both modes plan beside the project: the alert and the quota guard with
+// the given values, both on the bound project. No IAM tags: account-governance sets them under the
+// admin (T105, D109), so `want` in pinProjectPlan holds no `ovh_iam_resource_tags` address.
 func projectCommon(t testing.TB, byAddress map[string]plannedResource, threshold float64) {
 	t.Helper()
-	tags := byAddress[pfModule+"project.ovh_iam_resource_tags.this"].Change.After
-	if tags["urn"] != pfProjectURN {
-		t.Errorf("tags on %v, want the bound project's URN %s", tags["urn"], pfProjectURN)
-	}
-	if !reflect.DeepEqual(tags["tags"], pfLabels) {
-		t.Errorf("project tags %v, want exactly the label set %v", tags["tags"], pfLabels)
-	}
 	alert := byAddress[pfModule+"project.ovh_cloud_project_alerting.this[0]"].Change.After
 	for attr, want := range map[string]any{"service_name": pfProjectID, "monthly_threshold": threshold, "email": "finops@example.org", "delay": float64(3600)} {
 		if alert[attr] != want {
@@ -639,13 +650,14 @@ func projectCommon(t testing.TB, byAddress map[string]plannedResource, threshold
 
 // T028 (coordinator decision 2026-10-07 on T027's decision request 1): the project stage's real
 // plan in both modes. tofu test reads only a child module's outputs, so the component and stage
-// tests cannot see the order arguments, the alert's values or which project the alert, the quota
-// guard and the tags act on (T027 gaps 1, 2); a replacement of an adopted project orders a new one
+// tests cannot see the order arguments, the alert's values or which project the alert and the quota
+// guard act on (T027 gaps 1, 2); a replacement of an adopted project orders a new one
 // (cloud_project.md), and T009 showed that the order arguments force one. The envelope built from
-// each plan validates under project.schema.json against the bound project (KD-3).
+// each plan validates under project.schema.json against the bound project (KD-3). Neither mode
+// plans an IAM tag resource (T105): the exact address set refuses one.
 func TestOutputsProjectStagePlan(t *testing.T) {
 	t.Run("adopt", func(t *testing.T) { pinProjectPlan(t, "project", stagePlan(t, "project")) })
-	// Reference mode manages no project: it is only read (its tags, alert and guard still apply).
+	// Reference mode manages no project: it is only read (its alert and guard still apply).
 	t.Run("reference", func(t *testing.T) { pinProjectPlan(t, "project-reference", stagePlan(t, "project-reference")) })
 }
 
@@ -657,7 +669,6 @@ func pinProjectPlan(t testing.TB, c string, data []byte) {
 	values := []string{"budget_alert_id", "environment", "project_id", "project_urn", "regions", "tenant", "unlabelled"}
 	want := []string{
 		pfModule + "project.ovh_cloud_project_alerting.this[0]",
-		pfModule + "project.ovh_iam_resource_tags.this",
 		pfModule + "quota.ovh_cloud_quota.this[0]",
 	}
 	adopt := c == "project"

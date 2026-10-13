@@ -85,13 +85,14 @@ modules/
 ├── iam-service-account/                  # ovh_me_api_oauth2_client
 ├── iam-policy/                           # ovh_iam_policy
 ├── identity-group/                       # ovh_me_identity_group
-├── cloud-project/                        # ovh_cloud_project (adopt), ovh_iam_resource_tags, ovh_cloud_project_alerting (optional)
+├── iam-resource-tags/                    # ovh_iam_resource_tags (tenant project labels, set from identity/ovh-native, T105)
+├── cloud-project/                        # ovh_cloud_project (adopt), ovh_cloud_project_alerting (optional)
 ├── cloud-quota/                          # ovh_cloud_quota (optional)
 └── private-network/                      # ovh_cloud_project_network_private + _subnet
 components/
 ├── state-backend/                        # one protected bucket + bucket-scoped S3 users (bootstrap, tenant-state)
-├── identity/ovh-native/                  # deployers, policies, group
-├── project-factory/                      # adopt project, labels, alert, quota
+├── identity/ovh-native/                  # deployers, policies, group, tenant project tags (T105)
+├── project-factory/                      # adopt project, label set (output only), alert, quota
 ├── network/island/                       # private network + subnet
 └── runtime/managed-only/                 # bucket + runtime envelope
 stages/{bootstrap,tenant-state,account-governance,project,project-network,runtime}/
