@@ -553,7 +553,7 @@ Independent test: V007 offline; V010 owner session.
   - Verify: `task test:live-lane; go -C tools test -tags live ./internal/probes/live/chain -run TestChainObservations -count=1`: T048 controls green with the G15 mutants killed; `summary.json` and the final output line list known deviations observed; the chain exit code is unchanged by a `known-deviation`.
   - Evidence: `evidence/T062.md`; PR; initial status `not-run`.
 
-- [ ] T049 [US5] Owner session: run `task live:chain -- all` in the sandbox, recorded in evidence/T049.md
+- [x] T049 [US5] Owner session: run `task live:chain -- all` in the sandbox, recorded in evidence/T049.md — closed 2026-10-13 with gaps (run 20261013T075309Z-443f pass)
   - Requirements: FR-004, FR-008, FR-009, FR-010, FR-011, SC-003; ADRs: 0004, 0008, 0009, 0024. Depends on: T062, T044, T039.
   - Verify: Owner session in the dedicated owner clone `~/Projects/PlatformRelay/lz-live` (D92; `live.env`: `LZ_OWNER_CHECKOUT` its canonical absolute path, `LZ_AGENT_WORKTREE_ROOT` the existing agent worktree root, `/home/koni/Projects/PlatformRelay/worktrees` on the maintainer's workstation; quickstart *Owner session*), `task live:chain -- all` with `--reviewed-sha`: six stacks applied in order with the right authority each; T048 assertions pass on real observations, with KD-1 reported as `known-deviation` (or `pass` with the note if not reproduced); ephemeral destroy completes from the trap; leftover check over the full kind matrix zero; total within the deadline (< 60 min); run id, approximate cost and the KD-1 result recorded. A failed assertion still destroys and reports `fail`.
   - Evidence: `evidence/T049.md`; PR (run id, cost, leftover result, known deviations); initial status `not-run`.
