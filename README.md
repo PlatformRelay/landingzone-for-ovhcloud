@@ -1,87 +1,108 @@
 # Landing Zone for OVHcloud
 
+An open-source landing zone for OVHcloud Public Cloud, written in OpenTofu. It sets up the shared
+base that teams deploy onto (state storage, identity, projects, networks, and a runtime placeholder), and checks
+each piece with tests that run offline before anything touches an account.
+
 > [!IMPORTANT]
-> **A private open-source project — not provided by OVHcloud.** This repository is developed
-> privately and independently by PlatformRelay and licensed as open source. It is **not** an
-> official OVHcloud product or offering, and it is **not** provided, endorsed, sponsored, reviewed
-> or supported by OVHcloud. OVHcloud will not help you with it, and nothing here speaks for
-> OVHcloud. "OVHcloud" and related names are trademarks of their owner and are used only to say
-> which platform the code targets.
+> **Not an OVHcloud product.** This is an independent project by PlatformRelay. OVHcloud does not
+> provide, endorse or support it. "OVHcloud" is a trademark of its owner and is used here only to
+> name the target platform. See [ADR-0001](docs/adr/0001-scope-positioning-and-unofficial-status.md).
 
-**Status: first slice in progress.** The offline check tooling (pinned toolchain, sandboxed
-runner, report, traceability, dependency and static checks) and the guarded live lane exist; the
-first landing-zone module, `modules/naming`, is in place, and the stages and stacks of the first
-slice (spec 005) are being built.
-Each piece is merged only with its own verification evidence.
+## Who it is for
 
-## Purpose and differentiators
+- **For** platform engineers who want to read, run or compare a tested landing-zone baseline for
+  OVHcloud, and for contributors.
+- **Not for** production use today, nor for anyone who needs vendor support, a finished product, or
+  features listed below as not delivered.
 
-Create an inspectable reference baseline for an OVHcloud landing zone: useful code, documented
-tradeoffs and reproducible verification that future implementations can be compared against.
-Learning and visible technical contributions are worthwhile outcomes; adoption is the desired upside.
+## Status
 
-The ambition is a solid, approachable baseline with substantive reasons to choose it:
+Pre-release. No version has been published.
 
-- **Automatic installation documentation:** system maps, ownership, permissions with reasons,
-  control coverage and change history, with source references and honest observation status.
-- **Per-run/JIT deployment credentials:** scoped access, explicit issuer authority, expiry and
-  measured revocation windows rather than a blanket promise of secret-free automation.
-- **Policy-driven auto-merge:** routine tenant requests on both forges, with attributable decisions
-  and a visible deployment/recovery lifecycle.
-- **Adaptable naming and labelling:** organisation-specific ordering and metadata, resource-specific
-  constraints, import preservation and policy checks.
-- **Guided terminal setup:** friendly use-case questions, explained suggested defaults, helper
-  checks, accurate customization progress and save/resume before exporting a reviewable draft.
+- **Delivered:** the first slice ([spec 005](specs/005-first-landing-zone-slice/spec.md)): 11 modules,
+  5 components, 6 stages and 6 generated stacks, with naming and labels. Its offline checks pass. Its
+  live apply-and-destroy chain passed once in the maintainer's sandbox account (run
+  `20261013T075309Z-443f`, [evidence](specs/005-first-landing-zone-slice/evidence/T049.md)).
+- **Open:** bootstrapping a fresh account (task T045) has not run yet. Tenant state isolation is
+  not demonstrated: the sandbox shares one project between tenants and state (see the
+  [exit record](specs/005-first-landing-zone-slice/evidence/T051.md)).
+- **Not delivered:** golden-path profiles, tenant self-service merge requests, per-run deployment
+  credentials, generated installation docs and the guided setup are plans, described in the
+  [product direction](docs/explanation/product-direction.md).
 
-These are design commitments, not delivered capabilities. Each increment makes a user outcome
-visible and verifies its failure cases. The [product direction](docs/explanation/product-direction.md)
-defines the baseline, the user experience and how experiments become defensible claims.
+## Try it offline (about 5 minutes, no credentials)
 
-OVHcloud already publishes [network landing-zone examples](https://github.com/ovh/public-cloud-examples/tree/0ab581a39afbe61a2daa55b39238530f38665cc2/landing-zone).
-Our [reference comparison](docs/reference/upstream-reference-map.md) maps reusable topology,
-modules, IAM/backend examples and user journeys, together with the checks needed before adaptation.
-The proposed value here is a qualified baseline and its operating workflows; those outcomes still
-need implementation and evidence.
+Every check runs inside `lz-offline`, a sandboxed entry with the pinned toolchain (OpenTofu,
+Terramate, Go, TFLint) and no network. You need Linux on x86-64, `curl`, `jq`, `tar`, `sha256sum`
+and `sudo`. The install step replaces `/usr/bin/bwrap` with a pinned build and, where AppArmor
+restricts them (recent Ubuntu), allows unprivileged user namespaces: prefer a VM or a spare machine.
 
-## What this will be
+1. **Get the entry.** It is published by digest on GitHub's container registry. In a shell, export
+   the five `LZ_IMAGE`, `LZ_MANIFEST`, `LZ_LAYER`, `LZ_ENTRY_SHA256` and `LZ_BWRAP_SHA256` values
+   from the `env:` block of [`.github/workflows/foundation.yml`](.github/workflows/foundation.yml),
+   then set two directories **outside your clone** (the entry refuses to run from inside it):
 
-An open-source set of OpenTofu/Terraform modules, composable components, golden-path profiles and
-pipeline templates for building a governed landing zone on OVHcloud Public Cloud: a declarative
-tenant model with self-service merge requests gated by [assent](https://github.com/PlatformRelay/assent),
-identity across the OVHcloud IAM, OpenStack and Kubernetes planes with a pluggable identity
-provider, naming conventions, networking, observability, cost and quota guardrails, with testing at
-every layer and documentation that is checked for rot.
+   ```sh
+   export RUNNER_TEMP=$(mktemp -d) LZ_RUNTIME=$HOME/lz-runtime   # LZ_RUNTIME must not exist yet
+   ```
 
-It is opinionated at the seams (identity, state, pipeline, naming, guardrails, audit) and free in the
-middle: several **golden paths** (solo, team on Managed Kubernetes, team on VMs, federated
-organisation, regulated) are planned over one codebase. Supported combinations will be listed with
-their verification scope; the design also treats several base stacks and IAM providers as first-class.
+   Then run the `run:` scripts of the steps *Fetch the runtime layer by digest* and *Install the
+   pinned launcher* from the same workflow.
+2. **Run the checks** from the root of your clone:
 
-OVHcloud has no management-group hierarchy and no organisation-wide policy engine, so this is not a
-port of Azure's CAF or AWS's Landing Zone Accelerator. What it does instead, and what it cannot do,
-is part of the design and is documented up front.
+```sh
+E=$LZ_RUNTIME/runtime/lz-offline
+"$E" --candidate "$PWD" -- task test:slice         # lint + unit tests of every module, component, stage (~80 s)
+"$E" --candidate "$PWD" -- task stacks:check       # generated stacks match stacks/deployments.yaml
+"$E" --candidate "$PWD" -- task test:stack-plans   # every stack plans against mocks
+"$E" --candidate "$PWD" -- task stacks:order -- all  # the order the stacks would be applied in
+```
 
-## Layout
+A green run ends with `SLICE_PASS` (`test:slice`) or `pass`; `stacks:order` prints the order.
+With [Task](https://taskfile.dev) installed, `task --list` shows every target; CI runs the ones
+in `LZ_TARGETS` of the same workflow. Applying to a real account
+(`task bootstrap:*`, `task live:*`) is maintainer-only today; see the
+[runbook](docs/how-to/run-the-first-slice.md).
 
-Monorepo. The structure and other design decisions are in
-[`docs/adr/`](docs/adr/README.md). ADR-0002 is Accepted; other records retain their indexed status.
+## Map of the repository
 
-The [initial Spec Kit phases](specs/README.md) cover the offline foundation, transaction
-rehearsals and protected platform feasibility. Their specs, plans and task lists are drafts;
-acceptance checks are predefined, and implementation evidence is still `not-run`.
-An additional [guided-preconfiguration workstream](specs/004-guided-preconfiguration/spec.md)
-defines the requested terminal journey alongside those phases; its implementation is also planned.
+**The landing zone** (what gets deployed)
 
-The [first implementation guide](docs/how-to/first-implementation.md) explains the minimum
-safety subset, local versus live qualification, evidence and stop conditions.
-[Run the first slice](docs/how-to/run-the-first-slice.md) is the maintainer's guide to
-bootstrapping an OVHcloud account and running the slice's live lane (owner only).
-The current delivery scope covers all eligible work in specs 001–004 as dependencies and
-required decisions are satisfied. Independently reviewed increments are published as
-stacked PRs and merge once review and applicable checks pass. T001–T009 remain the minimum safety
-prerequisite for dependent implementation. Guided setup's hardened persistence/export
-remains deferred until real profile schemas exist; no qualification follows from activation.
+| Path | What it holds |
+| --- | --- |
+| `modules/` | Layer 1: small building blocks over OVHcloud resources (IAM, storage, network), plus naming. |
+| `components/` | Layer 2: building blocks composed from modules (state backend, identity, network, runtime). |
+| `stages/` | Layer 3: one reusable module per deployment step, without state or credentials: bootstrap, tenant state, account governance, project, network, runtime. |
+| `stacks/` | Deployable instances of the stages, each with its own state, generated from `stacks/deployments.yaml`. |
+| `schemas/` | JSON schemas for the deployment manifest, stage outputs and check reports. |
 
-The [known issues](docs/known-issues/README.md) record verified findings and accepted
-limitations, including [C2's unqualified CI source admission](docs/known-issues/KI-001-ci-source-admission-unqualified.md),
-its nonblocking private-development disposition and reassessment trigger.
+**How it is verified**
+
+| Path | What it holds |
+| --- | --- |
+| `tools/` | Go command-line tools: `lz-check` (checks), `lz-offline` (sandboxed entry), `lz-stacks` (stack generation), `lz-live` (live runs), `lz-pack` (runtime packing). |
+| `harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
+| `tests/` | Check fixtures, captured tool output and the live probe roots. |
+| `pipelines/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
+| `Taskfile.yml`, `mise.toml` | Every check as `task <target>`; the pinned tool versions. |
+
+**Why it is the way it is, and the delivery record**
+
+| Path | What it holds |
+| --- | --- |
+| `docs/` | Architecture decision records (ADRs), how-tos, explanations, references and known issues. |
+| `specs/` | The delivery record: one folder per feature with its spec, plan, tasks and evidence. You do not need it to use the landing zone. |
+| `AGENTS.md` | Working rules for contributors, human or automated. |
+
+## Where to go next
+
+- [Architecture decisions](docs/adr/README.md) — start with ADR-0001, 0002, 0004, 0008 and 0009.
+- [Run the first slice](docs/how-to/run-the-first-slice.md) — the maintainer's runbook for a real account.
+- [Specs and delivery status](specs/README.md) — what each spec covers and where it stands.
+- [Known issues](docs/known-issues/README.md) — verified findings and accepted limitations.
+
+## Licence
+
+Code, policies and schemas: [Apache-2.0](LICENSE). Documentation under `docs/`:
+[CC BY 4.0](docs/LICENSE). Quoted OVHcloud documentation keeps its own terms; see [NOTICE](NOTICE).
