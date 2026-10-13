@@ -1,6 +1,6 @@
 # Loop — 001-offline-foundation
 
-Repo: `landingzone-for-ovhcloud` (local dir `ovh-landing-zone-accelerator`) · Branch: `001-foundation-loop` · Base: `main` (origin/main 363b65a) · Resumed: 2026-10-06 · Reviewers: no opencode on this host → per review leg 1 `codex exec --sandbox read-only` (astra, as D62 requires), leg 2 `fanout.sh --legs "claude/sonnet:<lens>" --no-unify`; Opus leg on the claude-review triggers
+Repo: `landingzone-for-ovhcloud` (local dir `ovh-landing-zone-accelerator`) · Branch: `001-foundation-loop` · Base: `main` (origin/main 363b65a) · Resumed: 2026-10-06 · Reviewers: no free-model review legs on this host → per review leg 1 (a read-only run, as D62 requires), leg 2 a second, general review leg; the strong review leg on the strong-leg triggers
 Next: L / T023 — remaining `task ci:foundation` (judge the recorded GitHub run evidence) and evidence/T023.md; then `task.sh next`.
 
 Earlier history (2026-10-02 to 10-05: T001–T009 and the T023 implementation half, merged through PRs #10–#20) lives in git, the evidence files and `agent-context/decisions.md` (D58–D66); this file restarts from the merged state.
@@ -8,7 +8,7 @@ Earlier history (2026-10-02 to 10-05: T001–T009 and the T023 implementation ha
 ## Stages
 - [x] 0 orient — feature from the handover (feature.json on the stale `review` checkout points at 004; 001 is the active feature, T023 in flight). Spec, plan, tasks present. Worktree `worktrees/ovh-landing-zone-accelerator/001-foundation-loop` from origin/main.
 - [x] P plan + tasks — skipped: present.
-- [x] R spec-set review — stands in: the spec-set amendments since 2026-10-02 were each reviewed with their PRs (astra codex rounds, PRs #10–#20); the only change since is 53b3d24 (ADR-0003 accepted, other-cloud references removed, operator instruction D66), docs-only; `task check:specs` TRACE_OK requirements=15 tasks=23 checks=22 on 53b3d24 (2026-10-06, through the r3-e2 entry). No fresh fan-out, to spare credit.
+- [x] R spec-set review — stands in: the spec-set amendments since 2026-10-02 were each reviewed with their PRs (review leg 1 rounds, PRs #10–#20); the only change since is 53b3d24 (ADR-0003 accepted, other-cloud references removed, operator instruction D66), docs-only; `task check:specs` TRACE_OK requirements=15 tasks=23 checks=22 on 53b3d24 (2026-10-06, through the r3-e2 entry). No fresh fan-out, to spare credit.
 - [ ] L task loop — see *Tasks*
 - [ ] B branch review — not run
 - [ ] Hand-off — not reached
@@ -30,11 +30,11 @@ No golangci/arch-lint config exists; `go vet`/`gofmt` are the only Go linters av
 |---|---|---|---|---|---|---|
 
 ## Tasks
-| Task | Verdict | Review (legs, rounds, Claude?) | Gaps / decision request |
+| Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
 |---|---|---|---|
-| T001–T009 | CLOSED (merged) | per-PR astra rounds | see evidence/T00*.md |
-| T023 | CLOSED-WITH-GAPS | codex + Opus, 2 rounds (Opus: CI/harness diff); r1 REQUEST_CHANGES fixed, r2 REQUEST_CHANGES on registry digest coverage → decision | owner: GitHub run of the final head + record-only commit; decision: registry scope/inputs (evidence/T023.md) |
-| T024 | CLOSED-WITH-GAPS (test task: 5 tests red until T025) | codex + Opus, 2 rounds (Opus: offline entry tests); r1 REQUEST_CHANGES (3 test-isolation/coverage findings) fixed, r2 codex APPROVE / Opus CONCERNS | no target runs `./cmd/lz-offline`; decisions: T025 Verify + CI wiring, land T024+T025 together (evidence/T024.md) |
+| T001–T009 | CLOSED (merged) | per-PR review leg 1 rounds | see evidence/T00*.md |
+| T023 | CLOSED-WITH-GAPS | Review leg 1 + the strong review leg, 2 rounds (strong review leg: CI/harness diff); r1 REQUEST_CHANGES fixed, r2 REQUEST_CHANGES on registry digest coverage → decision | owner: GitHub run of the final head + record-only commit; decision: registry scope/inputs (evidence/T023.md) |
+| T024 | CLOSED-WITH-GAPS (test task: 5 tests red until T025) | Review leg 1 + the strong review leg, 2 rounds (strong review leg: offline entry tests); r1 REQUEST_CHANGES (3 test-isolation/coverage findings) fixed, r2 review leg 1 APPROVE / strong review leg CONCERNS | no target runs `./cmd/lz-offline`; decisions: T025 Verify + CI wiring, land T024+T025 together (evidence/T024.md) |
 
 ## Owner tasks (skipped by the loop)
 | Task | Command sheet |

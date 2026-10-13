@@ -2085,7 +2085,7 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 			}
 			return alias
 		},
-		// Review r1 (codex): ".." after a symlink climbs from the link's target, as the kernel
+		// Review r1 (review leg 1): ".." after a symlink climbs from the link's target, as the kernel
 		// resolves it; a check that cleans the path first looks beside the alias instead.
 		"dotdot-after-symlink-into-stack-root": func(t *testing.T, _ *runWorld, stack string) string {
 			mkdirPrivate(t, filepath.Join(stack, "tmp"))
@@ -2097,7 +2097,7 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 			}
 			return alias + string(filepath.Separator) + ".." + string(filepath.Separator) + "tmp"
 		},
-		// Review r1 (codex): a relative TMPDIR is resolved against the working directory.
+		// Review r1 (review leg 1): a relative TMPDIR is resolved against the working directory.
 		"relative-in-stack-root": func(t *testing.T, _ *runWorld, stack string) string {
 			mkdirPrivate(t, filepath.Join(stack, "tmp"))
 			t.Chdir(stack)
@@ -2158,7 +2158,7 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 		})
 	}
 
-	// Review r2 (codex): a stack root given through a symlink and ".." is the directory the kernel
+	// Review r2 (review leg 1): a stack root given through a symlink and ".." is the directory the kernel
 	// resolves (the alias target's parent), not the alias's lexical parent.
 	t.Run("stack-dir-dotdot-after-symlink", func(t *testing.T) {
 		w := newRunWorld(t)
@@ -2181,7 +2181,7 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 		}
 	})
 
-	// Review r1 (codex): a relative TMPDIR outside the roots is admitted, and the children get it as
+	// Review r1 (review leg 1): a relative TMPDIR outside the roots is admitted, and the children get it as
 	// one absolute directory: a relative HOME or TF_DATA_DIR would land under the stack root tofu
 	// runs in.
 	t.Run("relative-beside", func(t *testing.T) {
@@ -2286,7 +2286,7 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 	// T077 gap "the runner-level cleanup row does not watch the passphrase read", narrowed: a
 	// passphrase file another user could read is refused when read (file-mode, not naming TMPDIR),
 	// so the TMPDIR refusal must win over a passphrase read error. A read whose result is discarded
-	// before the check still passes here (review r1/r2, codex); lz-live's order is watched in
+	// before the check still passes here (review r1/r2, review leg 1); lz-live's order is watched in
 	// cmd/lz-live (TestProbeScratchOutsideCheckout/cleanup).
 	t.Run("cleanup-refused-before-passphrase", func(t *testing.T) {
 		root := tempPrivate(t)
@@ -2372,7 +2372,7 @@ func TestProbeCleanupRecordedProject(t *testing.T) {
 		}
 	})
 
-	// Review r1 (Opus): a probe start that could record no project id is refused before any probe
+	// Review r1 (strong review leg): a probe start that could record no project id is refused before any probe
 	// file or child, not after the apply, when its cleanup would be refused.
 	t.Run("start-without-project-refused", func(t *testing.T) {
 		root := tempPrivate(t)
