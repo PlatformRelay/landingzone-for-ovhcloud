@@ -12,7 +12,7 @@ Partial prototype evidence does not close a task whose deferred clauses remain u
 
 ## Early written journey (independent documentation)
 
-- [x] T014 Write the early journey and align the active/deferred boundary in spec.md, plan.md, tasks.md, contracts/checks.md, quickstart.md and docs/how-to/preconfigure-repository.md — documentation authoring independently approved 2026-10-02
+- [x] T014 Write the early journey and align the active/deferred boundary in spec.md, plan.md, tasks.md, contracts/checks.md, quickstart.md and docs/explanation/guided-setup-walkthrough.md — documentation authoring independently approved 2026-10-02
   - Requirements: FR-001, FR-002, FR-007, FR-008, FR-009, FR-010, SC-001 (prose only); ADRs: 0013, 0023; D29. Depends on: D29 authorization; no runtime task dependency.
   - Verify: exempt — docs-only. Check local links and whitespace; obtain fresh independent review of both this task-boundary delta and the narrative before checkbox/commit. Cover default provenance/reasons/consequences, explicit versus suggested choices, back/edit invalidation, honest conditional progress and help/cancel/plain/narrow expectations. Label synthetic examples as authored illustrations, not terminal captures; list commands as not implemented. Record next prototype requirements without implementing or executing them. Preserve all deferred controls and T012 dependencies.
   - Evidence: independent content/boundary review APPROVE on 2026-10-02; eight local links and two anchors resolve, whitespace clean, all 36 requirement clauses and 12 existing runtime verification contracts preserved. No behavioral tests, terminal captures, V001–V005 qualification or full T012 closure. Independent human clarity review remains distinct from runtime checks.
@@ -102,7 +102,7 @@ schemas. The complete publication, review-binding and outside-root controls rema
 
 ## Guide and final independent walkthrough
 
-- [ ] T012 Owner gate: postponed (D85) with the wizard. Complete the final setup/resume/review/export guide and human clarity rubric in docs/how-to/preconfigure-repository.md
+- [ ] T012 Owner gate: postponed (D85) with the wizard. Complete the final setup/resume/review/export guide and human clarity rubric in docs/explanation/guided-setup-walkthrough.md
   - Requirements: FR-001, FR-002, FR-006, FR-009, FR-010, SC-001; ADRs: 0013, 0023. Depends on: T009, T011.
   - Verify: exempt — docs-only prose/rubric authoring. Extend T014's early narrative using the implemented T009/T011 behavior and qualified captures; check instructions and recovery wording against that behavior. T014 does not satisfy or close this task. Any added executable example remains behavioral work with its own mapped target.
   - Evidence: docs content review; no invented behavioral-test evidence required.

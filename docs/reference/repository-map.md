@@ -53,6 +53,7 @@ ADR-0002 plans to generate it from the tree later. Counts are as of the first sl
 | `tests/live/chain/` | Expected and observed live-chain results that the chain's assertions are tested against. |
 | `pipelines/github/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
 | `.github/workflows/foundation.yml` | The one CI workflow; its `LZ_TARGETS` list is what CI runs. |
+| `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | How to contribute (checks, commits, merging); how to report a vulnerability. |
 | `Taskfile.yml` | Every check and operation as `task <target>`; `task --list` shows them. |
 | `mise.toml`, `mise.live.toml` | Pinned tool versions; the second adds host-only live tools. |
 | `.tflint.hcl`, `.sonarcloud.properties` | Linter and code-analysis configuration. |

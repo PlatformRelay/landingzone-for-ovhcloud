@@ -47,8 +47,8 @@ no runtime, network or regulated support is implied.
 The operator selected scalar naming with shared context and handwritten independent projections;
 spec 005's stages are its first concrete consumers (D85). Organisation-specific projections remain future work.
 
-The [first implementation guide](../docs/how-to/first-implementation.md) explains the minimum
-safety subset, local versus live qualification, evidence and stop conditions.
+The [contributing guide](../.github/CONTRIBUTING.md) explains how a task is picked, checked,
+evidenced and closed, and when to stop.
 
 ### Deferred CI source admission (KI-001)
 

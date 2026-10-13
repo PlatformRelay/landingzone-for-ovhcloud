@@ -1,5 +1,5 @@
 # Read the early journey
-No setup helper exists yet. Start with the [written walkthrough](../../docs/how-to/preconfigure-repository.md):
+No setup helper exists yet. Start with the [written walkthrough](../../docs/explanation/guided-setup-walkthrough.md):
 choose a use case, inspect a suggestion's source/reason/consequence, compare an explicit override,
 then follow an earlier edit and the resulting progress change. Its examples are synthetic authored
 illustrations, not captured output or qualified profiles. T014 delivers prose only.
