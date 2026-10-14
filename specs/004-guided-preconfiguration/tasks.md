@@ -10,6 +10,12 @@ T004–T005 and T010–T011, including synthetic persistence/export, remain defe
 real profile schemas exist. T008–T009, T012 and T013 retain their full dependencies.
 Partial prototype evidence does not close a task whose deferred clauses remain untested.
 
+**D113 (2026-10-14): amended and held.** D29's "real profile schemas" now exist:
+`schemas/deployments.schema.json` (v1alpha1), whose shape the strict decoder behind
+`task stacks:check` mirrors, so an export is checked offline and without credentials. The
+export target is that schema (see *Export target and live consequences*). **The D85 wizard gate
+stays closed**: no wizard task starts until the owner lifts it.
+
 ## Early written journey (independent documentation)
 
 - [x] T014 Write the early journey and align the active/deferred boundary in spec.md, plan.md, tasks.md, contracts/checks.md, quickstart.md and docs/explanation/guided-setup-walkthrough.md — documentation authoring independently approved 2026-10-02
@@ -43,7 +49,8 @@ cannot be inferred from a standalone prototype. Each partial result names its ex
 
 ## US2 — Leave and return safely (P1)
 Independent check: V002; current validity, not a saved percent, decides the resumed step.
-**Deferred under D29:** T004–T005, even with synthetic data, await real profile schemas.
+**Deferred under D29:** T004–T005, even with synthetic data, await real profile schemas
+(met by `schemas/deployments.schema.json`, D113; the D85 wizard gate still holds).
 The controls below remain mandatory when that prerequisite is met.
 
 - [ ] T004 [US2] Owner gate: postponed (D85) with the wizard. Write strict checkpoint/fault/concurrency tests in tools/internal/configure/session_test.go and tests/fixtures/configure/sessions/
@@ -88,7 +95,7 @@ it cannot close deferred integration clauses or enable persistence/export.
 ## US3 — Review and export a draft (P2)
 Independent checks: V003–V005; export is not permission to apply the resulting data.
 **Deferred under D29:** both synthetic and real export implementations await real profile
-schemas. The complete publication, review-binding and outside-root controls remain owed.
+schemas (met by `schemas/deployments.schema.json`, D113; the D85 wizard gate still holds). The complete publication, review-binding and outside-root controls remain owed.
 
 - [ ] T010 [US3] Owner gate: postponed (D85) with the wizard. Write reviewed-bundle/export safety tests in tools/internal/configure/export_test.go and tests/fixtures/configure/bundles/
   - Requirements: FR-004, FR-006, FR-008, SC-002; ADRs: 0003, 0005, 0021, 0023. Depends on: T005, T007 and real profile schemas (D29).
@@ -96,7 +103,7 @@ schemas. The complete publication, review-binding and outside-root controls rema
   - Evidence: `.local/evidence/004/t010-export-red.json`; initial status `not-run`.
 
 - [ ] T011 [US3] Owner gate: postponed (D85) with the wizard. Implement strict deterministic draft export in tools/internal/configure/export.go, tools/internal/configure/terminal.go and Taskfile.yml
-  - Requirements: FR-004, FR-006, FR-008, SC-002; ADRs: 0003, 0005, 0021, 0023. Depends on: T010, T009 and real profile schemas for all export work, including synthetic (D29). Real-export integration additionally depends on 001/T016, actual configuration schemas and supported catalogue creators in the later adoption spec, plus any dependent joint naming choice. Missing creators block real export; synthetic results never qualify it. Persistence keeps its own D29 gate.
+  - Requirements: FR-004, FR-006, FR-008, SC-002; ADRs: 0003, 0005, 0021, 0023. Depends on: T010, T009 and real profile schemas for all export work, including synthetic (D29). Real-export integration targets spec 005's `schemas/deployments.schema.json` and `modules/naming` (D113, replacing the 001/T016 dependency), validated by `task stacks:check` on a scratch copy; any dependent joint naming choice remains. Synthetic results never qualify real export. D29's gate for persistence is met by the same schema (D113); the D85 wizard gate still holds.
   - Verify: `task test:configure-export` (creates target): all T010 controls pass; confirmation binds exact effective draft/source digests and invalidates on change. Refresh helpers, show deterministic diff/blockers, atomically publish a complete schema-valid staging bundle with manifest and idempotent verified retry. No writes outside owned roots, cloud calls, secret collection, apply/commit/merge/procurement. Every guarded clause has red mutation proof; partial/missing discovery never passes.
   - Evidence: `.local/evidence/004/t011-export.json`; initial status `not-run`.
 

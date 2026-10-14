@@ -1,5 +1,5 @@
 # Feature Specification: Protected platform and recovery feasibility
-Created: 2026-10-01 · Status: draft · ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022
+Created: 2026-10-01 · Status: draft, re-scoped 2026-10-14 to one project (D113) · ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022
 
 ## Why and scope
 Observe the load-bearing cloud claims before building a landing zone. Cover ranked
@@ -7,15 +7,40 @@ spikes 1, 3, 5, 6 and 7 and the cloud isolation portion of spike 2; spike 4 belo
 No general module/runtime release, automatic purchase, production deny policy or
 unattended deployment is included. Unsupported routes stay explicitly blocked.
 
+## Re-scope to one project (D113, 2026-10-14)
+Spec 005's live runs changed what this spec can show. The owner re-scoped it (D113):
+- **Tag envelopes are refuted** (P25, D107): a tag condition on a project-URN policy does not scope
+  bucket reads. C006.9–C006.11 are withdrawn and ADR-0006's tag-envelope clause is amended.
+- **Isolation is tested only on the planes one project can show**: the tenant's S3 credentials and
+  its reach through Keystone/Swift. On the OVHcloud API plane a tenant deployer reaches every bucket
+  in a shared project (spec 005 KD-1), and one passphrase per account makes C005.2 fail by design.
+  **Real tenant isolation waits for a second project** (the KD-1 lift in spec 005); nothing here
+  claims it.
+- **Spikes run as probes on spec 005's live runner**: probe roots under `tests/live/probes/<root>`,
+  run by `task live:probe` (`lz-live probe`: host guard, deadline, inventory, destroy on exit,
+  leftover check). T002–T008 are dropped; no `spike:*` targets, `live:preflight`, RunConfig or
+  leases.
+- **EUR amounts are estimates**, not caps or admission conditions (D85, ADR-0024 amendment). The
+  budget rules in AGENTS.md apply, and each run records what it cost.
+- **State buckets are Object-Locked** (governance mode, default retention; D104): every state and
+  `.tflock` version is retained for the retention period. Locking, recovery and promotion account
+  for it (C005.8).
+- **Four probes come from spec 005's findings** (T025–T028): the tenant S3 user's reach to other
+  buckets through Keystone/Swift; whether an access token still works after its OAuth2 client is
+  deleted; which URN `account:apiovh:iam/*` actions are checked against (D109); `force-unlock` and
+  restoring an earlier state version on a locked bucket.
+
 ## User Scenarios & Testing
 ### User Story 1 — Admit and clean a bounded experiment (Priority: P1)
+**Superseded (D85, D113)** by spec 005's run core; kept as the record of the original design.
 Given known inventory, prices, cleanup health and an approved lease, a protected runner
 may execute in one dedicated sandbox project. Unknown inputs deny admission; cancellation
 and process death still leave an independently discoverable cleanup path. Test: V001–V002.
 ### User Story 2 — Recover and isolate state (Priority: P1)
 The maintainer in a clean environment restores the disposable fixture without its original
 account or KMS under the development custody amendment below; two tenant
-credentials cannot reach each other's state, and promotion never leaves two writers.
+credentials cannot reach each other's state on the S3 and Keystone/Swift planes (D113), and
+promotion never leaves two writers.
 Independent test: V003–V005.
 ### User Story 3 — Bound identity authority (Priority: P2)
 Each supported principal route has an attributable deny test, a working positive control
@@ -53,7 +78,7 @@ This amendment supplies no ADR ratification, numerical RunConfig, live authoriza
 passed task; absent setup or failed/missing recovery evidence blocks its dependent claim.
 
 ## Requirements
-- **FR-001**: MUST satisfy each clause below.
+- **FR-001**: MUST satisfy each clause below. FR-001–FR-003 are superseded as gates by spec 005's run core (D85, D113); no remaining task checks them.
   - **C001.1**: Require one operator-approved sandbox project ID and region.
   - **C001.2**: Require approved price/exposure calculation.
   - **C001.3**: Require two independently usable escrow holders, unless operator amends that requirement. For initial development, the approved [D49 amendment](#development-custody-amendment-d49) requires one maintainer plus a separately encrypted sealed offline copy, with independent usability and actual recovery evidence.
@@ -79,13 +104,14 @@ passed task; absent setup or failed/missing recovery evidence blocks its depende
   - **C004.5**: Restore known data in a clean runner without the original account or KMS.
   - **C004.6**: Never claim a fallback decrypts data written by another method.
 - **FR-005**: MUST satisfy each clause below.
-  - **C005.1**: Prove scoped fixture A cannot read/write B state or artifacts, and vice versa.
-  - **C005.2**: Prove A/B cannot use foreign decrypt authority.
+  - **C005.1**: Prove scoped fixture A cannot read/write B state or artifacts, and vice versa, with A's S3 credentials and through Keystone/Swift, inside one project (D113). The OVHcloud API plane is spec 005's KD-1 and waits for a second project.
+  - **C005.2**: Withdrawn until per-tenant keys or OKMS exist (D113): spec 005 uses one passphrase per account, so A/B share decrypt authority by design.
   - **C005.3**: Prove locking serializes concurrent writers.
   - **C005.4**: Prove interrupted-writer handling.
   - **C005.5**: Fence every old write path before replica promotion.
   - **C005.6**: Record replica lag against its approved bound.
   - **C005.7**: Do not infer cross-project/account isolation from within-project fixtures.
+  - **C005.8**: Account for Object Lock on the state buckets (D104): observe stale-lock recovery (`force-unlock`), restoring an earlier state version and teardown of a locked fixture (admin bypass or retention expiry) rather than assume them.
 - **FR-006**: MUST satisfy each clause below.
   - **C006.1**: Canary-test native-user routes.
   - **C006.2**: Canary-test service-account routes.
@@ -95,9 +121,9 @@ passed task; absent setup or failed/missing recovery evidence blocks its depende
   - **C006.6**: Drill native recovery before floor binding.
   - **C006.7**: Attempt floor-binding self-removal.
   - **C006.8**: Attempt floor-policy self-removal.
-  - **C006.9**: Test missing and present authorization tags.
-  - **C006.10**: Attempt cross-tenant retagging.
-  - **C006.11**: Test project-tag effects on applicable child operations for each route.
+  - **C006.9**: Withdrawn (P25 refuted, D107, D113): test missing and present authorization tags.
+  - **C006.10**: Withdrawn (P25 refuted, D107, D113): attempt cross-tenant retagging.
+  - **C006.11**: Withdrawn (P25 refuted, D107, D113): test project-tag effects on applicable child operations for each route.
   - **C006.12**: Capture source-bound policy/group/tag limits and current counts without saturation tests.
   - **C006.13**: Measure bounded allow/deny propagation with repeated positive/negative controls; unknown windows remain UNVERIFIED.
 - **FR-007**: MUST satisfy each clause below.
@@ -119,27 +145,22 @@ passed task; absent setup or failed/missing recovery evidence blocks its depende
   - **C009.5**: Keep missing/timeout/cap-limited observations blocked rather than passed.
 
 ## Predefined spike bounds and refutation stops
-These are draft maximums for the first experiment, not permission to run it. An approved
-RunConfig may reduce them; increasing a ceiling requires a reviewed operator amendment.
-Each timebox is elapsed wall time across admission, setup and probe retries. At deadline
-or reserved exposure exhaustion, stop new writes, retain a blocked result and continue
-scoped reconciliation/cleanup under its separate authority. Reserve cleanup and recurring
-liabilities before starting: a spend cap covers setup, probe and teardown, not only billed
-usage so far. Unknown price or inability to bound exposure denies admission. Actual cost
-and all outstanding reservations must also fit D8's EUR 200 total ceiling. These caps
-sum to EUR 110; that leaves at most EUR 90 for other remaining trial liabilities, never fresh
-headroom inferred from delayed billing. Forge execution costs/capacity are separate setup
-prerequisites; EUR 0 below is cloud spend, not a promise of free runners.
+These are draft bounds for the first experiment, not permission to run it. Each timebox is
+elapsed wall time for one probe run; `lz-live probe` enforces a deadline, then destroys and
+checks for leftovers. The EUR amounts are **estimates** (D113): cost is hygiene, not an
+admission condition (D85, ADR-0024 amendment). Each run records its actual cost, as AGENTS.md
+asks. Forge execution costs/capacity are separate setup prerequisites; EUR 0 below is cloud
+spend, not a promise of free runners.
 
-| Ranked spike | Checks/tasks | Max elapsed | Max exposure EUR | If refuted: withdraw/gate before any next implementation |
+| Ranked spike | Checks/tasks | Max elapsed | Estimated cost EUR | If refuted: withdraw/gate before any next implementation |
 | --- | --- | --- | --- | --- |
 | 1 Independent decryption and clean bootstrap | V003; T009–T010 | 8 h | 30 | Withdraw ADR-0009 recoverable-bootstrap/key-loss claim and ADR-0022 recovery readiness for the affected route. No deployment on that recovery mechanism. |
-| 2 State ownership and root ordering | V004; T011–T012 + 002/V001–V002 | 4 h | 20 | Gate ADR-0004 ownership/artifact isolation and ADR-0009 affected state route. Local roots alone cannot rescue cloud isolation. |
-| 3 Floor coverage and native lockout recovery | V006; T015–T017 | 4 h | 10 | Withdraw ADR-0006 preventive/floor or tag-envelope claim for each escaping route, and gate dependent ADR-0018/0021 authority. Failed native recovery forbids floor binding. |
-| 4 Merge authorization and races | 002/V003–V007; local T008/T012/T016; live T019 | 8 h total; 10 min per forge run | 0 | Gate ADR-0005/0007 unattended merge/apply on a stale/forged/racy path. Missing adapter is blocked, not refuted. |
-| 5 Credential issuance and revocation | V007; T018–T019 | 4 h | 10 | Withdraw ADR-0009/0018 JIT/bridge claim for issuer failure or excessive residual window. Fallback gains authority only after its own passing suite. |
-| 6 Sandbox safety under failure | V001–V002; T002–T008 | 4 h | 20 | Stop all new live admission under ADR-0008 when ownership/reaper safety fails or orphan remains; only reconciliation/cleanup continues. |
-| 7 Locking, interruption and promotion | V005; T013–T014 | 8 h | 20 | Withdraw ADR-0009/0022 locking/promotion readiness on concurrent writes, unfenced old writer or excessive lag. No replica activation. |
+| 2 State ownership and root ordering | V004; T011–T012, T025 (S3 and Keystone/Swift planes, D113) | 4 h | 20 | Gate ADR-0004 ownership/artifact isolation and ADR-0009 affected state route. Local roots alone cannot rescue cloud isolation. |
+| 3 Floor coverage and native lockout recovery | V006; T015–T017, T027 | 4 h | 10 | Withdraw ADR-0006 preventive/floor claim for each escaping route, and gate dependent ADR-0018/0021 authority. Failed native recovery forbids floor binding. The tag-envelope claim is already withdrawn (P25, D113). |
+| 4 Merge authorization and races | retired spec 002 (D113); postponed in spec 005's out-of-scope table | — | 0 | Gate ADR-0005/0007 unattended merge/apply on a stale/forged/racy path. Missing adapter is blocked, not refuted. |
+| 5 Credential issuance and revocation | V007; T018–T019, T026 | 4 h | 10 | Withdraw ADR-0009/0018 JIT/bridge claim for issuer failure or excessive residual window. Fallback gains authority only after its own passing suite. |
+| 6 Sandbox safety under failure | superseded by spec 005's run core (D85, D113) | — | — | Spec 005 stops a run that leaves a leftover; only cleanup continues. |
+| 7 Locking, interruption and promotion | V005; T013–T014, T028 | 8 h | 20 | Withdraw ADR-0009/0022 locking/promotion readiness on concurrent writes, unfenced old writer or excessive lag. No replica activation. |
 
 A decision packet can be complete while qualification fails. `pass` needs every required
 positive, negative, cleanup and review observation. `refuted` produces a failing check
@@ -155,20 +176,22 @@ valid/defect control; parent coverage alone cannot satisfy an untested child cla
 ## Acceptance and predefined verification
 All commands are **planned**, with creating tasks in tasks.md. No implementation or live
 check has run. Evidence below is initially `not-run`; paths are under `.local/evidence/`.
+Live checks run as probe roots on spec 005's runner: `task live:probe -- --reviewed-sha <sha>
+tests/live/probes/<root>` (D113); the root names below are planned.
 
 | Check | Requirements | Criterion: positive and negative outcomes | Verify (planned) | Evidence |
 | --- | --- | --- | --- | --- |
-| V001 | FR-001, FR-002, SC-001 | approved admission succeeds; missing/wrong project, unknown cost, stale billing, exhausted cap or unhealthy cleanup blocks; cleanup still admitted | `task test:sandbox-admission; task live:preflight` | `003/admission.json` |
-| V002 | FR-003, SC-001 | injected crash/partial create/reaper outage leave recorded ids; recovery empties owned fixture inventory with no foreign deletion | `task test:sandbox-reaper; task spike:sandbox-failure` | `003/sandbox-failure.json` |
-| V003 | FR-004 | actual pinned-tool state and saved plans decrypt/consume with the correct key, reject missing/wrong keys and plaintext input; separate state/plan-enforcement mutations fail; private canary scan finds no plaintext canary; fresh runner restores known data without the original account or KMS, wrong escrow and same-key replica fail, empty bootstrap imports ids/reissues secrets | `task spike:recovery` | `003/recovery.json` |
-| V004 | FR-005 | A control reads/writes own state and decrypts own fixture; A→B and B→A read/write/decrypt/artifact probes deny with attributable reasons | `task spike:state-isolation` | `003/isolation.json` |
-| V005 | FR-005 | two writers serialize; interrupted lock recovered only after owner-death proof; promotion disables primary writes, replica lag within approved bound; old writer is denied | `task spike:locking-promotion` | `003/locking.json` |
-| V006 | FR-006 | per-route positive/denial controls cover delete, floor/policy self-removal, missing/present tags, cross-tenant retagging and applicable child operations; native recovery works during federation failure; IAM limits/counts have source-bound or explicit unknown status and allow/deny propagation is measured within the deadline; absent subcontrol blocks spike-3/envelope-authority pass | `task spike:deny-floor` | `003/deny-floor.json` |
-| V007 | FR-007 | already-issued credential expires/revokes within its approved window; issuer/bridge failure blocks dependent use; fallback only after same suite passes | `task spike:credentials` | `003/credentials.json` |
-| V008 | FR-008, FR-009, SC-002 | schema/limits/route inventory cites source and actual capture; invented limit or unmeasured timing guarantee refuses readiness; unsupported tuple refuses readiness; sanitised packet has versions, revisions, cost, cleanup result and independent disposition | `task spike:qualification` | `003/qualification.json` |
+| V001 | FR-001, FR-002, SC-001 | superseded by spec 005's run core (D85, D113); not run | — | — |
+| V002 | FR-003, SC-001 | superseded by spec 005's run core (D85, D113); not run | — | — |
+| V003 | FR-004 | actual pinned-tool state and saved plans decrypt/consume with the correct key, reject missing/wrong keys and plaintext input; separate state/plan-enforcement mutations fail; private canary scan finds no plaintext canary; fresh runner restores known data without the original account or KMS, wrong escrow and same-key replica fail, empty bootstrap imports ids/reissues secrets | `task live:probe` on `tests/live/probes/recovery` | `003/recovery.json` |
+| V004 | FR-005 | A control reads/writes own state and artefact; A→B and B→A read/write/artefact probes with S3 credentials and through Keystone/Swift deny with attributable reasons; the API plane is KD-1 and decrypt is withdrawn (D113) | `task live:probe` on `tests/live/probes/state-isolation`, `tests/live/probes/swift-reach` | `003/isolation.json` |
+| V005 | FR-005 | two writers serialize; interrupted lock recovered only after owner-death proof, `force-unlock` and an earlier-version restore observed on an Object-Locked bucket; promotion disables primary writes, replica lag within approved bound; old writer is denied | `task live:probe` on `tests/live/probes/state-locking`, `tests/live/probes/locked-recovery` | `003/locking.json` |
+| V006 | FR-006 | per-route positive/denial controls cover delete and floor/policy self-removal, with `account:apiovh:iam/*` denials bound to the URN T027 observes; native recovery works during federation failure; IAM limits/counts have source-bound or explicit unknown status and allow/deny propagation is measured within the deadline; absent subcontrol blocks spike-3 pass | `task live:probe` on `tests/live/probes/deny-floor`, `tests/live/probes/iam-urn` | `003/deny-floor.json` |
+| V007 | FR-007 | already-issued credential expires/revokes within its approved window; issuer/bridge failure blocks dependent use; fallback only after same suite passes | `task live:probe` on `tests/live/probes/credentials`, `tests/live/probes/token-residual` | `003/credentials.json` |
+| V008 | FR-008, FR-009, SC-002 | schema/limits/route inventory cites source and actual capture; invented limit or unmeasured timing guarantee refuses readiness; unsupported tuple refuses readiness; sanitised packet has versions, revisions, cost, cleanup result and independent disposition | `task test:qualification` | `003/qualification.json` |
 
 ## Success Criteria
-- **SC-001**: Admission and every failure drill leave no unaccounted owned resource and no new admission above the EUR 200 total exposure ceiling (V001–V002).
+- **SC-001**: Superseded with V001–V002 (D113): spec 005's leftover check covers every probe run.
 - **SC-002**: Each of the top-seven spikes has observed evidence or a specific refuted/blocked result with a downstream stop gate; no UNVERIFIED control is called supported (V008 and phase 002).
 
 ## Edge cases
@@ -178,20 +201,22 @@ backup; lost original key; unreadable OAuth secret; stale lock; old writer with 
 unknown federation account; duplicate issuer; expired token mid-apply; denial caused by outage.
 
 ## Implementation surface
-Go probe/test helpers live in `tools/internal/probes/`; root `tests/` holds their fixtures.
-`tools/internal/sandbox/`, `tests/live/{sandbox,recovery,state,identity}/`,
-`tests/{security,recovery}/`, `harness/live-checks.yaml`, `catalog/`,
-`docs/adr/` (cost/sandbox decision), `docs/reference/{test-costs,provider-gaps}.md`.
+Probe roots live in `tests/live/probes/<root>/` and run through `task live:probe` (spec 005's
+runner); their Go checks and helpers live in `tools/internal/probes/live/` packages such as
+`state`, `storageiam` and `identity` (D113). Root
+`tests/fixtures/` holds captured outputs. Decisions go to `docs/adr/`; observations to
+`docs/reference/verification-status.md`.
 
 ## Dependencies and stop conditions
 Docs-only T001 has no 001 dependency. Behavioral preparation starts after 001/T009,
-the minimum local safety subset T001–T009, plus its own cost/sandbox approval and
-admission/reaper prerequisites. Naming, both-forge qualification and latency are not
-on that critical path. Local 002/T008, T012 and T016 gate the aggregate only; a missing
-forge adapter blocks forge readiness, not project-scoped platform observations.
+the minimum local safety subset T001–T009, and live work after spec 005's live lane
+(005/T047), which replaces the admission/reaper prerequisites (D85, D113). Naming,
+both-forge qualification and latency are not on that critical path. Spec 002 is retired
+(D113); its items report `blocked` in the aggregate, never pass.
 No live work is authorized by this planning request. Baseline is one pre-existing
 sandbox project under D8, with two separately scoped state/artifact fixtures inside it;
-this tests those routes, not cross-project or account isolation. Region and backup
+this tests the S3 and Keystone/Swift routes, not cross-project or account isolation. Real
+tenant isolation waits for a second project (D113). Region and backup
 location must be explicitly approved; no pool or second region is assumed. Account-scoped
 IAM/federation, backup placement and state-project ownership retain their separately
 recorded operator dispositions and actual setup gates. D49 settles initial-development
@@ -200,6 +225,6 @@ availability and independent recovery remain unverified. No second human is requ
 that limited scope, and maintainer-loss/production two-person recovery is not qualified.
 If required recovery/account scope is absent, the affected probe
 remains blocked; a project's existence does not authorize account-wide changes.
-Protected scoped runners, cleanup identity and numerical runtime/lag/credential windows
-are required. Cost/sandbox ADR precedes admission implementation. No automatic orders,
+Every live run goes through spec 005's runner (`lz-live probe`) as an owner session;
+numerical lag/credential windows are required where a check names them. No automatic orders,
 production floor binding or ordinary-account singleton changes are authorized.
