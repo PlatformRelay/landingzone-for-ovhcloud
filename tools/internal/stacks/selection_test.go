@@ -487,6 +487,9 @@ func TestSelectionCodeDigest(t *testing.T) {
 		{"module-object-storage", "modules/object-storage/main.tf", []string{"demo-dev-gra11-runtime"}},
 		{"component-state-backend", "components/state-backend/main.tf", []string{"account-bootstrap", "demo-state"}},
 		{"module-iam-policy", "modules/iam-policy/main.tf", []string{"account-governance"}},
+		// A Markdown-only change in a module of a stack's closure changes that stack's code digest
+		// (spec 005 T108): the cloud-quota README reselects demo-dev-project.
+		{"module-cloud-quota-readme", "modules/cloud-quota/README.md", []string{"demo-dev-project"}},
 		{"module-naming", "modules/naming/main.tf", all},
 		{"unreached", "stages/t040-unreached/main.tf", nil},
 		{"working-dir", "stacks/tenants/demo/dev/project/.terraform/terraform.tfstate", nil},
