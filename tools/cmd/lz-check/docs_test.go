@@ -181,9 +181,8 @@ func TestDocsRejected(t *testing.T) {
 }
 
 // T107: the committed registry's docs:check scope names every README the check
-// reads in this repository (the root one aside: the offline entry's snapshot
-// holds none, so a scope naming it could not be digested there), so editing a
-// README selects docs:check and changes its digest.
+// reads in this repository, the root one included (the offline entry admits it
+// since r4-e2), so editing a README selects docs:check and changes its digest.
 func TestDocsRegistryScopeREADMEs(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	readmes, _, err := readmePages(root)
@@ -213,7 +212,7 @@ func TestDocsRegistryScopeREADMEs(t *testing.T) {
 		t.Errorf("BEHAVIORAL_RED: docs:check scope %v lost docs", scope)
 	}
 	for _, p := range readmes {
-		if p != "README.md" && !slices.Contains(scope, p) {
+		if !slices.Contains(scope, p) {
 			t.Errorf("BEHAVIORAL_RED: docs:check reads %s, but its registry scope does not name it", p)
 		}
 	}

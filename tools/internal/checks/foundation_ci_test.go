@@ -124,6 +124,30 @@ func TestFoundationWorkflowShape(t *testing.T) {
 	}
 }
 
+// Every curl in the rendered workflow is limited to HTTPS, and one that
+// follows redirects is limited to HTTPS on each redirect too, as the fetch
+// script does: the digests already pin the content, so this keeps the token
+// and the transfer off clear text.
+func TestFoundationWorkflowCurlHTTPSOnly(t *testing.T) {
+	workflow := string(renderSource(t, encode(t, foundationSource())))
+	count := 0
+	for _, line := range strings.Split(workflow, "\n") {
+		if !strings.Contains(line, "curl ") {
+			continue
+		}
+		count++
+		if !strings.Contains(line, `curl --proto '=https' `) {
+			t.Errorf("BEHAVIORAL_RED: curl not limited to HTTPS: %s", line)
+		}
+		if strings.Contains(line, "-fsSL") && !strings.Contains(line, `--proto-redir '=https'`) {
+			t.Errorf("BEHAVIORAL_RED: curl follows redirects without limiting them to HTTPS: %s", line)
+		}
+	}
+	if count != 3 {
+		t.Errorf("BEHAVIORAL_RED: %d curl lines, want 3 (token, manifest, layer)", count)
+	}
+}
+
 // Every change to the committed workflow is drift from the rendered one,
 // whichever authority it widens.
 func TestFoundationWorkflowDrift(t *testing.T) {
@@ -371,13 +395,35 @@ func observeRun(t *testing.T, role, candidate, name string) FoundationRun {
 }
 
 // recordedRuns is the approved source and the record of the green PR head
-// and the red control, observed afresh for every caller.
+// and the red control, observed afresh for every caller. The runs executed
+// the workflow rendered from source.json by the renderer of their day
+// (workflow.sha, which TestFoundationObserve pins); the judge expects the
+// current renderer's blob, so each run's workflow blob is moved to it here.
+// Every other observed field stays as GitHub reported it, and a run whose
+// blob differs is still refused ("stale workflow" below).
+const fixtureRenderBlob = "669446634d020872049cd871468b73a8c8c39f21"
+
 func recordedRuns(t *testing.T) ([]byte, FoundationRuns) {
 	t.Helper()
-	return readRunFile(t, "source.json"), FoundationRuns{Runs: []FoundationRun{
+	source := readRunFile(t, "source.json")
+	parsed, err := ParseFoundationSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := gitBlob([]byte(RenderFoundationWorkflow(parsed)))
+	// Pinned, so a renderer change fails here until someone decides to move
+	// the fixtures again (or re-captures them), rather than passing silently.
+	if rendered != fixtureRenderBlob {
+		t.Fatalf("BEHAVIORAL_RED: the renderer now makes blob %s from the captured source, not %s; re-capture the runs or update fixtureRenderBlob deliberately", rendered, fixtureRenderBlob)
+	}
+	runs := FoundationRuns{Runs: []FoundationRun{
 		observeRun(t, RoleHead, prHead, "head"),
 		observeRun(t, RoleRedControl, redHead, "red"),
 	}}
+	for i := range runs.Runs {
+		runs.Runs[i].WorkflowBlob = rendered
+	}
+	return source, runs
 }
 
 var foundationTargets = []string{"verify:toolchain", "test:offline-boundary", "test:reports", "test:traceability", "check:specs",

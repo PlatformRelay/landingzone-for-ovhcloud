@@ -18,8 +18,8 @@ Every page under `docs/`, sorted by what you need from it. Words you do not know
   [runbook](how-to/run-the-first-slice.md), and read
   [ADR-0009](adr/0009-state-backend-bootstrap-and-credentials.md) for state and credentials first.
 - **Contributing?** Read the [contributing guide](../.github/CONTRIBUTING.md) for how work is
-  picked, checked and merged, `AGENTS.md` at the repository root for the working rules, and the
-  [repository map](reference/repository-map.md) to find your way.
+  picked, checked and merged, [`AGENTS.md`](../AGENTS.md) at the repository root for the
+  working rules, and the [repository map](reference/repository-map.md) to find your way.
 
 ## Tutorials (learn by doing)
 

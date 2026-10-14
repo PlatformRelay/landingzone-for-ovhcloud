@@ -773,7 +773,7 @@ func liveLaneCmds(t *testing.T, repo string) []string {
 // TestLiveLaneShardsComplement: test:live-lane runs its Go controls as two concurrent `go test`
 // processes, one with `-run <re>` and one with `-skip <re>`. The serial tests of ./internal/live
 // (they set the process environment) then split across two processes, and the target stays well
-// under the offline entry's 120 s child limit on slow runners. The split drops no test only while
+// under the offline entry's 240 s child limit on slow runners. The split drops no test only while
 // both shards name the same pattern and the same packages, the target waits for both, and either
 // failure fails it; a shard edited on its own fails here.
 func TestLiveLaneShardsComplement(t *testing.T) {

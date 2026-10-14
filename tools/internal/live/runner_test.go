@@ -790,7 +790,7 @@ func TestRunnerDefaultDeadline(t *testing.T) {
 	}
 }
 
-// testWaitCap bounds every wait a test runner injects, well under the offline entry's 120 s child
+// testWaitCap bounds every wait a test runner injects, well under the offline entry's 240 s child
 // limit (T114): a test that hangs then fails within it instead of holding the whole package.
 const testWaitCap = 30 * time.Second
 

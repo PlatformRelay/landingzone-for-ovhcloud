@@ -13,10 +13,10 @@ references:
   - path: tools/harness/capabilities.yaml
     blob: ecbfcfbec8dac380494d8b930e40205e6113a05b
   - path: tools/cmd/lz-offline/main.go
-    blob: 141914f1e30740e4aa51950819f99bc77f10816f
+    blob: aac737fa9f84ec0ec894b47b0161d0e379c193dd
   - path: tools/internal/live/guard.go
     blob: 68ce6304d38b9a5abd6c2d906c781737562775a3
-last_verified: 7e9e3a80357ab2a0b9b923d888854e2c4835230f
+last_verified: f35fade70aa7102e3e3bfcb2f19ad535745e90a2
 ---
 
 # Architecture overview
@@ -104,8 +104,14 @@ matrix) and [ADR-0018](../adr/0018-identity-planes-roles-and-providers.md).
 `lz-offline` is installed from a digest-pinned build outside the clone. It takes a read-only
 snapshot of the checkout (the *candidate*), copies it into a private scratch directory and runs
 the checks there, with the pinned toolchain, a provider mirror and no network
-(`tools/harness/capabilities.yaml`). The checkout itself is never written. `lz-live` refuses to run inside the offline entry, from a linked
-worktree, on a dirty tree, or at a commit other than the reviewed one on `origin/main`. Today it
+(`tools/harness/capabilities.yaml`). The snapshot holds only a fixed list of root entries: the
+Taskfile and tool configuration, `.github`, `pipelines`, `tools`, `tests`, `specs`, `docs`,
+`schemas`, the module, component, stage and stack trees, `README.md` with the `LICENSE` and
+`NOTICE` it links, `AGENTS.md`, `mise.live.toml` and `.specify`. At every level it leaves out
+`.git`, `.local`, `.terraform`, `.cache`, `.env`, `.env.*` and `.envrc`, refuses links, and
+gives each target one 240 s deadline. The checkout itself is never written. `lz-live` refuses to
+run inside the offline entry, from a linked worktree, on a dirty tree, or at a commit other than
+the reviewed one on `origin/main`. Today it
 runs from the maintainer's workstation rather than a protected pipeline (known deviation KD-2 in
 the [spec](../../specs/005-first-landing-zone-slice/spec.md#known-deviations)). Why:
 [ADR-0007](../adr/0007-pipeline-portability.md) (task contract, Terramate),

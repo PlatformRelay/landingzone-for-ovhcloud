@@ -16,6 +16,8 @@ references:
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
+  - path: mise.live.toml
+    blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
 last_verified: f05ade00658aa58a0b1d697dd45753dc0046100a

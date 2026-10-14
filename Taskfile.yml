@@ -165,7 +165,7 @@ tasks:
   # The Go controls run as two concurrent shards, -run and -skip of one pattern over
   # the same packages: the serial chain and observe tests of ./internal/live (they
   # set the process environment) run in a second process, which keeps the target
-  # well under the entry's 120 s child limit on slow runners. Both shards are
+  # well under the entry's 240 s child limit on slow runners. Both shards are
   # awaited and either failure fails the target (TestLiveLaneShardsComplement).
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)

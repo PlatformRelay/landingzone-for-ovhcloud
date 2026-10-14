@@ -30,7 +30,10 @@ func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 	candidate, destination := candidateTree(t)
 	files := map[string]string{"tools/a.go": "package a\n", "tools/.env": "SECRET=x\n", "secrets.txt": "x\n",
 		"specs/001-x/spec.md": "# spec\n", "docs/adr/0001-x.md": "# ADR\n", ".tflint.hcl": "config {}\n",
-		".github/workflows/foundation.yml": "name: foundation\n", "pipelines/github/foundation-source.json": "{}\n"}
+		".github/workflows/foundation.yml": "name: foundation\n", "pipelines/github/foundation-source.json": "{}\n",
+		"README.md": "# readme\n", "LICENSE": "license\n", "NOTICE": "notice\n", "AGENTS.md": "# agents\n",
+		"mise.live.toml": "[tools]\n", ".specify/memory/x.md": "# memory\n", ".specify/.env": "SECRET=x\n",
+		"harness/x": "retired root\n"}
 	for name, body := range files {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(candidate, name)), 0700); err != nil {
 			t.Fatal(err)
@@ -43,14 +46,19 @@ func TestSnapshotCopiesAllowlistOnly(t *testing.T) {
 		t.Fatalf("valid candidate rejected: %v", err)
 	}
 	// Specs and ADRs are data the trace check reads; the workflow and its
-	// approved source are data the foundation CI check reads.
+	// approved source are data the foundation CI check reads. The root README
+	// and the files it links, the working contract, the live pin and Spec
+	// Kit's memory are data the docs and registry checks read.
 	for _, name := range []string{"tools/a.go", "specs/001-x/spec.md", "docs/adr/0001-x.md", ".tflint.hcl",
-		".github/workflows/foundation.yml", "pipelines/github/foundation-source.json"} {
+		".github/workflows/foundation.yml", "pipelines/github/foundation-source.json",
+		"README.md", "LICENSE", "NOTICE", "AGENTS.md", "mise.live.toml", ".specify/memory/x.md"} {
 		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
-			t.Errorf("allowlisted file missing: %v", err)
+			t.Errorf("BEHAVIORAL_RED: allowlisted file missing: %v", err)
 		}
 	}
-	for _, name := range []string{"tools/.env", "secrets.txt"} {
+	// harness/ moved to tools/harness/; a root harness/ is no longer data any
+	// check reads.
+	for _, name := range []string{"tools/.env", "secrets.txt", ".specify/.env", "harness/x"} {
 		if _, err := os.Stat(filepath.Join(destination, name)); err == nil {
 			t.Errorf("BEHAVIORAL_RED: %s copied", name)
 		}
@@ -258,5 +266,46 @@ func TestSnapshotHonoursDeadline(t *testing.T) {
 	cancel()
 	if err := snapshot(ctx, candidate, destination); err == nil {
 		t.Error("BEHAVIORAL_RED: expired deadline admitted")
+	}
+}
+
+// One uniform deadline per target: 240 s is about 2.5 times the slowest
+// target seen in CI (test:live-lane, 94 s), and one hung target plus a normal
+// run (about 5 minutes) still ends inside the 10-minute job. It is also how
+// long KI-002's unbounded memory and process use can last, so a change here
+// changes that window.
+func TestChildDeadline(t *testing.T) {
+	if childDeadline != 240*time.Second {
+		t.Errorf("BEHAVIORAL_RED: childDeadline is %v, want 240s", childDeadline)
+	}
+}
+
+// The provider fixture goes into a new private directory each time, never a
+// fixed name in /tmp that something else could have planted first.
+func TestProviderScratch(t *testing.T) {
+	parent := t.TempDir()
+	planted := filepath.Join(t.TempDir(), "planted")
+	if err := os.Mkdir(planted, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(planted, filepath.Join(parent, "lz-provider")); err != nil {
+		t.Fatal(err)
+	}
+	first, err := providerScratch(parent)
+	if err != nil {
+		t.Fatalf("BEHAVIORAL_RED: %v", err)
+	}
+	second, err := providerScratch(parent)
+	if err != nil {
+		t.Fatalf("BEHAVIORAL_RED: %v", err)
+	}
+	if first == second || filepath.Dir(first) != parent || filepath.Dir(second) != parent {
+		t.Errorf("BEHAVIORAL_RED: scratch directories %s and %s are not new entries of %s", first, second, parent)
+	}
+	for _, directory := range []string{first, second} {
+		info, err := os.Lstat(directory)
+		if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+			t.Errorf("BEHAVIORAL_RED: %s is not a private directory: %v %v", directory, info, err)
+		}
 	}
 }
