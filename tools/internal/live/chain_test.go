@@ -371,11 +371,12 @@ func (c chainAdminTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 
 // chainExec is one chain run's setup beyond the fake world.
 type chainExec struct {
-	target   string
-	deadline time.Duration
-	signal   os.Signal // sent once a call blocks (laneStack.Block); nil: nothing is sent
-	seed     syntheticSeed
-	faults   map[string]listFault
+	target string
+	// deadlineAtBlock: the run's deadline is reached once a call blocks (T114; was a 6 s deadline).
+	deadlineAtBlock bool
+	signal          os.Signal // sent once a call blocks (laneStack.Block); nil: nothing is sent
+	seed            syntheticSeed
+	faults          map[string]listFault
 	// T047 (coordinator decisions 1, 3): early serves the seed from the first request (it is in
 	// the baseline); atBlock runs once a call blocks, before the signal; atFinal runs on the first
 	// listing request after an apply (the final reconciliation's first listing); production lists
@@ -397,6 +398,18 @@ type chainExec struct {
 	// stateObjects answers the state-object check's GetObject of an instance's state key (T102);
 	// an instance not named gets an encryption envelope.
 	stateObjects map[string]chainStateAnswer
+}
+
+// chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114).
+func (c chainExec) chainDeadline() time.Duration { return testWaitCap }
+
+// deadlineAt is the channel that reaches the chain's deadline: block when c.deadlineAtBlock, else
+// nil (only the deadline's own time).
+func (c chainExec) deadlineAt(block chan struct{}) <-chan struct{} {
+	if !c.deadlineAtBlock {
+		return nil
+	}
+	return block
 }
 
 // chainStateAnswer is the fake S3 endpoint's answer to one state object's GetObject.
@@ -484,7 +497,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	defer cancel()
 	sigs := make(chan os.Signal, 1)
 	var invAtBlock []InventoryEntry
-	stop, watched := make(chan struct{}), make(chan struct{})
+	stop, watched, deadlineAt := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(watched)
 		for {
@@ -500,16 +513,34 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 				c.atBlock(runDir)
 			}
 			// The blocked call printed its apply_complete events first: the inventory holds
-			// them while the child still runs, or it is not appended as they arrive.
-			for i := 0; i < 150; i++ {
+			// them while the child still runs, or it is not appended as they arrive. A blocked
+			// stack that reports no resource has none to wait for (T114: 3 s spent waiting before).
+			var id string
+			waitFor(3*time.Second, func() bool { // the file may be seen before its content
+				raw, _ := os.ReadFile(h.world.Log + ".blocked")
+				id = string(raw)
+				return id != ""
+			})
+			creates := 1 // unknown stack: wait as before
+			if in, err := h.m.Row(id); err == nil {
+				if st := h.world.Stacks[in.Path]; st.Block == "apply+events" {
+					creates = len(st.Creates)
+				} else {
+					creates = 0 // only "apply+events" prints events before it blocks
+				}
+			}
+			for i := 0; i < 150 && creates > 0; i++ {
 				invAtBlock, _ = ReadInventory(runDir)
-				if len(invAtBlock) > 0 && invAtBlock[len(invAtBlock)-1].Stack == "demo-dev-gra11-runtime" {
+				if len(invAtBlock) > 0 && invAtBlock[len(invAtBlock)-1].Stack == id {
 					break
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
 			if c.signal != nil {
 				sigs <- c.signal
+			}
+			if c.deadlineAtBlock {
+				close(deadlineAt) // the deadline is reached at the block (T114)
 			}
 			return
 		}
@@ -551,7 +582,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
-		Deadline: c.deadline, Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c)})
+		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt)})
 	process := streams()
 	close(stop)
 	<-watched
@@ -732,7 +763,7 @@ func TestChainDestroyOnExit(t *testing.T) {
 		name     string
 		setup    func(h *laneHarness)
 		signal   os.Signal
-		deadline time.Duration
+		deadline bool     // the deadline is reached once the runtime apply blocks
 		applied  []string // forward applies that ran (the failing one included)
 		destroy  []string
 		stopped  string // the signal the blocked apply got ("" when none blocks)
@@ -756,13 +787,13 @@ func TestChainDestroyOnExit(t *testing.T) {
 		{name: "deadline", setup: func(h *laneHarness) {
 			h.setStack("demo-dev-gra11-runtime", func(s *laneStack) { s.Block = "apply+events" })
 		},
-			deadline: 6 * time.Second, applied: laneOrder, destroy: chainDestroyOrder, stopped: "interrupt", reason: "deadline"},
+			deadline: true, applied: laneOrder, destroy: chainDestroyOrder, stopped: "interrupt", reason: "deadline"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newChainHarness(t)
 			tc.setup(h)
-			r := h.chain(chainExec{signal: tc.signal, deadline: tc.deadline})
+			r := h.chain(chainExec{signal: tc.signal, deadlineAtBlock: tc.deadline})
 			if tc.exit != 0 {
 				laneExit(t, r.laneRun, tc.exit)
 			} else if r.err == nil {
@@ -1073,6 +1104,7 @@ func TestChainDestroyVerb(t *testing.T) {
 // mise.live.toml (lz-offline's candidate allow-list): there the mise.toml half runs and the pin
 // half is skipped, naming why; on the host both run.
 func TestLiveToolchainPin(t *testing.T) {
+	t.Parallel()
 	_, tcb := os.Stat("/tcb")
 	offline := tcb == nil || os.Getenv("LZ_OFFLINE") == "1"
 	if _, err := os.Stat(filepath.Join(laneRepoRoot, "mise.live.toml")); offline && err != nil {

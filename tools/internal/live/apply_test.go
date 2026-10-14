@@ -1281,6 +1281,7 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 // them and returns what was written.
 func laneCaptureStd(t *testing.T) func() string {
 	t.Helper()
+	notParallel(t)
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -2690,6 +2691,7 @@ func TestApplyBindCacheWholeCredential(t *testing.T) {
 // The apply stream reaches the terminal line by line without its `outputs` events; an
 // unterminated last line is passed on at the end (review r2).
 func TestApplyDropOutputs(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	d := &dropOutputs{w: &out}
 	for _, chunk := range []string{`{"type":"apply_start"}` + "\n" + `{"type":"out`, `puts","outputs":{"s":{"value":"x"}}}` + "\n", `{"type":"change_summary"}` + "\n", "tail"} {

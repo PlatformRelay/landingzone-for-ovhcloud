@@ -21,6 +21,7 @@ func credentialOf(c apiCredential) Credential {
 // TestBindingFakeAPIEnforcesPolicy pins the fake itself: without it, a binding calling GET /me
 // would pass for every class.
 func TestBindingFakeAPIEnforcesPolicy(t *testing.T) {
+	t.Parallel()
 	f := newFakeAPI(t)
 	for name, wantMe := range map[string]int{"admin": 200, "platform-deployer": 403, "tenant-deployer": 403} {
 		t.Run(name, func(t *testing.T) {
@@ -41,6 +42,7 @@ func TestBindingFakeAPIEnforcesPolicy(t *testing.T) {
 }
 
 func TestBindingAllClassesBind(t *testing.T) {
+	t.Parallel()
 	f := newFakeAPI(t)
 	for _, name := range []string{"admin", "platform-deployer", "tenant-deployer"} {
 		t.Run(name, func(t *testing.T) {
@@ -77,6 +79,7 @@ func assertNoMe(t *testing.T, f *fakeAPI) {
 }
 
 func TestBindingRefuses(t *testing.T) {
+	t.Parallel()
 	f := newFakeAPI(t)
 	admin := credentialOf(f.credential("admin"))
 	otherAccount := credentialOf(f.credential("other-account-admin"))
@@ -116,6 +119,7 @@ func TestBindingRefuses(t *testing.T) {
 // TestBindingRefusesIncompleteBinding: an account.env missing a field binds nothing, even when
 // the credential or the manifest is empty in the same place.
 func TestBindingRefusesIncompleteBinding(t *testing.T) {
+	t.Parallel()
 	f := newFakeAPI(t)
 	admin := credentialOf(f.credential("admin"))
 	noEndpoint := admin

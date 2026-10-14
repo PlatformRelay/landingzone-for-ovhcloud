@@ -402,6 +402,7 @@ func tenantCalls(f *canaryAPI) map[string]canaryCall {
 // the management API as the tenant deployer. Each call observes `denied` (403), `allowed` (2xx
 // that did what it asked) or `error` (anything else: never `denied`, so never a pass).
 func TestObserveCanary(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		policy func([]string) []string
@@ -480,6 +481,7 @@ func TestObserveCanary(t *testing.T) {
 // someone else's bucket, and the trap must not delete it; a failed create or object leaves both
 // observations `error`. The tenant deployer makes no call.
 func TestObserveCanaryNotSetUp(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		answer     string
@@ -523,6 +525,7 @@ func TestObserveCanaryNotSetUp(t *testing.T) {
 // is content when the tenant already deleted it (KD-1 reproduced), names the canary when its
 // delete fails, and runs each cleanup once.
 func TestObserveCanaryTrap(t *testing.T) {
+	t.Parallel()
 	t.Run("canary-left", func(t *testing.T) {
 		f := newCanaryAPI(t, without("publicCloudProject:apiovh:region/storage/delete", "publicCloudProject:apiovh:region/storage/bulkDeleteObjects"))
 		ObserveCanary(context.Background(), f.options())
@@ -577,6 +580,7 @@ func TestObserveCanaryTrap(t *testing.T) {
 
 // Trap: every cleanup once; a failure names its cleanup and the others still run.
 func TestObserveTrap(t *testing.T) {
+	t.Parallel()
 	var tr Trap
 	ran := map[string]int{}
 	tr.Add("one", func(context.Context) error { ran["one"]++; return errors.New("boom") })

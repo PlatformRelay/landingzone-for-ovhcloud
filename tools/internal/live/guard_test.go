@@ -145,6 +145,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestGuardAdmitsOwnerCheckout(t *testing.T) {
+	t.Parallel()
 	w := newGuardWorld(t)
 	for name, c := range map[string]guardCase{
 		// Ignored files (.terraform/, .local/) are present in every scenario. D92: the owner's
@@ -170,6 +171,7 @@ func TestGuardAdmitsOwnerCheckout(t *testing.T) {
 }
 
 func TestGuardRefuses(t *testing.T) {
+	t.Parallel()
 	w := newGuardWorld(t)
 	rows := []struct {
 		name string
@@ -226,6 +228,7 @@ func TestGuardRefuses(t *testing.T) {
 // or that lies under the agent worktree root, before any credential loads. Each row fails exactly
 // one of these clauses; the fixtures follow host git 2.53.0 (t071-gitprobe.sh, t071-gitprobe2.sh).
 func TestGuardSeparateClone(t *testing.T) {
+	t.Parallel()
 	rows := []struct {
 		name string
 		c    func(w guardWorld) guardCase
@@ -431,6 +434,7 @@ func assertRefused(t *testing.T, err error, want []string) {
 var guardedVerbs = []string{"bootstrap", "probe", "plan", "apply", "destroy", "chain"}
 
 func TestGuardVerbs(t *testing.T) {
+	t.Parallel()
 	for _, v := range guardedVerbs {
 		if !Guarded(v) {
 			t.Errorf("Guarded(%q) = false, want true", v)
@@ -448,6 +452,7 @@ func TestGuardVerbs(t *testing.T) {
 // credential loader) starts, and a refusal never runs next; an unguarded verb runs next without
 // the guard, even on a host the guard would refuse.
 func TestGuardRunsBeforeCredentials(t *testing.T) {
+	t.Parallel()
 	w := newGuardWorld(t)
 	for _, verb := range guardedVerbs {
 		t.Run(verb+"/admitted", func(t *testing.T) {

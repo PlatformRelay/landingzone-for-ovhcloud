@@ -159,6 +159,7 @@ func credNoValue(t *testing.T, err error) {
 
 // Every row's authority is its stage's principal; an unknown or external id is an error.
 func TestCredentialsAuthorityOf(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, true)
 	for _, in := range m.Instances {
 		e, ok := credExpected[in.ID]
@@ -183,6 +184,7 @@ func TestCredentialsAuthorityOf(t *testing.T) {
 // Every other file of the config root exists with distinct values, so a variable from another
 // authority, tenant or account (or sandbox.env for every row, G1's mutant) shows.
 func TestCredentialsSelectByAuthority(t *testing.T) {
+	t.Parallel()
 	root := credRoot(t)
 	m := credManifest(t, true)
 	for _, in := range m.Instances {
@@ -207,6 +209,7 @@ func TestCredentialsSelectByAuthority(t *testing.T) {
 // A variable a file holds beyond the authority's five never reaches the children: the selection
 // passes the five, not the file.
 func TestCredentialsOnlyAuthorityVariables(t *testing.T) {
+	t.Parallel()
 	root := credRoot(t)
 	m := credManifest(t, false)
 	rel := filepath.Join("accounts", credAccount, "tenants", "demo", "deployer.env")
@@ -228,6 +231,7 @@ func TestCredentialsOnlyAuthorityVariables(t *testing.T) {
 // A missing file of the selected authority blocks the stack (exit 2): its producer has not run.
 // Nothing is returned, and no other file (sandbox.env above all, G1) stands in for it.
 func TestCredentialsMissingFileBlocks(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, false)
 	for _, id := range []string{"account-governance", "demo-dev-project", "demo-dev-gra11-runtime"} {
 		for _, rel := range credExpected[id].files {
@@ -254,6 +258,7 @@ func TestCredentialsMissingFileBlocks(t *testing.T) {
 
 // A credential file others may read is refused (exit 3, CondFileMode), whichever of the two.
 func TestCredentialsFileModeRefused(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, false)
 	for _, id := range []string{"demo-state", "demo-dev-project", "demo-dev-gra11-network"} {
 		for _, rel := range credExpected[id].files {
@@ -277,6 +282,7 @@ func TestCredentialsFileModeRefused(t *testing.T) {
 
 // A file without one of the authority's variables is refused (CondCredentials); nothing returned.
 func TestCredentialsIncompleteFileRefused(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, false)
 	cases := []struct{ id, rel, drop string }{
 		{"demo-dev-gra11-runtime", "accounts/" + credAccount + "/tenants/demo/deployer.env", "OVH_CLIENT_SECRET"},
@@ -313,6 +319,7 @@ func TestCredentialsIncompleteFileRefused(t *testing.T) {
 // pasted into a deployer file) is refused (CondCredentials) and nothing is returned; the refusal
 // names the files, never a value.
 func TestCredentialsMismatchRefused(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, false)
 	acct := "accounts/" + credAccount + "/"
 	cases := []struct{ name, id, rel, from string }{
@@ -349,6 +356,7 @@ func TestCredentialsMismatchRefused(t *testing.T) {
 // The same authority across tenants (review r1): with two tenants, ops' deployer or S3 keys copied
 // into demo's file is refused for demo's tenant stacks and its platform `project`.
 func TestCredentialsCrossTenantMismatchRefused(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, true)
 	acct := "accounts/" + credAccount + "/tenants/"
 	cases := []struct{ name, id, rel, from string }{
@@ -378,6 +386,7 @@ func TestCredentialsCrossTenantMismatchRefused(t *testing.T) {
 // The bound account's directory only: with the other account's files and no file of the bound
 // account's tenant, a tenant row is blocked, never served from the other account.
 func TestCredentialsBoundAccountOnly(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, false)
 	root := credRoot(t)
 	for _, rel := range []string{"deployer.env", "state.env"} {
@@ -401,6 +410,7 @@ func TestCredentialsBoundAccountOnly(t *testing.T) {
 // sandbox.env and the account's state.env bootstrap:account, the deployer files
 // account-governance, a tenant's S3 files that tenant's tenant-state instance.
 func TestCredentialsMissingFileNamesProducer(t *testing.T) {
+	t.Parallel()
 	m := credManifest(t, true)
 	acct := "accounts/" + credAccount + "/"
 	for _, c := range []struct{ id, rel, producer string }{

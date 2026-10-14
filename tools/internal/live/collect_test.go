@@ -58,6 +58,7 @@ func sandboxAccount(project string) stacks.BoundAccount {
 // demo tenant (IAM write; S3 read of the account bucket), the six rows' artefacts, both deployer
 // classes and both KD-1 calls.
 func TestL7Subjects(t *testing.T) {
+	t.Parallel()
 	got, err := L7Subjects(sandboxManifest(t), sandboxAccount(laneProject))
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +106,7 @@ func completeSet(exp map[string][]string) []Observation {
 // missing the observation of any one of them fails (naming it), and only that assertion; an
 // expected subject observed `error` fails too.
 func TestAssessExpected(t *testing.T) {
+	t.Parallel()
 	exp, err := L7Subjects(sandboxManifest(t), sandboxAccount(laneProject))
 	if err != nil || len(exp) != 10 {
 		t.Fatalf("L7Subjects: %v, %d assertions, want the ten", err, len(exp))
@@ -150,6 +152,7 @@ func TestAssessExpected(t *testing.T) {
 // binding fails although the other tenant's is observed; a qualified subject `tenant:<name>`
 // meets the fixed requirement `tenant`.
 func TestAssessTenantBindings(t *testing.T) {
+	t.Parallel()
 	exp := map[string][]string{"deployer-binding": {"platform", "tenant:a", "tenant:b"}}
 	obs := []Observation{{Assertion: "deployer-binding", Subject: "platform", Observed: "holds"},
 		{Assertion: "deployer-binding", Subject: "tenant:a", Observed: "holds"}, {Assertion: "deployer-binding", Subject: "tenant:b", Observed: "holds"}}
@@ -676,6 +679,7 @@ func collectComplete(t *testing.T, w *collectWorld, obs []Observation) map[strin
 // TestCollect: each mechanism against one changed fact of the fake account; every row also checks
 // completeness (collectComplete).
 func TestCollect(t *testing.T) {
+	t.Parallel()
 	type want map[string]map[string]string // assertion -> subject -> observed
 	tenantRuntime := "lz-demo-bkt-state/tenants/demo/dev/gra11/runtime/terraform.tfstate"
 	lockSubject := "lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate"
@@ -792,6 +796,7 @@ func TestCollect(t *testing.T) {
 // is content when nothing is left. A lock object already there is another writer's: an error,
 // left untouched, and no plan runs. A lock object of another writer found by the trap is left.
 func TestCollectLock(t *testing.T) {
+	t.Parallel()
 	key := "tenants/demo/dev/project/terraform.tfstate.tflock"
 	t.Run("order", func(t *testing.T) {
 		w := newCollectWorld(t)
@@ -881,6 +886,7 @@ func TestCollectLock(t *testing.T) {
 // A tenant deployer wrongly allowed to write IAM leaves a policy: the trap deletes it with the
 // bootstrap authority, by its id, or by its name when the answer carried no id (review r1).
 func TestCollectIAMWriteTrap(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"with-id", "without-id", "garbled"} {
 		t.Run(mode, func(t *testing.T) { collectIAMWriteTrap(t, mode) })
 	}
@@ -987,6 +993,7 @@ func TestObserveChainProductionCollector(t *testing.T) {
 // PutNew (review r1): the lock object is created only if absent — the request carries
 // `If-None-Match: *`, still signed as every request; an existing object answers 412, typed.
 func TestS3StorePutNew(t *testing.T) {
+	t.Parallel()
 	f := newFakeS3(t)
 	var cond []string
 	f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
@@ -1031,6 +1038,7 @@ func TestS3StorePutNew(t *testing.T) {
 // S3 read of a bucket that is not its own observes `denied` only on a 403), with the error text
 // unchanged; a 404 stays fs.ErrNotExist.
 func TestS3StoreRefusalTyped(t *testing.T) {
+	t.Parallel()
 	f := newFakeS3(t)
 	f.get = func(ak, bucket, key string) ([]byte, int) {
 		if key == "missing" {

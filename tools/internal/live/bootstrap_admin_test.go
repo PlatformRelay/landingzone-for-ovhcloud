@@ -877,6 +877,7 @@ func (h *bsHarness) run(fresh bool) ([]PhaseResult, error) {
 	if oerr != nil || eerr != nil {
 		h.t.Fatal(oerr, eerr)
 	}
+	notParallel(h.t)
 	savedOut, savedErr, savedLog := os.Stdout, os.Stderr, log.Writer()
 	os.Stdout, os.Stderr = outFile, errFile
 	log.SetOutput(errFile) // the standard logger holds the original stderr

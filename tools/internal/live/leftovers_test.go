@@ -181,6 +181,7 @@ func leftoverKeys(ls []Leftover) []string {
 }
 
 func TestLeftoversMatrixKinds(t *testing.T) {
+	t.Parallel()
 	got := slices.Clone(MatrixTypes())
 	want := slices.Clone(matrixTypes)
 	sort.Strings(got)
@@ -193,6 +194,7 @@ func TestLeftoversMatrixKinds(t *testing.T) {
 // TestLeftoversCleanMatrix: a clean listing of every kind passes; every listing is read to its
 // last page and every parent's children are listed.
 func TestLeftoversCleanMatrix(t *testing.T) {
+	t.Parallel()
 	w, _ := loadSynthetic(t)
 	c, l, inv := worldCheck(t, w, syntheticSeed{})
 	rep := c.Check(context.Background(), inv)
@@ -221,6 +223,7 @@ func TestLeftoversCleanMatrix(t *testing.T) {
 // TestLeftoversSeeded: one seeded leftover per kind, each reported exactly (kind and id); a
 // child of a leftover parent is reported with it. Every listable kind has a seed.
 func TestLeftoversSeeded(t *testing.T) {
+	t.Parallel()
 	w, seeds := loadSynthetic(t)
 	covered := map[string]bool{}
 	for name, s := range seeds.Seeds {
@@ -247,6 +250,7 @@ func TestLeftoversSeeded(t *testing.T) {
 
 // TestLeftoversAdminExemption: the admin client and policy pass only through their recorded ids.
 func TestLeftoversAdminExemption(t *testing.T) {
+	t.Parallel()
 	w, _ := loadSynthetic(t)
 	c, _, inv := worldCheck(t, w, syntheticSeed{})
 	c.Exempt = Exemption{}
@@ -266,6 +270,7 @@ func TestLeftoversAdminExemption(t *testing.T) {
 // unparseable or wrongly shaped listing, a created type outside the matrix and a check with no
 // project to list are each `fail` with an error, never `pass`.
 func TestLeftoversFailClosed(t *testing.T) {
+	t.Parallel()
 	w, seeds := loadSynthetic(t)
 	for name, s := range seeds.Broken {
 		t.Run(name, func(t *testing.T) {
@@ -285,6 +290,7 @@ func TestLeftoversFailClosed(t *testing.T) {
 // API endpoint, or a base that is not a v1 base, it is `fail` and sends nothing (T084: the
 // ovhcloud binary it used to need is gone, P18).
 func TestLeftoversNoListingSource(t *testing.T) {
+	t.Parallel()
 	w, _ := loadSynthetic(t)
 	for name, api := range map[string]API{
 		"no endpoint":     {},
@@ -315,6 +321,7 @@ func TestLeftoversNoListingSource(t *testing.T) {
 // account's account.env (not LZ_ADMIN_CLIENT_ID); a missing or open file, or a missing id, is an
 // error.
 func TestLeftoversLoadExemption(t *testing.T) {
+	t.Parallel()
 	const account = "ab12345-ovh"
 	setup := func(t *testing.T, sandbox, accountEnv string) string {
 		root := tempPrivate(t)

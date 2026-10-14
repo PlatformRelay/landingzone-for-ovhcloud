@@ -109,6 +109,7 @@ func (b *boundsAPI) check() LeftoverCheck {
 // child listing (a `/`, `?`, `#` or `%` in it cannot change the path, add a query or cut it), and
 // an id that is a dot segment is refused with an error naming the listing, never requested.
 func TestLeftoversAPIChildPathEscaped(t *testing.T) {
+	t.Parallel()
 	const nets = "/v1/cloud/project/p1/network/private"
 	for _, id := range []string{"pn-a/../../../me", "pn-a?x=1", "pn-a#frag", "pn-a%2Fb", "pn a"} {
 		t.Run(url.PathEscape(id), func(t *testing.T) {
@@ -153,6 +154,7 @@ func TestLeftoversAPIChildPathEscaped(t *testing.T) {
 // or a new one on every page — is an error naming the listing after a bounded number of pages,
 // never a hang until the deadline.
 func TestLeftoversAPIEndlessCursor(t *testing.T) {
+	t.Parallel()
 	const pol = "/v2/iam/policy"
 	for name, next := range map[string]func(cursor string, n int) string{
 		"same-cursor":      func(string, int) string { return "opaque-same" },
@@ -216,6 +218,7 @@ func TestLeftoversAPIEndlessCursor(t *testing.T) {
 // listing, also when its first maxListing bytes would parse (an array padded with whitespace); an
 // answer of exactly the limit is read.
 func TestLeftoversAPIOversize(t *testing.T) {
+	t.Parallel()
 	const groups = "/v1/me/identity/group"
 	pad := func(n int) string { return "[]" + strings.Repeat(" ", n-2) }
 	t.Run("over-the-limit", func(t *testing.T) {
@@ -240,6 +243,7 @@ func TestLeftoversAPIOversize(t *testing.T) {
 // unparseable Location in its error) — fails the listing with an error naming it, and no error
 // carries the credential.
 func TestLeftoversAPINoEchoInErrors(t *testing.T) {
+	t.Parallel()
 	for name, c := range map[string]struct{ path, loc, listing string }{
 		"listing-location-echoes-token":  {"/v1/me/identity/group", "/%ZZ" + listToken, "/me/identity/group"},
 		"listing-location-echoes-secret": {"/v2/iam/policy", "/%ZZ" + listSecret, "/iam/policy"},
@@ -262,6 +266,7 @@ func TestLeftoversAPINoEchoInErrors(t *testing.T) {
 // quotes in its error — fails the check with an error naming the token endpoint and no
 // credential; the token endpoint's status stays in the error.
 func TestLeftoversAPITokenAnswerNoEcho(t *testing.T) {
+	t.Parallel()
 	for name, raw := range map[string]string{
 		"malformed-trailer": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n" +
 			"1\r\n{\r\n0\r\n" + listSecret + " " + listClientID + "\r\n\r\n",
@@ -300,6 +305,7 @@ func TestLeftoversAPITokenAnswerNoEcho(t *testing.T) {
 // TestLeftoversAPITokenAskedOnce (T084 review r1): a rejected credential is sent to the token
 // endpoint once per check, not once per listing (each request carries the client secret).
 func TestLeftoversAPITokenAskedOnce(t *testing.T) {
+	t.Parallel()
 	b := newBoundsAPI(t)
 	c := b.check()
 	c.Cred.ClientSecret = "not-the-secret"

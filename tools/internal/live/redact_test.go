@@ -18,6 +18,7 @@ const (
 // TestRedactLongestFirst: a secret that holds another one is replaced whole, not leaving its
 // tail behind after the shorter secret's replacement.
 func TestRedactLongestFirst(t *testing.T) {
+	t.Parallel()
 	r := NewRedactor("abc123", "abc123-tail-secret")
 	if got := r.Redact("x abc123-tail-secret y"); strings.Contains(got, "tail-secret") {
 		t.Errorf("Redact = %q: the longer secret's tail leaked", got)
@@ -25,6 +26,7 @@ func TestRedactLongestFirst(t *testing.T) {
 }
 
 func TestRedactString(t *testing.T) {
+	t.Parallel()
 	r := NewRedactor(seedSecret, seedOther, "")
 	for name, in := range map[string]string{
 		"alone":     seedSecret,
@@ -57,6 +59,7 @@ func TestRedactString(t *testing.T) {
 // TestRedactWriterSplitWrites: a child writes the secret across several writes (pipes deliver
 // arbitrary chunks); the redacting writer must not let any part of it through.
 func TestRedactWriterSplitWrites(t *testing.T) {
+	t.Parallel()
 	in := "start " + seedSecret + " middle " + seedOther + " end\n"
 	for _, chunk := range []int{1, 3, 7, len(seedSecret) - 1, len(in)} {
 		t.Run("chunk="+strconv.Itoa(chunk), func(t *testing.T) {
@@ -92,6 +95,7 @@ func TestRedactWriterSplitWrites(t *testing.T) {
 // TestRedactWriterFlushesOnClose: text held back while it could still be the start of a secret
 // reaches the output on Close.
 func TestRedactWriterFlushesOnClose(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	w := NewRedactor(seedSecret).Writer(&buf)
 	tail := "trailing " + seedSecret[:5]

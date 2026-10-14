@@ -239,6 +239,7 @@ func normJSON(t testing.TB, raw []byte) string {
 // listing, a kind without a status, a kind recorded as captured without its listing (or as not
 // captured with one) and a listing not named in the sidecar are each refused.
 func TestLeftoversCapturedFixture(t *testing.T) {
+	t.Parallel()
 	p, err := readCaptured(capturedDir)
 	if err != nil {
 		t.Fatalf("captured fixture: %v", err)
@@ -358,6 +359,7 @@ func TestLeftoversCapturedFixture(t *testing.T) {
 // Archive region RBX-ARCHIVE: T087's red was exactly its 404); the captured region details are
 // re-recorded as captured; the untagged project resource is recorded as no tags.
 func TestLeftoversCapturedClean(t *testing.T) {
+	t.Parallel()
 	for _, prefix := range []string{"lzprobe-", "lz-"} {
 		t.Run(prefix, func(t *testing.T) {
 			p, w := loadCapturedWorld(t, prefix)
@@ -478,6 +480,7 @@ func capturedSeeds(p capturedProvenance, w syntheticWorld) map[string]syntheticS
 // TestLeftoversCapturedSeeded: one leftover per listed kind injected into the captured listings is
 // reported exactly, with no error.
 func TestLeftoversCapturedSeeded(t *testing.T) {
+	t.Parallel()
 	p, w := loadCapturedWorld(t, "lzprobe-")
 	seeds := capturedSeeds(p, w)
 	listed := 0
@@ -503,6 +506,7 @@ func TestLeftoversCapturedSeeded(t *testing.T) {
 // candidates, only their exact ids are exempt: another exemption id reports them, and a client or
 // policy named like the admin with another id is a leftover.
 func TestLeftoversCapturedExemption(t *testing.T) {
+	t.Parallel()
 	p, w := loadCapturedWorld(t, "lz-")
 	cases := []struct {
 		name   string
@@ -551,6 +555,7 @@ func TestLeftoversCapturedExemption(t *testing.T) {
 // naming the cause, never zero leftovers; a Cold-Archive-only region's 404 passes. An absent or null tags field is no
 // tags; a tags field of another type is an error.
 func TestLeftoversCapturedRed(t *testing.T) {
+	t.Parallel()
 	p, w := loadCapturedWorld(t, "lzprobe-")
 	pr := "/cloud/project/" + p.Project.ID
 	region := func(name string, services string) []json.RawMessage {
@@ -662,6 +667,7 @@ func TestLeftoversCapturedRed(t *testing.T) {
 // not recognise, or whose only one is Cold Archive (T087), is still asked for its buckets, and a
 // leftover there is found (the rule only decides whether a 404 is acceptable).
 func TestLeftoversCapturedUnrecognisedStorage(t *testing.T) {
+	t.Parallel()
 	p, w := loadCapturedWorld(t, "lzprobe-")
 	pr := "/cloud/project/" + p.Project.ID
 	for name, detail := range map[string][]json.RawMessage{
@@ -687,6 +693,7 @@ func TestLeftoversCapturedUnrecognisedStorage(t *testing.T) {
 // regions and RBX-ARCHIVE (storage-s3-coldarchive only); for the ten regions with a bucket service
 // the 404 is an error naming the region's listing.
 func TestLeftoversCapturedRegionRule(t *testing.T) {
+	t.Parallel()
 	p, w := loadCapturedWorld(t, "lzprobe-")
 	pr := "/cloud/project/" + p.Project.ID
 	var details []struct {
@@ -732,6 +739,7 @@ func TestLeftoversCapturedRegionRule(t *testing.T) {
 // TestLeftoversCapturedSecondProject: the floor holds per project: a second project none of whose
 // regions answers a bucket listing fails the check even though the captured project has one.
 func TestLeftoversCapturedSecondProject(t *testing.T) {
+	t.Parallel()
 	_, w := loadCapturedWorld(t, "lzprobe-")
 	const id = "f0000000000000000000000000000002"
 	urn := "urn:v1:eu:resource:publicCloudProject:" + id

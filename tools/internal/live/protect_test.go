@@ -76,6 +76,7 @@ func planActions(t *testing.T, plan []byte) map[string][]string {
 // TestProtect: admitted plans return nil; refused plans return a *Refusal with CondRetained (exit
 // 3) naming every refused address and its instance, and no value from the plan.
 func TestProtect(t *testing.T) {
+	t.Parallel()
 	type tc struct {
 		name     string
 		fixture  string // captured plan; "" when raw is used
@@ -258,6 +259,7 @@ func TestProtect(t *testing.T) {
 
 // TestProtectNamesInstance: the refusal names the retained instance the address belongs to.
 func TestProtectNamesInstance(t *testing.T) {
+	t.Parallel()
 	err := Protect(readPlan(t, "project-replaced"), []Retained{bootstrapRetained, projectRetained})
 	if err == nil || !strings.Contains(err.Error(), "demo-dev-project") || strings.Contains(err.Error(), "account-bootstrap") {
 		t.Errorf("refusal %v, want it to name instance demo-dev-project (and not account-bootstrap)", err)
@@ -358,6 +360,7 @@ func protectFixtureInputs(t *testing.T) (string, string) {
 // the pinned OpenTofu and is unedited since, and truncated.json is a cut of org-change.json. The
 // plan a sidecar vouches for is named by the sidecar's own file name.
 func TestProtectFixtures(t *testing.T) {
+	t.Parallel()
 	metas, err := filepath.Glob(filepath.Join(protectDir, "*.meta.json"))
 	if err != nil || len(metas) != 19 {
 		t.Fatalf("%d meta sidecars (%v), want 19 (18 captured, 1 derived)", len(metas), err)
@@ -395,6 +398,7 @@ func TestProtectFixtures(t *testing.T) {
 // TestProtectFixturesRefuseHostCapture: a sidecar that names a host capture, or that the entry
 // did not qualify, is red; the committed create.meta.json is the positive control.
 func TestProtectFixturesRefuseHostCapture(t *testing.T) {
+	t.Parallel()
 	taskfile, inputSHA := protectFixtureInputs(t)
 	plan := readPlan(t, "create")
 	raw, err := os.ReadFile(filepath.Join(protectDir, "create.meta.json"))
@@ -498,6 +502,7 @@ func TestProtectFixturesRefuseHostCapture(t *testing.T) {
 // pinned by planjson's TestCallersRefuseIdentically). The scan must see the package itself, or it
 // scans nothing.
 func TestProtectOnlyPlanReader(t *testing.T) {
+	t.Parallel()
 	const decoder = "github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/planjson"
 	root := filepath.Join("..", "..")
 	own := filepath.Join(root, "internal", "planjson")

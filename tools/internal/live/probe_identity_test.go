@@ -400,6 +400,7 @@ func TestProbeIdentity(t *testing.T) {
 // required; half an identity, two ids of one prefix and an unpaired credential-shaped key (ending
 // in key, token, password or secret, any case) are refused; the S3 keys and other names pass.
 func TestProbeIdentities(t *testing.T) {
+	t.Parallel()
 	got, err := identities(identityEnv, "ovh-eu")
 	want := []Credential{{Endpoint: "ovh-eu", ClientID: identityClientID, ClientSecret: identityClient},
 		{Endpoint: "ovh-eu", ClientID: identityP25ID, ClientSecret: identityP25Secret}}
@@ -438,6 +439,7 @@ func TestProbeIdentities(t *testing.T) {
 // apply_start event however the stream is cut into reads — ConsumeApply reads through a 4096-byte
 // buffer, so the event name can fall across two reads — and only once.
 func TestApplyStartWatch(t *testing.T) {
+	t.Parallel()
 	stream := strings.Repeat(`{"type":"version"}`+"\n", 300) + `{"type":"apply_start"}` + "\n" + `{"type":"apply_start"}` + "\n"
 	for name, r := range map[string]io.Reader{
 		"one byte per read": iotest.OneByteReader(strings.NewReader(stream)),

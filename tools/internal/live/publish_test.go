@@ -584,6 +584,7 @@ func TestExchangeBootstrapPublishesToAccountBucket(t *testing.T) {
 // The resolved-reference input is written from account.env and its digest is recorded the same
 // way as a consumed artefact's: account-governance's tenants map and project's project_id.
 func TestExchangeResolvedInputs(t *testing.T) {
+	t.Parallel()
 	_, m := exchangeRoot(t)
 	acct := exAccountEnv(t, exProjectID)
 	urn := "urn:v1:eu:resource:publicCloudProject:" + exProjectID
@@ -765,6 +766,7 @@ func (r recordingStore) Put(bucket, key string, data []byte) error {
 // publishing it is refused with nothing written; the same outputs publish when it is a row
 // (T061 review round 1: the adapter reads external producers, the publisher must not write them).
 func TestPublishRefusesExternalInstance(t *testing.T) {
+	t.Parallel()
 	fixture := string(mustRead(t, filepath.Join(repoRoot, "tests/fixtures/manifests/tenant-only/deployments.yaml")))
 	row := `{"id": "demo-dev-project", "stage": "project", "tenant": "demo", "environment": "dev"}`
 	state := `{"id": "demo-state", "stage": "tenant-state", "tenant": "demo"}`
@@ -811,6 +813,7 @@ func TestPublishRefusesExternalInstance(t *testing.T) {
 // account.env → the bound account: the endpoint and every LZ_PROJECT_ID_<REF>, nothing else; a
 // missing endpoint or an empty or malformed project id is refused.
 func TestPublishBoundAccount(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{"LZ_ACCOUNT_ID": "fixture-ovh", "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
 		"LZ_PROJECT_ID_STATE": exStateID, "LZ_PROJECT_ID_DEMO_DEV": exProjectID, "LZ_ADMIN_CLIENT_ID": "EU.fixture", "LZ_ADMIN_POLICY_ID": "p"}
 	acct, err := BoundAccountFromEnv(env)
@@ -848,6 +851,7 @@ func TestPublishBoundAccount(t *testing.T) {
 // record written by WriteRecord comes back from stacks.ReadRecords unchanged under the strict
 // decode, and a row without a file has none.
 func TestPublishRecordIsSelectionRecord(t *testing.T) {
+	t.Parallel()
 	m := exTwoTenantManifest(t)
 	dir := filepath.Join(t.TempDir(), "records")
 	rec := Record{AppliedAt: "2026-10-07T00:00:00Z", SourceRevision: exRevision, CodeDigest: sha([]byte("code")),
@@ -867,6 +871,7 @@ func TestPublishRecordIsSelectionRecord(t *testing.T) {
 // A record is <dir>/<id>.json, private, and an id that would leave dir is refused with nothing
 // written.
 func TestPublishRecord(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "records")
 	rec := Record{AppliedAt: "2026-10-07T00:00:00Z", SourceRevision: exRevision, CodeDigest: sha([]byte("code")),
 		Consumed: map[string]string{exProject: sha([]byte("artefact"))}, Resolved: sha([]byte("resolved"))}
