@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 // Producer→consumer pins of 005 T022 and T024 (T018 review gap; bootstrap added by T038): a stage's real plan, made by its
@@ -44,6 +46,34 @@ var stagePlans = map[string][]string{
 	"project-network":    {"stages/project-network", "components/network/island", "modules/naming", "modules/private-network"},
 	"runtime":            {"stages/runtime", "components/runtime/managed-only", "modules/naming", "modules/object-storage"},
 	"runtime-slot":       {"stages/runtime", "components/runtime/managed-only", "modules/naming", "modules/object-storage"},
+}
+
+// TestOutputsRegistryInputs pins that test:outputs' registry scope and inputs name every
+// directory a captured plan is made from (stagePlans) and the schemas and fixtures it reads
+// (005 T111), so a change to one of them alone reselects test:outputs and changes its digest.
+// It reads stagePlans, not a copy, so a stage calling a new module fails here until both the
+// list and the registry name it. It parses the whole registry, which any row can make
+// invalid, so the registry is one of the inputs too.
+func TestOutputsRegistryInputs(t *testing.T) {
+	reg, err := checks.ParseRegistry(readFile(t, filepath.Join(repoRoot, "tools", "harness", "checks.yaml")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []string
+	for _, c := range reg.Checks {
+		if c.ID == "test:outputs" {
+			entries = append(append(entries, c.Scope...), c.Inputs...)
+		}
+	}
+	want := []string{"schemas/outputs", "tests/fixtures/outputs", "tools/harness/checks.yaml"}
+	for _, c := range slices.Sorted(maps.Keys(stagePlans)) {
+		want = append(want, stagePlans[c]...)
+	}
+	for _, p := range want {
+		if !slices.ContainsFunc(entries, func(e string) bool { return p == e || strings.HasPrefix(p, e+"/") }) {
+			t.Errorf("BEHAVIORAL_RED: test:outputs reads %s, but its registry scope and inputs do not name it", p)
+		}
+	}
 }
 
 // planCases are the capture cases that are not a stage's default run: their stage and run.

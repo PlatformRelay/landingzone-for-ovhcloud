@@ -598,3 +598,61 @@ func TestFoundationCICommandsWithoutSource(t *testing.T) {
 		t.Errorf("BEHAVIORAL_RED: ci-workflow rendered a malformed source: exit %d\n%s", code, out)
 	}
 }
+
+// registryReads is each check's scope and inputs in the committed registry.
+func registryReads(t *testing.T, root string) map[string][]string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "tools", "harness", "checks.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := checks.ParseRegistry(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := map[string][]string{}
+	for _, c := range reg.Checks {
+		reads[c.ID] = append(append([]string{}, c.Scope...), c.Inputs...)
+	}
+	return reads
+}
+
+// covered says whether path is one of entries or lies below one of them.
+func covered(entries []string, path string) bool {
+	for _, e := range entries {
+		if path == e || strings.HasPrefix(path, e+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// A check's registry scope and inputs name the trees its tests and commands
+// read outside tools/ (005 T111; read sets traced through the entry,
+// evidence/T111.md), so a change to one of them alone reselects the check and
+// changes its digest. The test reads only the registry, so its own check
+// needs no further input. test:outputs' stage closures are pinned beside
+// their list, in tools/internal/stacks (TestOutputsRegistryInputs).
+func TestRegistryInputsCoverReads(t *testing.T) {
+	reads := registryReads(t, filepath.Join("..", "..", ".."))
+	want := map[string][]string{
+		"test:stack-plans": {"stacks", "terramate.tm.hcl", "tests/fixtures/manifests", "tests/fixtures/outputs/envelopes",
+			"stages", "components", "modules", "mise.toml"},
+		"test:stacks": {"stacks", "stages", "schemas/deployments.schema.json", "specs/005-first-landing-zone-slice/data-model.md",
+			"tests/fixtures/manifests", "tests/fixtures/terramate", "tests/fixtures/outputs/captures", "tests/fixtures/tofu-probes/protect",
+			"tests/live/probes/storage-iam/main.tf", "components", "modules", "mise.toml", "terramate.tm.hcl"},
+		"test:live-lane": {"tests/fixtures/ovhcloud"},
+	}
+	for id, paths := range want {
+		entries, ok := reads[id]
+		if !ok {
+			t.Errorf("BEHAVIORAL_RED: %s is not in the registry", id)
+			continue
+		}
+		for _, p := range paths {
+			if !covered(entries, p) {
+				t.Errorf("BEHAVIORAL_RED: %s reads %s, but its registry scope and inputs do not name it", id, p)
+			}
+		}
+	}
+}
