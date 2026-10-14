@@ -11,7 +11,7 @@ package live
 // shaped tokens of `details.unauthorizedActionsByIAM` and of the message "missing IAM
 // permissions: …"; kb manage-and-operate/iam/troubleshooting.mdx:21-31, T010 rows 10 and 14), a
 // created policy's uuid and the ids of the listed policies of the asked name or of an id asked to
-// be kept (T101). No error carries answer text, a token or a secret.
+// be kept (T101), with their createdAt (T113). No error carries answer text, a token or a secret.
 
 import (
 	"bytes"
@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // APIOp is an OVHcloud API operation the checker may send.
@@ -61,6 +62,9 @@ type APIAnswer struct {
 	Actions  []string    // a non-2xx answer's IAM actions, sorted, when it names any
 	ID       string      // a 2xx CreatePolicy answer's policy id, when a uuid
 	Policies []APIPolicy // a 2xx ListPolicies answer: the policies of the asked name, every page
+	// CreatedAt (a 2xx ListPolicies answer): by id, the createdAt of each policy in Policies that has
+	// a readable one (iam.json iam.policy.Response.createdAt, RFC 3339; T113).
+	CreatedAt map[string]time.Time
 }
 
 // maxPolicyBody bounds a CreatePolicy body: a probe's policy is a few hundred bytes.
@@ -161,9 +165,10 @@ func apiGate(call APICall) error {
 
 // policyPage collects, over the pages of a listing, the policies named name or with an id in keep.
 type policyPage struct {
-	name  string
-	keep  []string
-	found []APIPolicy
+	name    string
+	keep    []string
+	found   []APIPolicy
+	created map[string]time.Time
 }
 
 // send makes one request and reads its answer: a non-2xx answer keeps its status and the actions
@@ -217,8 +222,9 @@ func (c *APIChecker) send(ctx context.Context, method, path string, body []byte,
 		// of other names are skipped whatever their shape (iam.json puts no pattern on a name);
 		// one of the asked name without a uuid could not be deleted, so it is an error.
 		var entries []*struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			CreatedAt string `json:"createdAt"`
 		}
 		if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal(trimmed, &entries) != nil {
 			return APIAnswer{}, "", fmt.Errorf("%s: the answer is not a policy listing", what)
@@ -231,10 +237,14 @@ func (c *APIChecker) send(ctx context.Context, method, path string, body []byte,
 				// A kept id (a uuid, gated) whatever its name: the run's own write (T101 review r2).
 				page.found = append(page.found, APIPolicy{ID: e.ID, Name: e.Name})
 			case e.Name != page.name:
+				continue
 			case !apiUUID.MatchString(e.ID):
 				return APIAnswer{}, "", fmt.Errorf("%s: a listed policy of the asked name has no usable id", what)
 			default:
 				page.found = append(page.found, APIPolicy{ID: e.ID, Name: e.Name})
+			}
+			if at, err := time.Parse(time.RFC3339Nano, e.CreatedAt); err == nil {
+				page.created[e.ID] = at
 			}
 		}
 		next = resp.Header.Get("X-Pagination-Cursor-Next")
@@ -247,7 +257,7 @@ func (c *APIChecker) send(ctx context.Context, method, path string, body []byte,
 // absence marks the last page) and keeps the policies named name or with an id in keep. A refused
 // page is the answer.
 func (c *APIChecker) list(ctx context.Context, name string, keep []string) (APIAnswer, error) {
-	page := &policyPage{name: name, keep: keep, found: []APIPolicy{}}
+	page := &policyPage{name: name, keep: keep, found: []APIPolicy{}, created: map[string]time.Time{}}
 	cursor := ""
 	for range maxPages {
 		a, next, err := c.send(ctx, http.MethodGet, "/iam/policy", nil, cursor, page)
@@ -255,7 +265,7 @@ func (c *APIChecker) list(ctx context.Context, name string, keep []string) (APIA
 			return a, err
 		}
 		if cursor = next; cursor == "" {
-			return APIAnswer{Status: a.Status, Policies: page.found}, nil
+			return APIAnswer{Status: a.Status, Policies: page.found, CreatedAt: page.created}, nil
 		}
 	}
 	return APIAnswer{}, fmt.Errorf("GET /iam/policy: more than %d pages", maxPages)

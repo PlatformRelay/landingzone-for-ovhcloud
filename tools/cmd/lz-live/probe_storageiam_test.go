@@ -185,8 +185,9 @@ func TestProbeEntryStorageIAM(t *testing.T) {
 				}
 			}
 			// Each identity asks for its own: the P25 identity reads, the tenant calls /me and the
-			// write, the admin lists in the undo; the P1 key reads the state object.
-			want := []string{"EU.probep25 read A", "EU.probep25 read B", "EU.probeidentity GET /me", "EU.probeidentity POST /iam/policy", "EU.sandboxadmin list policies"}
+			// write, the admin lists in the undo; the P1 key reads the state object. T113: the admin
+			// first lists the P25 policy for its createdAt (bucket A's policy age).
+			want := []string{"EU.sandboxadmin list policies", "EU.probep25 read A", "EU.probep25 read B", "EU.probeidentity GET /me", "EU.probeidentity POST /iam/policy", "EU.sandboxadmin list policies"}
 			if len(seen) < len(want) || !slices.Equal(seen[:len(want)], want) {
 				t.Errorf("check calls %v, want %v first", seen, want)
 			}

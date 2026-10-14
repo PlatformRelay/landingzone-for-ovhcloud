@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -738,6 +739,19 @@ func (s *session) undo(ctx context.Context, st Stack) (keep bool, err error) {
 	if env == nil {
 		return false, nil
 	}
+	// A cleanup knows what the run's Observe wrote only from its record (T113).
+	if s.r.cleanupOnly && s.r.check.Recorded != nil {
+		rec, err := os.ReadFile(filepath.Join(s.r.Dir, "observations.json"))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			rec = nil
+		case err != nil:
+			return true, fmt.Errorf("undo of %s not run: observations.json unreadable: %w", st.ID, err)
+		}
+		if err := s.r.check.Recorded(rec, s.term); err != nil {
+			return true, fmt.Errorf("undo of %s not run: %w", st.ID, err)
+		}
+	}
 	if err := s.r.check.Undo(ctx, env, s.term); err != nil {
 		return true, err
 	}
@@ -1086,6 +1100,12 @@ type ProbeCheck struct {
 	Validate func(env map[string]string) error
 	Observe  func(ctx context.Context, env map[string]string, term io.Writer) (record []byte, err error)
 	Undo     func(ctx context.Context, env map[string]string, term io.Writer) error
+	// Recorded (optional) hands a `--cleanup` — a fresh process — what the run's Observe recorded,
+	// before Undo: the run directory's observations.json as the run wrote it (redacted), or nil
+	// when there is none (the run never observed, or the cleanup runs in another checkout). An
+	// unreadable file, or an error from Recorded, fails the undo step without Undo, so the root is
+	// kept (T113, T101 gap 2). A run hands Undo what its own Observe saw and never calls Recorded.
+	Recorded func(record []byte, term io.Writer) error
 }
 
 // RunIDPattern is the shape of a run id: YYYYMMDDThhmmssZ-<4 hex>.

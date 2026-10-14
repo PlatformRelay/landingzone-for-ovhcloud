@@ -181,7 +181,7 @@ apply reported no resource operation, or the companion stopped before its apply)
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 8a | `storage-iam` → `companion` (state) | P1, P2, P3 | T010 | row 8's command (one run) | the companion's `init` and `apply` succeed on the S3 backend in `lzprobe-p1-<run-id>` with the OVHcloud options (P2) and enforced client-side encryption (P3); `second-writer-storage-iam-companion.txt` holds `Error acquiring the state lock` and a non-zero exit (P1) | the S3 backend or the lock file is refused (P2); the second writer's plan succeeds while the apply runs (P1: read the record's exit line) | destroy-on-exit: companion, then root |
 | 8b | `storage-iam` → `companion` (tenant identity) | P9 usage, P26 tenant | T010 | row 8's command | the tenant identity creates and destroys network and bucket `lzprobe-p9-<run-id>` and subnet `10.251.0.0/24` (P9); the binding step passes; `observations.json` (`check: storage-iam`): `p26-get-me` refused 403 `account:apiovh:me/get` and `p9-iam-write` (`POST /v2/iam/policy`, a harmless policy `lzprobe-p9-write-<run-id>`) refused 403 `account:apiovh:iam/policy/create`, both `as_expected: true`; the terminal shows `LZ-LIVE undo removed 0 IAM policies named lzprobe-p9-write-<run-id> or created by the write` before the root's destroy | a create or delete is denied (the apply or destroy fails naming the action: record it); `p26-get-me` or `p9-iam-write` observed `allowed` (the run fails; an accepted write is deleted by the undo, by name and by the id the `POST` returned, which then prints `removed 1`; `policy_id` records the id) | destroy-on-exit |
-| 8c | `storage-iam` → check (P25 identity) | P25 evaluation | T010 | row 8's command | P25 is refuted (T010 run 20261012T072729Z-0646: bucket A refused 403 `region/storage/get` although the policy's tag condition names it; coordinator decision D107, T101): `p25-read-bucket-a` and `p25-read-bucket-b` both refused 403 `publicCloudProject:apiovh:region/storage/get`, both `as_expected: true`. A refused bucket A is equally what a P25 policy not yet in effect would answer (IAM propagation delay UNVERIFIED): a `pass` does not show the tag condition was evaluated | `p25-read-bucket-a` allowed (the run fails, `LZ-LIVE finding p25-read-bucket-a: expected refused, observed allowed 200; P25 holds after all: re-open tag-scoped envelopes (D107)`: record it and re-open tag-scoped envelopes), or `p25-read-bucket-b` allowed | destroy-on-exit |
+| 8c | `storage-iam` → check (P25 identity) | P25 evaluation | T010 | row 8's command | P25 is refuted (T010 run 20261012T072729Z-0646: bucket A refused 403 `region/storage/get` although the policy's tag condition names it; coordinator decision D107, T101): `p25-read-bucket-a` and `p25-read-bucket-b` both refused 403 `publicCloudProject:apiovh:region/storage/get`, both `as_expected: true`. A refused bucket A is equally what a P25 policy not yet in effect would answer (IAM propagation delay UNVERIFIED): a `pass` does not show the tag condition was evaluated. So before the read the sandbox admin lists the P25 policy, and `p25-read-bucket-a` records `policy_age_seconds` (from its `createdAt` to the read, local clock against OVHcloud's) and a `note` saying the above, printed as `LZ-LIVE observe p25-read-bucket-a note: …` (T113); copy both into T010's evidence. An age the listing cannot tell is said in the note, not a finding | `p25-read-bucket-a` allowed (the run fails, `LZ-LIVE finding p25-read-bucket-a: expected refused, observed allowed 200; P25 holds after all: re-open tag-scoped envelopes (D107)`: record it and re-open tag-scoped envelopes), or `p25-read-bucket-b` allowed | destroy-on-exit |
 | 8d | `storage-iam` → check (state object) | P3 | T010 | row 8's command | `p3-state-object`: the P1 S3 key reads `storage-iam-companion.tfstate` back (200) and it is an OpenTofu encryption envelope (`detail: encryption envelope`, `as_expected: true`); record `sse` if present (the `x-amz-server-side-encryption` answer header: whether OVHcloud sends it on a GET is UNVERIFIED, the probe bucket has no default encryption set) | `observed: plaintext` (a state with `resources`, or no `encrypted_data`) or `unreadable`; refused (the P1 user lacks `s3:GetObject`: record the code) | destroy-on-exit |
 
 **The storage-iam check (rows 8b–8d, T100).** After the companion's apply, lz-live reads the root's
@@ -197,7 +197,9 @@ action or none (bucket A's must name it: D107). **Unlike the state-backend check
 the run** (`LZ-LIVE finding <step>: expected …, observed …`, listed under `findings`, and the run's
 error). Since D107 (T101) the bucket-A read is expected refused, as run 20261012T072729Z-0646 saw it
 (P25 refuted), so a run whose observations match that run's ends `pass`; a bucket-A read allowed
-after all fails the run and says P25 holds.
+after all fails the run and says P25 holds. A bucket-A refusal that is not the expected one (another
+action, none, not a 403) is a finding whose text adds that a refusal is also what a P25 policy not
+yet in effect would answer (T113).
 Before the root's destroy, on every way out and on `--cleanup`, the undo lists `/v2/iam/policy` with
 the sandbox admin's credential, deletes every policy named `lzprobe-p9-write-<run-id>` and, in the
 same process, every policy id an accepted write returned (T101: a listing that lags behind the
@@ -205,7 +207,15 @@ create, or a normalised name, would miss it), each once — the known ids also w
 listing fails — and lists again, keeping the name and those ids (a delete acknowledged but not
 effective under another name); one left (or a refused second listing or delete — the other
 deletes are still tried) keeps the root
-for `--cleanup`, which knows the name only (the id is in `observations.json`). The undo line counts
+for `--cleanup`. A cleanup is a fresh process: it reads every `policy_id` from the run's
+`observations.json` (`.local/live/<run-id>/`, so run it in the checkout that ran the probe) and
+deletes those ids as well as the name (T113). Without `observations.json` it deletes by name only
+and prints `LZ-LIVE undo no observations.json: deleting by name only …` (likewise when the record
+shows an accepted write without an id); an unreadable or malformed one, or a `policy_id` that is
+not a policy uuid or not on the accepted `p9-iam-write`, fails the undo before any request and
+keeps the root (fix or remove the file, then run `--cleanup` again). A recorded id is deleted only
+when the first listing does not show it under another name than `lzprobe-p9-write-<run-id>`
+(case aside): one shown as another policy is not deleted and the undo fails. The undo line counts
 the deletes OVHcloud answered; a 404 (expired, gone already) removed nothing. The undo also runs when the
 companion could not be destroyed (the root is then kept anyway), and other policies of the account
 are skipped whatever their name. The write also expires an

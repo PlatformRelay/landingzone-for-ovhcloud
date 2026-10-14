@@ -48,10 +48,14 @@ const (
 	stateBkt   = "lzprobe-p1-20261012t072729z-0646"
 	writeName  = "lzprobe-p9-write-" + runID
 	otherPol   = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	p25Pol     = "6ba7b810-9dad-11d1-80b4-00c04fd43025"
 	echo       = "SERVERTEXT"
 	envelope   = `{"serial":3,"lineage":"l","meta":{"key_provider.pbkdf2.main":"eyJ4IjoxfQ=="},"encrypted_data":"Y2lwaGVydGV4dA==","encryption_version":"v0"}`
 	plainState = `{"version":4,"terraform_version":"1.13.0","serial":3,"lineage":"l","resources":[{"type":"ovh_cloud_project_storage","name":"p9"}]}`
 )
+
+// wantNotInEffect is what bucket A's note and a refused bucket-A finding say (T113, T101 gap 6).
+const wantNotInEffect = "a refusal is also what a P25 policy not yet in effect would answer"
 
 var (
 	secrets = []string{tenantSK, p25SK, adminSK, s3SK, s3AK, "tok-tenant", "tok-p25", "tok-admin"}
@@ -100,6 +104,7 @@ type world struct {
 	written      []string // the ids accepted writes created
 	bound        []string // client ids Bind saw, in order
 	bindRefuse   string   // Bind refuses this client id
+	p25Created   string   // the P25 policy's createdAt in the listing ("": the policy is not listed)
 }
 
 type answer struct {
@@ -116,7 +121,9 @@ func newWorld(t *testing.T) *world {
 		"p25 GET /v1/cloud/project/" + project + "/region/GRA/storage/" + bucketB: {403, "publicCloudProject:apiovh:region/storage/get"},
 		"tenant GET /v1/me":          {403, "account:apiovh:me/get"},
 		"tenant POST /v2/iam/policy": {403, "account:apiovh:iam/policy/create"},
-	}, policies: []policy{{otherPol, "lz-sandbox-admin"}}}
+	}, policies: []policy{{otherPol, "lz-sandbox-admin"}},
+		// T113: created 95.3 s before the read (the format of T087's captured listing).
+		p25Created: now.Add(-95305461 * time.Microsecond).Format("2006-01-02T15:04:05.000000Z")}
 	w.api = httptest.NewServer(http.HandlerFunc(w.serveAPI))
 	t.Cleanup(w.api.Close)
 	w.s3 = httptest.NewTLSServer(http.HandlerFunc(w.serveS3))
@@ -190,6 +197,9 @@ func (w *world) serveAPI(rw http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			out = append(out, map[string]any{"id": p.id, "name": p.name, "identities": []string{identity}})
+		}
+		if w.p25Created != "" {
+			out = append(out, map[string]any{"id": p25Pol, "name": "lzprobe-p25-" + runID, "identities": []string{identity}, "createdAt": w.p25Created})
 		}
 		if out == nil {
 			out = []map[string]any{}
@@ -381,6 +391,7 @@ func TestObserve(t *testing.T) {
 		}
 		wantOrder := []string{
 			"bind ovh-eu " + p25ID,
+			"admin GET /v2/iam/policy", // T113: the P25 policy's createdAt
 			"p25 GET /v1/cloud/project/" + project + "/region/GRA/storage/" + bucketA,
 			"p25 GET /v1/cloud/project/" + project + "/region/GRA/storage/" + bucketB,
 			"bind ovh-eu " + tenantID,
@@ -413,6 +424,20 @@ func TestObserve(t *testing.T) {
 			p.ExpiredAt != now.Add(time.Hour).Format(time.RFC3339) {
 			t.Errorf("posted policy %s: want %s, the tenant identity on the project URN, allow region/storage/get only, expiring at %s", w.posted[0], writeName, now.Add(time.Hour).Format(time.RFC3339))
 		}
+		// T113 (T101 gap 6): bucket A's observation records how old the P25 policy was at the read,
+		// and says that a refusal is also what a policy not yet in effect answers.
+		a := rec.Observations[0]
+		if a.PolicyAge == nil || *a.PolicyAge != 95 || !strings.Contains(a.Note, "95 s") || !strings.Contains(a.Note, wantNotInEffect) {
+			t.Errorf("bucket A observation %+v: want policy_age_seconds 95 and a note naming it and %q", a, wantNotInEffect)
+		}
+		if !strings.Contains(string(raw), `"policy_age_seconds":95`) || !strings.Contains(term, "LZ-LIVE observe p25-read-bucket-a note: ") {
+			t.Errorf("record %s, terminal:\n%s\nwant policy_age_seconds and the note printed", raw, term)
+		}
+		for _, o := range rec.Observations[1:] {
+			if o.PolicyAge != nil || o.Note != "" {
+				t.Errorf("%s carries a policy age or note: %+v", o.Step, o)
+			}
+		}
 		for _, l := range strings.Split(strings.TrimSpace(term), "\n") {
 			if !strings.HasPrefix(l, "LZ-LIVE observe ") {
 				t.Errorf("terminal line %q: want LZ-LIVE observe lines only", l)
@@ -443,6 +468,46 @@ func TestObserve(t *testing.T) {
 		}
 		noLeak(t, "record, terminal and error", string(raw), term, err.Error())
 	})
+
+	// T113: the P25 policy's age is context, not an observation: a listing that cannot tell it (the
+	// policy not listed, or the listing refused) leaves it out and says so; the run is not failed.
+	// Review r1: an allowed bucket-A read keeps the age but not the refusal caveat; a negative age
+	// (the local clock behind OVHcloud's) is said.
+	t.Run("bucket-a-allowed-note", func(t *testing.T) {
+		w := newWorld(t)
+		w.answers["p25 GET /v1/cloud/project/"+project+"/region/GRA/storage/"+bucketA] = answer{200, ""}
+		rec, _, _, _ := runObserve(t, w, testEnv())
+		if a := rec.Observations[0]; a.PolicyAge == nil || *a.PolicyAge != 95 || strings.Contains(a.Note, wantNotInEffect) {
+			t.Errorf("bucket A observation %+v: want the age 95 and no refusal caveat", a)
+		}
+	})
+	t.Run("bucket-a-policy-age-negative", func(t *testing.T) {
+		w := newWorld(t)
+		w.p25Created = now.Add(3 * time.Second).Format("2006-01-02T15:04:05.000000Z")
+		rec, _, _, err := runObserve(t, w, testEnv())
+		if a := rec.Observations[0]; err != nil || a.PolicyAge == nil || *a.PolicyAge != -3 || !strings.Contains(a.Note, "negative: the local clock is behind") {
+			t.Errorf("Observe: %v, bucket A observation %+v: want age -3, said to be clock skew, no finding", err, a)
+		}
+	})
+
+	for name, setup := range map[string]func(*world){
+		"bucket-a-policy-age-unlisted": func(w *world) { w.p25Created = "" },
+		"bucket-a-policy-age-refused":  func(w *world) { w.listStatus = 403 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			setup(w)
+			rec, raw, term, err := runObserve(t, w, testEnv())
+			if err != nil {
+				t.Fatalf("Observe: %v; an unknown policy age is no finding", err)
+			}
+			wantSteps(t, rec.Observations, expected)
+			if a := rec.Observations[0]; a.PolicyAge != nil || !strings.Contains(a.Note, "age unknown") || !strings.Contains(a.Note, wantNotInEffect) {
+				t.Errorf("bucket A observation %+v: want no policy age, a note saying it is unknown and %q", a, wantNotInEffect)
+			}
+			noLeak(t, "record and terminal", string(raw), term)
+		})
+	}
 
 	findings := map[string]struct {
 		setup func(*world)
@@ -497,6 +562,10 @@ func TestObserve(t *testing.T) {
 			step := strings.SplitN(tc.err, ":", 2)[0]
 			if !slices.Equal(rec.Findings, []string{step}) || !strings.Contains(term, "LZ-LIVE finding "+step+": ") {
 				t.Errorf("findings %v, terminal:\n%s\nwant the one finding %s, printed", rec.Findings, term, step)
+			}
+			// T113: a refused bucket-A read's finding says a policy not yet in effect refuses too.
+			if refusedA := step == "p25-read-bucket-a" && tc.steps[0].observed == "refused"; refusedA != strings.Contains(err.Error(), wantNotInEffect) {
+				t.Errorf("finding %q: a refused bucket-A read (%v) must name, and only it, %q", err, refusedA, wantNotInEffect)
 			}
 			noLeak(t, "record, terminal and error", string(raw), term, err.Error())
 		})
@@ -767,6 +836,180 @@ func TestUndo(t *testing.T) {
 		}
 		if !slices.Equal(deletes, []string{"/v2/iam/policy/3f2504e0-4f89-41d3-9a0c-000000000007"}) {
 			t.Errorf("deletes %v, want the run's write only", deletes)
+		}
+	})
+}
+
+// TestRecorded (T113, T101 gap 2): `lz-live probe --cleanup` runs in a fresh process, where only
+// the run's observations.json knows the id an accepted IAM write returned. Recorded takes every
+// policy_id from it, and the undo deletes each by id as well as by name; an id that is not a policy
+// uuid (kb/api/v2/iam.json: policyId is a uuid) is refused before any request; no record means name
+// only, said on the terminal; a malformed record is refused, never read as no record.
+func TestRecorded(t *testing.T) {
+	// The record of a run whose write OVHcloud accepted, as that run's Observe wrote it.
+	accepted := func(t *testing.T, w *world) ([]byte, string) {
+		t.Helper()
+		w.writeAllowed = true
+		raw, err := Check(w.options()).Observe(context.Background(), testEnv(), io.Discard)
+		if err == nil || len(w.written) != 1 {
+			t.Fatalf("Observe: %v, writes %v; want the accepted write as a finding", err, w.written)
+		}
+		return raw, w.written[0]
+	}
+	deletes := func(w *world) []string {
+		var out []string
+		for _, c := range w.seen() {
+			if c.method == http.MethodDelete {
+				out = append(out, strings.TrimPrefix(c.path, "/v2/iam/policy/"))
+			}
+		}
+		return out
+	}
+	// A listing that misses the write, or shows it under a normalised name: by name alone the
+	// cleanup leaves it; with the record it deletes it by id.
+	for name, setup := range map[string]func(*world){
+		"record-unlisted": func(w *world) { w.hidden = true },
+		"record-renamed":  func(w *world) { w.renameTo = strings.ToLower(writeName) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			setup(w)
+			raw, created := accepted(t, w)
+			before := len(w.seen())
+			fresh := Check(w.options())
+			var term bytes.Buffer
+			if err := fresh.Recorded(raw, &term); err != nil {
+				t.Fatalf("Recorded: %v", err)
+			}
+			if n := len(w.seen()); n != before {
+				t.Errorf("Recorded made %d calls; it reads the record only", n-before)
+			}
+			if err := fresh.Undo(context.Background(), testEnv(), &term); err != nil {
+				t.Fatalf("Undo: %v", err)
+			}
+			if got := deletes(w); !slices.Equal(got, []string{created}) {
+				t.Errorf("deletes %v, want the recorded id %s once", got, created)
+			}
+			if slices.ContainsFunc(w.policies, func(p policy) bool { return p.id == created }) {
+				t.Errorf("policies after the cleanup's undo %v: the recorded write remains", w.policies)
+			}
+			if !strings.Contains(term.String(), "LZ-LIVE undo removed 1 ") {
+				t.Errorf("terminal lacks the undo line:\n%s", term.String())
+			}
+		})
+	}
+	t.Run("no-record-name-only", func(t *testing.T) {
+		w := newWorld(t)
+		w.policies = append(w.policies, policy{"3f2504e0-4f89-41d3-9a0c-000000000007", writeName})
+		c := Check(w.options())
+		var term bytes.Buffer
+		if err := c.Recorded(nil, &term); err != nil {
+			t.Fatalf("Recorded(nil): %v", err)
+		}
+		if !strings.Contains(term.String(), "LZ-LIVE undo no observations.json: deleting by name only (lzprobe-p9-write-<run id>)") {
+			t.Errorf("terminal %q: want the name-only fallback said", term.String())
+		}
+		if err := c.Undo(context.Background(), testEnv(), &term); err != nil {
+			t.Fatalf("Undo: %v", err)
+		}
+		if got := deletes(w); !slices.Equal(got, []string{"3f2504e0-4f89-41d3-9a0c-000000000007"}) {
+			t.Errorf("deletes %v, want the policy of the name", got)
+		}
+	})
+	// Refused before any request: the runner then fails the undo step and keeps the root.
+	good := func(id string) string {
+		return `{"check":"storage-iam","observations":[{"step":"p9-iam-write","operation":"CreatePolicy","credential":"tenant","expected":"refused","observed":"allowed","status":200,"policy_id":"` + id + `","as_expected":false}],"findings":["p9-iam-write"]}`
+	}
+	for name, rec := range map[string]string{
+		// Review r1: only the accepted IAM write carries the run's policy id; refusals echo nothing
+		// of the record (a field name or a step holding SERVERTEXT).
+		"id-on-another-step":    strings.Replace(good("3f2504e0-4f89-41d3-9a0c-000000000007"), `"step":"p9-iam-write"`, `"step":"p25-read-bucket-a"`, 1),
+		"id-on-a-refused-write": strings.Replace(good("3f2504e0-4f89-41d3-9a0c-000000000007"), `"observed":"allowed"`, `"observed":"refused"`, 1),
+		"step-echo":             strings.Replace(good("3f2504e0-4f89-41d3-9a0c-000000000007"), `"step":"p9-iam-write"`, `"step":"`+echo+`"`, 1),
+		"field-echo":            `{"check":"storage-iam","observations":[],"findings":[],"` + echo + `":1}`,
+		"empty":                 ``,
+		"not-json":              `{"check":"storage-iam",`,
+		"null":                  `null`,
+		"another-check":         `{"check":"state-backend-deny","observations":[],"findings":[]}`,
+		"unknown-field":         `{"check":"storage-iam","observations":[],"findings":[],"extra":1}`,
+		"trailing-data":         good("3f2504e0-4f89-41d3-9a0c-000000000007") + `{}`,
+		"id-path":               good("../../me"),
+		"id-uppercase":          good("3F2504E0-4F89-41D3-9A0C-000000000007"),
+		"id-short":              good("3f2504e0-4f89-41d3-9a0c"),
+		"id-with-query":         good("3f2504e0-4f89-41d3-9a0c-000000000007?x=1"),
+		"id-redacted-value":     good("[REDACTED]"),
+	} {
+		t.Run("refused-"+name, func(t *testing.T) {
+			w := newWorld(t)
+			var term bytes.Buffer
+			err := Check(w.options()).Recorded([]byte(rec), &term)
+			if err == nil || !strings.Contains(err.Error(), "observations.json") {
+				t.Fatalf("Recorded(%s): %v; want a refusal naming observations.json", name, err)
+			}
+			if strings.Contains(term.String(), "name only") {
+				t.Errorf("a refused record fell back to name only: %q", term.String())
+			}
+			if n := len(w.seen()); n != 0 {
+				t.Errorf("%d calls for a refused record", n)
+			}
+			noLeak(t, "error", err.Error())
+		})
+	}
+	// Review r1: a recorded id is the run's write only if the listing does not show it as another
+	// policy; one it lists under another name (here the admin's own) is refused, the undo fails
+	// (the root is kept), and nothing is deleted. Without a first listing, no recorded id goes.
+	for name, tc := range map[string]struct {
+		setup func(*world)
+		err   string
+	}{
+		"recorded-id-of-another-policy": {func(*world) {}, "listed under another name"},
+		"recorded-id-listing-fails":     {func(w *world) { w.listFailOnce = true }, "not deleted without a listing"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			tc.setup(w)
+			c := Check(w.options())
+			if err := c.Recorded([]byte(good(otherPol)), io.Discard); err != nil {
+				t.Fatalf("Recorded: %v", err)
+			}
+			err := c.Undo(context.Background(), testEnv(), io.Discard)
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Fatalf("Undo: %v; want %q", err, tc.err)
+			}
+			if got := deletes(w); len(got) != 0 {
+				t.Errorf("deletes %v, want none", got)
+			}
+			if !slices.Contains(w.policies, policy{otherPol, "lz-sandbox-admin"}) {
+				t.Errorf("policies %v: the admin's policy was deleted", w.policies)
+			}
+		})
+	}
+	// An accepted write the record has no id for (the POST's answer carried none): by name only,
+	// and said.
+	t.Run("accepted-write-without-id", func(t *testing.T) {
+		w := newWorld(t)
+		var term bytes.Buffer
+		rec := strings.Replace(good("x"), `,"policy_id":"x"`, "", 1)
+		if err := Check(w.options()).Recorded([]byte(rec), &term); err != nil {
+			t.Fatalf("Recorded: %v", err)
+		}
+		if !strings.Contains(term.String(), "LZ-LIVE undo observations.json records an accepted write without its id: deleting by name only") {
+			t.Errorf("terminal %q: want the name-only fallback said", term.String())
+		}
+	})
+	// A well-formed record without a write (the expected run) adds nothing: the undo is by name.
+	t.Run("record-without-write", func(t *testing.T) {
+		w := newWorld(t)
+		raw, err := Check(w.options()).Observe(context.Background(), testEnv(), io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := Check(w.options())
+		if err := c.Recorded(raw, io.Discard); err != nil {
+			t.Fatalf("Recorded: %v", err)
+		}
+		if err := c.Undo(context.Background(), testEnv(), io.Discard); err != nil || len(deletes(w)) != 0 {
+			t.Errorf("Undo: %v, deletes %v; want none", err, deletes(w))
 		}
 	})
 }

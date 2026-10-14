@@ -17,8 +17,8 @@ references:
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
-    blob: 158337b013192a1694fcec1574c0820c83a218f0
-last_verified: d43334baa5aa2ec4d17fda0cb57e028282d2ec4b
+    blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
+last_verified: a84e6382da2dfede6e222a3e1856de62eadc422f
 ---
 
 # Run the first slice on an OVHcloud account

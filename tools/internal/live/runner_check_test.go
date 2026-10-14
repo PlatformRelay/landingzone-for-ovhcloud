@@ -66,10 +66,29 @@ type checkHooks struct {
 	observeWait bool  // Observe waits until its context ends
 	validateErr error // Validate refuses the published variables
 	started     chan struct{}
+	// T113: withRecorded sets Recorded, which logs `recorded`, keeps what it was handed (nil: no
+	// record) and fails with recordedErr.
+	withRecorded bool
+	recordedErr  error
+	records      [][]byte
 }
 
 func (h *checkHooks) check(w *runWorld) *ProbeCheck {
 	h.started = make(chan struct{}, 1)
+	c := h.probeCheck(w)
+	if h.withRecorded {
+		c.Recorded = func(record []byte, term io.Writer) error {
+			logCall(w.bin, "tofu.log", tofuCall{Cmd: "recorded", Stack: "p"})
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.records = append(h.records, record)
+			return h.recordedErr
+		}
+	}
+	return c
+}
+
+func (h *checkHooks) probeCheck(w *runWorld) *ProbeCheck {
 	return &ProbeCheck{
 		Output: "deny_check",
 		Validate: func(env map[string]string) error {
@@ -124,7 +143,7 @@ func checkOrder(calls []tofuCall) []string {
 		switch {
 		case c.Cmd == "plan" && slices.Contains(c.Args, "-destroy"):
 			out = append(out, "plan-destroy")
-		case slices.Contains([]string{"apply", "output", "observe", "undo", "destroy"}, c.Cmd):
+		case slices.Contains([]string{"apply", "output", "observe", "recorded", "undo", "destroy"}, c.Cmd):
 			out = append(out, c.Cmd)
 		}
 	}
@@ -320,6 +339,95 @@ func TestProbeCheckRun(t *testing.T) {
 			t.Error("a failed cleanup removed the probe's files")
 		}
 	})
+
+	// T113 (T101 gap 2): `--cleanup` is a fresh process, so what the run's Observe recorded is known
+	// only from the run directory's observations.json. The cleanup hands it to the check's Recorded
+	// before Undo; none there is handed as nil and the undo runs; an unreadable one, or one Recorded
+	// refuses, fails the undo step without Undo, and the root is kept. A run never calls Recorded.
+	cleanupAfterKept := func(t *testing.T, h *checkHooks) (*runWorld, Probe, string, int) {
+		t.Helper()
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		h.withRecorded = true
+		h.undoErrs = []error{errors.New("policy still listed")}
+		p := w.checkProbe(t, root, checkOutputs(t, w, "deny_check", checkEnvWant()), h)
+		if err := p.Start(context.Background()); err == nil {
+			t.Fatal("Start passed with a failing undo")
+		}
+		if len(h.records) != 0 {
+			t.Errorf("the run called Recorded %d times; only a cleanup hands the record", len(h.records))
+		}
+		return w, p, root, len(w.calls(t, "tofu.log"))
+	}
+	t.Run("cleanup-hands-the-record", func(t *testing.T) {
+		h := &checkHooks{}
+		w, p, root, before := cleanupAfterKept(t, h)
+		want, err := os.ReadFile(filepath.Join(w.runDir, "observations.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Cleanup(context.Background()); err != nil {
+			t.Fatalf("cleanup: %v\n%s", err, w.term)
+		}
+		if got, wantOrder := checkOrder(w.calls(t, "tofu.log")[before:]), []string{"output", "recorded", "undo", "plan-destroy", "destroy"}; !slices.Equal(got, wantOrder) {
+			t.Errorf("cleanup calls %v, want %v: the record handed over before the undo", got, wantOrder)
+		}
+		if len(h.records) != 1 || string(h.records[0]) != string(want) {
+			t.Errorf("Recorded got %q, want observations.json as the run wrote it, %q", h.records, want)
+		}
+		noCheckSecret(t, w, root, w.runDir, w.stacks)
+	})
+	t.Run("cleanup-without-record", func(t *testing.T) {
+		h := &checkHooks{}
+		w, p, _, before := cleanupAfterKept(t, h)
+		if err := os.Remove(filepath.Join(w.runDir, "observations.json")); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Cleanup(context.Background()); err != nil {
+			t.Fatalf("cleanup: %v\n%s", err, w.term)
+		}
+		if got, wantOrder := checkOrder(w.calls(t, "tofu.log")[before:]), []string{"output", "recorded", "undo", "plan-destroy", "destroy"}; !slices.Equal(got, wantOrder) {
+			t.Errorf("cleanup calls %v, want %v", got, wantOrder)
+		}
+		if len(h.records) != 1 || h.records[0] != nil {
+			t.Errorf("Recorded got %q, want one call with nil (no record)", h.records)
+		}
+	})
+	for name, tc := range map[string]struct {
+		edit func(t *testing.T, h *checkHooks, runDir string)
+		err  string
+	}{
+		"cleanup-unreadable-record": {func(t *testing.T, _ *checkHooks, runDir string) {
+			rec := filepath.Join(runDir, "observations.json")
+			if err := os.Remove(rec); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(rec, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, "observations.json"},
+		"cleanup-record-refused": {func(_ *testing.T, h *checkHooks, _ string) {
+			h.recordedErr = errors.New("observations.json malformed")
+		}, "observations.json malformed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := &checkHooks{}
+			w, p, root, before := cleanupAfterKept(t, h)
+			tc.edit(t, h, w.runDir)
+			err := p.Cleanup(context.Background())
+			after := w.calls(t, "tofu.log")[before:]
+			if err == nil || !strings.Contains(err.Error(), tc.err) {
+				t.Fatalf("cleanup: %v; want a failure naming %q", err, tc.err)
+			}
+			if got := checkOrder(after); slices.Contains(got, "undo") || slices.Contains(got, "destroy") || slices.Contains(got, "plan-destroy") {
+				t.Errorf("cleanup calls %v: want neither the undo nor a destroy (never name only)", got)
+			}
+			if _, state, pass := probeFiles(t, root); !exists(state) || !exists(pass) {
+				t.Error("a failed cleanup removed the probe's files")
+			}
+		})
+	}
 
 	t.Run("plan-only", func(t *testing.T) {
 		root := tempPrivate(t)
