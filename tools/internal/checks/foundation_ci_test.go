@@ -257,6 +257,32 @@ func TestFoundationSpecScopedCreators(t *testing.T) {
 	}
 }
 
+// The committed source runs `stacks:check` in CI (005 T106), so the
+// generated stack files are compared with the manifest on every pull request;
+// the committed workflow carries the same list (its drift from the rendered
+// one is `ci-source`'s, under the same target).
+func TestFoundationCommittedTargets(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", FoundationSourcePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := ParseFoundationSource(data)
+	if err != nil {
+		t.Fatalf("committed source refused: %v", err)
+	}
+	if !slices.Contains(source.Targets, "stacks:check") {
+		t.Errorf("BEHAVIORAL_RED: committed source targets %v lack stacks:check", source.Targets)
+	}
+	workflow, err := os.ReadFile(filepath.Join("..", "..", "..", FoundationWorkflow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\n      LZ_TARGETS: " + strings.Join(source.Targets, " ") + "\n"
+	if !strings.Contains(string(workflow), want) {
+		t.Errorf("BEHAVIORAL_RED: committed workflow lacks %q", want)
+	}
+}
+
 // A repeated key is refused rather than resolved to its last value.
 func TestFoundationSourceDuplicateKey(t *testing.T) {
 	registry, tasks := foundationRegistry()
