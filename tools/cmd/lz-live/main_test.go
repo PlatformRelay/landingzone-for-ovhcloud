@@ -747,14 +747,9 @@ func TestProbeCleanupRecordedProjectEntry(t *testing.T) {
 	})
 }
 
-// TestLiveLaneRunsProbeTests (T073; T008 gap "probe tests in no CI target"): every probe root
-// with a `tofu test` control (*.tftest.hcl) runs it under `task test:live-lane`, through the unit
-// runner (a command `go -C tools run ./cmd/lz-check … unit tests/live/probes/<root>`), next to
-// the Go controls of the live lane. A static check of the wiring (layout as protect_test.go reads
-// it); that the probe tests pass is the entry run of the target.
-// A root added without its line, or a line left in a comment, fails here.
-func TestLiveLaneRunsProbeTests(t *testing.T) {
-	repo := filepath.Join("..", "..", "..")
+// liveLaneCmds returns the `cmds:` lines of test:live-lane in the repository's Taskfile.yml.
+func liveLaneCmds(t *testing.T, repo string) []string {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(repo, "Taskfile.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -772,6 +767,56 @@ func TestLiveLaneRunsProbeTests(t *testing.T) {
 			cmds = append(cmds, c)
 		}
 	}
+	return cmds
+}
+
+// TestLiveLaneShardsComplement: test:live-lane runs its Go controls as two concurrent `go test`
+// processes, one with `-run <re>` and one with `-skip <re>`. The serial tests of ./internal/live
+// (they set the process environment) then split across two processes, and the target stays well
+// under the offline entry's 120 s child limit on slow runners. The split drops no test only while
+// both shards name the same pattern and the same packages, the target waits for both, and either
+// failure fails it; a shard edited on its own fails here.
+func TestLiveLaneShardsComplement(t *testing.T) {
+	var line string
+	for _, c := range liveLaneCmds(t, filepath.Join("..", "..", "..")) {
+		if strings.HasPrefix(c, "go -C tools test ") && strings.Contains(c, "./internal/live ") {
+			line = c
+		}
+	}
+	shard := regexp.MustCompile(`^go -C tools test -count=1 -run '([^']+)' ((?:\./[\w/-]+ )+)& shard=\$!; rest=0; ` +
+		`go -C tools test -count=1 -skip '([^']+)' ((?:\./[\w/-]+ )+)\|\| rest=\$\?; wait \$shard \|\| rest=1; exit \$rest$`)
+	m := shard.FindStringSubmatch(line)
+	if m == nil {
+		t.Fatalf("test:live-lane's Go controls %q are not two shards `go -C tools test -count=1 -run '<re>' <pkgs> & shard=$!; rest=0; "+
+			"go -C tools test -count=1 -skip '<re>' <pkgs> || rest=$?; wait $shard || rest=1; exit $rest`", line)
+	}
+	if strings.Contains(m[1], "/") {
+		// go test splits -run and -skip on "/": -skip of a top-level element skips a whole test
+		// whose -run side runs only some subtests, so the others would run in neither shard.
+		t.Errorf("the shards' pattern %q names a subtest; it must select top-level tests only", m[1])
+	}
+	if m[1] != m[3] {
+		t.Errorf("the shards' patterns differ: -run %q, -skip %q; a test matching neither runs in no shard", m[1], m[3])
+	}
+	if a, b := strings.Fields(m[2]), strings.Fields(m[4]); !slices.Equal(a, b) {
+		t.Errorf("the shards' packages differ: -run %v, -skip %v; a package in one shard only loses the other shard's tests", a, b)
+	}
+	for _, pkg := range []string{"./internal/planjson", "./internal/live", "./internal/probes/live/state", "./internal/probes/live/storageiam", "./cmd/lz-live"} {
+		if !slices.Contains(strings.Fields(m[2]), pkg) {
+			t.Errorf("the shards no longer test %s", pkg)
+		}
+	}
+}
+
+// TestLiveLaneRunsProbeTests (T073; T008 gap "probe tests in no CI target"): every probe root
+// with a `tofu test` control (*.tftest.hcl) runs it under `task test:live-lane`, through the unit
+// runner (a command `go -C tools run ./cmd/lz-check … unit tests/live/probes/<root>`), next to
+// the Go controls of the live lane. A static check of the wiring (layout as protect_test.go reads
+// it); that the probe tests pass is the entry run of the target.
+// A root added without its line, or a line left in a comment, fails here.
+func TestLiveLaneRunsProbeTests(t *testing.T) {
+	repo := filepath.Join("..", "..", "..")
+	cmds := liveLaneCmds(t, repo)
 	if !slices.ContainsFunc(cmds, func(c string) bool {
 		return strings.HasPrefix(c, "go -C tools test ") && strings.Contains(c, "./internal/live") && strings.Contains(c, "./cmd/lz-live")
 	}) {
@@ -781,7 +826,7 @@ func TestLiveLaneRunsProbeTests(t *testing.T) {
 	// root's companion/ carries its own tofu test, which the root's unit run does not reach).
 	probes := filepath.Join(repo, "tests", "live", "probes")
 	roots := map[string]bool{}
-	err = filepath.WalkDir(probes, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(probes, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
