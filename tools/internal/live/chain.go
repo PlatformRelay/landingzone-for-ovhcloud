@@ -77,6 +77,9 @@ type ChainOptions struct {
 	S3HTTP *http.Client
 	// deadlineAt, once closed, ends the run as its deadline does (tests); nil in production.
 	deadlineAt <-chan struct{}
+	// stateReadBackoff are the waits before the retries of a retained state read (T110; nil:
+	// defaultStateReadBackoff). Tests shorten them.
+	stateReadBackoff []time.Duration
 }
 
 // CondConsumerApplied refuses `destroy -- <producer>` while a stack consuming it has a record
@@ -301,7 +304,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 		destroyErr = errors.Join(destroyErr, e)
 	}
 
-	rep := r.leftovers(dctx, check)
+	rep := r.leftovers(dctx, check, c.stateReadBackoff)
 	var recErr error
 	for typ, items := range rep.Listings {
 		raw, e := json.Marshal(items)
@@ -587,18 +590,64 @@ func (r *laneRunner) prepare(ctx context.Context, in stacks.Instance) (*childEnv
 var stateIDAttr = map[string]string{tStorage: "name", tUser: "id", tCred: "access_key_id", tS3Pol: "user_id", tClient: "client_id",
 	tPolicy: "id", tGroup: "name", tAlert: "id", tNetwork: "id", tSubnet: "id"}
 
+// readRetained is retainedIDs retried after a transient failure of its `init` or `show -json`
+// (T110, evidence/T049.md run 3: a read failing once turned the instance's objects into
+// leftovers): at most len(backoff) retries (nil: defaultStateReadBackoff), each after its wait; a
+// wait that would end after ctx's deadline is not started. A 4xx, any other failure and the last
+// attempt's failure are returned (the report's error: fail closed). Each retry prints one line
+// naming the instance with the redacted error, nothing of tofu's output.
+func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into map[string][]string, backoff []time.Duration) error {
+	if backoff == nil {
+		backoff = defaultStateReadBackoff
+	}
+	for attempt := 0; ; attempt++ {
+		err := r.retainedIDs(ctx, in, into)
+		if err == nil {
+			return nil
+		}
+		var f *tofuFailure
+		if attempt >= len(backoff) || ctx.Err() != nil || !errors.As(err, &f) || !transient(f.output) {
+			if attempt > 0 {
+				err = fmt.Errorf("%w (attempt %d of %d)", err, attempt+1, len(backoff)+1)
+			}
+			return err
+		}
+		wait := backoff[attempt]
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
+			return fmt.Errorf("%w; no retry: the deadline leaves less than %v", err, wait)
+		}
+		fmt.Fprintf(r.term, "LZ-LIVE retry state read %s in %v: transient failure (attempt %d of %d): %s\n",
+			in.ID, wait, attempt+2, len(backoff)+1, r.red.Redact(err.Error()))
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return errors.Join(err, context.Cause(ctx))
+		}
+	}
+}
+
+// readTofu is laneRunner.tofu keeping the call's stderr (capped, in memory, unredacted) in the
+// *tofuFailure it returns, so transient can judge it (T110, as session.tofu does for T095).
+func (r *laneRunner) readTofu(ctx context.Context, child *childEnv, id, dir string, stdout io.Writer, args ...string) error {
+	var stderr capped
+	if err := r.tofuStreams(ctx, child, id, dir, stdout, io.MultiWriter(r.term, &stderr), args...); err != nil {
+		return &tofuFailure{err: err, output: stderr.String()}
+	}
+	return nil
+}
+
 // retainedIDs reads a retained instance's state (`tofu show -json`, nested modules included) into
-// provider type -> listing ids.
+// provider type -> listing ids; into is written only once the state decoded.
 func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into map[string][]string) error {
 	child, dir, _, err := r.prepare(ctx, in)
 	if err != nil {
 		return err
 	}
-	if err := r.tofu(ctx, child, in.ID, dir, r.term, initArgs...); err != nil {
+	if err := r.readTofu(ctx, child, in.ID, dir, r.term, initArgs...); err != nil {
 		return err
 	}
 	var js bytes.Buffer
-	if err := r.tofu(ctx, child, in.ID, dir, &js, "show", "-json"); err != nil {
+	if err := r.readTofu(ctx, child, in.ID, dir, &js, "show", "-json"); err != nil {
 		return err
 	}
 	type res struct {
@@ -649,7 +698,7 @@ func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into m
 // inventory and the baseline record read back from the run directory. A state, exemption,
 // inventory or baseline that cannot be read, or a baseline listing that failed, is an error of the
 // report (fail closed).
-func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck) Report {
+func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff []time.Duration) Report {
 	o, m := r.o, r.o.Manifest
 	check.Retained = map[string][]string{}
 	var errs []string
@@ -662,7 +711,7 @@ func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck) Report 
 		if st.Chain != "retained" {
 			continue
 		}
-		if err := r.retainedIDs(ctx, in, check.Retained); err != nil {
+		if err := r.readRetained(ctx, in, check.Retained, backoff); err != nil {
 			errs = append(errs, fmt.Sprintf("state of %s: %s", in.ID, r.red.Redact(err.Error())))
 		}
 	}

@@ -282,8 +282,9 @@ var (
 	statusCodeRE  = regexp.MustCompile(`(?i)\bstatus[ _]?code\D{0,3}([1-5][0-9]{2})\b`)
 	tokenStatusRE = regexp.MustCompile(`oauth2: cannot fetch token: ([1-5][0-9]{2})\b`)
 	statusTextRE  = regexp.MustCompile(`(?i)\b([45][0-9]{2}) (bad request|unauthorized|payment required|forbidden|not found|method not allowed|not acceptable|proxy authentication required|request timeout|conflict|gone|length required|precondition failed|request entity too large|content too large|request-uri too long|uri too long|unsupported media type|requested range not satisfiable|range not satisfiable|expectation failed|misdirected request|unprocessable entity|unprocessable content|locked|failed dependency|too early|upgrade required|precondition required|too many requests|request header fields too large|unavailable for legal reasons|internal server error|not implemented|bad gateway|service unavailable|gateway timeout|http version not supported|insufficient storage|network authentication required)\b`)
-	// transientMarks need no status: a transport failure on the token endpoint, a reset connection.
-	transientMarks = []string{`/oauth2/token": `, "connection reset by peer"}
+	// transientMarks need no status: a transport failure on the token endpoint, a reset connection,
+	// a connection that timed out (T110: the state read of T049 run 3).
+	transientMarks = []string{`/oauth2/token": `, "connection reset by peer", "connection timed out"}
 )
 
 func transient(output string) bool {
@@ -764,6 +765,10 @@ func (s *session) undo(ctx context.Context, st Stack) (keep bool, err error) {
 // defaultCompanionBackoff are the waits before the second and third attempt of the companion's
 // destroy (T095): three attempts within about 80 s, well inside the default deadline.
 var defaultCompanionBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
+
+// defaultStateReadBackoff are the waits before the second and third attempt of the leftover
+// check's read of a retained instance's state (T110, chain.go readRetained).
+var defaultStateReadBackoff = []time.Duration{10 * time.Second, 30 * time.Second}
 
 // destroyCompanion destroys the companion (session.destroy: plan, judge, apply that plan), retrying
 // the whole destroy — a saved plan is stale once its apply failed — after a transient failure, at

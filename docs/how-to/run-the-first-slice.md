@@ -9,7 +9,7 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 523192a59b7b87d137f30af6cd24c7653e2eacbd
+    blob: 7143d74f5daeff15644761cc2fdca66fd7aba790
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
@@ -18,7 +18,7 @@ references:
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
     blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
-last_verified: db829892653ca7782e9132a6154377fbefc9b285
+last_verified: d2bd57fbe80edd2c831a1613e2e6cf1afae2b8c2
 ---
 
 # Run the first slice on an OVHcloud account
@@ -358,8 +358,12 @@ outcomes and the known deviations into the evidence or PR, never the record itse
 
 - The chain cleans up after itself: ephemeral destroy, trap, then the leftover check. A
   leftover or listing error makes the run `fail`. The check fails closed on transient 5xx and
-  transport errors too (evidence T087). No verb runs the leftover check on its own. Before you
-  conclude that something was left behind, read `leftovers.json` and look by hand (below).
+  transport errors too (evidence T087). Only its read of a retained instance's state is
+  retried: after a 5xx, a reset or a timed-out connection, at most twice, 10 s and 30 s later,
+  each retry printing one `LZ-LIVE retry state read <instance>` line; a 4xx or a read that still
+  fails is a state error in `leftovers.json` (T110). No verb runs the leftover check on its
+  own. Before you conclude that something was left behind, read `leftovers.json` and look by
+  hand (below).
 - If an ephemeral destroy failed, run `task live:destroy` for that instance in the same session.
 - If a probe's destroy failed, run
   `task live:probe -- --reviewed-sha "$S" --cleanup <run-id>`. Its state and passphrase under
