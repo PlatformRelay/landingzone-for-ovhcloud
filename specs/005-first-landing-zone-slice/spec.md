@@ -339,8 +339,15 @@ Details and controls: `contracts/checks.md`.
 ## Out of scope / postponed (with trigger)
 | Item | Seam kept | Trigger to start |
 | --- | --- | --- |
-| Artefact transaction (generations, fencing, waves; spec 002) | output envelope, consumed-digest record | second consumer of one producer in CI, or concurrent tenant runs |
-| Tombstones, retirement, rename | `UNSUPPORTED_CHANGE` | first instance removal |
+| Artefact transaction (generations, fencing, waves; from retired spec 002, D113) | output envelope, consumed-digest record | second consumer of one producer in CI, or concurrent tenant runs |
+| Tombstones, retirement, rename (spec 002 C002.4, D113) | `UNSUPPORTED_CHANGE` | first instance removal |
+| Plan binding: an approval binds every input of the saved plan it approves, and a change to any one of them voids it (spec 002 FR-005, D113) | the chain applies the saved plan it judged (`-out`) | assent, or a protected pipeline that applies a plan someone else approved |
+| Trusted-base authority: a tenant's change is judged by the owners and policy on the base branch, never by the request itself (spec 002 FR-006, D113) | manifest is platform-controlled | first tenant author who is not the maintainer |
+| Aggregate reservations: concurrent quota or budget requests reserve against an account total atomically (spec 002 FR-007, D113) | `quota_guard`, `budget_alert` per project | first self-service quota or budget request |
+| Forge qualification: stale, forged or racing candidates are blocked on each forge (spec 002 FR-008, D113) | Taskfile contract, GitHub CI | assent on a forge, or GitLab |
+| Producer authenticity under KD-3: a forged artefact for the right project id is detected, by a signed envelope, a platform-only bucket or the writer recorded per artefact (D113) | adapter refuses an unbound project id (R24) | the artefact transaction starts, or a tenant S3 credential is held by someone other than the maintainer |
+| Transaction store under Object Lock: conditional create of a generation object, a delayed older publisher, teardown with the governance bypass, qualified on OVHcloud S3 (D104, D113) | Object-Locked state buckets, output envelope | the artefact transaction starts |
+| A 5xx on an apply is an uncertain outcome, reconciled before any retry, never a plain failure (T095, D113) | transient-failure retry of a probe destroy (T095) | a driver that reconciles uncertain applies (the artefact transaction), or unattended CI applies |
 | OKMS state key, escrow, backup | `encryption {}` in every backend | first non-sandbox tenant or a second maintainer |
 | Separate state project (lifts KD-1) | `spec.state.project` input, V010 negative | a second project in the sandbox, or the first claim of tenant isolation |
 | Narrower `onboarding` authority for `tenant-state`/`account-governance` | stage table authority column | tenant onboarding from CI |
