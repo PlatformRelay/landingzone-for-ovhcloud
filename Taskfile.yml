@@ -162,10 +162,15 @@ tasks:
   # and, under the `live` tag, the L7 judge over recorded observations (T062);
   # the state-backend probe's Deny check against a fake S3 endpoint (T096); the storage-iam probe's
   # check against a fake API and S3 endpoint (T100).
+  # The Go controls run as two concurrent shards, -run and -skip of one pattern over
+  # the same packages: the serial chain and observe tests of ./internal/live (they
+  # set the process environment) run in a second process, which keeps the target
+  # well under the entry's 120 s child limit on slow runners. Both shards are
+  # awaited and either failure fails the target (TestLiveLaneShardsComplement).
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
-      - go -C tools test -count=1 ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./cmd/lz-live
+      - go -C tools test -count=1 -run '^Test(Chain|Observe)' ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./cmd/lz-live & shard=$!; rest=0; go -C tools test -count=1 -skip '^Test(Chain|Observe)' ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./cmd/lz-live || rest=$?; wait $shard || rest=1; exit $rest
       - go -C tools test -count=1 -tags live ./internal/probes/live/chain
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/alerting
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/iam
