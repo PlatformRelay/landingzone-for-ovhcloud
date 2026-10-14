@@ -1113,22 +1113,10 @@ func TestChainDestroyVerb(t *testing.T) {
 
 // TestLiveToolchainPin (T047, research R19): the ovhcloud CLI 0.15.0 is pinned in mise.live.toml
 // only (loaded with MISE_ENV=live, on the host), as its one tool; mise.toml, which the offline
-// toolchain identity reads, names no ovhcloud tool. The offline entry admits mise.toml but not
-// mise.live.toml (lz-offline's candidate allow-list): there the mise.toml half runs and the pin
-// half is skipped, naming why; on the host both run.
+// toolchain identity reads, names no ovhcloud tool. The offline entry admits both files (lz-offline's
+// candidate allow-list), so both halves run there, in CI and on the host.
 func TestLiveToolchainPin(t *testing.T) {
 	t.Parallel()
-	_, tcb := os.Stat("/tcb")
-	offline := tcb == nil || os.Getenv("LZ_OFFLINE") == "1"
-	if _, err := os.Stat(filepath.Join(laneRepoRoot, "mise.live.toml")); offline && err != nil {
-		defer t.Skip("mise.live.toml is host-only: the offline entry does not admit it; the pin half runs on the host")
-		for _, line := range miseTools(t, "mise.toml") {
-			if strings.Contains(line, "ovhcloud") {
-				t.Errorf("mise.toml pins %s: the live tool belongs in mise.live.toml only", line)
-			}
-		}
-		return
-	}
 	if got := miseTools(t, "mise.live.toml"); !slices.Equal(got, []string{`"github:ovh/ovhcloud-cli" = "0.15.0"`}) {
 		t.Errorf("mise.live.toml tools %q, want exactly the ovhcloud CLI 0.15.0", got)
 	}

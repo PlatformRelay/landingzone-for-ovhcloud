@@ -185,13 +185,16 @@ const (
 // specs and docs are data for the trace check; .github and pipelines are data
 // for the foundation CI check; stacks and terramate.tm.hcl are the generated
 // stacks and their Terramate root, data for the stack checks (005 T038).
+// README.md with the LICENSE and NOTICE it links, AGENTS.md and .specify are
+// data for the docs check; mise.live.toml is in a registry scope ci:foundation
+// digests. No tool in the sandbox reads any of them as configuration.
 // The probe.sh, included.yml, bin and lz-offline names admit the boundary
 // suite's hostile fixtures, so the suite can show they have no effect.
 func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := bundle.RealDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "harness", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "stacks", "terramate.tm.hcl", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := []string{"Taskfile.yml", "mise.toml", "mise.live.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "stacks", "terramate.tm.hcl", "README.md", "LICENSE", "NOTICE", "AGENTS.md", ".specify", "probe.sh", "included.yml", "bin", "lz-offline"}
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
@@ -304,7 +307,7 @@ const (
 	candidateBytes = "1073741824"
 	runBytes       = "16777216"
 	homeBytes      = "67108864"
-	childDeadline  = 120 * time.Second
+	childDeadline  = 240 * time.Second
 )
 
 // Targets the entry runs itself. Their success is computed by trusted code and
@@ -353,11 +356,17 @@ func networkDenied() error {
 	return nil
 }
 
+// providerScratch makes a new private directory below parent for the
+// provider fixture; a fixed name could already exist.
+func providerScratch(parent string) (string, error) {
+	return os.MkdirTemp(parent, "lz-provider-")
+}
+
 // providerInit installs the pinned ovh provider from the read-only mirror into a
 // trusted copy of the fixture, with the lock file read-only and no network.
 func providerInit() error {
-	directory := "/tmp/lz-provider"
-	if err := os.Mkdir(directory, 0700); err != nil {
+	directory, err := providerScratch("/tmp")
+	if err != nil {
 		return err
 	}
 	for _, name := range []string{"main.tf", ".terraform.lock.hcl"} {

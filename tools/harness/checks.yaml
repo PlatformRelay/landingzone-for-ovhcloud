@@ -154,7 +154,7 @@
      "scope": ["stacks", "tools/internal/live", "tools/cmd/lz-live", "tools/internal/probes/live"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson"], "review": true},
     {"id": "docs:check", "requirements": ["005/FR-011", "005/FR-012"], "command": "task docs:check", "creator": "005/T092", "kind": "behavioral",
-     "scope": ["docs", "components/README.md", "components/runtime/managed-only/README.md", "modules/README.md", "modules/cloud-project/README.md",
+     "scope": ["docs", "README.md", "components/README.md", "components/runtime/managed-only/README.md", "modules/README.md", "modules/cloud-project/README.md",
        "modules/cloud-quota/README.md", "modules/iam-policy/README.md", "modules/iam-resource-tags/README.md", "modules/iam-service-account/README.md",
        "modules/identity-group/README.md", "modules/naming/README.md", "modules/object-storage-protected/README.md", "modules/object-storage-user/README.md",
        "modules/object-storage/README.md", "modules/private-network/README.md", "pipelines/README.md", "schemas/README.md", "specs/README.md",

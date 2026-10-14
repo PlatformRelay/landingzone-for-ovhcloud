@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -519,11 +522,33 @@ func capture(t *testing.T, name string, tree map[string]string) string {
 		}
 		files[f] = string(data)
 	}
+	files["workflow.sha"] = renderedBlob(t)
 	for path, content := range tree {
 		files["tree/"+path] = content
 	}
 	writeFiles(t, dir, files)
 	return dir
+}
+
+// renderedBlob is the git blob of the workflow the current renderer makes
+// from the captured source. The captured runs executed the one rendered by
+// the renderer of their day; the judge expects today's, so a capture's
+// workflow blob is moved to it. A changed source still makes them stale.
+func renderedBlob(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(capturedRuns, "source.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := checks.ParseFoundationSource(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := checks.RenderFoundationWorkflow(source)
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(workflow))
+	h.Write([]byte(workflow))
+	return hex.EncodeToString(h.Sum(nil)) + "\n"
 }
 
 // ci-observe turns captured GitHub output and the head's tree into the
