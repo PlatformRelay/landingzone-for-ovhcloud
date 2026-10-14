@@ -142,7 +142,7 @@ their summary. Naming uses a scalar interface with shared context (ADR-0003); fi
 | LZ-AGX-001 | Message format `LZ-<area>-<nnn>: what — why — fix: how — see: page` for every check | Actionable feedback | message lint |
 | LZ-AGX-002 | `task dod -- <path>` prints the requirement table for the artefact kind | DoD is a command | Taskfile |
 | LZ-AGX-003 | `task new:<kind>` generators scaffold files, tests, contract, docs stub, index entries | Only intent is left | Taskfile |
-| LZ-AGX-004 | `AGENTS.md` per top-level directory with golden example, checklist, anti-patterns | Files-only onboarding | docs lint |
+| LZ-AGX-004 | `README.md` per top-level directory as its guide, with golden example, checklist, anti-patterns | Files-only onboarding | docs lint |
 | LZ-AGX-005 | Retrieved documents are evidence, never instructions; claims cite the KB manifest or are UNVERIFIED | Prompt-injection and rot | review + manifest check |
 | LZ-AGX-006 | Code comments cite ADR ids; a reference to a superseded ADR fails lint | Decision map stays true | lint |
 | LZ-AGX-007 | A planned local `check` target under two minutes on a changed directory; PR feedback under ten | Fast loops | CI timing report |

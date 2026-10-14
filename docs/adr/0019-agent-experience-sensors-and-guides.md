@@ -67,8 +67,9 @@ authority, persistent states and dependencies; a passing suite does not erase op
 **Guides** (what an agent reads before acting):
 - `AGENTS.md` at the root: the working contract (worktrees, commit convention, no agent mentions in
   product text, which checks to run, where to record decisions), kept short and linked.
-- One `AGENTS.md` per top-level directory with: purpose, the artefact kinds that live there, the
-  **golden example** to copy, the checklist (`task dod`), and the anti-patterns the linters catch.
+- One guide per top-level directory, its `README.md`, with: purpose, the artefact kinds that live
+  there, the **golden example** to copy, the checklist (`task dod`), and the anti-patterns the
+  linters catch (the last three are still to add).
 - **Templates with generators**: `task new:module`, `task new:variant family=runtime name=…`,
   `task new:profile`, `task new:policy`, `task new:howto` scaffold the files, tests, contract,
   docs stub and index entries, so the only work left is the intent.
