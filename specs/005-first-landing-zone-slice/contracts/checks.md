@@ -78,7 +78,8 @@ manifest edit precedes them). The committed result is checked by offline `stacks
 
 ### `task stacks:check` (offline, T036)
 Copies the candidate to scratch, runs reconcile `--check` and `terramate generate`, diffs against the
-candidate; any difference is `fail` and names the files.
+candidate; any difference is `fail` and names the files. No difference prints
+`STACKS_CHECK_OK stacks=<n> files=<m>`: the candidate's stacks and checked files.
 
 ### `task test:stack-plans` (offline, T038)
 For each stack: `init -backend=false`, `tofu test` of its generated `_lz_offline.tftest.hcl` with

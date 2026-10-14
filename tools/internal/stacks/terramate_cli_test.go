@@ -30,8 +30,8 @@ func TestTerramateLeavesHomeEmpty(t *testing.T) {
 	if err := Generate(GenerateOptions{Root: root, Terramate: bin}); err != nil {
 		t.Fatal(err)
 	}
-	if findings, err := CheckStacks(root, bin); err != nil || len(findings) != 0 {
-		t.Fatalf("stacks:check of the generated root: %q, %v", findings, err)
+	if report, err := CheckStacks(root, bin); err != nil || len(report.Findings) != 0 {
+		t.Fatalf("stacks:check of the generated root: %q, %v", report.Findings, err)
 	}
 	// Terramate runs `tofu -version` from PATH (strace, evidence/T038.md), and that tofu creates an
 	// empty ~/.terraform.d: the one entry admitted, and only empty.

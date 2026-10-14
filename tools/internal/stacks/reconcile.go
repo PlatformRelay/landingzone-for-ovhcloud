@@ -399,42 +399,48 @@ func resolveTerramate(root, override, tcb string) (string, error) {
 // `terramate generate`, and returns one finding per missing stack (manifest row order), then one
 // per generated file that differs from, is absent from or is extra in the candidate (sorted).
 // The candidate is never written. A reconciler refusal or a Terramate failure is the error.
-func CheckStacks(root, terramate string) ([]string, error) {
+// The report also counts what was compared, so that a check of nothing shows as such.
+func CheckStacks(root, terramate string) (CheckReport, error) {
+	var none CheckReport
 	if _, err := os.Stat(filepath.Join(root, ManifestPath)); errors.Is(err, fs.ErrNotExist) {
-		return nil, ErrNoManifest
+		return none, ErrNoManifest
 	}
 	scratch, err := os.MkdirTemp("", "lz-stacks-check-")
 	if err != nil {
-		return nil, err
+		return none, err
 	}
 	defer os.RemoveAll(scratch)
 	candidate, err := checkedFiles(root)
 	if err != nil {
-		return nil, err
+		return none, err
 	}
 	for rel, data := range candidate {
 		dst := filepath.Join(scratch, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return nil, err
+			return none, err
 		}
 		if err := os.WriteFile(dst, data, 0o644); err != nil {
-			return nil, err
+			return none, err
 		}
 	}
-	report, err := Reconcile(ReconcileOptions{Root: scratch, Terramate: terramate, Check: true})
+	reconciled, err := Reconcile(ReconcileOptions{Root: scratch, Terramate: terramate, Check: true})
 	if err != nil {
-		return nil, err
+		return none, err
+	}
+	_, stacks, err := discoverStacks(scratch)
+	if err != nil {
+		return none, err
 	}
 	var findings []string
-	for _, p := range report.Created {
+	for _, p := range reconciled.Created {
 		findings = append(findings, "missing stack "+p)
 	}
 	if out, err := runTerramate(terramate, true, "-C", scratch, "generate"); err != nil {
-		return nil, fmt.Errorf("terramate generate: %v: %s", err, out)
+		return none, fmt.Errorf("terramate generate: %v: %s", err, out)
 	}
 	generated, err := checkedFiles(scratch)
 	if err != nil {
-		return nil, err
+		return none, err
 	}
 	var stale []string
 	for rel, data := range generated {
@@ -451,7 +457,15 @@ func CheckStacks(root, terramate string) ([]string, error) {
 	for _, rel := range stale {
 		findings = append(findings, "stale generated file "+rel)
 	}
-	return findings, nil
+	return CheckReport{Findings: findings, Stacks: len(stacks), Files: len(candidate)}, nil
+}
+
+// CheckReport is what stacks:check found and what it compared: Stacks counts the candidate's
+// stack directories, Files its checked files (the root Terramate files and stacks/, OpenTofu
+// working files excluded).
+type CheckReport struct {
+	Findings      []string
+	Stacks, Files int
 }
 
 // tofuWorkingFile is an OpenTofu working file: the .terraform and .terragrunt-cache directories

@@ -60,7 +60,8 @@ E=$LZ_RUNTIME/runtime/lz-offline
 "$E" --candidate "$PWD" -- task stacks:order -- all  # the order the stacks would be applied in
 ```
 
-A green run ends with `SLICE_PASS` (`test:slice`) or `pass`; `stacks:order` prints the order.
+A green run ends with `SLICE_PASS` (`test:slice`), `STACKS_CHECK_OK` (`stacks:check`) or `pass`;
+`stacks:order` prints the order.
 With [Task](https://taskfile.dev) installed, `task --list` shows every target; CI runs the ones
 in `LZ_TARGETS` of the same workflow. Applying to a real account
 (`task bootstrap:*`, `task live:*`) is maintainer-only today; see the

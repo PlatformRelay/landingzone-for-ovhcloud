@@ -1026,9 +1026,9 @@ func TestGenerateRefusesGitStageSource(t *testing.T) {
 		if _, err := Reconcile(ReconcileOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
 			t.Fatal(err)
 		}
-		findings, err := CheckStacks(root, pinnedTerramate(t))
+		report, err := CheckStacks(root, pinnedTerramate(t))
 		if err == nil || !strings.Contains(err.Error(), CodeStageSourceNotImplemented) {
-			t.Fatalf("stacks:check of a git stage source: findings %q, error %v; want %s", findings, err, CodeStageSourceNotImplemented)
+			t.Fatalf("stacks:check of a git stage source: findings %q, error %v; want %s", report.Findings, err, CodeStageSourceNotImplemented)
 		}
 	})
 }
@@ -1440,9 +1440,9 @@ func authoringFlow(t *testing.T) {
 	if err := Generate(GenerateOptions{Root: wt, Terramate: pinnedTerramate(t)}); err != nil {
 		t.Fatalf("generate in the authoring worktree: %v", err)
 	}
-	findings, err := CheckStacks(wt, pinnedTerramate(t))
-	if err != nil || len(findings) != 0 {
-		t.Errorf("stacks:check after the authoring flow: findings %q, error %v; want none", findings, err)
+	checked, err := CheckStacks(wt, pinnedTerramate(t))
+	if err != nil || len(checked.Findings) != 0 {
+		t.Errorf("stacks:check after the authoring flow: findings %q, error %v; want none", checked.Findings, err)
 	}
 	compareGenerated(t, "authoring worktree", expectedFiles(t, "sandbox"), generatedFiles(t, wt))
 	if git(t, wt, "status", "--porcelain") == "" {
