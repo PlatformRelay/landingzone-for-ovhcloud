@@ -15,9 +15,10 @@
 // per file under stacks/ it created, changed or removed, sorted; a `git` stage source is refused
 // (STAGE_SOURCE_NOT_IMPLEMENTED) with nothing written. check (task stacks:check) copies the root
 // Terramate files and stacks/ to scratch, reconciles there under -check, runs `terramate generate`
-// and prints `fail: …` per missing stack and per stale generated file, or `pass`; the candidate is
-// never written. plans (task test:stack-plans) plans every stack offline under its generated
-// mocked test with the fixture envelopes of tests/fixtures/outputs/envelopes, on a scratch copy,
+// and prints `fail: …` per missing stack and per stale generated file, or the count line
+// `STACKS_CHECK_OK stacks=<n> files=<m>` (the candidate's stacks and checked files); the
+// candidate is never written. plans (task test:stack-plans) plans every stack offline under its
+// generated mocked test with the fixture envelopes of tests/fixtures/outputs/envelopes, on a scratch copy,
 // prints `planned <path>` per stack that planned, then `fail: …` per stack that did not or for a
 // NAME_COLLISION, or `pass`. order (task stacks:order) prints the run order grouped by level
 // (`order a → {b, c} → d`), then one `selected <id> <reason>[,<reason>…] [blocked-on=<p>[,…]]`
@@ -112,15 +113,15 @@ func run(args []string, out io.Writer) int {
 	}
 	switch flags.Arg(0) {
 	case "check":
-		findings, err := stacks.CheckStacks(abs, terramate)
+		report, err := stacks.CheckStacks(abs, terramate)
 		if err != nil {
 			return fail(out, err)
 		}
-		if len(findings) == 0 {
-			fmt.Fprintln(out, "pass")
+		if len(report.Findings) == 0 {
+			fmt.Fprintf(out, "STACKS_CHECK_OK stacks=%d files=%d\n", report.Stacks, report.Files)
 			return 0
 		}
-		for _, f := range findings {
+		for _, f := range report.Findings {
 			fmt.Fprintln(out, "fail: "+f)
 		}
 		return 1

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,10 +167,14 @@ func TestStacksCheckNoManifest(t *testing.T) {
 }
 
 // stacks:check works on a scratch copy, fails on every missing stack and every stale or missing
-// generated file, naming them, and passes on a reconciled and generated candidate.
+// generated file, naming them, and passes on a reconciled and generated candidate with a count
+// line of what it compared, so that a green run that compared nothing is visible as such: the
+// six stacks, and their 16 files (the two root Terramate files, the globals, the manifest, and
+// each stack's stack.tm.hcl and _lz_main.tf), OpenTofu working files never among them.
 func TestStacksCheck(t *testing.T) {
 	pinned(t)
 	stackPaths := sandboxPaths(t)
+	passed := fmt.Sprintf("STACKS_CHECK_OK stacks=%d files=%d", len(stackPaths), 4+2*len(stackPaths))
 	generated := func(paths []string) []string {
 		var out []string
 		for _, p := range paths {
@@ -194,7 +199,7 @@ func TestStacksCheck(t *testing.T) {
 		{"reconciled and generated", func(t *testing.T, root string) {
 			reconciled(t, root)
 			terramate(t, root, "generate")
-		}, 0, []string{"pass"}},
+		}, 0, []string{passed}},
 		{"generated file edited", func(t *testing.T, root string) {
 			reconciled(t, root)
 			terramate(t, root, "generate")
@@ -224,7 +229,7 @@ func TestStacksCheck(t *testing.T) {
 			writeFile(t, filepath.Join(root, stackPaths[4], "terraform.tfstate"), []byte("{}\n"))
 			writeFile(t, filepath.Join(root, stackPaths[4], "terraform.tfstate.backup"), []byte("{}\n"))
 			writeFile(t, filepath.Join(root, stackPaths[4], "plan.tfplan"), []byte("plan\n"))
-		}, 0, []string{"pass"}},
+		}, 0, []string{passed}},
 		{"one stack missing, the others generated", func(t *testing.T, root string) {
 			reconciled(t, root)
 			terramate(t, root, "generate")

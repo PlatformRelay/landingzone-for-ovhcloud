@@ -333,9 +333,11 @@ type RunStep struct {
 
 // RunTarget is one target of the checks step, in log order: ok when the
 // workflow printed LZ_TARGET_OK for it, failed when Task reported it failed.
-// Discovered counts its passing package and summary lines, Empty its
-// packages that ran no test, Failures the failed test assertions (`--- FAIL:`
-// lines) of a failed target.
+// Discovered counts its passing package lines and summary lines, Empty its
+// packages that ran no test in any of its lines (a target may split one
+// package's tests over concurrent `go test` processes, so one half printing
+// `[no tests to run]` is no finding when another ran tests there), Failures
+// the failed test assertions (`--- FAIL:` lines) of a failed target.
 type RunTarget struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
@@ -562,6 +564,19 @@ func observeLog(o *FoundationRun, log string) error {
 	var group string
 	inEnv := false
 	current, failures := RunTarget{}, 0
+	// tested and idle are the current target's packages that ran tests and
+	// that printed `[no tests to run]`; Empty is what is idle and untested.
+	tested, idle := map[string]bool{}, map[string]bool{}
+	closeTarget := func(status string) {
+		for pkg := range idle {
+			if !tested[pkg] {
+				current.Empty++
+			}
+		}
+		current.Status = status
+		o.Targets = append(o.Targets, current)
+		current, tested, idle = RunTarget{}, map[string]bool{}, map[string]bool{}
+	}
 	fetched := map[string]bool{}
 	for _, l := range lines {
 		step, text := l.step, l.text
@@ -598,20 +613,22 @@ func observeLog(o *FoundationRun, log string) error {
 				failures++
 			}
 			if name, ok := strings.CutPrefix(text, "LZ_TARGET_OK "); ok {
-				current.Name, current.Status = name, "ok"
-				o.Targets = append(o.Targets, current)
-				current, failures = RunTarget{}, 0
+				current.Name = name
+				closeTarget("ok")
+				failures = 0
 			} else if m := failedTask.FindStringSubmatch(text); m != nil {
-				current.Name, current.Status = m[1], "failed"
-				o.Targets = append(o.Targets, current)
-				current = RunTarget{}
+				current.Name = m[1]
+				closeTarget("failed")
 			} else if count, ok := strings.CutPrefix(text, "LZ_TARGETS_DONE "); ok {
 				if n, err := strconv.Atoi(count); err == nil {
 					o.TargetsDone = n
 				}
-			} else if strings.HasPrefix(text, "ok  \t") && strings.Contains(text, "[no tests to run]") {
-				current.Empty++
-			} else if strings.HasPrefix(text, "ok  \t") || summaryLine.MatchString(text) {
+			} else if pkg, ok := goPackage(text); ok && strings.Contains(text, "[no tests to run]") {
+				idle[pkg] = true
+			} else if ok {
+				tested[pkg] = true
+				current.Discovered++
+			} else if summaryLine.MatchString(text) {
 				current.Discovered++
 			}
 		}
@@ -628,6 +645,17 @@ func observeLog(o *FoundationRun, log string) error {
 		}
 	}
 	return nil
+}
+
+// goPackage is the package of a passing `go test` package line,
+// `ok  \t<package>\t<time>[ <note>]`.
+func goPackage(text string) (string, bool) {
+	rest, ok := strings.CutPrefix(text, "ok  \t")
+	if !ok {
+		return "", false
+	}
+	pkg, _, _ := strings.Cut(rest, "\t")
+	return pkg, true
 }
 
 // gitBlob is the git blob SHA of data, as GitHub reports file contents.

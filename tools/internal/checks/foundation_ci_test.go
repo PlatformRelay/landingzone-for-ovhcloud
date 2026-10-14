@@ -424,6 +424,64 @@ func TestFoundationObserve(t *testing.T) {
 	}
 }
 
+// withLines inserts texts as job-log lines of the step in front of the line
+// that holds anchor, so they belong to the same target.
+func withLines(t *testing.T, log []byte, anchor string, texts ...string) []byte {
+	t.Helper()
+	lines := strings.Split(string(log), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, anchor) {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 3)
+		stamp, _, _ := strings.Cut(fields[2], " ")
+		var added []string
+		for _, text := range texts {
+			added = append(added, fields[0]+"\t"+fields[1]+"\t"+stamp+" "+text)
+		}
+		return []byte(strings.Join(slices.Concat(lines[:i], added, lines[i:]), "\n"))
+	}
+	t.Fatalf("anchor %q not in the log", anchor)
+	return nil
+}
+
+// A target may split its packages over concurrent `go test` processes, one
+// with -run and one with -skip of the same pattern (test:live-lane), so a
+// package can print `[no tests to run]` in one half and run in the other.
+// Discovery is judged per target: a package counts as tested when any of
+// its lines ran tests, wherever that line falls, and a package that ran no
+// test in every line is still a package that ran no test.
+func TestFoundationObserveShardedTarget(t *testing.T) {
+	const pkg = "github.com/PlatformRelay/landingzone-for-ovhcloud/tools/"
+	first, last := "Z ok  \t"+pkg+"internal/report\t", "Z LZ_TARGET_OK test:reports"
+	for name, c := range map[string]struct {
+		anchor            string
+		texts             []string
+		discovered, empty int
+	}{
+		"empty half before the tested one": {first, []string{"ok  \t" + pkg + "internal/report\t0.010s [no tests to run]"}, 2, 0},
+		"empty half after the tested one":  {last, []string{"ok  \t" + pkg + "internal/report\t0.010s [no tests to run]"}, 2, 0},
+		"no half ran tests": {first, []string{"ok  \t" + pkg + "internal/other\t0.010s [no tests to run]",
+			"ok  \t" + pkg + "internal/other\t0.020s [no tests to run]"}, 2, 1},
+		"one package, one empty line": {last, []string{"ok  \t" + pkg + "internal/other\t0.010s [no tests to run]"}, 2, 1},
+		// A target that is no Go test counts by its count line, as
+		// stacks:check prints it (lz-stacks check).
+		"a count line": {last, []string{"STACKS_CHECK_OK stacks=6 files=16"}, 3, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			capture := captureRun(t, "head")
+			capture.Log = withLines(t, capture.Log, c.anchor, c.texts...)
+			run, err := ObserveFoundationRun(RoleHead, prHead, capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := run.Targets[2]; got.Name != "test:reports" || got.Discovered != c.discovered || got.Empty != c.empty {
+				t.Errorf("BEHAVIORAL_RED: %s observed as %+v, want discovered %d, empty %d", name, got, c.discovered, c.empty)
+			}
+		})
+	}
+}
+
 // A capture that is not one run of one job, or whose blob is not a SHA, is
 // refused rather than observed.
 func TestFoundationObserveRefused(t *testing.T) {
