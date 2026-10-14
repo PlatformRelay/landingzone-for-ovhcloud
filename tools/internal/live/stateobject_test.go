@@ -9,6 +9,7 @@ import (
 // for a probe check: an OpenTofu encryption envelope holds; a plaintext state, an object without
 // the envelope and one that is no JSON do not. The detail is fixed text, nothing of the object.
 func TestStateObjectEncrypted(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, raw string
 		want      bool

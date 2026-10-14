@@ -17,6 +17,7 @@ import (
 // TestEnvCredsCannotReplacePathOrHome: a credential file cannot redirect which binary or home
 // directory a child uses.
 func TestEnvCredsCannotReplacePathOrHome(t *testing.T) {
+	t.Parallel()
 	creds := map[string]string{"PATH": "/evil/bin", "HOME": "/evil/home", "PATH=/evil/bin:": "v", "OVH_CLIENT_ID": "id"}
 	cmd := Command(AuthorityTenant, creds, "true")
 	for _, want := range []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "OVH_CLIENT_ID=id"} {
@@ -33,6 +34,7 @@ func TestEnvCredsCannotReplacePathOrHome(t *testing.T) {
 
 // TestBindingNoRedirect: a redirect from the token endpoint never carries the secret elsewhere.
 func TestBindingNoRedirect(t *testing.T) {
+	t.Parallel()
 	var leaked []string
 	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -62,6 +64,7 @@ func TestBindingNoRedirect(t *testing.T) {
 // TestBindingSendsNothingOnMismatch: endpoint and org are compared before the credential is sent
 // anywhere.
 func TestBindingSendsNothingOnMismatch(t *testing.T) {
+	t.Parallel()
 	f := newFakeAPI(t)
 	admin := credentialOf(f.credential("admin"))
 	ca := admin
@@ -75,6 +78,7 @@ func TestBindingSendsNothingOnMismatch(t *testing.T) {
 
 // TestBindingErrorOmitsAnswer: neither the API's answer nor the secret enters an error.
 func TestBindingErrorOmitsAnswer(t *testing.T) {
+	t.Parallel()
 	f := newFakeAPI(t)
 	c := credentialOf(f.credential("admin"))
 	c.ClientSecret = "wrong-secret-value"

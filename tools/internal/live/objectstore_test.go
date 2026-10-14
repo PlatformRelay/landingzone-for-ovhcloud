@@ -95,6 +95,7 @@ func sha256Hex(b []byte) string {
 // copy) and the four worked S3 examples (GET Object, PUT Object, two bucket GETs), each with its
 // published keys and fixed clock.
 func TestS3SigV4Vectors(t *testing.T) {
+	t.Parallel()
 	suites := []struct {
 		dir                string
 		ak, sk, region, sv string
@@ -328,6 +329,7 @@ func s3NoSecretIn(t *testing.T, f *fakeS3, secret string) {
 // storage-and-backup/object-storage/s3-getting-started-with-object-storage.mdx), the region's
 // case folded; anything whose host would not be that pattern is refused (UNVERIFIED until T044).
 func TestS3Endpoint(t *testing.T) {
+	t.Parallel()
 	for region, want := range map[string]string{"gra": "https://s3.gra.io.cloud.ovh.net", "sbg": "https://s3.sbg.io.cloud.ovh.net", "GRA": "https://s3.gra.io.cloud.ovh.net"} {
 		if got, err := ObjectStorageEndpoint(region); err != nil || got != want {
 			t.Errorf("ObjectStorageEndpoint(%q) = %q, %v; want %q", region, got, err, want)
@@ -348,6 +350,7 @@ func TestS3Endpoint(t *testing.T) {
 // TestS3StoreClient (review r1): without an injected client the store gets a bounded timeout; with
 // or without one, a redirect is never followed, and the caller's client is not modified.
 func TestS3StoreClient(t *testing.T) {
+	t.Parallel()
 	s, err := NewS3Store(S3Options{Region: "gra", Keys: s3TestKeys()})
 	if err != nil {
 		t.Fatal(err)
@@ -365,6 +368,7 @@ func TestS3StoreClient(t *testing.T) {
 }
 
 func TestS3StoreKeys(t *testing.T) {
+	t.Parallel()
 	for _, missing := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
 		keys := s3TestKeys()
 		delete(keys, missing)
@@ -392,6 +396,7 @@ func TestS3StoreKeys(t *testing.T) {
 // unreserved set and '/' percent-encoded once), so a server that verifies against the URI as sent
 // agrees with one that decodes and re-encodes it (review r1).
 func TestS3StoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
 	key := stacks.ArtifactKey("account-bootstrap")
@@ -461,6 +466,7 @@ func TestS3StoreRoundTrip(t *testing.T) {
 // TestS3StoreMethods: GET, PUT and HEAD only; any other method (or a lower-case one) is refused
 // before any request is sent, and the refusal names the method.
 func TestS3StoreMethods(t *testing.T) {
+	t.Parallel()
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
 	for _, m := range []string{http.MethodPost, http.MethodDelete, http.MethodPatch, http.MethodOptions, http.MethodConnect, http.MethodTrace, "get", "put", "PROPFIND", ""} {
@@ -484,6 +490,7 @@ func TestS3StoreMethods(t *testing.T) {
 // TestS3StoreNames: a bucket that is not an S3 bucket name or a key with an empty, `.` or `..`
 // segment, a leading slash or a control character is refused before any request.
 func TestS3StoreNames(t *testing.T) {
+	t.Parallel()
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
 	for _, b := range []string{"", "ab", "LZ-bkt", "lz_bkt", "-lz", "lz-", "lz/bkt", "lz bkt", strings.Repeat("a", 64)} {
@@ -511,6 +518,7 @@ func TestS3StoreNames(t *testing.T) {
 // operation, bucket and key; no error carries the server's text, the secret or the access key,
 // also when the server echoes them; a Put larger than the cap is refused before any request.
 func TestS3StoreErrors(t *testing.T) {
+	t.Parallel()
 	echo := "SERVERTEXT " + s3TestSK + " " + s3TestAK
 	faults := map[string]func(rw http.ResponseWriter, r *http.Request){}
 	for _, code := range []int{400, 401, 403, 404, 409, 429, 500, 502, 503, 201, 204, 206} {

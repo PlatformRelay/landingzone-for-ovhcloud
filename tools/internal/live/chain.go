@@ -75,6 +75,8 @@ type ChainOptions struct {
 	Observer Observer
 	// S3HTTP is the state-object check's S3 client (T102; nil: the store's default client).
 	S3HTTP *http.Client
+	// deadlineAt, once closed, ends the run as its deadline does (tests); nil in production.
+	deadlineAt <-chan struct{}
 }
 
 // CondConsumerApplied refuses `destroy -- <producer>` while a stack consuming it has a record
@@ -224,7 +226,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	}
 	// The destroy-on-exit is registered here, before the baseline and the first apply: every way
 	// out of the loop below (failure, refusal, signal, deadline) reaches the destroy.
-	runCtx, cancelTimeout := context.WithTimeoutCause(ctx, deadline, errDeadline)
+	runCtx, cancelTimeout := withDeadline(ctx, deadline, c.deadlineAt)
 	defer cancelTimeout()
 	runCtx, cancel := context.WithCancelCause(runCtx)
 	defer cancel(nil)

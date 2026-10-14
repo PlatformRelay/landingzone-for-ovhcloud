@@ -116,6 +116,7 @@ func apiNoLeak(t *testing.T, msg string) {
 // TestAPICheckerOperations: each operation goes out with its method and path (v1 or v2), the
 // identity's bearer token, a body only for CreatePolicy (JSON content type).
 func TestAPICheckerOperations(t *testing.T) {
+	t.Parallel()
 	policy := []byte(`{"name":"lzprobe-p9-write-x"}`)
 	cases := []struct {
 		call         APICall
@@ -162,6 +163,7 @@ func TestAPICheckerOperations(t *testing.T) {
 // TestAPICheckerGate: anything outside the five operations, or an operation with a part it does
 // not take or a part of the wrong shape, is refused before any request.
 func TestAPICheckerGate(t *testing.T) {
+	t.Parallel()
 	ok := APICall{Op: APIGetStorage, Project: apiTestProject, Region: "GRA", Name: "lzprobe-p25a-x"}
 	with := func(edit func(*APICall)) APICall { c := ok; edit(&c); return c }
 	refused := map[string]APICall{
@@ -215,6 +217,7 @@ func TestAPICheckerGate(t *testing.T) {
 // keeps (id, name); errors (oversized, unexpected listing, too many pages, transport) carry no
 // answer text.
 func TestAPICheckerAnswers(t *testing.T) {
+	t.Parallel()
 	echo := "SERVERTEXT " + apiTestToken + " " + apiTestSecret
 	forbidden := func(message, byIAM string) string {
 		b, _ := json.Marshal(map[string]any{"class": "Client::Forbidden", "message": message,
@@ -395,6 +398,7 @@ func TestAPICheckerAnswers(t *testing.T) {
 // TestAPICheckerToken: a refused credential is an error naming the token endpoint, never a value;
 // the secret goes only to the token endpoint, the token only in Authorization.
 func TestAPICheckerToken(t *testing.T) {
+	t.Parallel()
 	f := newFakeCheckAPI(t)
 	_, err := NewAPIChecker(context.Background(), f.api(), Credential{Endpoint: "ovh-eu", ClientID: apiTestClient, ClientSecret: "wrong-" + apiTestSecret})
 	if err == nil || !strings.Contains(err.Error(), "token endpoint") {

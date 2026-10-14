@@ -45,6 +45,7 @@ func answerWith(f *fakeS3, status int, version, body string) {
 // PUTs carry a signed Content-MD5 of the body; only ListObjectVersions and GetBucketVersioning
 // return the answer's body.
 func TestS3CheckerOperations(t *testing.T) {
+	t.Parallel()
 	const vid = "3HL4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY"
 	cases := []struct {
 		call       S3Call
@@ -121,6 +122,7 @@ func TestS3CheckerOperations(t *testing.T) {
 // take, is refused before any request — above all a DELETE of the bucket or of its sub-resources
 // other than the policy.
 func TestS3CheckerGate(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("a", 1025)
 	refused := map[string]S3Call{
 		"DeleteBucket":                {Op: "DeleteBucket"},
@@ -187,6 +189,7 @@ func TestS3CheckerGate(t *testing.T) {
 // truncation, transport, cancellation) name the operation and never the answer's text, a key, the
 // URL or the host.
 func TestS3CheckerAnswers(t *testing.T) {
+	t.Parallel()
 	echo := "SERVERTEXT " + s3TestSK + " " + s3TestAK
 	errorBody := func(code string) string {
 		return "<?xml version=\"1.0\"?><Error><Code>" + code + "</Code><Message>" + echo + "</Message></Error>"
@@ -313,6 +316,7 @@ func noLeak(t *testing.T, msg, echo string) {
 // TestS3CheckerNoSecret: the secret key appears in no request (URL, header, body), the access key
 // only in Authorization.
 func TestS3CheckerNoSecret(t *testing.T) {
+	t.Parallel()
 	f := newFakeS3(t)
 	answerWith(f, 200, "v-1", "")
 	c := newTestS3Checker(t, f)

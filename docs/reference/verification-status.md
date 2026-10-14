@@ -5,10 +5,10 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 84526829da4e0be0e8114344fd4ad2a818818c88
+    blob: 523192a59b7b87d137f30af6cd24c7653e2eacbd
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
-last_verified: 525ba2d658acf7b1eb8aac3d6a4f1d65a7c17c71
+last_verified: db829892653ca7782e9132a6154377fbefc9b285
 ---
 
 # Verification status of the first slice

@@ -20,8 +20,16 @@ import (
 // host's umask strips group/other bits still fails.
 func withUmask(t *testing.T) {
 	t.Helper()
+	notParallel(t)
 	old := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(old) })
+}
+
+// notParallel marks t as changing process-wide state (the umask, os.Stdout, the standard logger):
+// t.Setenv panics in a test that called t.Parallel, so such a test never runs beside another (T114).
+func notParallel(t testing.TB) {
+	t.Helper()
+	t.Setenv("LZ_TEST_PROCESS_WIDE", "1")
 }
 
 // tempPrivate is a 0700 temporary directory (t.TempDir follows the host umask: 0775 here).
@@ -183,6 +191,7 @@ func TestFilesWriteStaysUnderRoot(t *testing.T) {
 }
 
 func TestFilesWriteRefusesMalformedValues(t *testing.T) {
+	t.Parallel()
 	root := tempPrivate(t)
 	for name, values := range map[string]map[string]string{
 		"newline in value": {"K": "a\nINJECTED=1"},
@@ -209,6 +218,7 @@ func TestFilesWriteRefusesMalformedValues(t *testing.T) {
 }
 
 func TestFilesReadRefusesOpenModes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, m := range []os.FileMode{0o640, 0o604, 0o620, 0o602, 0o660, 0o644} {
 		path := filepath.Join(dir, "open.env")
@@ -264,6 +274,7 @@ func TestFilesReadRefusesOpenModes(t *testing.T) {
 }
 
 func TestFilesAccountDir(t *testing.T) {
+	t.Parallel()
 	root := tempPrivate(t)
 	got, err := AccountDir(root, "ab12345-ovh")
 	if err != nil || got != filepath.Join(root, "accounts", "ab12345-ovh") {
@@ -286,6 +297,7 @@ var writers = map[string]bool{
 // TestFilesOnlyWriter: outside files.go, no non-test file of the live lane calls a writer
 // (os.X, ioutil.WriteFile, or a method of the same name on an *os.File is not a writer).
 func TestFilesOnlyWriter(t *testing.T) {
+	t.Parallel()
 	var offenders []string
 	for _, dir := range []string{".", filepath.Join("..", "..", "cmd", "lz-live")} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))

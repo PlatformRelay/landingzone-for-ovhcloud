@@ -36,6 +36,7 @@ type applyEvent struct {
 // stream (tofu must never block on a full pipe), still prints every message, and returns the
 // error at the end.
 func TestInventoryDrainsAfterFailedAppend(t *testing.T) {
+	t.Parallel()
 	dir := tempPrivate(t)
 	inv, err := OpenInventory(dir, NewRedactor())
 	if err != nil {
@@ -130,6 +131,7 @@ func waitFor(timeout time.Duration, cond func() bool) bool {
 // time and does not send the next event until the entry of an apply_complete is on disk: an
 // implementation that buffers the stream, or writes the inventory at the end, never gets it.
 func TestInventoryAppendsBeforeNextEvent(t *testing.T) {
+	t.Parallel()
 	dir := tempPrivate(t)
 	lines := streamLines(t, "apply-ok.jsonl")
 	want := completed(t, "probe-a", lines)
@@ -198,6 +200,7 @@ func TestInventoryAppendsBeforeNextEvent(t *testing.T) {
 // TestInventoryFailedApply: the captured failing apply records the resource that completed, not
 // the one whose apply errored.
 func TestInventoryFailedApply(t *testing.T) {
+	t.Parallel()
 	dir := tempPrivate(t)
 	lines := streamLines(t, "apply-fail.jsonl")
 	inv, err := OpenInventory(dir, NewRedactor())
@@ -216,6 +219,7 @@ func TestInventoryFailedApply(t *testing.T) {
 // TestInventoryStateListFallback is the P24 fallback: after a stack, what `tofu state list`
 // prints and the inventory does not hold yet is appended (without an id), data sources excepted.
 func TestInventoryStateListFallback(t *testing.T) {
+	t.Parallel()
 	dir := tempPrivate(t)
 	inv, err := OpenInventory(dir, NewRedactor())
 	if err != nil {
@@ -254,6 +258,7 @@ func TestInventoryStateListFallback(t *testing.T) {
 
 // TestInventoryReopenAppends: a cleanup run reopens the run's inventory; nothing recorded is lost.
 func TestInventoryReopenAppends(t *testing.T) {
+	t.Parallel()
 	dir := tempPrivate(t)
 	for i, addr := range []string{"terraform_data.a", "terraform_data.b"} {
 		inv, err := OpenInventory(dir, NewRedactor())
@@ -272,6 +277,7 @@ func TestInventoryReopenAppends(t *testing.T) {
 
 // TestInventoryRedacts: an id or address holding a seeded secret is written redacted (G2).
 func TestInventoryRedacts(t *testing.T) {
+	t.Parallel()
 	dir := tempPrivate(t)
 	inv, err := OpenInventory(dir, NewRedactor(seedSecret))
 	if err != nil {

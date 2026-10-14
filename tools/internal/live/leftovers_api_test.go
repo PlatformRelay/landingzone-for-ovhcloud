@@ -315,6 +315,7 @@ func assertNoCredentialIn(t *testing.T, what string, texts ...string) {
 // from that credential's client-credentials grant. (Whether ovhcloud is started is a run-level
 // question: TestLeftoversAPIRunStartsNoOvhcloud.)
 func TestLeftoversAPICleanMatrix(t *testing.T) {
+	t.Parallel()
 	w, _ := loadSynthetic(t)
 	f := newFakeListAPI(t, w.Responses)
 	c, inv := apiCheck(t, w, syntheticSeed{}, f)
@@ -381,6 +382,7 @@ func TestLeftoversAPICleanMatrix(t *testing.T) {
 // TestLeftoversAPISeeded: one seeded leftover per kind, listed through the API, is reported
 // exactly.
 func TestLeftoversAPISeeded(t *testing.T) {
+	t.Parallel()
 	w, seeds := loadSynthetic(t)
 	for name, s := range seeds.Seeds {
 		t.Run(name, func(t *testing.T) {
@@ -397,6 +399,7 @@ func TestLeftoversAPISeeded(t *testing.T) {
 // TestLeftoversAPIGetOnly: the client sends GET and nothing else; any other method is refused
 // before a request (no token request, no API request), whether or not it holds a token yet.
 func TestLeftoversAPIGetOnly(t *testing.T) {
+	t.Parallel()
 	w, _ := loadSynthetic(t)
 	const path = "/me/identity/group"
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead,
@@ -447,6 +450,7 @@ func TestLeftoversAPIGetOnly(t *testing.T) {
 // X-Pagination-Cursor header until a page comes without one, and a leftover on the last page of
 // a paginated listing is found.
 func TestLeftoversAPIPagination(t *testing.T) {
+	t.Parallel()
 	w, seeds := loadSynthetic(t)
 	ctx := context.Background()
 
@@ -540,6 +544,7 @@ func TestLeftoversAPIPagination(t *testing.T) {
 // well-formed empty listing wherever it sends a body. No error carries the secret or the token,
 // and a redirect is not followed.
 func TestLeftoversAPIErrors(t *testing.T) {
+	t.Parallel()
 	w, _ := loadSynthetic(t)
 	routes := []struct {
 		name, route string

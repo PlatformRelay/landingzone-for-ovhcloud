@@ -24,6 +24,7 @@ var capturesDir = filepath.Join("..", "..", "..", "tests", "fixtures", "tofu-pro
 // stream's file name, and its own `file` and `case` fields must name that stream. This shows the
 // sidecar is consistent, not that the entry wrote it: capture.sh writes it on the host.
 func TestInventoryCapturedP24Fixture(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join(capturesDir, "p24-apply-json.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +113,7 @@ func treeDigest(t *testing.T, root string) string {
 // only after its dependency's apply_complete, so the id is recorded before the next resource
 // that could need it is created.
 func TestInventoryCapturedP24(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join(capturesDir, "p24-apply-json.jsonl"))
 	if err != nil {
 		t.Fatal(err)

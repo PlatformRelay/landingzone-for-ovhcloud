@@ -91,6 +91,9 @@ type Runner struct {
 	// companionBackoff are the waits before each retry of the companion's destroy (T095); nil:
 	// defaultCompanionBackoff. Tests shorten them.
 	companionBackoff []time.Duration
+	// deadlineAt, once closed, ends the run as its deadline does (tests: once the run reaches the
+	// call the deadline is to stop); nil in production. Deadline still bounds run and destroy.
+	deadlineAt <-chan struct{}
 }
 
 // companionStage is a probe root's second stage (T075/T076): after the root's apply, the
@@ -863,7 +866,7 @@ func (r Runner) Execute(ctx context.Context) error {
 
 	// The destroy-on-exit is registered before the first apply: from here on every way out of
 	// the stack loop (failure, refusal, signal, deadline) reaches the destroy below.
-	runCtx, cancelTimeout := context.WithTimeoutCause(ctx, deadline, errDeadline)
+	runCtx, cancelTimeout := withDeadline(ctx, deadline, r.deadlineAt)
 	defer cancelTimeout()
 	runCtx, cancel := context.WithCancelCause(runCtx)
 	defer cancel(nil)

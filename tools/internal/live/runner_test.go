@@ -500,6 +500,8 @@ func hang(bin, stack string, sigs chan os.Signal, ignore bool) int {
 			_ = os.WriteFile(filepath.Join(bin, "plugin-"+stack+".pid"), []byte(strconv.Itoa(plugin.Process.Pid)), 0o600)
 		}
 	}
+	// Written once the apply hangs: a test's deadline is reached there (T114).
+	_ = os.WriteFile(filepath.Join(bin, "hanging-"+stack), nil, 0o600)
 	timeout := time.After(60 * time.Second)
 	for {
 		select {
@@ -681,13 +683,15 @@ func (w *runWorld) runner(t *testing.T, stacks ...Stack) Runner {
 	t.Helper()
 	c, _ := cleanCheck(t, "")
 	return Runner{
-		ID:        "20261006T120000Z-a1b2",
-		Dir:       w.runDir,
-		Tofu:      w.tofu,
-		Authority: AuthorityTenant,
-		Creds:     runCreds,
-		Stacks:    stacks,
-		Deadline:  time.Minute,
+		ID:               "20261006T120000Z-a1b2",
+		Dir:              w.runDir,
+		Tofu:             w.tofu,
+		Authority:        AuthorityTenant,
+		Creds:            runCreds,
+		Stacks:           stacks,
+		Deadline:         testWaitCap,
+		Grace:            testGrace,
+		companionBackoff: testBackoff,
 		Protect: func(s Stack, plan []byte) error {
 			var p planFile
 			_ = json.Unmarshal(plan, &p)
@@ -754,9 +758,22 @@ func execute(t *testing.T, r Runner) (error, time.Duration) {
 	}
 }
 
+// hanging returns a channel that closes once stack's apply hangs (tofuStack.HangAfter): the run's
+// deadline is reached there (Runner.deadlineAt, T114).
+func (w *runWorld) hanging(t *testing.T, stack string) <-chan struct{} {
+	t.Helper()
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		waitFor(testWaitCap, func() bool { return exists(filepath.Join(w.bin, "hanging-"+stack)) })
+	}()
+	return ch
+}
+
 // ---------------------------------------------------------------- controls
 
 func TestRunnerDefaultDeadline(t *testing.T) {
+	t.Parallel()
 	if DefaultDeadline != 45*time.Minute {
 		t.Errorf("DefaultDeadline = %v, want 45m (FR-011)", DefaultDeadline)
 	}
@@ -773,9 +790,53 @@ func TestRunnerDefaultDeadline(t *testing.T) {
 	}
 }
 
+// testWaitCap bounds every wait a test runner injects, well under the offline entry's 120 s child
+// limit (T114): a test that hangs then fails within it instead of holding the whole package.
+const testWaitCap = 30 * time.Second
+
+// testGrace and testBackoff are the grace period and companion backoff of every test runner (T114):
+// a fake tofu stops at once on an interrupt, and a retry needs no real wait.
+var (
+	testGrace   = 5 * time.Second
+	testBackoff = []time.Duration{50 * time.Millisecond, 100 * time.Millisecond}
+)
+
+// TestTestRunnersInjectWaits: T114 — every runner the tests build (the run world's, which every
+// probe harness starts from; the fresh lz-live process's; the chain harness's) injects its
+// deadline, grace period and companion backoff, so no test runs under a production default (45
+// min, 2 min, 20 s and 60 s); and those production defaults are unchanged.
+func TestTestRunnersInjectWaits(t *testing.T) {
+	t.Parallel()
+	if DefaultDeadline != 45*time.Minute || DefaultGrace != 2*time.Minute ||
+		!slices.Equal(defaultCompanionBackoff, []time.Duration{20 * time.Second, 60 * time.Second}) {
+		t.Errorf("production defaults changed: deadline %v, grace %v, companion backoff %v; want 45m, 2m, [20s 1m]",
+			DefaultDeadline, DefaultGrace, defaultCompanionBackoff)
+	}
+	short := func(who, what string, d time.Duration) {
+		if d <= 0 || d > testWaitCap {
+			t.Errorf("%s: %s %v, want an injected wait in (0, %v] (0 is the production default)", who, what, d, testWaitCap)
+		}
+	}
+	runner := func(who string, r Runner) {
+		short(who, "Deadline", r.Deadline)
+		short(who, "Grace", r.Grace)
+		if len(r.companionBackoff) == 0 {
+			t.Errorf("%s: companionBackoff %v, want injected waits (nil is the production default)", who, r.companionBackoff)
+		}
+		for _, b := range r.companionBackoff {
+			short(who, "companionBackoff", b)
+		}
+	}
+	w := newRunWorld(t)
+	runner("runWorld.runner", w.runner(t))
+	runner("fakeRunner (zero config)", fakeRunner(fakeRunConfig{}))
+	short("chain harness (zero chainExec)", "Deadline", chainExec{}.chainDeadline())
+}
+
 // TestRunnerAppliesInOrderDestroysEphemeralInReverse: a run that succeeds still destroys its
 // ephemeral stacks on exit, last applied first; a retained stack is never destroyed.
 func TestRunnerAppliesInOrderDestroysEphemeralInReverse(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	a, r, b := w.stack(t, "a", true, tofuStack{}), w.stack(t, "r", false, tofuStack{}), w.stack(t, "b", true, tofuStack{})
 	err, _ := execute(t, w.runner(t, a, r, b))
@@ -819,6 +880,7 @@ func TestRunnerAppliesInOrderDestroysEphemeralInReverse(t *testing.T) {
 // in reverse order, and nothing after it is planned; a failed destroy does not stop the others;
 // either way the run fails.
 func TestRunnerDestroyOnExit(t *testing.T) {
+	t.Parallel()
 	t.Run("apply-failure", func(t *testing.T) {
 		w := newRunWorld(t)
 		s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "r", false, tofuStack{}), w.stack(t, "b", true, tofuStack{}),
@@ -881,6 +943,7 @@ func TestRunnerDestroyOnExit(t *testing.T) {
 // destroy plan the guard refuses is not applied, the destroy goes on with the next stack, the
 // leftover check still runs, and the run exits 3.
 func TestRunnerDestroyJudgedPlan(t *testing.T) {
+	t.Parallel()
 	judged := func(t *testing.T, calls []tofuCall, id string) {
 		t.Helper()
 		var plan, protect, applied string
@@ -958,10 +1021,11 @@ func TestRunnerDestroyJudgedPlan(t *testing.T) {
 // its own time, not the expired one), in reverse order; what was created before the hang is in
 // the inventory.
 func TestRunnerDeadline(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{HangAfter: 3})}
 	r := w.runner(t, s...)
-	r.Deadline = 3 * time.Second
+	r.deadlineAt = w.hanging(t, "b")
 	err, took := execute(t, r)
 	if ExitCode(err) == 0 {
 		t.Error("a run past its deadline exited 0")
@@ -992,6 +1056,7 @@ func TestRunnerDeadline(t *testing.T) {
 // TestRunnerSignals: G8 — SIGINT and SIGTERM to a fresh lz-live process (no injected channel)
 // stop the hanging apply and fire the destroy in reverse order; the process exits non-zero.
 func TestRunnerSignals(t *testing.T) {
+	t.Parallel()
 	for name, sig := range map[string]syscall.Signal{"SIGINT": syscall.SIGINT, "SIGTERM": syscall.SIGTERM, "SIGHUP": syscall.SIGHUP} {
 		t.Run(name, func(t *testing.T) {
 			w := newRunWorld(t)
@@ -1055,17 +1120,22 @@ func TestRunnerSignals(t *testing.T) {
 	}
 }
 
+// ignoredGrace is TestRunnerInterruptGrace's grace period (T114: 2 s before; the assertions are
+// relative to it, and the Ctrl-C row also checks the ignoring tofu is alive a third into it).
+const ignoredGrace = time.Second
+
 // TestRunnerInterruptGrace: coordinator decision (T055) — a tofu that does not stop after the
 // forwarded interrupt is killed once the grace period has passed, and the destroy still runs. A
 // Ctrl-C at the terminal signals lz-live's whole process group: tofu runs in a group of its own,
 // so it receives the interrupt once (from lz-live), not twice (a second interrupt makes tofu exit
 // at once, without writing its state; believed, OpenTofu docs not checked).
 func TestRunnerInterruptGrace(t *testing.T) {
+	t.Parallel()
 	t.Run("deadline", func(t *testing.T) {
 		w := newRunWorld(t)
 		s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{HangAfter: 3, IgnoreInterrupt: true})}
 		r := w.runner(t, s...)
-		r.Deadline, r.Grace = 3*time.Second, 2*time.Second
+		r.Grace, r.deadlineAt = ignoredGrace, w.hanging(t, "b")
 		err, took := execute(t, r)
 		if ExitCode(err) == 0 {
 			t.Error("a run past its deadline exited 0")
@@ -1095,7 +1165,7 @@ func TestRunnerInterruptGrace(t *testing.T) {
 		w := newRunWorld(t)
 		w.stack(t, "a", true, tofuStack{})
 		w.stack(t, "b", true, tofuStack{HangAfter: 3, IgnoreInterrupt: true})
-		cmd := w.subprocess(t, fakeRunConfig{Mode: "execute", Stacks: []fakeRunStack{{"a", true}, {"b", true}}, DeadlineMS: 60000, GraceMS: 2000})
+		cmd := w.subprocess(t, fakeRunConfig{Mode: "execute", Stacks: []fakeRunStack{{"a", true}, {"b", true}}, DeadlineMS: 60000, GraceMS: int(ignoredGrace / time.Millisecond)})
 		out := &syncBuffer{}
 		cmd.Stdout, cmd.Stderr = out, out
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -1112,9 +1182,25 @@ func TestRunnerInterruptGrace(t *testing.T) {
 			_ = cmd.Process.Kill()
 			t.Fatalf("apply of b never streamed:\n%s", out)
 		}
+		// The hanging tofu's plugin: alive until the kill reaches tofu's group (T114 review r1:
+		// the lower bound on lz-live's exit alone also counts the destroys' time).
+		if !waitFor(20*time.Second, func() bool { return exists(filepath.Join(w.bin, "hanging-b")) }) {
+			t.Fatalf("apply of b never hung:\n%s", out)
+		}
+		raw, err := os.ReadFile(filepath.Join(w.bin, "plugin-b.pid"))
+		pid, _ := strconv.Atoi(string(raw))
+		if err != nil || pid <= 0 {
+			t.Fatalf("the hanging apply started no plugin: %v", err)
+		}
 		start := time.Now()
 		if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil { // the terminal's Ctrl-C
 			t.Fatal(err)
+		}
+		time.Sleep(ignoredGrace / 3)
+		// Judged only while the grace period still runs: a sleep overrun on a loaded host is no
+		// finding (review r2).
+		if syscall.Kill(pid, 0) != nil && time.Since(start) < ignoredGrace {
+			t.Errorf("the plugin of the tofu ignoring Ctrl-C is gone %v after it: killed before the grace period", ignoredGrace/3)
 		}
 		done := make(chan error, 1)
 		go func() { done <- cmd.Wait() }()
@@ -1127,7 +1213,7 @@ func TestRunnerInterruptGrace(t *testing.T) {
 			_ = cmd.Process.Kill()
 			t.Fatalf("lz-live did not stop within 30 s of Ctrl-C:\n%s", out)
 		}
-		if took := time.Since(start); took < 2*time.Second {
+		if took := time.Since(start); took < ignoredGrace {
 			t.Errorf("lz-live stopped %v after Ctrl-C: the tofu ignoring it was killed before the grace period", took)
 		}
 		calls := w.calls(t, "tofu.log")
@@ -1155,6 +1241,7 @@ func TestRunnerInterruptGrace(t *testing.T) {
 // plan deleting a retained address is refused (exit 3) and never applied; the same plan with an
 // empty retained set is applied.
 func TestRunnerDefaultProtect(t *testing.T) {
+	t.Parallel()
 	del := tofuStack{Changes: []planChange{{"ovh_cloud_project_storage.state", []string{"delete"}}}}
 	w := newRunWorld(t)
 	r := w.runner(t, w.stack(t, "a", true, del))
@@ -1183,6 +1270,7 @@ func TestRunnerDefaultProtect(t *testing.T) {
 // judged by the guard, nothing is applied or destroyed, the leftover check still lists (read
 // only) and the run record says pass.
 func TestRunnerPlanOnly(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	r := w.runner(t, w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{}))
 	r.PlanOnly = true
@@ -1210,6 +1298,7 @@ func TestRunnerPlanOnly(t *testing.T) {
 // TestRunnerProtectBeforeApply: every plan goes through the retained-resource guard (given
 // `tofu show -json` of the saved plan) before exactly that plan file is applied.
 func TestRunnerProtectBeforeApply(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "r", false, tofuStack{})}
 	if err, _ := execute(t, w.runner(t, s...)); err != nil {
@@ -1247,6 +1336,7 @@ func TestRunnerProtectBeforeApply(t *testing.T) {
 // TestRunnerProtectRefusalStops: a guard refusal stops the run before that plan is applied;
 // ephemeral stacks already applied are destroyed; the exit is a refusal (3).
 func TestRunnerProtectRefusalStops(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{}), w.stack(t, "c", true, tofuStack{})}
 	r := w.runner(t, s...)
@@ -1302,6 +1392,7 @@ func (d *deadTerminal) Write(p []byte) (int, error) {
 // children's output is dropped, not their pipes closed: a child writing to a closed pipe dies of
 // SIGPIPE, which would kill the destroy-on-exit.
 func TestRunnerDeadTerminal(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	r := w.runner(t, w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{}))
 	r.Terminal = &deadTerminal{n: 64}
@@ -1320,6 +1411,7 @@ func TestRunnerDeadTerminal(t *testing.T) {
 // TestRunnerErrorRedacted: G2 — the error Execute returns (lz-live prints it on stderr) holds no
 // secret, also when a failure's detail carries one, and keeps its exit code.
 func TestRunnerErrorRedacted(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	r := w.runner(t, w.stack(t, "a", true, tofuStack{}))
 	r.Protect = func(Stack, []byte) error {
@@ -1350,6 +1442,7 @@ func TestRunnerErrorRedacted(t *testing.T) {
 // A failed apply is the case the fallback exists for: the captured failing apply leaves the
 // errored resource in the state but not in the stream.
 func TestRunnerStateListFallback(t *testing.T) {
+	t.Parallel()
 	for _, failing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "apply-failure"}[failing], func(t *testing.T) {
 			w := newRunWorld(t)
@@ -1380,6 +1473,7 @@ func TestRunnerStateListFallback(t *testing.T) {
 // run record (inventory.jsonl, listings/, summary.json, plan-<id>.txt), nor any child's argv;
 // the non-secret part of each output does arrive.
 func TestRunnerRedactsEveryOutput(t *testing.T) {
+	t.Parallel()
 	for _, failing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "apply-failure"}[failing], func(t *testing.T) {
 			w := newRunWorld(t)
@@ -1548,6 +1642,7 @@ func exists(p string) bool {
 // then runs against the other root's data. Every call of one stack (init, plan, show, apply, state
 // list, destroy) uses that stack's directory; none is in a stack root or the run record.
 func TestRunnerDataDirPerStack(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	s := []Stack{w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{})}
 	r := w.runner(t, s...)
@@ -1822,6 +1917,7 @@ func TestProbeState(t *testing.T) {
 // its plan failed) has nothing to destroy: its passphrase and probe record are removed whatever the
 // outcome, since no cleanup could use them.
 func TestProbeNoStateNoFiles(t *testing.T) {
+	t.Parallel()
 	root := tempPrivate(t)
 	w := newRunWorld(t)
 	p := w.probe(t, root, tofuStack{PlanExit: 1})
@@ -1838,6 +1934,7 @@ func TestProbeNoStateNoFiles(t *testing.T) {
 // TestProbeCleanupShortPassphrase: a retained passphrase shorter than 16 characters is not the
 // one Start wrote; cleanup refuses it and destroys nothing.
 func TestProbeCleanupShortPassphrase(t *testing.T) {
+	t.Parallel()
 	root := tempPrivate(t)
 	w := newRunWorld(t)
 	p := w.probe(t, root, tofuStack{DestroyExit: 1})
@@ -1897,6 +1994,7 @@ func within(p, dir string) bool {
 // changed or deleted, a `.terraform/` left by an older runner included. Every probe child also
 // receives the run id as TF_VAR_run_id.
 func TestProbeRerun(t *testing.T) {
+	t.Parallel()
 	const id2 = "20261006T130000Z-c3d4"
 	for _, stale := range []bool{false, true} {
 		name := "clean-root"
@@ -2315,6 +2413,7 @@ func TestRunnerScratchOutsideRoots(t *testing.T) {
 // account.env edited between the failed destroy and the cleanup). A run record without a project
 // id is refused for cleanup: no child runs, the probe's files stay.
 func TestProbeCleanupRecordedProject(t *testing.T) {
+	t.Parallel()
 	failedRun := func(t *testing.T) (*runWorld, string) {
 		t.Helper()
 		root := tempPrivate(t)
@@ -2479,20 +2578,7 @@ func fakeRun(cfgPath string) (code int) {
 		fmt.Fprintln(os.Stderr, "fake run: bad config")
 		return 2
 	}
-	check, lister := cleanCheck(&fakeTB{}, c.Seed)
-	lister.log = c.ListerLog
-	r := Runner{
-		ID: "20261006T120000Z-a1b2", Dir: c.RunDir, Tofu: filepath.Join(c.Bin, "tofu"), Authority: AuthorityTenant,
-		Creds: runCreds, Deadline: time.Duration(c.DeadlineMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond,
-		Vars: c.Vars, Leftovers: check, Terminal: os.Stdout,
-		Protect: func(Stack, []byte) error { return nil },
-	}
-	if r.Deadline == 0 {
-		r.Deadline = time.Minute
-	}
-	for _, s := range c.Stacks {
-		r.Stacks = append(r.Stacks, Stack{ID: s.ID, Dir: filepath.Join(c.StacksDir, s.ID), Ephemeral: s.Ephemeral})
-	}
+	r := fakeRunner(c)
 	switch c.Mode {
 	case "execute":
 		err = r.Execute(context.Background())
@@ -2505,6 +2591,29 @@ func fakeRun(cfgPath string) (code int) {
 		fmt.Fprintln(os.Stderr, "fake run:", err)
 	}
 	return ExitCode(err)
+}
+
+// fakeRunner is the Runner a fresh lz-live process (fakeRun) rebuilds from its config.
+func fakeRunner(c fakeRunConfig) Runner {
+	check, lister := cleanCheck(&fakeTB{}, c.Seed)
+	lister.log = c.ListerLog
+	r := Runner{
+		ID: "20261006T120000Z-a1b2", Dir: c.RunDir, Tofu: filepath.Join(c.Bin, "tofu"), Authority: AuthorityTenant,
+		Creds: runCreds, Deadline: time.Duration(c.DeadlineMS) * time.Millisecond, Grace: time.Duration(c.GraceMS) * time.Millisecond,
+		Vars: c.Vars, Leftovers: check, Terminal: os.Stdout,
+		Protect: func(Stack, []byte) error { return nil },
+	}
+	if r.Deadline == 0 {
+		r.Deadline = testWaitCap
+	}
+	if r.Grace == 0 {
+		r.Grace = testGrace
+	}
+	r.companionBackoff = testBackoff
+	for _, s := range c.Stacks {
+		r.Stacks = append(r.Stacks, Stack{ID: s.ID, Dir: filepath.Join(c.StacksDir, s.ID), Ephemeral: s.Ephemeral})
+	}
+	return r
 }
 
 // fakeTB lets the fixture helpers run outside a test: a fatal error panics (fakeRun recovers).
@@ -2566,7 +2675,7 @@ func (w *runWorld) companionRetryProbe(t *testing.T, root string, planErrs, dest
 	t.Helper()
 	p := w.identityProbe(t, root, tofuStack{DestroyPlanErrors: planErrs, DestroyErrors: destroyErrs})
 	p.Bind = func(context.Context, Credential) error { *binds++; return nil }
-	p.Run.companionBackoff = []time.Duration{300 * time.Millisecond, 600 * time.Millisecond}
+	p.Run.companionBackoff = []time.Duration{30 * time.Millisecond, 60 * time.Millisecond}
 	return p
 }
 
@@ -2858,6 +2967,7 @@ func TestProbeCompanionDestroyRetry(t *testing.T) {
 // TestDiagnosticLinesBounded (T095 review r1): a stream line longer than errLimit is dropped, not
 // buffered, and the next diagnostic line is still kept, decoded, across split writes.
 func TestDiagnosticLinesBounded(t *testing.T) {
+	t.Parallel()
 	d := &diagnosticLines{}
 	long := bytes.Repeat([]byte("x"), errLimit/2)
 	for i := 0; i < 3; i++ {
@@ -2889,6 +2999,7 @@ func TestDiagnosticLinesBounded(t *testing.T) {
 // holds the API's answer and reaches the terminal only as its one-line summary), are appended to
 // errors.txt in the run record, redacted.
 func TestRunnerErrorRecord(t *testing.T) {
+	t.Parallel()
 	w := newRunWorld(t)
 	raw, err := os.ReadFile(filepath.Join("testdata", "tofu", "apply-fail.jsonl"))
 	if err != nil {
