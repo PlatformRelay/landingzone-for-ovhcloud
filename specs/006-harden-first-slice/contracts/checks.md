@@ -1,0 +1,49 @@
+# Checks and command contracts: Harden and tidy the first slice
+All new commands are **planned**; `tasks.md` names each creator. Evidence starts `not-run`.
+The entry admits exactly `lz-offline --candidate <checkout> -- task <target> [-- <path>]`
+(`tools/cmd/lz-offline/main.go:153-172`), so every offline control runs as a Task target:
+`<approved-absolute-path>/lz-offline --candidate <checkout> -- task <target>`. Two host steps run
+outside the entry and need no credential: the limit test
+`go -C tools test -tags hostlimits -run TestHostLimits ./cmd/lz-offline` (it needs the host's user
+manager) and the per-target peak measurement of T032.
+
+Outcome words: `pass`, `fail`, `blocked`, `not-run`, `review-required` (constitution V). A missing
+tool, empty discovery or a refused precondition is never `pass`. "Red" means a behavioural failure
+of the control on the unfixed tree; a compile error or missing binary is not red.
+
+## V-checks
+
+| Check | Requirements | Positive control | Negative controls (each must fail) | Evidence |
+| --- | --- | --- | --- | --- |
+| V001 | FR-003, FR-004, FR-005, FR-006, FR-007, SC-001 | binding through a well-behaved fake API; leftover check over clean listings; a credential set written, switched and read back whole; a companion env with `TF_VAR_x` and one complete OAuth2 pair; every child of bootstrap, probe, plan, apply, destroy and chain sees the scratch `HOME` | fake endpoint answering a 3xx with an unparseable `Location` that quotes the secret, and a transport error carrying it: secret in `Bind`'s error; token echoed as a listed id (alone, inside a longer id, split across writes): token in `listings/*.json`, `leftovers.json` or a stream; crash during the generation write, after it is complete, after `current.tmp` is written and just before the switch: readers see anything but the previous set whole; crash after the switch: readers see anything but the new set whole; `current` naming a missing directory or `../x`: accepted; companion name `PATH`, `HOME`, `HOMEPAGE`, `TF_CLI_ARGS`, `OVH_ENDPOINT`, `tf_var_x`, `TF_VAR_run_id` or a half pair admitted; caller `HOME` seen by a bootstrap child; `env.Command` passing `os.Getenv("HOME")` | PR + `evidence/T005.md`–`T016.md` |
+| V002 | FR-001, FR-002, FR-008, FR-009, FR-010, SC-001 | `apply` of an ephemeral instance under a fake: deadline set, inventory has every created id, summary and cost reminder printed; `plan` and `destroy` print their summaries; a chain run with `--deadline` shorter than `DefaultDeadline` whose apply fails still completes destroy-on-exit under a budget of `DefaultDeadline`; leftover check over three retained instances within one budget; canary create answering 500 after creation: canary removed; fake S3 reporting governance lock with retention on each state bucket: `state-bucket-object-lock` `pass` | `apply` with deadline 0 or no inventory; a hung fake `tofu` under `plan`, `apply` or `destroy` running past the deadline; SIGINT during `apply` destroying a retained instance or dropping the inventory; a run deadline shorter than `DefaultDeadline` giving a destroy budget shorter than `DefaultDeadline`; one fresh backoff per instance (budget exceeded); a wait admitted with no time left for read and listings (reported `pass` late instead of `blocked`); canary left after an error answer; pre-existing canary name removed; lock disabled, compliance mode or no retention reported `pass`; lock read error reported `pass` | PR + `evidence/T017.md`–`T026.md` |
+| V003 | FR-011 | sandbox manifest generates with each new stack's lock equal to its stage's; all stage locks agree | row without a reconciled stack generated (`UNRECONCILED_ROW` missing); new stack without lock; two stage locks pinning different `ovh/ovh` versions or hashes not reported | PR + `evidence/T027.md`, `T028.md` |
+| V004 | FR-012, FR-022 | every Go-running check covers its `go list -deps` in-module directories; a planned check without a Task target is listed as planned; Taskfile.yml's `check:specs` default and `ci-source` arguments name every spec with registry keys | `test:stacks` without `tools/internal/report`; `test:traceability` without `tools/harness/checks.yaml`; a check with a closed creator and no target; `check:specs` default or `ci-source` omitting spec 006; `test:foundation-ci` inputs without the 005 and 006 `tasks.md` | PR + `evidence/T001.md`–`T004.md` |
+| V005 | FR-013, SC-001, SC-003 | fake `systemd-run` receives `MemoryMax` and `TasksMax` and the bwrap argv unchanged; host: valid allocation and a short fork tree pass under the limits; every CI target's peak recorded | host: child allocating 2× `memoryMax` or forking past `tasksMax` not stopped within 10 s, or stopped without `RESOURCE_LIMIT`; `systemd-run` missing, user manager unreachable, or a controller missing → child started (must be `LIMITS_UNAVAILABLE`); scope created but `memory.max` not equal to the request → admitted | PR + `evidence/T029.md`, `T032.md` |
+| V006 | FR-014, FR-017 | Go `prepare` on fixture archives writes `resources.json` that `bundle.Admit` accepts; its pins come from `checks.Packages`; two packs give identical `provenance.json` with the image digests as subjects | archive with a symlink or hard link escaping the root extracted; archive with a wrong digest accepted; a pin present in `prepare` but not in `checks.Packages`; `prepare.py` still present; statement subject not the packed digest; timestamp or map-order difference between packs | PR + `evidence/T030.md`, `T031.md`, `T033.md`, `T034.md` |
+| V007 | FR-015, SC-004 | committed `.github/renovate.json` covers every pin source with a rule naming its file; runtime group labelled; provider group includes the snapshot; snapshot version equals the pin | a pin source without a rule; `automerge: true` anywhere; a runtime-mirrored tool outside the labelled group; snapshot for 2.20.0 with pin 2.21.0; snapshot without its command record; malformed configuration (manager names are not judged: research R8) | PR + `evidence/T035.md`, `T037.md` |
+| V008 | FR-016, SC-006 | manifest for a fixture repository built in the test at a known commit equals the golden output, twice; it validates | version `2026.13.0` or one an existing fixture tag carries; a non-conforming subject dropped instead of `unclassified`; working-tree change altering the output; a non-empty `tested`; a tag or a `releases/` file created | PR + `evidence/T036.md`, `T038.md` |
+| V009 | FR-018, FR-019, FR-020, SC-005 | real `docs/` passes all rules; fixture pages with `verified_against` equal to or two minors behind the pin pass; the real map passes and reports its unjudged count | page three minors behind its pin; page naming an unpinned tool; how-to naming `tofu` without `verified_against`; a file outside `docs/adr/` citing a Superseded ADR; map missing an admitted top-level directory present in the checkout; map naming a deleted path under an admitted name; `docs:check` inputs without `mise.toml`, `mise.live.toml` or the lock files | PR + `evidence/T039.md`–`T043.md` |
+| V010 | FR-021, FR-022, SC-002 | `task check:specs -- specs/006-harden-first-slice` TRACE_OK; every task's Verify is offline | a Verify that names `live:*`, `bootstrap:account` or an owner session; a requirement without a check | PR + `evidence/T044.md`–`T046.md` |
+
+## Security guards with mandatory mutation proof
+Each guard: one behavioural mutant that removes or weakens the clause must turn its control red.
+
+| Guard | Where | Mutant |
+| --- | --- | --- |
+| G16 quiet binding errors (FR-003) | `tools/internal/live/binding.go` | wrap the transport or decode error with `%w` again; include the URL or a header in the message |
+| G17 leftover token redaction (FR-004) | `tools/internal/live/leftovers.go`, `chain.go` | never call `Add` for the token; call it after the first listing |
+| G18 credential set (FR-005) | `tools/internal/live/files.go`, `credentials.go`, `apply.go` | write files into the live paths before the switch; switch before the generation is fsynced; reader accepting a `current` that names no sibling `gen-` directory; writer removing the previous generation before the switch |
+| G19 companion allow-list (FR-006) | `tools/internal/live/runner.go` | admit any `TF_*`; admit `TF_VAR_` case-insensitively; admit a reserved `TF_VAR_` name; admit by prefix `OVH_`; accept a half pair |
+| G20 scratch home (FR-007) | `tools/internal/live/env.go`, `bootstrap_state.go` | pass `os.Getenv("HOME")` on the bootstrap path |
+| G21 destroy budget (FR-002) | `tools/internal/live/chain.go`, `runner.go` | use the run deadline as the destroy budget when it is shorter than `DefaultDeadline` |
+| G22 entry limits (FR-013) | `tools/cmd/lz-offline/limits.go`, `main.go` | start the child when limits are unavailable; drop `TasksMax`; skip the post-start `memory.max` check |
+| G23 bounded verbs (FR-001) | `tools/internal/live/apply.go`, `tools/cmd/lz-live/main.go` | pass deadline 0; skip the inventory for `apply` |
+
+## Premise probe contracts
+| Probe | Task | Procedure | Pass | Refute → effect |
+| --- | --- | --- | --- | --- |
+| P1 | T003 | `go list -deps` inside `task test:traceability` through the entry | exit 0, in-module dirs listed, no network | committed per-check list (R11 fallback) |
+| P2, P4 | T029 (P2), T032 (P4) | host-tagged test: allocating child, forking child, a valid child; host step: each CI target run through the entry inside a measuring `systemd-run --user --scope`, `memory.peak` and `pids.peak` read after | limits enforced, `--die-with-parent` holds, peaks recorded | delegated-subtree fallback (R5); FR-013 revised before T032 closes |
+| P7 | T035 | `task capture:provider-schema` through the entry against the mirror | schema captured, version matches pin | host capture with the same pinned binaries, recorded as such |
+| P3, P5, P6 | out of scope | runner CI run; owner chain; owner installs the update app | — | as in spec *Premises* |

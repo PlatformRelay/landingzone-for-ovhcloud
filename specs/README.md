@@ -4,7 +4,7 @@ This folder is the delivery record, written with [Spec Kit](https://github.com/g
 one folder per feature with its spec, research, plan, tasks and evidence. To use or understand the
 landing zone, start at the [README](../README.md) and the [ADR index](../docs/adr/README.md).
 
-## Specs and their state (2026-10-14)
+## Specs and their state (2026-10-15)
 
 | Spec | Outcome | State |
 | --- | --- | --- |
@@ -13,6 +13,7 @@ landing zone, start at the [README](../README.md) and the [ADR index](../docs/ad
 | [003-platform-feasibility](003-platform-feasibility/spec.md) | Protected recovery, isolation, floor, credential, sandbox and locking probes | Re-scoped to one project (D113). ADR-0024 written (T001); T002–T008 are superseded by spec 005's run core; T009–T010 stay postponed with OKMS and escrow (D85); T011–T028 are open, live parts as probes on spec 005's runner. Real tenant isolation waits for a second project. |
 | [004-guided-preconfiguration](004-guided-preconfiguration/spec.md) | Friendly terminal journey, defaults, progress and save/resume proposal | Amended and held (D113). The written journey is done (T014); D29's schema gate is met by `schemas/deployments.schema.json`; the wizard stays postponed (D85). |
 | [005-first-landing-zone-slice](005-first-landing-zone-slice/spec.md) | First real OpenTofu slice: naming and labels, six stage stacks generated from `deployments.yaml`, a scripted account bootstrap, a tested live run core and an owner-run live apply→destroy chain | Every task is closed except the owner session T045 (fresh-account bootstrap). The live chain passed in the sandbox (T049, run `20261013T075309Z-443f`, closed with gaps); the exit record is [T051](005-first-landing-zone-slice/evidence/T051.md). The spec stays draft until T045 runs. |
+| [006-harden-first-slice](006-harden-first-slice/spec.md) | Harden and tidy the first slice: the recorded live-lane safety gaps, memory and process limits for the offline entry, runtime preparation in Go, an offline-checked update, release and provenance lane, and the docs that drifted | Draft, specified 2026-10-15; no task done. Every task is offline and needs no owner session; the three owner choices (companion allow-list, update bot, release tooling and signing) are decided (D115). |
 
 Feature numbers identify documents, not a delivery schedule.
 
@@ -29,6 +30,7 @@ This section records how work is admitted and merged. It is process, not product
 | 003 | Docs-only T001 is done. D85's scope for spec 003, restated by D113: admission, ledger, reaper and cleanup drills (T002–T008) are superseded by spec 005's run core, which covers cleanup as hygiene, not a gate; escrow and clean recovery (T009–T010) stay postponed with OKMS; T011–T028 are open, every live run an owner session through `task live:probe`. The remaining probes keep their task dependencies and operator gates (see [tasks.md](003-platform-feasibility/tasks.md)). Every refutation blocks its named downstream claim; incomplete observations remain blocked. |
 | 004 | Bounded renderer prototype and written journey approved; satisfy task and execution/capture prerequisites before dependent work. D29's real profile schema is `schemas/deployments.schema.json` (D113); the D85 wizard gate stays closed. Synthetic qualification is not real export readiness. |
 | 005 | Needs 001/T001–T009 and T023. Live tasks are owner sessions from the owner's dedicated clone on a reviewed commit, admitted by a host guard; the shared sandbox project is a recorded state-isolation deviation (KD-1, D88), so tenant state isolation is not claimed; cost guards are hygiene (constitution 1.3.0, D87). Full AgentEx scope is deferred from this slice (D87). Premise refutations block their dependent clauses. |
+| 006 | Needs spec 005's closed tasks and the entry r4-e2. Offline only: no credential, network, OVHcloud call or owner session. Its owner choices are decided (D115, 2026-10-15). The entry limits (FR-013) are not pinned in CI until the runner premise P3 is observed; publication is coordinator work under D89. It is not a vertical slice, so the AgentEx trigger does not fire. |
 
 ### Scope and merge rules
 
