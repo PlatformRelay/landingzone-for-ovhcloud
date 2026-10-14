@@ -234,21 +234,45 @@ func compiledDigest(path string) (string, error) {
 	return "", fmt.Errorf("PACK_ENTRY: no main.manifestSHA symbol")
 }
 
+// extractLimits bounds what extract reads and writes: the number of entries,
+// the total size of regular files, and the whole decompressed stream, which
+// also counts the extended headers the tar reader consumes between entries.
+// The r4 bundle has about 18 000 entries and 650 MB, so these leave room to
+// grow and still stop a crafted layer from filling the disk.
+var extractLimits = struct {
+	entries       int
+	bytes, stream int64
+}{100_000, 4 << 30, 5 << 30}
+
 // extract unpacks a layer this program wrote into the new directory dest,
 // restoring modes and links; directory modes are set last so a private
-// directory can still be filled.
-func extract(layer, dest string) error {
+// directory can still be filled. It treats the layer as untrusted, since a
+// layout can change after it was written: every name must be one layer
+// writes, nothing is written below a link the layer made, all writes go
+// through an os.Root on dest, extractLimits applies, and the blob must hash
+// to layerDigest.
+func extract(layer, layerDigest, dest string) error {
+	root, err := os.OpenRoot(dest)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	file, err := os.Open(layer)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	unzipped, err := gzip.NewReader(file)
+	sum := sha256.New()
+	compressed := io.TeeReader(file, sum)
+	unzipped, err := gzip.NewReader(compressed)
 	if err != nil {
 		return err
 	}
-	reader := tar.NewReader(unzipped)
-	var directories []*tar.Header
+	reader := tar.NewReader(&budgeted{unzipped, extractLimits.stream})
+	var directories []string
+	var modes []fs.FileMode
+	links := map[string]bool{}
+	count, remaining := 0, extractLimits.bytes
 	for {
 		h, err := reader.Next()
 		if err == io.EOF {
@@ -257,43 +281,109 @@ func extract(layer, dest string) error {
 		if err != nil {
 			return err
 		}
-		// The names are the ones layer wrote: host/ and runtime/ only.
-		path := filepath.Join(dest, h.Name)
+		if count++; count > extractLimits.entries {
+			return fmt.Errorf("PACK_VERIFY: layer has more than %d entries", extractLimits.entries)
+		}
+		name, err := layerName(h.Name, links)
+		if err != nil {
+			return err
+		}
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err := os.Mkdir(path, 0o700); err != nil {
+			if err := root.Mkdir(name, 0o700); err != nil {
 				return err
 			}
-			directories = append(directories, h)
+			directories, modes = append(directories, name), append(modes, fs.FileMode(h.Mode))
 		case tar.TypeReg:
-			out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-			if err != nil {
-				return err
+			if h.Size > remaining {
+				return fmt.Errorf("PACK_VERIFY: layer files exceed %d bytes", extractLimits.bytes)
 			}
-			_, err = io.Copy(out, reader)
-			if closeErr := out.Close(); err == nil {
-				err = closeErr
-			}
-			if err == nil {
-				err = os.Chmod(path, fs.FileMode(h.Mode))
-			}
-			if err != nil {
+			remaining -= h.Size
+			if err := extractFile(root, name, fs.FileMode(h.Mode), reader); err != nil {
 				return err
 			}
 		case tar.TypeSymlink:
-			if err := os.Symlink(h.Linkname, path); err != nil {
+			if err := root.Symlink(h.Linkname, name); err != nil {
 				return err
 			}
+			links[name] = true
 		default:
 			return fmt.Errorf("PACK_VERIFY: unexpected entry type: %s", h.Name)
 		}
 	}
 	for i := len(directories) - 1; i >= 0; i-- {
-		if err := os.Chmod(filepath.Join(dest, directories[i].Name), fs.FileMode(directories[i].Mode)); err != nil {
+		if err := root.Chmod(directories[i], modes[i]); err != nil {
 			return err
 		}
 	}
+	// Whatever follows the tar stream is part of the blob too.
+	if _, err := io.Copy(io.Discard, compressed); err != nil {
+		return err
+	}
+	if got := digest(sum); got != layerDigest {
+		return fmt.Errorf("PACK_VERIFY: layer blob is %s and does not match %s", got, layerDigest)
+	}
 	return nil
+}
+
+// budgeted reads at most left bytes from r and then fails, so a stream longer
+// than its budget is an error, never a silent end.
+type budgeted struct {
+	r    io.Reader
+	left int64
+}
+
+func (b *budgeted) Read(p []byte) (int, error) {
+	if b.left <= 0 {
+		if len(p) == 0 {
+			return 0, nil
+		}
+		// Only a byte past the budget proves the stream too long.
+		if n, err := b.r.Read(make([]byte, 1)); n == 0 {
+			return 0, err
+		}
+		return 0, fmt.Errorf("PACK_VERIFY: layer stream exceeds %d bytes", extractLimits.stream)
+	}
+	if int64(len(p)) > b.left {
+		p = p[:b.left]
+	}
+	n, err := b.r.Read(p)
+	b.left -= int64(n)
+	return n, err
+}
+
+// layerName returns raw without its trailing slash when it is a name layer
+// writes: local, clean, host or runtime or below them, and not below a link
+// made earlier in the same layer.
+func layerName(raw string, links map[string]bool) (string, error) {
+	name := strings.TrimSuffix(raw, "/")
+	top, _, _ := strings.Cut(name, "/")
+	if !filepath.IsLocal(name) || filepath.Clean(name) != name || (top != "host" && top != "runtime") {
+		return "", fmt.Errorf("PACK_VERIFY: unexpected entry name: %q", raw)
+	}
+	for parent := filepath.Dir(name); parent != "."; parent = filepath.Dir(parent) {
+		if links[parent] {
+			return "", fmt.Errorf("PACK_VERIFY: entry below a link: %q", raw)
+		}
+	}
+	return name, nil
+}
+
+// extractFile writes one regular file that must not exist yet; the tar
+// reader yields exactly the size its header declares.
+func extractFile(root *os.Root, name string, mode fs.FileMode, content io.Reader) error {
+	out, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, content)
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return root.Chmod(name, mode)
 }
 
 // verify extracts the written layer beside out and requires that the bundle
@@ -310,7 +400,7 @@ func verify(out, layerDigest, manifestSHA string) error {
 		return err
 	}
 	defer os.RemoveAll(scratch)
-	if err := extract(filepath.Join(out, "blobs", "sha256", strings.TrimPrefix(layerDigest, "sha256:")), scratch); err != nil {
+	if err := extract(filepath.Join(out, "blobs", "sha256", strings.TrimPrefix(layerDigest, "sha256:")), layerDigest, scratch); err != nil {
 		return err
 	}
 	runtime := filepath.Join(scratch, "runtime")
