@@ -102,6 +102,7 @@ func TestDependenciesSelection(t *testing.T) {
 		"inherited generator configuration":       {[]string{"instances/config.tm.hcl"}, Selection{Dirs: []string{"instances/prod"}}},
 		"generator configuration nobody inherits": {[]string{"orphan.tm.hcl"}, Selection{Full: true, Reason: "UNKNOWN_PATH"}},
 		"shared tool":                             {[]string{"tools/internal/checks/x.go"}, Selection{Full: true, Reason: "SHARED_TOOL"}},
+		"check registry":                          {[]string{"tools/harness/checks.yaml"}, Selection{Full: true, Reason: "SHARED_TOOL"}}, // T109: it wires every check
 		"task configuration":                      {[]string{"Taskfile.yml"}, Selection{Full: true, Reason: "SHARED_TOOL"}},
 		"linter configuration":                    {[]string{".tflint.hcl"}, Selection{Full: true, Reason: "SHARED_TOOL"}},
 		"documentation only":                      {[]string{"docs/guide.md"}, Selection{Reason: "DOCS_ONLY"}},

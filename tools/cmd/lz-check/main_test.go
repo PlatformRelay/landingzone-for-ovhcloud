@@ -261,6 +261,10 @@ func TestDependencyCommands(t *testing.T) {
 	if code, out := lzCheck(root, "select", "misc/x.txt"); code != 0 || !strings.Contains(out, "SELECT_FULL UNKNOWN_PATH") {
 		t.Errorf("BEHAVIORAL_RED: unknown path not widened: code=%d\n%s", code, out)
 	}
+	// T109: the check registry wires every check, so a change to it runs the full suite.
+	if code, out := lzCheck(root, "select", "tools/harness/checks.yaml"); code != 0 || !strings.Contains(out, "SELECT_FULL SHARED_TOOL") {
+		t.Errorf("BEHAVIORAL_RED: check registry change not widened to the full suite: code=%d\n%s", code, out)
+	}
 	if code, out := lzCheck(root, "select", "docs/x.md"); code != 0 || !strings.Contains(out, "SELECT_NONE DOCS_ONLY") {
 		t.Errorf("BEHAVIORAL_RED: docs-only change not explicit: code=%d\n%s", code, out)
 	}
