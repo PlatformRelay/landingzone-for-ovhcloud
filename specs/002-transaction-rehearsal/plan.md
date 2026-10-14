@@ -1,5 +1,14 @@
 # Implementation Plan: Deployment and self-service transaction rehearsals
-Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft
+Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: retired 2026-10-14 (D113)
+
+**Retired 2026-10-14 (D113).** Spec 005 delivered about half of this spec under other names
+(strict manifest decoding, the reconciler, selection, two-tenant fixtures). Every remaining item is
+postponed with its own trigger in spec 005's
+[*Out of scope / postponed*](../005-first-landing-zone-slice/spec.md#out-of-scope--postponed-with-trigger)
+table. When a trigger fires, a new, narrow spec is written against the spec 005 code; this one is not
+resumed, and its V003–V007 controls are that spec's starting checklist. The paths named here are
+stale: there is no `templates/tenant-repo/`, `tools/internal/{instances,transaction,authority,reservations}/`,
+`tools/cmd/lz-deploy/` or `policies/`.
 
 ## Summary
 Rehearse instances, output publications and routine-change authority with disposable

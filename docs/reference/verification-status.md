@@ -1,14 +1,14 @@
 ---
 references:
   - path: specs/005-first-landing-zone-slice/spec.md
-    blob: f190ec6d7a734e7a29613f9201ffb40267e96305
+    blob: 33a52b523d4ad3b6cb00c2bc3773d9ca2b2f23a5
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
     blob: 84526829da4e0be0e8114344fd4ad2a818818c88
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
-last_verified: d43334baa5aa2ec4d17fda0cb57e028282d2ec4b
+last_verified: a1476a05ee6140505ad207a7f9d6f34032f4b594
 ---
 
 # Verification status of the first slice
