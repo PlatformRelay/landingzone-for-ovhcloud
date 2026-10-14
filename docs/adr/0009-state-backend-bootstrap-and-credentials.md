@@ -30,7 +30,18 @@ OVH Object Storage S3, bucket versioning on, `use_lockfile = true`; one bucket p
 root set, one bucket per tenant for its instances; backend and decrypt permissions scoped to the
 instance's credential class (ADR-0004), otherwise per-tenant buckets isolate nothing. Stale-lock and
 interrupted-writer procedures are documented and drilled; a replica is **never** a second active
-writer; promotion is an explicit, logged step; Object Lock never applies to lock objects.
+writer; promotion is an explicit, logged step.
+
+**Object Lock covers lock objects too (D104).** State buckets are created with S3 Object Lock in
+governance mode and a short default retention (spec 005 T099; observed in T010 row 13). The default
+retention applies to every new object version, `.tflock` lock objects included. Locking still works:
+a delete without a version id only adds a delete marker and is allowed (T010 row 13,
+`delete-current` 204), and lock round-trips and a refused second writer were observed on locked
+state buckets (spec 005 T049 run 4, `state-lock-contention`). Each released lock leaves a retained
+noncurrent version until the retention ends. The state credential cannot delete a locked version or
+bypass the retention, so emptying a bucket needs the admin's governance bypass or the end of the
+retention. Stale-lock recovery (`force-unlock`) and restoring an earlier state version on a locked
+bucket are not yet observed (spec 003 T028).
 
 **Known sandbox deviation (2026-10-06, D88).** The maintainer sandbox has one Public Cloud project,
 which holds both tenant resources and every state bucket. OVHcloud IAM grants bucket management

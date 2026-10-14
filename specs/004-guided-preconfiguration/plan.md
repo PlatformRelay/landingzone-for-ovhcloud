@@ -1,5 +1,11 @@
 # Implementation Plan: Guided preconfiguration
-Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft
+Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft, amended and held 2026-10-14 (D113)
+
+**D113 (2026-10-14): amended and held.** D29's "real profile schemas" now exist:
+`schemas/deployments.schema.json` (v1alpha1), whose shape the strict decoder behind
+`task stacks:check` mirrors, so an export is checked offline and without credentials. The
+export target is that schema (see *Export target and live consequences*). **The D85 wizard gate
+stays closed**: no wizard task starts until the owner lifts it.
 
 **Active slice — D29:** Deliver T014's early written journey independently. Prepare the
 requirements for T001's bounded renderer experiment and the in-memory T002–T003 portion;

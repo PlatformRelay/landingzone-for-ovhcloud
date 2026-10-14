@@ -13,11 +13,11 @@ Do not run acceptance commands until their implementation and prerequisites have
 6. Keep absent tools, unavailable forge/credentials and unobserved mechanisms blocked.
 7. Complete independent review and record every non-docs check before changing to done.
 
-For 003, approved sandbox setup, numerical RunConfig and tested cleanup health gate every
-live target. A planning document is not permission for a purchase, deletion or IAM change.
+For 003, every live target is a probe root run by spec 005's `task live:probe` as an owner
+session (D113); RunConfig and leases are superseded by spec 005's run core. A planning document is not permission for a purchase, deletion or IAM change.
 Docs-only tasks need content review, not invented acceptance tests.
 
-The per-spike ceilings and refutation stops are in spec.md. Approval must bind these
-values before a live target starts; deadline/spend stops admission but keeps cleanup
-executable. A complete decision packet is not a qualification pass. Aggregate inputs
-are local 002/T008/T012/T016 evidence and explicit per-forge status, not adapter availability.
+The per-spike timeboxes, cost estimates and refutation stops are in spec.md. A run's deadline
+is enforced by spec 005's runner, which then destroys and checks for leftovers; cost is an
+estimate, never an admission condition (D113). A complete decision packet is not a
+qualification pass. Spec 002 is retired (D113): its items report `blocked` in the aggregate.

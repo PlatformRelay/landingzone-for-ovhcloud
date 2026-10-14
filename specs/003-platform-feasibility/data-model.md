@@ -1,4 +1,9 @@
 # Data model: approved experiments
+
+**Re-scope (D113).** RunConfig and RunLease are superseded by spec 005's run core (run id,
+deadline, inventory, leftover check); the tag-envelope status of PrincipalRoute is withdrawn
+(P25 refuted). See [spec.md](spec.md#re-scope-to-one-project-d113-2026-10-14).
+
 - RunConfig: immutable approved revision, exactly one baseline sandbox project id, region/product list,
   credential/cleanup classes, numeric per-spike runtime/exposure ceilings, explicit refutation stops, freshness/reservation/lag bounds,
   per-credential residual windows, scoped authorization and protected candidate digest.

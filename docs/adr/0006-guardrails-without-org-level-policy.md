@@ -8,7 +8,9 @@ Azure Policy, AWS SCPs and GCP org policy let a root enforce rules every child i
 no hierarchy, but — verified 2026-10-01 in the provider docs — `ovh_iam_policy` supports `allow`,
 `except`, **`deny` ("always denied even if also allowed by this policy or another one")**,
 `permissions_groups`, **`conditions`** (nested `AND|OR|NOT|MATCH`, depth 3, keys `resource.Tag(<name>)`,
-`date(<tz>).WeekDay[.In]`, `request.IP`) and **`expired_at`**. So a real preventive platform layer
+`date(<tz>).WeekDay[.In]`, `request.IP`) and **`expired_at`**. Observed live (spec 005 T010, P25
+refuted, D107): a `resource.Tag` condition on a policy for a project URN does not narrow bucket
+actions to tagged buckets; both a tagged and an untagged bucket were refused. So a real preventive platform layer
 exists: a deny that every principal inherits through group membership. What does not exist is an
 inherited *policy engine* with compliance evaluation. A guardrail that lives only in the pipeline is
 bypassed by anyone with console rights, so every rule must say which planes enforce it.
@@ -30,7 +32,7 @@ membership (ADR-0012), and for each plane whether it enforces the rule and how:
 
 | Plane | Mechanism | Strength |
 |---|---|---|
-| **Preventive (platform)** | **Deny floor**: a tested deny permission set (delete project, modify IAM policy or group, delete `*-state-*`/`*-audit-*` buckets) attached to **each supported principal class through verified bindings** — native users via their group, service accounts and federated users through whatever binding the spike proves (a single universal `lz-all` group is UNVERIFIED: native users carry one `group`, OAuth2 clients are separate identities). Record exact actions, resource selectors, identity routes, exceptions and negative API tests; coverage of untested routes is UNVERIFIED, never "prevented". Enrolment verifies floor coverage before issuing deployment authority; rollout starts on a canary principal. Tenant envelopes: `allow` on tenant URNs with `conditions` on `resource.Tag(lz:tenant)` — the spike must test tag mutation, missing tags at creation and whether project tags apply to child operations. Only the break-glass user and the identity pipeline's service account are outside the floor. | Real for the tested routes; an OVH API denial says nothing about an alternate credential (Keystone, S3) reaching the same data |
+| **Preventive (platform)** | **Deny floor**: a tested deny permission set (delete project, modify IAM policy or group, delete `*-state-*`/`*-audit-*` buckets) attached to **each supported principal class through verified bindings** — native users via their group, service accounts and federated users through whatever binding the spike proves (a single universal `lz-all` group is UNVERIFIED: native users carry one `group`, OAuth2 clients are separate identities). Record exact actions, resource selectors, identity routes, exceptions and negative API tests; coverage of untested routes is UNVERIFIED, never "prevented". Enrolment verifies floor coverage before issuing deployment authority; rollout starts on a canary principal. Tenant envelopes are one project per tenant: tags are labels, not an access boundary, because tag conditions do not scope bucket actions (P25 refuted, D113). Only the break-glass user and the identity pipeline's service account are outside the floor. | Real for the tested routes; an OVH API denial says nothing about an alternate credential (Keystone, S3) reaching the same data |
 | **Preventive (pipeline)** | Rego on `tofu show -json` plan output (Conftest) as a **post-plan, pre-apply** gate; `precondition`s halt a run (`check` blocks only warn and are informational); assent on tenant files (ADR-0005). Apply executes **the exact saved plan or TACO run artefact** that was approved; a required re-plan invalidates the approval and repeats policy evaluation. Unknown critical plan values block. | Bypassable outside the pipeline |
 | **Preventive (architecture)** | The deployed topology makes the violation impossible: islands-first networking (no east-west path exists), no public gateway unless requested, per-tenant state buckets. | Real; holds until someone changes the topology |
 | **Detective** | `tools/lz-audit` on a schedule: enumerates projects, principals, policies, OpenStack users, NIC-handle delegations, public buckets, effective security-group rules (including OpenStack's unmanaged default allow-all egress, which `ovh_cloud_security_group` never shows as drift), expired waivers, federation settings; reconciles against the tenant model, ledger and spec; emits SARIF (forge code-scanning tab) and JSON (Logs Data Platform). Report-only; never deletes. | Catches console changes a day late |
@@ -83,9 +85,8 @@ membership (ADR-0012), and for each plane whether it enforces the rule and how:
 ## Verification
 - Spike (ranked 3 by the review): for each supported principal route (native user, service account,
   federated user; OVH API, Keystone, S3) a positive control and an attributable denial on project
-  deletion; the floor cannot be shed by supported tenant credentials; tag-conditioned envelope: call
-  without the tag → denied, with the tag → allowed, tag mutation by the tenant → tested; native
-  recovery works during a federation failure.
+  deletion; the floor cannot be shed by supported tenant credentials; native recovery works during a
+  federation failure. The tag-conditioned envelope is not tested: it was refuted (P25, D113).
 - Spike: API list calls the scanner needs and their rate limits (`api_rate_limits` guide).
 - Spike: cost preview from the public catalogue API for three flavours and one managed cluster.
 

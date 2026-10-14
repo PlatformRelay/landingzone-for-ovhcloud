@@ -1,5 +1,14 @@
 # Implementation Plan: Protected platform and recovery feasibility
-Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft
+Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft, re-scoped 2026-10-14 to one project (D113)
+
+**Re-scope (D113).** This plan predates spec 005's live runs; the spec's
+[*Re-scope to one project*](spec.md#re-scope-to-one-project-d113-2026-10-14) wins where they differ.
+Phases 1–2 (admission, ledger, reaper, RunConfig, leases) are superseded by spec 005's run core.
+Every live step is a probe root on spec 005's runner (`task live:probe`). EUR amounts are
+estimates, not caps. The tag-envelope subcontrols in phase 4 are withdrawn (P25 refuted).
+Isolation is tested on the S3 and Keystone/Swift planes only; real tenant isolation waits for a
+second project. State buckets are Object-Locked (D104), which phase 3's locking, recovery and
+promotion steps account for (T013, T014, T028).
 
 ## Summary
 Prepare protected experiments before applying broad cloud guardrails. Sandbox admission and
@@ -21,7 +30,8 @@ fixtures. A failed premise stops its dependent implementation and revises the Pr
   pool/second region/account shape retains its separate approval requirements.
 - Storage: external durable lease/resource-id inventory not hosted solely inside the
   fixtures it cleans; private encrypted snapshots/plans/logs; sanitised evidence envelope.
-- Cost: one-off EUR 200 trial funding per the current repository working contract.
+- Cost: one-off EUR 200 trial funding per the current repository working contract; amounts per
+  spike are estimates, not caps (D113).
   D8's earlier monthly wording is superseded for current runs; no monthly replenishment. Include preparation,
   idle/recurring charges, replica/storage, test, teardown and already-reserved future costs.
   No spend hard cap claim; budget alert alone cannot admit a run.
@@ -75,7 +85,8 @@ Feature artefacts: research.md, data-model.md, contracts/checks.md, quickstart.m
 4. US3: establish native recovery before attaching a floor to a disposable canary. Test
    every supported route with positive control and attributable denial; alternate Keystone
    and S3 routes are independent tests. Attempt floor/policy self-removal, missing/present
-   authorisation tags, cross-tenant retagging and applicable child operations. Unrun or
+   authorisation tags, cross-tenant retagging and applicable child operations (these three are
+   withdrawn: P25 refuted, D113). Unrun or
    failed subcontrols block full spike-3 and dependent envelope-authority qualification.
    No production deny rollout. Probe credential bridge,
    fallback, expiry/refresh, offboarding with already-issued credentials and cleanup failure.
@@ -121,4 +132,4 @@ Only actual passing observations qualify the required live scope.
 
 Canonical top-seven names, task/check ownership, timeboxes, caps and refutation ADRs
 are in [spec.md](spec.md#predefined-spike-bounds-and-refutation-stops); no second ranking
-is implied. Spike 2 has local 002 and cloud 003 portions; spike 4 is owned by 002.
+is implied. Spike 2 has local 002 and cloud 003 portions; spike 4 was owned by 002, now retired (D113).

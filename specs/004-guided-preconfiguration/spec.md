@@ -1,5 +1,5 @@
 # Feature Specification: Friendly, resumable repository preconfiguration
-Created: 2026-10-01 · Status: draft · ADRs: 0001, 0002, 0003, 0005, 0007, 0008, 0011, 0013, 0019, 0021, 0023
+Created: 2026-10-01 · Status: draft, amended and held 2026-10-14 (D113) · ADRs: 0001, 0002, 0003, 0005, 0007, 0008, 0011, 0013, 0019, 0021, 0023
 
 **Active slice — D29:** The early written journey (T014), bounded renderer comparison
 (T001) and minimal in-memory controller portion of T002–T003 are authorized. T014 is
@@ -8,6 +8,12 @@ and capture qualification and independent review of the exact experiment packet.
 Hardened persistence and export, including synthetic implementations, remain deferred
 until real profile schemas exist. Full terminal/save/resume integration, final guide T012
 and aggregate T013 remain open. D61 widens eligible work without removing these gates.
+
+**D113 (2026-10-14): amended and held.** D29's "real profile schemas" now exist:
+`schemas/deployments.schema.json` (v1alpha1), whose shape the strict decoder behind
+`task stacks:check` mirrors, so an export is checked offline and without credentials. The
+export target is that schema (see *Export target and live consequences*). **The D85 wizard gate
+stays closed**: no wizard task starts until the owner lifts it.
 
 ## Why and scope
 Help an operator understand choices and prepare a reviewable repository configuration through
@@ -22,6 +28,27 @@ for the in-memory prototype to save or export. The early journey produces prose 
 The terminal journey, friendly explanations, helper checks and resumability are approved direction.
 Huh versus Gum is a bounded renderer comparison; exact version/platform qualification is owed.
 Naming convention input is independent of the naming module final field names; ADR-0003 selects a scalar interface with shared context.
+
+## Export target and live consequences (D113)
+The export is a draft `stacks/deployments.yaml` that `schemas/deployments.schema.json` and
+`task stacks:check` accept (tenant × environment × region rows, `slot`, CIDR, `vlan_id`, `org`),
+checked on a scratch copy, plus an `account.env` checklist of the project references that
+`task bootstrap:account`'s `identify` phase asks for. The wizard feeds that phase and never
+collects credentials (FR-008). Naming input maps to `spec.org` and spec 005's `modules/naming`.
+
+Spec 005's live runs showed consequences the steps must explain (FR-001, FR-010):
+- **One project per tenant and environment** is the only isolation boundary: tag conditions do not
+  scope bucket access (P25 refuted, D107). Projects are ordered by hand (005 P22).
+- **KD-1**: with `spec.sandbox.shared_state_project`, state shares the tenants' project, so tenant
+  state isolation is not claimed (D88, D105).
+- **Reference mode**: an existing project is referenced, not adopted; adopting it plans a
+  replacement (P5 refuted, D94).
+- **One VLAN per network**: every private network in a project needs its own VLAN id (005 T098);
+  the decoder refuses a duplicate (`DUPLICATE_VLAN`).
+- **The `org` discriminator**: bucket names are unique across OVHcloud, so `org` keeps them apart
+  and a taken name fails (005 P21, T057).
+- **Object Lock**: state buckets are Object-Locked in governance mode with a default retention
+  (D104), so tearing one down needs the admin's governance bypass or the end of the retention.
 
 ## User Scenarios & Testing
 ### User Story 1 — Understand and choose (Priority: P1)
@@ -122,17 +149,16 @@ unsupported tuple, missing tool, long helper run, symlink destination, secret-li
 
 ## Implementation surface
 `tools/cmd/lz-configure/`, `tools/internal/configure/`, `schemas/configure-session.schema.json`,
-`harness/configure/{steps,checks,limits}.yaml`, `tests/fixtures/configure/`, `Taskfile.yml`,
+`tools/harness/configure/{steps,checks,limits}.yaml`, `tests/fixtures/configure/`, `Taskfile.yml`,
 `docs/explanation/guided-setup-walkthrough.md`. One tools Go module created by 001/T001; no second module.
 
 ## Dependencies and stop conditions
 Phase 001 T001 pins tools; its T007 report/evidence contract supports local integration.
 The checkpoint has its own strict schema; it does not require the naming module/interface choice.
-Phase 001 T016 naming schemas are required at real-export integration. Only in-memory
-synthetic choice vectors may precede real profile data; they do not authorize synthetic
-checkpointing or export. T004–T005 and T010–T011 wait for real profile schemas; real export
-also needs configuration/catalogue/naming contract creators and any dependent interface
-decision. Preserve all fault, permission, concurrency and publication controls for that work.
+Real-export integration uses spec 005's `schemas/deployments.schema.json` and `modules/naming`
+(D113), not 001/T016. Only in-memory synthetic choice vectors may precede real profile data;
+they do not authorize synthetic checkpointing or export. D29's schema gate for T004–T005 and
+T010–T011 is met (D113); they still wait for the D85 wizard gate. Preserve all fault, permission, concurrency and publication controls for that work.
 A renderer comparison needs exact reviewed pins, finite bounds and actual 001/T003 safety/
 capture qualification before implementation/execution in this lane. Missing platform
 qualification blocks that platform's claim, not T014 prose. No invented runnable cloud configuration.
