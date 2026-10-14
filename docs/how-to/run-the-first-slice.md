@@ -18,7 +18,7 @@ references:
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: tests/live/probes/README.md
     blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
-last_verified: d2bd57fbe80edd2c831a1613e2e6cf1afae2b8c2
+last_verified: f05ade00658aa58a0b1d697dd45753dc0046100a
 ---
 
 # Run the first slice on an OVHcloud account
@@ -29,13 +29,16 @@ bootstrap the account, apply and destroy the stacks, read what a run recorded, a
 Everything here acts on the account and spends credit. **Only the owner runs it, on the
 maintainer workstation.** Agents and CI never run `task bootstrap:*` or `task live:*`.
 
-**Status (2026-10-13).** Against the current sandbox account, every create→destroy probe has
+**Status (2026-10-14).** Against the current sandbox account, every create→destroy probe has
 passed ([T010](../../specs/005-first-landing-zone-slice/evidence/T010.md)) and the account was
 bootstrapped twice ([T044](../../specs/005-first-landing-zone-slice/evidence/T044.md)). The
-chain (T049) ran three times, each stopped by the project's IAM tags: run 1 and run 3 on the
-platform deployer's missing tag permission, run 2 on an action OVHcloud does not know. The admin
-now tags the projects in `account-governance` (T105). The fresh-account path
-(T045) has not run yet. Expect them to find what the fakes could not. See
+chain ([T049](../../specs/005-first-landing-zone-slice/evidence/T049.md)) passed in run
+20261013T075309Z-443f, its fourth: every assertion passed except the KD-1 canary, reported as
+the known deviation it is in the sandbox; the ephemeral stacks were destroyed and the leftover
+check found nothing. T049 still has a gap: the six stacks were not all applied within one run
+(`demo-state` last applied in run 1). Runs 1–3 stopped on the projects' IAM tags, which the
+admin now sets in `account-governance` (T105). The fresh-account path (T045) is the remaining
+owner run; expect it to find what the fakes could not. See
 [what is still unverified](../reference/verification-status.md#what-is-still-unverified).
 
 ## Before you start

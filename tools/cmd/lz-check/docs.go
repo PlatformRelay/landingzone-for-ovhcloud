@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -24,7 +25,11 @@ import (
 // included, relative links and anchors resolve and no 32-hex id (an OVHcloud
 // project or account id) appears; outside the ADRs, which name targets that
 // were designed but not built, every `task <target>` named exists in
-// Taskfile.yml.
+// Taskfile.yml. The root README.md, when present, and every README.md below
+// the other top-level directories (outside hidden directories and fixtures,
+// testdata and vendor trees) are held to the link and anchor rules only (T107);
+// DOCS_OK counts them and says whether the root README was checked or absent
+// (the offline entry's snapshot holds none).
 //
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
 // from the file on disk: on a clean checkout that is the id of HEAD:<path>,
@@ -64,6 +69,11 @@ type docChecker struct {
 	targets  map[string]bool
 	anchors  map[string]map[string]bool
 	findings []docFinding
+	// rootReadme is whether the root README.md exists; without it a README's
+	// link to it is counted in unjudgedRoot instead of judged (the entry's
+	// snapshot).
+	rootReadme   bool
+	unjudgedRoot int
 }
 
 func docs(out io.Writer, root string) int {
@@ -91,7 +101,12 @@ func docs(out io.Writer, root string) int {
 		return 2
 	}
 	sort.Strings(pages)
-	c := &docChecker{root: root, targets: taskfileTargets(string(taskfile)), anchors: map[string]map[string]bool{}}
+	readmes, rootReadme, err := readmePages(root)
+	if err != nil {
+		fmt.Fprintln(out, "README_UNREADABLE:", err)
+		return 2
+	}
+	c := &docChecker{root: root, targets: taskfileTargets(string(taskfile)), anchors: map[string]map[string]bool{}, rootReadme: rootReadme}
 	headed, references := 0, 0
 	for _, page := range pages {
 		data, err := os.ReadFile(filepath.Join(root, page))
@@ -105,10 +120,22 @@ func docs(out io.Writer, root string) int {
 			headed++
 			references += c.header(page, text)
 		}
-		c.body(page, text, !adr)
+		c.body(page, text, bodyRules{ids: true, targets: !adr})
 	}
 	if len(pages) == 0 {
 		c.add("NO_PAGES", "docs", "no Markdown page under docs/")
+	}
+	for _, page := range readmes {
+		data, err := os.ReadFile(filepath.Join(root, page))
+		if err != nil {
+			fmt.Fprintln(out, "PAGE_UNREADABLE:", err)
+			return 2
+		}
+		c.body(page, string(data), bodyRules{readme: true})
+	}
+	rootState := fmt.Sprintf("absent unjudged_root_links=%d", c.unjudgedRoot)
+	if rootReadme {
+		rootState = "checked"
 	}
 	for _, f := range c.findings {
 		fmt.Fprintf(out, "%s %s: %s\n", f.rule, f.page, f.detail)
@@ -117,8 +144,58 @@ func docs(out io.Writer, root string) int {
 		fmt.Fprintf(out, "DOCS_FAIL findings=%d\n", len(c.findings))
 		return 1
 	}
-	fmt.Fprintf(out, "DOCS_OK pages=%d headed=%d references=%d\n", len(pages), headed, references)
+	fmt.Fprintf(out, "DOCS_OK pages=%d headed=%d references=%d readmes=%d root_readme=%s\n", len(pages), headed, references, len(readmes), rootState)
 	return 0
+}
+
+// readmeSkip are the directory names whose READMEs are not read: a fixture's
+// or a test's data, and third-party code.
+var readmeSkip = map[string]bool{"fixtures": true, "testdata": true, "vendor": true}
+
+// readmePages are the READMEs held to the link rules (T107), sorted: the root
+// README.md when it exists (rootReadme), and every regular README.md below a
+// top-level directory other than docs/ (whose pages have every rule), outside
+// hidden directories and readmeSkip trees.
+func readmePages(root string) (pages []string, rootReadme bool, err error) {
+	// A root README that is not a regular file (a symbolic link, a directory)
+	// is an input error, never followed out of the repository (review r2).
+	if info, err := os.Lstat(filepath.Join(root, "README.md")); err == nil {
+		if !info.Mode().IsRegular() {
+			return nil, false, errors.New("README.md is not a regular file")
+		}
+		pages, rootReadme = append(pages, "README.md"), true
+	} else if !os.IsNotExist(err) {
+		return nil, false, err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "docs" || strings.HasPrefix(e.Name(), ".") || readmeSkip[e.Name()] {
+			continue
+		}
+		err := filepath.WalkDir(filepath.Join(root, e.Name()), func(p string, d fs.DirEntry, err error) error {
+			switch {
+			case err != nil:
+				return err
+			case d.IsDir() && (strings.HasPrefix(d.Name(), ".") || readmeSkip[d.Name()]):
+				return filepath.SkipDir
+			case d.Name() != "README.md" || !d.Type().IsRegular():
+				return nil
+			}
+			rel, err := filepath.Rel(root, p)
+			if err == nil {
+				pages = append(pages, filepath.ToSlash(rel))
+			}
+			return err
+		})
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	sort.Strings(pages)
+	return pages, rootReadme, nil
 }
 
 func (c *docChecker) add(rule, page, format string, args ...any) {
@@ -305,14 +382,21 @@ func (f *fenced) step(line string) bool {
 	return f.marker != ""
 }
 
-// body judges a page's links, anchors, ids and, when targets is set, its
+// bodyRules are the body rules a page is held to besides links and anchors:
+// no 32-hex id (ids) and only existing `task` targets (targets); readme marks a
+// README, whose links to an absent root README are counted, not judged (a page
+// under docs/ keeps judging them: review r1).
+type bodyRules struct{ ids, targets, readme bool }
+
+// body judges a page's links and anchors and, as rules say, its ids and its
 // `task` invocations. Code blocks and code spans hold no links; a target in
 // code is judged whatever its form, one in prose only when namespaced
 // ("this task covers" is English, "task live:plan" is a command).
-func (c *docChecker) body(page, text string, targets bool) {
+func (c *docChecker) body(page, text string, rules bodyRules) {
+	targets := rules.targets
 	var code fenced
 	for n, line := range strings.Split(text, "\n") {
-		if hexID.MatchString(line) {
+		if rules.ids && hexID.MatchString(line) {
 			c.add("HEX_ID", page, "line %d carries a 32-hex id", n+1)
 		}
 		if code.step(line) {
@@ -331,10 +415,10 @@ func (c *docChecker) body(page, text string, targets bool) {
 			c.taskTargets(page, prose, false)
 		}
 		for _, m := range inlineLink.FindAllStringSubmatch(prose, -1) {
-			c.link(page, m[1])
+			c.link(page, m[1], rules.readme)
 		}
 		if m := refLink.FindStringSubmatch(prose); m != nil {
-			c.link(page, m[1])
+			c.link(page, m[1], rules.readme)
 		}
 	}
 }
@@ -355,7 +439,7 @@ func (c *docChecker) taskTargets(page, text string, code bool) {
 // relative path must exist inside the repository (a leading / is the
 // repository root), and a fragment on a Markdown page must be one of its
 // anchors.
-func (c *docChecker) link(page, target string) {
+func (c *docChecker) link(page, target string, readme bool) {
 	if scheme.MatchString(target) {
 		return
 	}
@@ -378,6 +462,10 @@ func (c *docChecker) link(page, target string) {
 	}
 	if resolved == ".." || strings.HasPrefix(resolved, "../") {
 		c.add("LINK_BROKEN", page, "%s leaves the repository", target)
+		return
+	}
+	if readme && resolved == "README.md" && !c.rootReadme {
+		c.unjudgedRoot++ // the root README is absent (the entry's snapshot): counted, not judged
 		return
 	}
 	full := filepath.Join(c.root, filepath.FromSlash(resolved))
