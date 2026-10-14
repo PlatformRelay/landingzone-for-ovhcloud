@@ -13,6 +13,7 @@ zone. Most `task` targets in `Taskfile.yml` call one of them.
 | `cmd/json2junit` | Renders a `tofu test -json` stream as JUnit XML. |
 | `internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`. |
 | `vendor/` | Vendored dependencies, so builds need no network. |
+| `scripts/` | Host scripts, not Go: `fetch-offline-entry.sh` fetches, verifies and installs the offline entry ([README](../README.md#try-it-offline-about-5-minutes-no-credentials)). |
 | `harness/` | Data, not Go: the check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
 
 **Rules:** no credentials in code, tests or fixtures; tests use fakes and captured output, never

@@ -35,26 +35,31 @@ Pre-release. No version has been published.
 ## Try it offline (about 5 minutes, no credentials)
 
 Every check runs inside `lz-offline`, a sandboxed entry with the pinned toolchain (OpenTofu,
-Terramate, Go, TFLint) and no network. You need Linux on x86-64, `curl`, `jq`, `tar`, `sha256sum`
-and `sudo`. The install step replaces `/usr/bin/bwrap` with a pinned build and, where AppArmor
-restricts them (recent Ubuntu), allows unprivileged user namespaces: prefer a VM or a spare machine.
-
-1. **Get the entry.** It is published by digest on GitHub's container registry. In a shell, export
-   the five `LZ_IMAGE`, `LZ_MANIFEST`, `LZ_LAYER`, `LZ_ENTRY_SHA256` and `LZ_BWRAP_SHA256` values
-   from the `env:` block of [`.github/workflows/foundation.yml`](.github/workflows/foundation.yml),
-   then set two directories **outside your clone** (the entry refuses to run from inside it):
-
-   ```sh
-   export RUNNER_TEMP=$(mktemp -d) LZ_RUNTIME=$HOME/lz-runtime   # LZ_RUNTIME must not exist yet
-   ```
-
-   Then run the `run:` scripts of the steps *Fetch the runtime layer by digest* and *Install the
-   pinned launcher* from the same workflow.
-2. **Run the checks** from the root of your clone:
+Terramate, Go, TFLint) and no network. You need Linux on x86-64 with `curl`, `sha256sum`, `tar`,
+`sed` and `grep`. From the root of your clone:
 
 ```sh
-E=$LZ_RUNTIME/runtime/lz-offline
+E=$(tools/scripts/fetch-offline-entry.sh)        # fetch, verify and install the entry
 "$E" --candidate "$PWD" -- task test:slice         # lint + unit tests of every module, component, stage (~80 s)
+```
+
+The [script](tools/scripts/fetch-offline-entry.sh) pulls the entry anonymously from GitHub's
+container registry, checks every download against the digests pinned in
+[`.github/workflows/foundation.yml`](.github/workflows/foundation.yml), and installs it outside
+your clone (the entry refuses to run from inside it), under
+`~/.local/share/landingzone-for-ovhcloud/runtime/` unless you pass `--dest DIR`. Any mismatch
+stops it with nothing installed. Running it again reuses a verified install.
+
+**Prerequisite: the pinned `bwrap`.** The entry sandboxes every check with `/usr/bin/bwrap`, and
+only the build shipped with it is accepted. If yours is missing or different, the script prints
+the one `sudo install …` command that puts the verified build in place, and exits; it never runs
+`sudo` itself; run that command, then the script again. That replaces your distribution's `bwrap`: prefer a VM or a spare machine. Where
+AppArmor restricts unprivileged user namespaces (recent Ubuntu), CI also runs
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; you may need it too.
+
+Other checks run the same way:
+
+```sh
 "$E" --candidate "$PWD" -- task stacks:check       # generated stacks match stacks/deployments.yaml
 "$E" --candidate "$PWD" -- task test:stack-plans   # every stack plans against mocks
 "$E" --candidate "$PWD" -- task stacks:order -- all  # the order the stacks would be applied in
