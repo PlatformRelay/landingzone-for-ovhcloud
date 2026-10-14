@@ -157,9 +157,17 @@ else
 	verify "$work/layer.tgz" "${layer#sha256:}" "the layer"
 
 	mkdir "$work/root"
-	tar -xzpf "$work/layer.tgz" -C "$work/root" || fail 1 "FETCH_FAILED: the layer does not unpack"
+	# The entry admits runtime/resources/ against the exact modes recorded in
+	# resources.json, so the layer's modes must survive whatever the caller's
+	# umask is. GNU tar -p keeps them; busybox tar applies the umask even with
+	# -p. Unpacking under umask 0 keeps them with both. $work is mode 0700
+	# (mktemp -d), so nobody else can reach the files meanwhile.
+	(umask 0 && tar -xzpf "$work/layer.tgz" -C "$work/root") || fail 1 "FETCH_FAILED: the layer does not unpack"
 	verify "$work/root/runtime/lz-offline" "$entry_sha" "the entry runtime/lz-offline"
 	verify "$work/root/host/bwrap" "$bwrap_sha" "the launcher host/bwrap"
+	# The entry and the launcher sit outside resources/ and are not admitted by
+	# mode: make them executable and writable by their owner only.
+	chmod 0755 "$work/root/runtime/lz-offline" "$work/root/host/bwrap"
 	printf '%s\n' "$layer" >"$work/root/.layer-digest"
 
 	[ ! -e "$dest" ] || fail 1 "INSTALL_LOCATION: $dest appeared during the fetch"

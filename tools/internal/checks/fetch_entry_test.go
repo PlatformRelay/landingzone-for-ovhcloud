@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -68,16 +69,26 @@ func layerArchive(t *testing.T, files map[string][]byte) []byte {
 	var raw bytes.Buffer
 	zw := gzip.NewWriter(&raw)
 	tw := tar.NewWriter(zw)
-	for _, dir := range []string{"host/", "runtime/"} {
-		if err := tw.WriteHeader(&tar.Header{Name: dir, Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+	// The modes are the real layer's: the entry admits runtime/resources/
+	// against the exact modes recorded in resources.json.
+	for _, dir := range []struct {
+		name string
+		mode int64
+	}{{"host/", 0o755}, {"runtime/", 0o775}, {"runtime/resources/", 0o700}} {
+		if err := tw.WriteHeader(&tar.Header{Name: dir.name, Typeflag: tar.TypeDir, Mode: dir.mode}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"host/bwrap", "runtime/lz-offline"} {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o775, Size: int64(len(files[name]))}); err != nil {
+	resource := []byte("provider_installation {}\n")
+	for _, file := range []struct {
+		name string
+		mode int64
+		data []byte
+	}{{"host/bwrap", 0o755, files["host/bwrap"]}, {"runtime/lz-offline", 0o775, files["runtime/lz-offline"]}, {"runtime/resources/tofurc", 0o664, resource}} {
+		if err := tw.WriteHeader(&tar.Header{Name: file.name, Typeflag: tar.TypeReg, Mode: file.mode, Size: int64(len(file.data))}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tw.Write(files[name]); err != nil {
+		if _, err := tw.Write(file.data); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -219,10 +230,7 @@ func TestFoundationFetchInstalls(t *testing.T) {
 	if got, err := os.ReadFile(entry); err != nil || !bytes.Equal(got, f.entry) {
 		t.Errorf("BEHAVIORAL_RED: installed entry %q, %v", got, err)
 	}
-	if info, err := os.Stat(entry); err != nil || info.Mode().Perm() != 0o775 {
-		t.Errorf("BEHAVIORAL_RED: entry mode not preserved: %v %v", info, err)
-	}
-	if want := "'" + entry + `' --candidate "$PWD" -- task test:slice`;!strings.Contains(stderr, want) {
+	if want := "'" + entry + `' --candidate "$PWD" -- task test:slice`; !strings.Contains(stderr, want) {
 		t.Errorf("BEHAVIORAL_RED: stderr lacks the run command %q:\n%s", want, stderr)
 	}
 	want := []string{
@@ -445,7 +453,7 @@ func TestFoundationFetchRefusesTamperedInstall(t *testing.T) {
 // Usage errors exit 2 before anything is read or fetched.
 func TestFoundationFetchUsage(t *testing.T) {
 	for name, args := range map[string][]string{
-		"unknown argument": {"--force"},
+		"unknown argument":       {"--force"},
 		"--dest without a value": {"--dest"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -456,6 +464,39 @@ func TestFoundationFetchUsage(t *testing.T) {
 			}
 			if got := f.log("curl.log"); got != "" {
 				t.Errorf("BEHAVIORAL_RED: fetched on a usage error: %q", got)
+			}
+		})
+	}
+}
+
+// The install does not depend on the caller's umask, nor on whether tar
+// applies it (busybox tar does, even with -p; GNU tar -p does not): the
+// resources keep their exact layer modes, which the entry admits against
+// resources.json, and the entry and the launcher are set to 0755, executable
+// and writable by their owner only.
+func TestFoundationFetchModes(t *testing.T) {
+	for _, mask := range []int{0o022, 0o077, 0o002} {
+		t.Run(fmt.Sprintf("umask %04o", mask), func(t *testing.T) {
+			f := newFetchFixture(t)
+			old := syscall.Umask(mask)
+			_, stderr, code := f.run(t)
+			syscall.Umask(old)
+			if code != 0 {
+				t.Fatalf("BEHAVIORAL_RED: fetch under umask %04o exited %d: %s", mask, code, stderr)
+			}
+			for rel, want := range map[string]os.FileMode{
+				"runtime/lz-offline":       0o755,
+				"host/bwrap":               0o755,
+				"runtime/resources":        0o700,
+				"runtime/resources/tofurc": 0o664,
+			} {
+				info, err := os.Lstat(filepath.Join(f.defaultDest(), filepath.FromSlash(rel)))
+				if err != nil || info.Mode().Perm() != want {
+					t.Errorf("BEHAVIORAL_RED: %s under umask %04o: %v, want %04o", rel, mask, err, want)
+					if err == nil {
+						t.Errorf("got %04o", info.Mode().Perm())
+					}
+				}
 			}
 		})
 	}
