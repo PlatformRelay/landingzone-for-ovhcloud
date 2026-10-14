@@ -35,6 +35,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -182,6 +183,16 @@ type laneStack struct {
 	// LockHeld (T062): a plan that must not wait for the lock (-lock-timeout) is refused, as
 	// OpenTofu refuses a second writer, naming this lock id; "" when the state is not locked.
 	LockHeld string `json:"lock_held,omitempty"`
+	// ReadFail (T110) makes the stack's state reads fail for a while: its first len(Answers)
+	// calls of ReadFail.Call ("init", or "show-state": `show -json` without a plan file) print
+	// their answer on stderr and exit 1.
+	ReadFail *laneReadFail `json:"read_fail,omitempty"`
+}
+
+// laneReadFail is a run of failing state reads (laneStack.ReadFail).
+type laneReadFail struct {
+	Call    string   `json:"call"`
+	Answers []string `json:"answers"`
 }
 
 // laneCreate is one resource an apply creates: one `apply_complete` event of `tofu apply -json`
@@ -218,6 +229,7 @@ type laneCall struct {
 	Key      string   `json:"key,omitempty"`      // store: the access key the store was opened with
 	Destroy  bool     `json:"destroy,omitempty"`  // plan -destroy, or a show/apply of such a plan file (T046)
 	Exit     int      `json:"exit"`
+	At       string   `json:"at,omitempty"` // tofu: when the call ended (T110: the retry waits)
 }
 
 // laneNotTofu are the logged events that are not a tofu call (store, locks, binding, and the
@@ -294,7 +306,7 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		call.Stack = "unknown:" + filepath.ToSlash(rel)
 	}
 	done := func(code int) int {
-		call.Exit = code
+		call.Exit, call.At = code, time.Now().Format(time.RFC3339Nano)
 		laneAppend(w.Log, call)
 		return code
 	}
@@ -347,6 +359,22 @@ func fakeLaneTofu(worldPath string, args []string) int {
 	if st.Fail != "" && st.Fail == failing {
 		call.Cmd = failing
 		return fail("fake %s failure of %s", failing, st.ID)
+	}
+	if rf := st.ReadFail; rf != nil {
+		name := failing
+		if name == "show-json" && len(positional) == 0 {
+			name = "show-state"
+		}
+		if name == rf.Call {
+			counter := w.Log + ".readfail-" + st.ID
+			raw, _ := os.ReadFile(counter)
+			n, _ := strconv.Atoi(string(raw))
+			_ = os.WriteFile(counter, []byte(strconv.Itoa(n+1)), 0o600)
+			if n < len(rf.Answers) {
+				call.Cmd = name
+				return fail("%s", rf.Answers[n])
+			}
+		}
 	}
 	// Block (review r1): the call announces itself next to the log and waits for SIGINT, as tofu
 	// stops gracefully on it; a kill is never logged.

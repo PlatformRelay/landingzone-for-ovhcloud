@@ -803,8 +803,9 @@ var (
 
 // TestTestRunnersInjectWaits: T114 — every runner the tests build (the run world's, which every
 // probe harness starts from; the fresh lz-live process's; the chain harness's) injects its
-// deadline, grace period and companion backoff, so no test runs under a production default (45
-// min, 2 min, 20 s and 60 s); and those production defaults are unchanged.
+// deadline, grace period and companion backoff (the chain harness also the retained state read's
+// backoff, T110), so no test runs under a production default (45 min, 2 min, 20 s and 60 s; 10 s
+// and 30 s); and those production defaults are unchanged.
 func TestTestRunnersInjectWaits(t *testing.T) {
 	t.Parallel()
 	if DefaultDeadline != 45*time.Minute || DefaultGrace != 2*time.Minute ||
@@ -831,6 +832,17 @@ func TestTestRunnersInjectWaits(t *testing.T) {
 	runner("runWorld.runner", w.runner(t))
 	runner("fakeRunner (zero config)", fakeRunner(fakeRunConfig{}))
 	short("chain harness (zero chainExec)", "Deadline", chainExec{}.chainDeadline())
+	// T110: the retained state read's backoff, injected by the chain harness, default 10 s and 30 s.
+	if !slices.Equal(defaultStateReadBackoff, []time.Duration{10 * time.Second, 30 * time.Second}) {
+		t.Errorf("production state-read backoff %v, want [10s 30s]", defaultStateReadBackoff)
+	}
+	if b := (chainExec{}).stateReadBackoff(); len(b) == 0 {
+		t.Errorf("chain harness (zero chainExec): stateReadBackoff %v, want injected waits (nil is the production default)", b)
+	} else {
+		for _, d := range b {
+			short("chain harness (zero chainExec)", "stateReadBackoff", d)
+		}
+	}
 }
 
 // TestRunnerAppliesInOrderDestroysEphemeralInReverse: a run that succeeds still destroys its

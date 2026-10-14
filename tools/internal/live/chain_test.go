@@ -33,6 +33,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -398,10 +399,21 @@ type chainExec struct {
 	// stateObjects answers the state-object check's GetObject of an instance's state key (T102);
 	// an instance not named gets an encryption envelope.
 	stateObjects map[string]chainStateAnswer
+	// stateBackoff are the waits before the retries of a retained state read (T110; nil:
+	// testBackoff, never the production default).
+	stateBackoff []time.Duration
 }
 
 // chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114).
 func (c chainExec) chainDeadline() time.Duration { return testWaitCap }
+
+// stateReadBackoff is the retained state read's backoff the chain harness passes (T110).
+func (c chainExec) stateReadBackoff() []time.Duration {
+	if c.stateBackoff == nil {
+		return testBackoff
+	}
+	return c.stateBackoff
+}
 
 // deadlineAt is the channel that reaches the chain's deadline: block when c.deadlineAtBlock, else
 // nil (only the deadline's own time).
@@ -582,7 +594,8 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
-		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt)})
+		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt),
+		stateReadBackoff: c.stateReadBackoff()})
 	process := streams()
 	close(stop)
 	<-watched
@@ -1321,18 +1334,130 @@ func TestChainBaseline(t *testing.T) {
 	}
 }
 
+// chainAnswerMark is in every failing answer of TestChainStateUnreadable's fake reads: a retry line
+// carrying it would carry tofu's output, not only the redacted error.
+const chainAnswerMark = "fake-answer-t110"
+
 // G9 fail closed (T047, mutant g9-state-error-ignored): a retained instance's state that cannot be
 // read leaves its resources unexempted and unknowable; the report names it as an error and the
-// chain fails, after the destroys.
+// chain fails, after the destroys. T110 (evidence/T049.md run 3, gap 2): a read whose `init` or
+// `show -json` failed with a transient answer (5xx, connection reset, connection timed out) is
+// retried at most twice, each after its wait, unless the wait would end after the deadline; a
+// read that then succeeds exempts the instance's objects; a 4xx or any other failure is not
+// retried; each retry prints one `LZ-LIVE retry` line naming the instance, without tofu's output.
 func TestChainStateUnreadable(t *testing.T) {
-	h := newChainHarness(t)
-	h.setStack("account-bootstrap", func(s *laneStack) { s.StateDoc = h.writeFake("state-unreadable.json", "not a state document") })
-	r := h.chain(chainExec{})
-	laneExit(t, r.laneRun, 1)
-	chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
-	rep := chainReport(t, r.runDir)
-	if !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, "account-bootstrap") }) {
-		t.Errorf("report errors %v, want one naming the unreadable state of account-bootstrap", rep.Errors)
+	answer := func(s string) string { return s + " (" + chainAnswerMark + ")" }
+	errReset := answer("Error: reading the state: read tcp 10.0.0.1:443: connection reset by peer")
+	for _, c := range []struct {
+		name     string
+		stack    string
+		fail     *laneReadFail
+		undecode bool            // the state document does not decode (non-transient, T047)
+		backoff  []time.Duration // nil: the harness's
+		reads    int             // calls of fail.Call (or show-state) the run makes
+		retries  int             // LZ-LIVE retry lines
+		ok       bool            // the read finally succeeded: no error, no leftover, pass
+		noRetry  bool            // the report error says the deadline left no time for the wait
+	}{
+		{name: "transient-then-ok-show", stack: "account-governance",
+			fail:  &laneReadFail{Call: "show-state", Answers: []string{answer("GET /v1/iam/policy: 503 Service Unavailable")}},
+			reads: 2, retries: 1, ok: true},
+		{name: "transient-then-ok-init", stack: "account-bootstrap",
+			fail: &laneReadFail{Call: "init", Answers: []string{
+				answer("Failed to get existing workspaces: dial tcp 10.0.0.1:443: connect: connection timed out"),
+				answer("Failed to get existing workspaces: status code 502")}},
+			reads: 3, retries: 2, ok: true},
+		{name: "transient-on-every-attempt", stack: "demo-state",
+			fail:    &laneReadFail{Call: "show-state", Answers: []string{errReset, errReset, errReset, errReset, errReset}},
+			backoff: []time.Duration{200 * time.Millisecond, 400 * time.Millisecond},
+			reads:   3, retries: 2},
+		{name: "403-not-retried", stack: "demo-dev-project",
+			fail:  &laneReadFail{Call: "show-state", Answers: []string{answer("GET /v1/iam/resource: 403 Forbidden"), answer("x")}},
+			reads: 1},
+		{name: "deadline-too-close", stack: "account-governance",
+			fail:    &laneReadFail{Call: "show-state", Answers: []string{errReset, errReset}},
+			backoff: []time.Duration{time.Minute, time.Minute}, // the harness's deadline is 30 s
+			reads:   1, noRetry: true},
+		{name: "undecodable", stack: "account-bootstrap", undecode: true, reads: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newChainHarness(t)
+			h.setStack(c.stack, func(s *laneStack) {
+				s.ReadFail = c.fail
+				if c.undecode {
+					s.StateDoc = h.writeFake("state-unreadable.json", "not a state document")
+				}
+			})
+			start := time.Now()
+			r := h.chain(chainExec{stateBackoff: c.backoff})
+			took := time.Since(start)
+			rep := chainReport(t, r.runDir)
+			named := slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, c.stack) })
+			if c.ok {
+				laneExit(t, r.laneRun, 0)
+				chainDestroyedAfter(t, h, r, chainDestroyOrder, "pass")
+				if len(rep.Leftovers) != 0 || len(rep.Errors) != 0 {
+					t.Errorf("leftovers %v, errors %v; want none once the read of %s succeeded", leftoverKeys(rep.Leftovers), rep.Errors, c.stack)
+				}
+			} else {
+				laneExit(t, r.laneRun, 1)
+				chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+				if !named || rep.Outcome != "fail" {
+					t.Errorf("report outcome %q, errors %v; want fail with an error naming the unreadable state of %s", rep.Outcome, rep.Errors, c.stack)
+				}
+			}
+			if c.noRetry {
+				if !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, "no retry") }) {
+					t.Errorf("report errors %v, want one saying the deadline left no time for the retry", rep.Errors)
+				}
+				if took > 15*time.Second {
+					t.Errorf("the run took %v: it waited for a retry the deadline did not leave time for", took)
+				}
+			}
+			// The reads of the instance: fail.Call's calls (show-state for the undecodable row)
+			// after the last destroy, where the leftover check runs (an applied stack's own init
+			// comes before).
+			call := "show-state"
+			if c.fail != nil {
+				call = c.fail.Call
+			}
+			var at []time.Time
+			for i := r.index(true, func(x laneCall) bool { return x.Destroy }) + 1; i < len(r.calls); i++ {
+				if x := r.calls[i]; x.Stack == c.stack && x.Cmd == call {
+					ts, err := time.Parse(time.RFC3339Nano, x.At)
+					if err != nil {
+						t.Fatalf("call %+v without its time: %v", x, err)
+					}
+					at = append(at, ts)
+				}
+			}
+			if reads := len(at); reads != c.reads {
+				t.Errorf("%d %s calls of %s, want %d (at most two retries, only after a transient answer)", len(at), call, c.stack, c.reads)
+			}
+			backoff := chainExec{stateBackoff: c.backoff}.stateReadBackoff()
+			for i := 1; i < len(at) && i <= len(backoff); i++ {
+				if gap := at[i].Sub(at[i-1]); gap < backoff[i-1] {
+					t.Errorf("retry %d came %v after the attempt before, want at least %v", i, gap, backoff[i-1])
+				}
+			}
+			var retries []string
+			for _, l := range strings.Split(h.term.String(), "\n") {
+				if strings.HasPrefix(l, "LZ-LIVE retry") {
+					retries = append(retries, l)
+				}
+			}
+			if len(retries) != c.retries {
+				t.Errorf("%d LZ-LIVE retry lines, want %d:\n%s", len(retries), c.retries, strings.Join(retries, "\n"))
+			}
+			// The line names the instance and carries the call's error, nothing of tofu's output.
+			shape := regexp.MustCompile(`^LZ-LIVE retry state read ` + regexp.QuoteMeta(c.stack) +
+				` in [0-9.]+m?s: transient failure \(attempt [23] of 3\): tofu (init|show) ` + regexp.QuoteMeta(c.stack) + `: exit status 1$`)
+			for _, l := range retries {
+				if !shape.MatchString(l) || strings.Contains(l, chainAnswerMark) {
+					t.Errorf("retry line %q: want `LZ-LIVE retry state read %s in <wait>: transient failure (attempt n of 3): tofu <call> %s: exit status 1`, nothing of tofu's output", l, c.stack, c.stack)
+				}
+			}
+		})
 	}
 }
 
