@@ -428,6 +428,106 @@ func TestFoundationObserveRefused(t *testing.T) {
 	}
 }
 
+// unnamedHead is push run 38550248277 of main at this commit, captured with
+// gh 2.98.0, which labels every line of a successful run's log UNKNOWN STEP.
+const unnamedHead = "0e755067f64ef0cceabb7eeb70dacae2b3117e4e"
+
+// unnameSteps rewrites a log the way gh prints it when it cannot name the
+// steps: every step column UNKNOWN STEP, and the one byte-order mark at the
+// head of the job log, not one per step.
+func unnameSteps(log []byte) []byte {
+	lines := strings.Split(string(log), "\n")
+	for i, line := range lines {
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		if i > 0 {
+			fields[2] = strings.TrimPrefix(fields[2], "\uFEFF")
+		}
+		lines[i] = fields[0] + "\t" + unknownStep + "\t" + fields[2]
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// A log whose step names gh no longer prints is cut into steps at the
+// `##[group]Run ` marker that opens each workflow step, and observed exactly
+// as the same log with names.
+func TestFoundationObserveUnnamedSteps(t *testing.T) {
+	for _, c := range []struct{ name, role, candidate string }{{"head", RoleHead, prHead}, {"red", RoleRedControl, redHead}} {
+		named := observeRun(t, c.role, c.candidate, c.name)
+		capture := captureRun(t, c.name)
+		capture.Log = unnameSteps(capture.Log)
+		unnamed, err := ObserveFoundationRun(c.role, c.candidate, capture)
+		if err != nil {
+			t.Fatalf("BEHAVIORAL_RED: %s run without step names refused: %v", c.name, err)
+		}
+		if !reflect.DeepEqual(unnamed, named) {
+			t.Errorf("BEHAVIORAL_RED: %s run without step names observed as %+v, with names as %+v", c.name, unnamed, named)
+		}
+	}
+	run := observeRun(t, RoleHead, unnamedHead, "head-unnamed")
+	targets := strings.Fields(run.Env["LZ_TARGETS"])
+	names := []string{}
+	for _, target := range run.Targets {
+		names = append(names, target.Name)
+		if target.Status != "ok" || target.Discovered == 0 {
+			t.Errorf("BEHAVIORAL_RED: target observed as %+v", target)
+		}
+	}
+	for name, ok := range map[string]bool{
+		"token":   slices.Equal(run.Permissions, tokenPermissions),
+		"image":   run.RunnerImage == "ubuntu-24.04",
+		"head":    run.FetchedHead == unnamedHead && run.Env["LZ_HEAD"] == unnamedHead,
+		"env":     len(run.Env) == 9 && run.Env["LZ_IMAGE"] == RuntimeImage,
+		"targets": len(targets) == 17 && slices.Equal(names, targets) && run.TargetsDone == 17,
+	} {
+		if !ok {
+			t.Errorf("BEHAVIORAL_RED: unnamed run observed wrongly: %s: %+v", name, run)
+		}
+	}
+}
+
+// Markers and steps that do not pair one to one are refused, never guessed
+// at; so is a log that names some steps and not others.
+func TestFoundationObserveUnnamedStepsRefused(t *testing.T) {
+	marker := "Z ##[group]Run set -euo pipefail"
+	for name, change := range map[string]func(*RunCapture){
+		"a step marker missing": func(c *RunCapture) {
+			c.Log = []byte(strings.Replace(string(c.Log), marker, "Z set -euo pipefail", 1))
+		},
+		"a marker in a step's output": func(c *RunCapture) {
+			c.Log = []byte(strings.Replace(string(c.Log), "Z LZ_TARGET_OK docs:check", "Z ##[group]Run docs:check", 1))
+		},
+		"a step without a marker": func(c *RunCapture) {
+			c.Jobs = []byte(strings.Replace(string(c.Jobs), `{"name":"Complete job"`,
+				`{"name":"Post run","status":"completed","conclusion":"success"},{"name":"Complete job"`, 1))
+		},
+		// A skipped step prints no marker, so it pairs with none: a marker in
+		// the checks' output cannot stand in for it.
+		"a skipped step and a marker in a step's output": func(c *RunCapture) {
+			c.Jobs = []byte(strings.Replace(string(c.Jobs), `{"name":"Install the pinned launcher","status":"completed","conclusion":"success"`,
+				`{"name":"Install the pinned launcher","status":"completed","conclusion":"skipped"`, 1))
+			c.Log = []byte(strings.Replace(string(c.Log), "21.9946033Z ##[group]Run set -euo pipefail", "21.9946033Z set -euo pipefail", 1))
+			c.Log = []byte(strings.Replace(string(c.Log), "Z LZ_TARGET_OK docs:check", "Z ##[group]Run docs:check", 1))
+		},
+		"no set-up step": func(c *RunCapture) {
+			c.Jobs = []byte(strings.Replace(string(c.Jobs), `"name":"Set up job"`, `"name":"Prepare"`, 1))
+		},
+		"names on some lines": func(c *RunCapture) {
+			c.Log = []byte(strings.Replace(string(c.Log), "\t"+unknownStep+"\t", "\tSet up job\t", 1))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := captureRun(t, "head-unnamed")
+			change(&c)
+			if _, err := ObserveFoundationRun(RoleHead, unnamedHead, c); err == nil || !strings.HasPrefix(err.Error(), "CAPTURE_LOG: ") {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v, want CAPTURE_LOG", name, err)
+			}
+		})
+	}
+}
+
 func TestFoundationRunsValid(t *testing.T) {
 	source, runs := recordedRuns(t)
 	if findings := JudgeFoundationRuns(source, encode(t, runs), treeDigests()); len(findings) != 0 {

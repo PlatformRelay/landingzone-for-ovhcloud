@@ -454,7 +454,9 @@ func ObserveFoundationRun(role, candidate string, c RunCapture) (FoundationRun, 
 	for _, s := range job.Steps {
 		o.Steps = append(o.Steps, RunStep{Name: s.Name, Conclusion: deref(s.Conclusion)})
 	}
-	observeLog(&o, string(c.Log))
+	if err := observeLog(&o, string(c.Log)); err != nil {
+		return FoundationRun{}, err
+	}
 	return o, nil
 }
 
@@ -469,28 +471,100 @@ func deref(s *string) string {
 // the targets ran with.
 const checksStep = "Run the foundation checks inside the offline entry"
 
-// observeLog reads `gh run view --log` output: job, step and a timestamped
-// line, tab-separated. It takes the runner image and token permissions from
-// the job set-up, the fetched head, the checks step's environment and each
-// target's outcome and discovery.
-func observeLog(o *FoundationRun, log string) {
-	var group string
-	inEnv := false
-	current, failures := RunTarget{}, 0
-	fetched := map[string]bool{}
+// unknownStep is the step column `gh run view --log` prints on a line it
+// cannot attribute to a step; gh 2.98.0 prints it on every line of a
+// successful run.
+const unknownStep = "UNKNOWN STEP"
+
+// stepMarker opens the log of each workflow step: `##[group]Run ` and the
+// step's first command line.
+const stepMarker = "##[group]Run "
+
+// logLine is one line of `gh run view --log` output: its step and its text
+// without the timestamp.
+type logLine struct{ step, text string }
+
+// splitLog reads `gh run view --log` output: job, step and a timestamped
+// line, tab-separated. When gh names no step, it attributes the lines from
+// the log itself: those before the first step marker to "Set up job", and
+// each marker and the lines after it to the next step between "Set up job"
+// and "Complete job" of steps, the job's steps as GitHub reported them, that
+// was not skipped, since a skipped step prints no marker. The lines after the
+// last marker stay with the last workflow step, as no marker opens "Complete
+// job". Markers and steps that do not pair one to one, or a log that names
+// some steps and not others, are refused; so a step's output that prints a
+// marker has its run refused, not misread.
+func splitLog(log string, steps []RunStep) ([]logLine, error) {
+	var lines []logLine
+	unknown := 0
 	for _, raw := range strings.Split(log, "\n") {
 		fields := strings.SplitN(raw, "\t", 3)
 		if len(fields) != 3 {
 			continue
 		}
-		step := fields[1]
 		text := strings.TrimPrefix(fields[2], "\uFEFF")
 		if _, rest, ok := strings.Cut(text, " "); ok {
 			text = rest
 		} else {
 			text = ""
 		}
-		text = strings.TrimRight(text, "\r")
+		lines = append(lines, logLine{step: fields[1], text: strings.TrimRight(text, "\r")})
+		if fields[1] == unknownStep {
+			unknown++
+		}
+	}
+	switch unknown {
+	case 0:
+		return lines, nil
+	case len(lines):
+	default:
+		return nil, fmt.Errorf("CAPTURE_LOG: %d of %d lines name no step", unknown, len(lines))
+	}
+	names := stepNames(steps)
+	n := len(names)
+	if n < 2 || names[0] != "Set up job" || names[n-1] != "Complete job" {
+		return nil, fmt.Errorf("CAPTURE_LOG: steps %q do not run from Set up job to Complete job", names)
+	}
+	workflow := []string{}
+	for _, s := range steps[1 : n-1] {
+		if s.Conclusion != "skipped" {
+			workflow = append(workflow, s.Name)
+		}
+	}
+	markers := 0
+	for _, l := range lines {
+		if strings.HasPrefix(l.text, stepMarker) {
+			markers++
+		}
+	}
+	if markers != len(workflow) {
+		return nil, fmt.Errorf("CAPTURE_LOG: %d step markers for the %d workflow steps %q", markers, len(workflow), workflow)
+	}
+	step, next := names[0], 0
+	for i := range lines {
+		if strings.HasPrefix(lines[i].text, stepMarker) {
+			step = workflow[next]
+			next++
+		}
+		lines[i].step = step
+	}
+	return lines, nil
+}
+
+// observeLog takes the runner image and token permissions from the job
+// set-up, the fetched head, the checks step's environment and each target's
+// outcome and discovery from the job log (splitLog).
+func observeLog(o *FoundationRun, log string) error {
+	lines, err := splitLog(log, o.Steps)
+	if err != nil {
+		return err
+	}
+	var group string
+	inEnv := false
+	current, failures := RunTarget{}, 0
+	fetched := map[string]bool{}
+	for _, l := range lines {
+		step, text := l.step, l.text
 		switch {
 		case strings.HasPrefix(text, "##[group]"):
 			group = strings.TrimPrefix(text, "##[group]")
@@ -553,6 +627,7 @@ func observeLog(o *FoundationRun, log string) {
 			o.FetchedHead = head
 		}
 	}
+	return nil
 }
 
 // gitBlob is the git blob SHA of data, as GitHub reports file contents.
