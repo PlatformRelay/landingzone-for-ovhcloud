@@ -485,3 +485,188 @@ func TestPackRefuses(t *testing.T) {
 		})
 	}
 }
+
+// layerOf writes entries as a gzip-compressed tar layer and returns its path.
+func layerOf(t *testing.T, headers []*tar.Header) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "layer")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipper := gzip.NewWriter(file)
+	archive := tar.NewWriter(zipper)
+	for _, h := range headers {
+		if h.Mode == 0 {
+			h.Mode = 0o755
+		}
+		if err := archive.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			if _, err := archive.Write([]byte(strings.Repeat("x", int(h.Size)))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, c := range []io.Closer{archive, zipper, file} {
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+
+// setExtractLimits lowers the extraction budgets for one test; a zero keeps
+// that budget.
+func setExtractLimits(t *testing.T, entries int, bytes, stream int64) {
+	t.Helper()
+	saved := extractLimits
+	t.Cleanup(func() { extractLimits = saved })
+	if entries != 0 {
+		extractLimits.entries = entries
+	}
+	if bytes != 0 {
+		extractLimits.bytes = bytes
+	}
+	if stream != 0 {
+		extractLimits.stream = stream
+	}
+}
+
+// Extraction only writes the names a layer from this program can hold, never
+// through a link and never past its budgets, and only from a blob that
+// matches its digest, whatever the layer says: a tampered layout must fail
+// verification, not write outside its scratch.
+func TestExtractRefuses(t *testing.T) {
+	dir := func(name string) *tar.Header { return &tar.Header{Name: name, Typeflag: tar.TypeDir} }
+	file := func(name string, size int64) *tar.Header {
+		return &tar.Header{Name: name, Typeflag: tar.TypeReg, Size: size, Mode: 0o644}
+	}
+	link := func(name, target string) *tar.Header {
+		return &tar.Header{Name: name, Typeflag: tar.TypeSymlink, Linkname: target}
+	}
+	for name, c := range map[string]struct {
+		headers       func(outside string) []*tar.Header
+		entries       int
+		bytes, stream int64
+		plant         func(t *testing.T, scratch, outside string)
+		otherDigest   bool
+		want          string
+	}{
+		"parent reference out of the scratch": {want: "unexpected entry name", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), file("runtime/../../escaped", 1)}
+		}},
+		"absolute name": {want: "unexpected entry name", headers: func(outside string) []*tar.Header {
+			return []*tar.Header{file(filepath.Join(outside, "escaped"), 1)}
+		}},
+		"name outside host and runtime": {want: "unexpected entry name", headers: func(string) []*tar.Header {
+			return []*tar.Header{file("other", 1)}
+		}},
+		"name that is not clean": {want: "unexpected entry name", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), file("runtime/./escaped", 1)}
+		}},
+		"file written through a linked directory": {want: "below a link", headers: func(outside string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), link("runtime/out", outside), file("runtime/out/escaped", 1)}
+		}},
+		"directory made through a linked directory": {want: "below a link", headers: func(outside string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), link("runtime/out", outside), dir("runtime/out/escaped/")}
+		}},
+		"file written through a relative link": {want: "below a link", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), link("runtime/up", "../.."), file("runtime/up/escaped", 1)}
+		}},
+		// The names alone look harmless, so only the os.Root stops this.
+		"file written through a link already in the scratch": {
+			plant: func(t *testing.T, scratch, outside string) {
+				if err := os.Symlink(outside, filepath.Join(scratch, "runtime")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			headers: func(string) []*tar.Header { return []*tar.Header{file("runtime/escaped", 1)} },
+		},
+		"more entries than the budget": {entries: 2, want: "entries", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), file("runtime/a", 1), file("runtime/b", 1)}
+		}},
+		"more bytes than the budget": {bytes: 3, want: "layer files exceed", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), file("runtime/a", 2), file("runtime/b", 2)}
+		}},
+		"one file larger than the budget": {bytes: 3, want: "layer files exceed", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/"), file("runtime/a", 4)}
+		}},
+		// The tar reader consumes extended headers without returning an
+		// entry, so only a budget on the whole stream bounds them.
+		"metadata past the stream budget": {stream: 64 << 10, want: "layer stream exceeds", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/" + strings.Repeat("d/", 100_000))}
+		}},
+		"blob that does not match its digest": {otherDigest: true, want: "does not match", headers: func(string) []*tar.Header {
+			return []*tar.Header{dir("runtime/")}
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setExtractLimits(t, c.entries, c.bytes, c.stream)
+			root := t.TempDir()
+			outside := filepath.Join(root, "outside")
+			scratch := filepath.Join(root, "a", "b", "scratch")
+			for _, d := range []string{outside, scratch} {
+				if err := os.MkdirAll(d, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.plant != nil {
+				c.plant(t, scratch, outside)
+			}
+			layer := layerOf(t, c.headers(outside))
+			want := digestOf(t, layer)
+			if c.otherDigest {
+				want = "sha256:" + strings.Repeat("0", 64)
+			}
+			err := extract(layer, want, scratch)
+			if err == nil || !strings.Contains(err.Error(), c.want) || (c.want != "" && !strings.HasPrefix(err.Error(), "PACK_VERIFY: ")) {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v, want PACK_VERIFY: …%s", name, err, c.want)
+			}
+			for _, escaped := range []string{filepath.Join(outside, "escaped"), filepath.Join(root, "a", "b", "escaped"), filepath.Join(root, "a", "escaped"), filepath.Join(root, "escaped")} {
+				if _, err := os.Lstat(escaped); err == nil {
+					t.Errorf("BEHAVIORAL_RED: %s wrote %s outside the scratch", name, escaped)
+				}
+			}
+		})
+	}
+}
+
+// The budgets leave room for the real bundle (about 18 000 entries and
+// 650 MB in r4), and a layer exactly at the entry and byte budgets still
+// extracts.
+func TestExtractBudgets(t *testing.T) {
+	if extractLimits.entries < 50_000 || extractLimits.bytes < 2<<30 || extractLimits.stream < extractLimits.bytes {
+		t.Errorf("BEHAVIORAL_RED: budgets too small for the real bundle: %+v", extractLimits)
+	}
+	setExtractLimits(t, 3, 3, 0)
+	layer := layerOf(t, []*tar.Header{{Name: "runtime/", Typeflag: tar.TypeDir}, {Name: "runtime/a", Typeflag: tar.TypeReg, Size: 2, Mode: 0o644},
+		{Name: "runtime/b", Typeflag: tar.TypeReg, Size: 1, Mode: 0o644}})
+	if err := extract(layer, digestOf(t, layer), t.TempDir()); err != nil {
+		t.Errorf("BEHAVIORAL_RED: a layer at the budgets was refused: %v", err)
+	}
+	// The stream budget: exactly the decompressed size passes, one byte less
+	// fails on the budget.
+	file, err := os.Open(layer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	unzipped, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, err := io.Copy(io.Discard, unzipped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setExtractLimits(t, 0, 0, size)
+	if err := extract(layer, digestOf(t, layer), t.TempDir()); err != nil {
+		t.Errorf("BEHAVIORAL_RED: a layer at the stream budget was refused: %v", err)
+	}
+	setExtractLimits(t, 0, 0, size-1)
+	if err := extract(layer, digestOf(t, layer), t.TempDir()); err == nil || !strings.Contains(err.Error(), "PACK_VERIFY: layer stream exceeds") {
+		t.Errorf("BEHAVIORAL_RED: a layer one byte over the stream budget gave %v", err)
+	}
+}
