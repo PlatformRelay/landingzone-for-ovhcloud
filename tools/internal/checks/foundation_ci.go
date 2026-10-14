@@ -623,9 +623,9 @@ func observeLog(o *FoundationRun, log string) error {
 				if n, err := strconv.Atoi(count); err == nil {
 					o.TargetsDone = n
 				}
-			} else if pkg, ok := goPackage(text); ok && strings.Contains(text, "[no tests to run]") {
+			} else if pkg, isPackage := goPackage(text); isPackage && strings.Contains(text, "[no tests to run]") {
 				idle[pkg] = true
-			} else if ok {
+			} else if isPackage {
 				tested[pkg] = true
 				current.Discovered++
 			} else if summaryLine.MatchString(text) {
