@@ -83,8 +83,11 @@ func Generate(opts GenerateOptions) error {
 
 // PlannedBucketNames returns the bucket names (ovh_cloud_project_storage `name`) a plan creates
 // or keeps, sorted, read through the shared plan decoder (planjson: a document that is not a
-// complete plan, or is marked errored, is an error). A bucket whose actions are not known, or
-// whose name is not known at plan time, is an error: uniqueness cannot be judged on it.
+// complete plan, or is marked errored, is an error). A bucket the plan deletes or forgets (a
+// `removed` block with `destroy = false`; `after` is null) is skipped: it leaves the stack's
+// state, though a forgotten one stays in the account, so uniqueness here is among planned
+// names only and a clash with a forgotten bucket is left to the apply (T112). A bucket whose actions are not known, or whose name is not known at plan
+// time, is an error: uniqueness cannot be judged on it.
 func PlannedBucketNames(plan []byte) ([]string, error) {
 	p, err := planjson.Decode(plan)
 	if err != nil {
@@ -102,7 +105,7 @@ func PlannedBucketNames(plan []byte) ([]string, error) {
 		if !planjson.KnownActions(c.Actions) {
 			return nil, fmt.Errorf("%s: plan actions %q not known", c.Address, c.Actions)
 		}
-		if slices.Equal(c.Actions, []string{"delete"}) {
+		if slices.Equal(c.Actions, []string{"delete"}) || slices.Equal(c.Actions, []string{"forget"}) {
 			continue
 		}
 		var after map[string]any
