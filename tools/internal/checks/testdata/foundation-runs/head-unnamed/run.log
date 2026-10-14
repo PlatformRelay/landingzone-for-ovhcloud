@@ -1,0 +1,235 @@
+foundation	UNKNOWN STEP	﻿2026-10-14T10:32:12.3942159Z Current runner version: '2.337.0'
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3978440Z ##[group]Runner Image Provisioner
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3979714Z Hosted Compute Agent
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3980740Z Version: 20261002.596
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3981772Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3982982Z Build Date: 2026-10-02T22:28:27Z
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3984129Z Worker ID: {9790f02e-6a79-43b8-b376-f6b4421726dd}
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3985258Z Region: centralus
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3986486Z Cloud: Azure
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3987469Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3990383Z ##[group]Operating System
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3991635Z Ubuntu
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3992593Z 24.04.5
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3993659Z LTS
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3994698Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3995893Z ##[group]Runner Image
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3997101Z Image: ubuntu-24.04
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.3998008Z Version: 20261004.327.1
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4000854Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4003628Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4005911Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4007621Z ##[group]GITHUB_TOKEN Permissions
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4010917Z Metadata: read
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4011952Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4015015Z Secret source: Actions
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4016801Z Cache mode: write
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4018643Z Prepare workflow directory
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4674143Z Prepare all required actions
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.4778050Z Complete job name: foundation
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.5617544Z ##[group]Run set -euo pipefail
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.5618333Z ^[[36;1mset -euo pipefail^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.5619184Z ^[[36;1mecho "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.5620652Z ^[[36;1mecho "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6424996Z shell: /usr/bin/bash -e {0}
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6426561Z env:
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6427284Z   LZ_HEAD: 0e755067f64ef0cceabb7eeb70dacae2b3117e4e
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6428632Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6430416Z   LZ_MANIFEST: sha256:2e381947ba1d30645b5e5db2189a08afcb2aeb0094abb659fbf8eb64d84d2f7c
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6432367Z   LZ_LAYER: sha256:a9a5c6e0b06d5b84aebde6486e367f8f256711de50fbf55c43a313b5c64b1d6a
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6433683Z   LZ_ENTRY_SHA256: 249be1df5e6d92260078bddfdf47ec4032afc113a5fbff0b4e7049d6355dfbbe
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6434942Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6437564Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap docs:check
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6439481Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6872115Z ##[group]Run set -euo pipefail
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6872854Z ^[[36;1mset -euo pipefail^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6873394Z ^[[36;1mgit init -q "$LZ_CANDIDATE"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6874317Z ^[[36;1mgit -C "$LZ_CANDIDATE" fetch -q --depth=1 --no-tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$LZ_HEAD"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6876297Z ^[[36;1mgit -c core.hooksPath=/dev/null -c filter.lfs.process= -c filter.lfs.smudge= -c filter.lfs.required=false -C "$LZ_CANDIDATE" checkout -q --detach FETCH_HEAD^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6877666Z ^[[36;1mtest "$(git -C "$LZ_CANDIDATE" rev-parse HEAD)" = "$LZ_HEAD"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6878390Z ^[[36;1mecho "LZ_CANDIDATE_HEAD $LZ_HEAD"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6943018Z shell: /usr/bin/bash -e {0}
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6943536Z env:
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6944022Z   LZ_HEAD: 0e755067f64ef0cceabb7eeb70dacae2b3117e4e
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6944741Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6946000Z   LZ_MANIFEST: sha256:2e381947ba1d30645b5e5db2189a08afcb2aeb0094abb659fbf8eb64d84d2f7c
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6947316Z   LZ_LAYER: sha256:a9a5c6e0b06d5b84aebde6486e367f8f256711de50fbf55c43a313b5c64b1d6a
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6948353Z   LZ_ENTRY_SHA256: 249be1df5e6d92260078bddfdf47ec4032afc113a5fbff0b4e7049d6355dfbbe
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6949370Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6951436Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap docs:check
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6953339Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6953983Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:12.6954544Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0364519Z LZ_CANDIDATE_HEAD 0e755067f64ef0cceabb7eeb70dacae2b3117e4e
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0448794Z ##[group]Run set -euo pipefail
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0450289Z ^[[36;1mset -euo pipefail^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0452578Z ^[[36;1mtoken=$(curl -fsS "https://ghcr.io/token?scope=repository:$LZ_IMAGE:pull" | jq -r .token)^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0457951Z ^[[36;1mcurl -fsSL -H "Authorization: ***" -H "Accept: application/vnd.oci.image.manifest.v1+json" -o "$RUNNER_TEMP/manifest.json" "https://ghcr.io/v2/$LZ_IMAGE/manifests/$LZ_MANIFEST"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0463985Z ^[[36;1mecho "${LZ_MANIFEST#sha256:}  $RUNNER_TEMP/manifest.json" | sha256sum -c -^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0466755Z ^[[36;1mtest "$(jq -r '.layers | length' "$RUNNER_TEMP/manifest.json")" = 1^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0470422Z ^[[36;1mtest "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/manifest.json")" = "$LZ_LAYER"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0473839Z ^[[36;1mcurl -fsSL -H "Authorization: ***" -o "$RUNNER_TEMP/layer.tgz" "https://ghcr.io/v2/$LZ_IMAGE/blobs/$LZ_LAYER"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0477137Z ^[[36;1mecho "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0478975Z ^[[36;1mmkdir "$LZ_RUNTIME"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0480476Z ^[[36;1mtar -xzpf "$RUNNER_TEMP/layer.tgz" -C "$LZ_RUNTIME"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0482595Z ^[[36;1mecho "$LZ_ENTRY_SHA256  $LZ_RUNTIME/runtime/lz-offline" | sha256sum -c -^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0484874Z ^[[36;1mecho "$LZ_BWRAP_SHA256  $LZ_RUNTIME/host/bwrap" | sha256sum -c -^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0553002Z shell: /usr/bin/bash -e {0}
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0554226Z env:
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0555350Z   LZ_HEAD: 0e755067f64ef0cceabb7eeb70dacae2b3117e4e
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0557475Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0559794Z   LZ_MANIFEST: sha256:2e381947ba1d30645b5e5db2189a08afcb2aeb0094abb659fbf8eb64d84d2f7c
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0562571Z   LZ_LAYER: sha256:a9a5c6e0b06d5b84aebde6486e367f8f256711de50fbf55c43a313b5c64b1d6a
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0565258Z   LZ_ENTRY_SHA256: 249be1df5e6d92260078bddfdf47ec4032afc113a5fbff0b4e7049d6355dfbbe
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0568211Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0573720Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap docs:check
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0579114Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0580681Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.0582064Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:14.3691024Z /home/runner/work/_temp/manifest.json: OK
+foundation	UNKNOWN STEP	2026-10-14T10:32:17.8621879Z /home/runner/work/_temp/layer.tgz: OK
+foundation	UNKNOWN STEP	2026-10-14T10:32:21.9879538Z /home/runner/work/_temp/runtime/runtime/lz-offline: OK
+foundation	UNKNOWN STEP	2026-10-14T10:32:21.9897686Z /home/runner/work/_temp/runtime/host/bwrap: OK
+foundation	UNKNOWN STEP	2026-10-14T10:32:21.9946033Z ##[group]Run set -euo pipefail
+foundation	UNKNOWN STEP	2026-10-14T10:32:21.9946485Z ^[[36;1mset -euo pipefail^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:21.9946882Z ^[[36;1msudo install -m 0755 "$LZ_RUNTIME/host/bwrap" /usr/bin/bwrap^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:21.9947962Z ^[[36;1mif [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0014408Z shell: /usr/bin/bash -e {0}
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0014727Z env:
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0015025Z   LZ_HEAD: 0e755067f64ef0cceabb7eeb70dacae2b3117e4e
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0015619Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0016165Z   LZ_MANIFEST: sha256:2e381947ba1d30645b5e5db2189a08afcb2aeb0094abb659fbf8eb64d84d2f7c
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0016796Z   LZ_LAYER: sha256:a9a5c6e0b06d5b84aebde6486e367f8f256711de50fbf55c43a313b5c64b1d6a
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0017426Z   LZ_ENTRY_SHA256: 249be1df5e6d92260078bddfdf47ec4032afc113a5fbff0b4e7049d6355dfbbe
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0018079Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0019342Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap docs:check
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0020503Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0020885Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0021215Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0298393Z ##[group]Run set -euo pipefail
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0298810Z ^[[36;1mset -euo pipefail^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0299133Z ^[[36;1mfor target in $LZ_TARGETS; do^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0299619Z ^[[36;1m  "$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task "$target"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0300121Z ^[[36;1m  echo "LZ_TARGET_OK $target"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0300483Z ^[[36;1mdone^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0300802Z ^[[36;1mecho "LZ_TARGETS_DONE $(wc -w <<<"$LZ_TARGETS")"^[[0m
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0366933Z shell: /usr/bin/bash -e {0}
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0367258Z env:
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0367552Z   LZ_HEAD: 0e755067f64ef0cceabb7eeb70dacae2b3117e4e
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0368011Z   LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0368546Z   LZ_MANIFEST: sha256:2e381947ba1d30645b5e5db2189a08afcb2aeb0094abb659fbf8eb64d84d2f7c
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0369160Z   LZ_LAYER: sha256:a9a5c6e0b06d5b84aebde6486e367f8f256711de50fbf55c43a313b5c64b1d6a
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0369808Z   LZ_ENTRY_SHA256: 249be1df5e6d92260078bddfdf47ec4032afc113a5fbff0b4e7049d6355dfbbe
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0370414Z   LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0371654Z   LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap docs:check
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0372813Z   LZ_CANDIDATE: /home/runner/work/_temp/candidate
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0373199Z   LZ_RUNTIME: /home/runner/work/_temp/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:32:22.0373547Z ##[endgroup]
+foundation	UNKNOWN STEP	2026-10-14T10:32:23.5893972Z TOOLCHAIN_QUALIFIED go=1.27.1 tofu=1.13.0 terramate=0.17.3 task=3.53.1 tflint=0.64.0 git=2.56.0 provider=ovh/ovh@2.21.0 network=none
+foundation	UNKNOWN STEP	2026-10-14T10:32:23.5913706Z LZ_TARGET_OK verify:toolchain
+foundation	UNKNOWN STEP	2026-10-14T10:32:24.5888348Z BOUNDARY_QUALIFIED process=kernel:ENETUNREACH subprocess=kernel:ENETUNREACH
+foundation	UNKNOWN STEP	2026-10-14T10:32:24.5911545Z LZ_TARGET_OK test:offline-boundary
+foundation	UNKNOWN STEP	2026-10-14T10:32:34.2963657Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/report	0.042s
+foundation	UNKNOWN STEP	2026-10-14T10:32:34.2964537Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/json2junit	0.004s
+foundation	UNKNOWN STEP	2026-10-14T10:32:34.2990662Z LZ_TARGET_OK test:reports
+foundation	UNKNOWN STEP	2026-10-14T10:32:47.6737960Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks	0.275s
+foundation	UNKNOWN STEP	2026-10-14T10:32:47.6739041Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.105s
+foundation	UNKNOWN STEP	2026-10-14T10:32:47.6770350Z LZ_TARGET_OK test:traceability
+foundation	UNKNOWN STEP	2026-10-14T10:32:57.8522412Z TRACE_OK specs/001-offline-foundation requirements=15 tasks=26 checks=22
+foundation	UNKNOWN STEP	2026-10-14T10:32:57.8523651Z TRACE_OK specs/005-first-landing-zone-slice requirements=19 tasks=103 checks=21
+foundation	UNKNOWN STEP	2026-10-14T10:32:57.8555140Z LZ_TARGET_OK check:specs
+foundation	UNKNOWN STEP	2026-10-14T10:33:11.5723227Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks	0.194s
+foundation	UNKNOWN STEP	2026-10-14T10:33:11.5724359Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.006s
+foundation	UNKNOWN STEP	2026-10-14T10:33:11.5725145Z DEPENDENCIES_OK dirs=37
+foundation	UNKNOWN STEP	2026-10-14T10:33:11.5760086Z LZ_TARGET_OK test:dependencies
+foundation	UNKNOWN STEP	2026-10-14T10:33:25.4788537Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks	0.810s
+foundation	UNKNOWN STEP	2026-10-14T10:33:25.4789609Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.327s
+foundation	UNKNOWN STEP	2026-10-14T10:33:25.4831997Z LZ_TARGET_OK test:static
+foundation	UNKNOWN STEP	2026-10-14T10:33:44.8049873Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-pack	5.613s
+foundation	UNKNOWN STEP	2026-10-14T10:33:44.8051089Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle	0.023s
+foundation	UNKNOWN STEP	2026-10-14T10:33:44.8052315Z ?   	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle/bundletest	[no test files]
+foundation	UNKNOWN STEP	2026-10-14T10:33:44.8053463Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-offline	1.039s
+foundation	UNKNOWN STEP	2026-10-14T10:33:44.8082500Z LZ_TARGET_OK test:runtime-image
+foundation	UNKNOWN STEP	2026-10-14T10:33:58.4176069Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks	0.058s
+foundation	UNKNOWN STEP	2026-10-14T10:33:58.4177131Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.019s
+foundation	UNKNOWN STEP	2026-10-14T10:33:58.4177845Z FOUNDATION_CI_OK targets=17 deferred=1
+foundation	UNKNOWN STEP	2026-10-14T10:33:58.4213101Z LZ_TARGET_OK test:foundation-ci
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6518064Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/planjson	0.036s
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6519245Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live	75.142s
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6520393Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/state	0.317s
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6521655Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/storageiam	0.219s
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6522768Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-live	5.599s
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6523857Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/chain	0.007s
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6524708Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6525152Z pass report  tests=8 passed=8 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6526168Z UNIT_PASS tests/live/probes/alerting tests=8 passed=8 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6526749Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6527017Z pass report  tests=8 passed=8 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6527563Z UNIT_PASS tests/live/probes/iam tests=8 passed=8 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6528163Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6528453Z pass report  tests=19 passed=19 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6528992Z UNIT_PASS tests/live/probes/network tests=19 passed=19 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6529944Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6530444Z pass report  tests=8 passed=8 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6531203Z UNIT_PASS tests/live/probes/quota tests=8 passed=8 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6531757Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6532233Z pass report  tests=11 passed=11 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6533076Z UNIT_PASS tests/live/probes/state-backend tests=11 passed=11 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6533846Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6534281Z pass report  tests=11 passed=11 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6535091Z UNIT_PASS tests/live/probes/storage-iam tests=11 passed=11 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6536122Z pass init 
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6536611Z pass report  tests=14 passed=14 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6537547Z UNIT_PASS tests/live/probes/storage-iam/companion tests=14 passed=14 failed=0 errored=0 skipped=0
+foundation	UNKNOWN STEP	2026-10-14T10:35:51.6539503Z LZ_TARGET_OK test:live-lane
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1338600Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks	1.355s
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1339655Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.621s
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1340763Z pass components/identity/ovh-native lint=pass tests=18 passed=18 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1341945Z pass components/network/island lint=pass tests=30 passed=30 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1343053Z pass components/project-factory lint=pass tests=19 passed=19 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1344220Z pass components/runtime/managed-only lint=pass tests=14 passed=14 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1345363Z pass components/state-backend lint=pass tests=18 passed=18 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1346696Z pass modules/cloud-project lint=pass tests=18 passed=18 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1347743Z pass modules/cloud-quota lint=pass tests=7 passed=7 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1348722Z pass modules/iam-policy lint=pass tests=5 passed=5 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1350161Z pass modules/iam-resource-tags lint=pass tests=4 passed=4 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1351284Z pass modules/iam-service-account lint=pass tests=6 passed=6 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1352409Z pass modules/identity-group lint=pass tests=6 passed=6 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1353407Z pass modules/naming lint=pass tests=73 passed=73 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1354412Z pass modules/object-storage lint=pass tests=10 passed=10 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1355765Z pass modules/object-storage-protected lint=pass tests=18 passed=18 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1356895Z pass modules/object-storage-user lint=pass tests=26 passed=26 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1357908Z pass modules/private-network lint=pass tests=30 passed=30 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1359016Z pass stages/account-governance lint=pass tests=8 passed=8 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1359872Z pass stages/bootstrap lint=pass tests=9 passed=9 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1360594Z pass stages/project lint=pass tests=21 passed=21 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1361414Z pass stages/project-network lint=pass tests=30 passed=30 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1362084Z pass stages/runtime lint=pass tests=11 passed=11 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1363294Z pass stages/tenant-state lint=pass tests=9 passed=9 failed=0 errored=0 skipped=0 
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1364069Z SLICE_PASS dirs=22
+foundation	UNKNOWN STEP	2026-10-14T10:37:06.1365000Z LZ_TARGET_OK test:slice
+foundation	UNKNOWN STEP	2026-10-14T10:37:19.8593580Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks	0.183s
+foundation	UNKNOWN STEP	2026-10-14T10:37:19.8621646Z LZ_TARGET_OK test:outputs
+foundation	UNKNOWN STEP	2026-10-14T10:38:11.0937830Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks	37.355s
+foundation	UNKNOWN STEP	2026-10-14T10:38:11.0938898Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-stacks	8.374s
+foundation	UNKNOWN STEP	2026-10-14T10:38:11.0951885Z LZ_TARGET_OK test:stacks
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1517080Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks	20.899s
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1517615Z planned stacks/account/bootstrap
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1535399Z planned stacks/account/account-governance
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1536093Z planned stacks/account/tenant-state/demo
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1536443Z planned stacks/tenants/demo/dev/project
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1536819Z planned stacks/tenants/demo/dev/gra11/project-network
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1537271Z planned stacks/tenants/demo/dev/gra11/runtime
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1537630Z pass
+foundation	UNKNOWN STEP	2026-10-14T10:38:48.1537845Z LZ_TARGET_OK test:stack-plans
+foundation	UNKNOWN STEP	2026-10-14T10:39:17.5421584Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks	0.036s
+foundation	UNKNOWN STEP	2026-10-14T10:39:17.5423253Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live	6.190s
+foundation	UNKNOWN STEP	2026-10-14T10:39:17.5444790Z LZ_TARGET_OK test:exchange
+foundation	UNKNOWN STEP	2026-10-14T10:39:42.0221661Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live	2.054s
+foundation	UNKNOWN STEP	2026-10-14T10:39:42.0222776Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-live	0.639s
+foundation	UNKNOWN STEP	2026-10-14T10:39:42.0240737Z LZ_TARGET_OK test:bootstrap
+foundation	UNKNOWN STEP	2026-10-14T10:39:54.6637074Z ok  	github.com/PlatformRelay/landingzone-for-ovhcloud/tools/cmd/lz-check	0.051s
+foundation	UNKNOWN STEP	2026-10-14T10:39:54.6637881Z DOCS_OK pages=39 headed=15 references=25
+foundation	UNKNOWN STEP	2026-10-14T10:39:54.6672636Z LZ_TARGET_OK docs:check
+foundation	UNKNOWN STEP	2026-10-14T10:39:54.6697841Z LZ_TARGETS_DONE 17
+foundation	UNKNOWN STEP	2026-10-14T10:39:54.6795313Z Cleaning up orphan processes
