@@ -252,7 +252,7 @@ tasks:
       - .local/bin/lz-live chain {{.CLI_ARGS}}
 
   check:specs:
-    desc: 'Trace a spec''s requirements and tasks through its keys in harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'
+    desc: 'Trace a spec''s requirements and tasks through its keys in tools/harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'
     vars:
       SPEC_DIRS: '{{.CLI_ARGS | default "specs/001-offline-foundation specs/005-first-landing-zone-slice"}}'
     cmds:

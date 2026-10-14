@@ -59,7 +59,7 @@ type CheckDefinition struct {
 	Review       bool     `json:"review,omitempty"`
 }
 
-// Registry is harness/checks.yaml. Evaluators are Task targets that judge
+// Registry is tools/harness/checks.yaml. Evaluators are Task targets that judge
 // checks rather than being checks; Producers are the evidence producers whose
 // output DoD may accept as a pass; Procedures names, with a reason, the tasks
 // verified by an approved external procedure instead of a runnable check.
@@ -587,7 +587,7 @@ func cleanRelative(p string) bool {
 	return p != "" && !path.IsAbs(p) && path.Clean(p) == p && p != "." && p != ".." && !strings.HasPrefix(p, "../")
 }
 
-// ParseRegistry decodes harness/checks.yaml. The file is YAML written in its
+// ParseRegistry decodes tools/harness/checks.yaml. The file is YAML written in its
 // JSON-compatible flow form and is decoded strictly as JSON.
 func ParseRegistry(data []byte) (Registry, error) {
 	var file struct {

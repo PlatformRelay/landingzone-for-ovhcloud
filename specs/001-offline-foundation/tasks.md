@@ -168,7 +168,7 @@ Independent test: V003, V008.
   - Verify: `task test:agentex; task decision-map:check`: V008 controls and unknown/stale ADR references pass/fail correctly; remove any required diagnostic/evidence clause and its mutant fails. Creates both targets.
   - Evidence: `.local/evidence/001/t018-agentex.json`; initial status `not-run`.
 
-- [ ] T019 [US3] Owner gate: postponed (D87) with the full AgentEx scope until the second vertical slice or agents repeatedly misread check output. Write progressive router and implemented-kind guides in AGENTS.md and harness/guides/{checks,naming}.md
+- [ ] T019 [US3] Owner gate: postponed (D87) with the full AgentEx scope until the second vertical slice or agents repeatedly misread check output. Write progressive router and implemented-kind guides in AGENTS.md and tools/harness/guides/{checks,naming}.md
   - Requirements: FR-009; ADRs: 0019. Depends on: T018.
   - Verify: exempt — docs-only; content review confirms commands, trusted boundaries and deferred generators are accurately described.
   - Evidence: `.local/evidence/001/t019-docs-review.json`; initial status `not-run` (docs content review only).
@@ -185,7 +185,7 @@ Independent test: V003, V008.
   - Verify: `task verify:latency`: entire applicable naming check suite <=120s after preparation on an exclusive self-hosted runner with fixed CPU/memory, digest-pinned OS/image, cache preparation and no overlapping jobs recorded; versions, counts and each layer are recorded, including actual T009 L0 and T016 schema results; >120s/missing layer fails; unknown runner allocation or overlapping jobs blocks measurement. Creates target; no filtering to meet budget.
   - Evidence: `.local/evidence/001/t021-latency.json`; initial status `not-run`.
 
-- [ ] T022 Run foundation exit checks and independent evidence inspection through harness/checks.yaml
+- [ ] T022 Run foundation exit checks and independent evidence inspection through tools/harness/checks.yaml
   - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, SC-001, SC-002, SC-003, SC-004, SC-005; ADRs: 0002, 0003, 0007, 0008, 0011, 0019, 0021. Depends on: T019, T021, T023.
   - Verify: Run every V001–V009 command from spec.md and `task check -- modules/naming`; valid cases pass, every guarded clause has a killed behavioural mutant/valid unusual case; absent tool, forge proof or expert review prevents phase exit. Deferred C010.5/P4 (KI-001) also prevent whole-feature hardened acceptance; the current private increment does not close T022.
   - Aggregate ADR rationale: 0002 paths/layers; 0003 names/labels; 0007 forge execution; 0008 checks/evidence; 0011 pins; 0019 diagnostics/DoD; 0021 protected boundary.

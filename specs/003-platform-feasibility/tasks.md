@@ -21,7 +21,7 @@ module; no second Go module or package outside tools/ is assumed.
   - Verify: `go -C tools test ./internal/sandbox -run TestAdmission -count=1`: exact approved valid config accepted; missing/wrong project, numeric limit, D49 maintainer custody or independently usable sealed offline copy, cleanup permission, unknown cost, stale billing, exhausted aggregate or unhealthy reaper rejected; missing/over-ceiling per-spike deadline/spend or absent refutation rule rejected; permissive stub yields behavioural red. The development valid control uses one maintainer plus a separately encrypted sealed offline copy, not a fabricated second human.
   - Evidence: `.local/evidence/003/t002-admission-red.json`; initial status `not-run`.
 
-- [ ] T003 Owner gate: postponed (D85): cost admission is hygiene in 005, not a gate. Implement approved config schema, external lease/exposure ledger and admission in tools/internal/sandbox/ and harness/live-checks.yaml
+- [ ] T003 Owner gate: postponed (D85): cost admission is hygiene in 005, not a gate. Implement approved config schema, external lease/exposure ledger and admission in tools/internal/sandbox/ and tools/harness/live-checks.yaml
   - Requirements: FR-001, FR-002; ADRs: 0008, 0021. Depends on: T002.
   - Verify: `task test:sandbox-admission`: each valid/invalid/duplicate/concurrent reservation case and timeout/spend/refutation controls green as a suite; guard clause mutation fails; cleanup remains enabled despite admission refusal. Creates target and schema-checked preflight entry.
   - Evidence: `.local/evidence/003/t003-admission.json`; initial status `not-run`.
@@ -139,7 +139,7 @@ Independent test: V008.
   - Aggregate ADR rationale: 0004 local ownership; 0006 floor; 0008 admission/cleanup; 0009 encryption/issuers; 0011 pins; 0018 routes; 0021 isolation; 0022 readiness.
   - Evidence: `.local/evidence/003/t022-qualification.json`; initial status `not-run`.
 
-- [ ] T023 [US4] Independently inspect spike packets and run aggregate decision through harness/live-checks.yaml
+- [ ] T023 [US4] Independently inspect spike packets and run aggregate decision through tools/harness/live-checks.yaml
   - Requirements: FR-008, FR-009, SC-001, SC-002; ADRs: 0004, 0006, 0008, 0009, 0011, 0018, 0021, 0022. Depends on: T022; fresh reviewer and result records for T014/T017/T019/T020 (observed pass/refuted or explicit blocked prerequisite; T010 postponed, recorded blocked). Spec 002 edges cut (D85). Required live observations gate qualification, not writing a negative decision record.
   - Verify: `task spike:qualification`: ranked spikes 1–7 have actual scoped results, costs/cleanup, matching source/pins and independent disposition; refuted controls fail qualification and withdraw the predefined claim; missing/timeout/cap-limited observation remains blocked. A completed decision record is not a qualification pass and cannot close an incomplete experiment.
   - Aggregate ADR rationale: 0004 local ownership; 0006 floor; 0008 admission/cleanup; 0009 encryption/issuers; 0011 captured pins; 0018 principal routes; 0021 isolation; 0022 readiness/recovery.

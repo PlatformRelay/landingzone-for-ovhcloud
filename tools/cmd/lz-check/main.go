@@ -1,5 +1,5 @@
 // lz-check checks a feature's traceability and a path's definition of done
-// against the check registry, harness/checks.yaml.
+// against the check registry, tools/harness/checks.yaml.
 //
 //	lz-check [-root <repo>] specs <spec-dir>
 //	lz-check [-root <repo>] [-evidence <dir>] dod <path>
@@ -112,7 +112,7 @@ func run(args []string, out io.Writer) int {
 }
 
 func loadRegistry(root string) (checks.Registry, error) {
-	data, err := os.ReadFile(filepath.Join(root, "harness/checks.yaml"))
+	data, err := os.ReadFile(filepath.Join(root, "tools/harness/checks.yaml"))
 	if err != nil {
 		return checks.Registry{}, fmt.Errorf("REGISTRY_MISSING: %w", err)
 	}

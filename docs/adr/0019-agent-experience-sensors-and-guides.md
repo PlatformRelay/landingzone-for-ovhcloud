@@ -51,12 +51,12 @@ authority, persistent states and dependencies; a passing suite does not erase op
   input digest, tool versions, fixture or environment and the observed resource identity; historical,
   current, self-review and independent-review evidence are marked distinctly; a diagnostic carries
   rule id, subject, location, claim, observed, expected, why, fix and an evidence reference, and wraps
-  the upstream tool's own message rather than replacing it (`harness/schemas/`).
+  the upstream tool's own message rather than replacing it (`tools/harness/schemas/`).
 - **A protected evaluator.** Rubrics, policies, oracles, snapshots, capability grants and sensor
   suppressions cannot be weakened through the routine lane; such changes need protected review and
-  a justification line. Held-out evaluation cases live outside prompt tuning (`harness/evals/`).
+  a justification line. Held-out evaluation cases live outside prompt tuning (`tools/harness/evals/`).
 - **Executable permissions.** The authoring environment has no cloud authority and no cloud network
-  in offline mode (`harness/capabilities.yaml`); protected runners execute immutable candidates with
+  in offline mode (`tools/harness/capabilities.yaml`); protected runners execute immutable candidates with
   the minimum credential class (ADR-0021). Code an agent wrote still runs under runner authority once
   merged, which is why the trust boundary, not the agent's lack of credentials, is the control.
 - **Readable diffs as sensors**: plan snapshots are normalised and sorted; contract diffs name the
@@ -86,11 +86,11 @@ authority, persistent states and dependencies; a passing suite does not erase op
   hold production or sandbox-apply credentials — those lanes run only from protected branches.
 - **Progressive discovery**: the root `AGENTS.md` is a short router (scope, trust boundaries,
   commands, evidence requirements, where the decision map and the next guide are); per-kind guides
-  (`harness/guides/add-module.md`, `add-variant.md`, `add-profile.md`, `add-policy.md`,
-  `change-tenant.md`) load on demand; one shared check registry (`harness/checks.yaml`) instead of
+  (`tools/harness/guides/add-module.md`, `add-variant.md`, `add-profile.md`, `add-policy.md`,
+  `change-tenant.md`) load on demand; one shared check registry (`tools/harness/checks.yaml`) instead of
   rules duplicated in nested files. Context-reset handovers preserve objective, exact revisions,
   decisions, failing checks, evidence paths and the next bounded action.
-- **Friction becomes reviewed harness change**: a short retrospective (`harness/retrospectives/`)
+- **Friction becomes reviewed harness change**: a short retrospective (`tools/harness/retrospectives/`)
   records repeated confusion, slow checks, false positives, missed defects and unsafe affordances;
   each becomes a one-off fix, a guide, a sensor, a tool change or a justified exception, with the
   failure reproduced and a valid case retained before the change is accepted.

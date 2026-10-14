@@ -125,7 +125,7 @@ Independent test: V005–V007.
   - Verify: exempt — docs-only; content review distinguishes local rehearsal from cloud/forge support.
   - Evidence: `.local/evidence/002/t020-docs-review.json`; initial status `not-run` (docs content review only).
 
-- [ ] T021 Owner gate: postponed (D85) with the whole rehearsal. Run the rehearsal exit and independent race-evidence inspection using harness/checks.yaml
+- [ ] T021 Owner gate: postponed (D85) with the whole rehearsal. Run the rehearsal exit and independent race-evidence inspection using tools/harness/checks.yaml
   - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, SC-001, SC-002, SC-003; ADRs: 0004, 0005, 0006, 0007, 0008, 0021. Depends on: T008, T012, T016, T020; per-forge V007 status record.
   - Verify: Run V001–V006; every binding/fencing/reservation clause needs a failing behavioral mutant and valid control. For V007 retain per-forge actual pass/fail or explicit blocked setup/adapter record. V001–V006 failures and missing V007 status prevent local exit. A blocked V007 permits only local exit, leaving FR-008/SC-003 incomplete and forge/deployment readiness blocked; available-but-failing forge proof is fail, not an unavailable-adapter exception.
   - Aggregate ADR rationale: 0004 graph/publication; 0005 intent/binding; 0006 authority/budget; 0007 driver/forge; 0008 race evidence; 0021 trust boundary.

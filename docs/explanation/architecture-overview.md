@@ -3,20 +3,20 @@ references:
   - path: tools/internal/stacks/stages.go
     blob: 33eb518d978ed33b6ae3b0c79b1247813638565c
   - path: tools/internal/checks/dependencies.go
-    blob: 0b80fa0dee492fc6e5375759d1a75c8326ade1d6
+    blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
   - path: tools/internal/live/credentials.go
     blob: 1743f402c2e072087da44419551bc27cc1febcd6
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: stacks/_lz/backend.tm.hcl
     blob: e622f7854ef111f266927b7dae6fc927794de7da
-  - path: harness/capabilities.yaml
+  - path: tools/harness/capabilities.yaml
     blob: ecbfcfbec8dac380494d8b930e40205e6113a05b
   - path: tools/cmd/lz-offline/main.go
     blob: 141914f1e30740e4aa51950819f99bc77f10816f
   - path: tools/internal/live/guard.go
     blob: 68ce6304d38b9a5abd6c2d906c781737562775a3
-last_verified: 7406a5791afb1ea7049f63c3cae03583d3a3c3c0
+last_verified: 7e9e3a80357ab2a0b9b923d888854e2c4835230f
 ---
 
 # Architecture overview
@@ -104,7 +104,7 @@ matrix) and [ADR-0018](../adr/0018-identity-planes-roles-and-providers.md).
 `lz-offline` is installed from a digest-pinned build outside the clone. It takes a read-only
 snapshot of the checkout (the *candidate*), copies it into a private scratch directory and runs
 the checks there, with the pinned toolchain, a provider mirror and no network
-(`harness/capabilities.yaml`). The checkout itself is never written. `lz-live` refuses to run inside the offline entry, from a linked
+(`tools/harness/capabilities.yaml`). The checkout itself is never written. `lz-live` refuses to run inside the offline entry, from a linked
 worktree, on a dirty tree, or at a commit other than the reviewed one on `origin/main`. Today it
 runs from the maintainer's workstation rather than a protected pipeline (known deviation KD-2 in
 the [spec](../../specs/005-first-landing-zone-slice/spec.md#known-deviations)). Why:
