@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // T100: the probe check's OVHcloud API client (apicheck.go). Its gate admits five named operations,
@@ -309,6 +312,31 @@ func TestAPICheckerAnswers(t *testing.T) {
 		want := []APIPolicy{{apiTestPolicy, "renamed"}, {"6ba7b810-9dad-11d1-80b4-00c04fd430c9", "lzprobe-p9-write-a"}}
 		if err != nil || !slices.Equal(got.Policies, want) {
 			t.Errorf("listing %+v, %v; want the kept id and the named policy %v", got, err, want)
+		}
+	})
+
+	// T113 (T101 gap 6): a listing keeps each kept policy's createdAt, read from the v2 policy listing
+	// as the sandbox answered it (T087's captured listing, run 20261007T133803Z-aeee; iam.json
+	// iam.policy.Response.createdAt); one without a readable createdAt has none.
+	t.Run("listing-created-at", func(t *testing.T) {
+		captured, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "fixtures", "ovhcloud", "captured", "20261007T133803Z-aeee", "listings", "ovh_iam_policy.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var entries []map[string]any
+		if err := json.Unmarshal(captured, &entries); err != nil || len(entries) == 0 {
+			t.Fatalf("captured listing: %v", err)
+		}
+		// The captured admin policy, then two of the asked name: no createdAt, an unreadable one.
+		page, _ := json.Marshal(append(entries[:1:1],
+			map[string]any{"id": apiTestPolicy, "name": "lz-sandbox-admin"},
+			map[string]any{"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c9", "name": "lz-sandbox-admin", "createdAt": "yesterday"}))
+		f := newFakeCheckAPI(t)
+		f.answer = func(rw http.ResponseWriter, r *http.Request) { rw.Write(page) }
+		got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIListPolicies, Name: "lz-sandbox-admin"})
+		want := map[string]time.Time{"00000000-0000-4000-8000-000000000001": time.Date(2026, 10, 1, 20, 2, 44, 305461000, time.UTC)}
+		if err != nil || len(got.Policies) != 3 || len(got.CreatedAt) != 1 || !got.CreatedAt["00000000-0000-4000-8000-000000000001"].Equal(want["00000000-0000-4000-8000-000000000001"]) {
+			t.Errorf("listing %+v, %v; want three policies and the captured one's createdAt %v only", got, err, want)
 		}
 	})
 

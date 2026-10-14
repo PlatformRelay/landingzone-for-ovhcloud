@@ -14,8 +14,13 @@
 //     region/storage/get where lz:tenant = lzprobe-a: T010 run 20261012T072729Z-0646 saw it refused
 //     403 naming publicCloudProject:apiovh:region/storage/get, P25 is refuted, and coordinator
 //     decision D107 (2026-10-12, T101) makes that refusal the expected answer; an allowed bucket-A
-//     read is a finding saying P25 holds after all (re-open tag-scoped envelopes).
-//     A refusal is as expected when it is a 403 that names the step's IAM action or none (bucket
+//     read is a finding saying P25 holds after all (re-open tag-scoped envelopes). A refused
+//     bucket-A read is also what a P25 policy not yet in effect would answer (IAM propagation
+//     delay UNVERIFIED), so a `pass` does not show the tag condition was evaluated: before the
+//     read, the sandbox admin lists the P25 policy (lzprobe-p25-<run id>) and the observation
+//     records the seconds from its createdAt to the read (policy_age_seconds; local clock against
+//     OVHcloud's) with a note saying so; an age the listing cannot tell is said, never a finding
+//     (T113, T101 gap 6). A refusal is as expected when it is a 403 that names the step's IAM action or none (bucket
 //     A's must name it: D107 names the action); one naming another action is not the denial the
 //     step observes. Every answer is recorded; an answer
 //     other than the expected one is a finding: listed, printed as `LZ-LIVE finding`, and Observe's
@@ -28,8 +33,13 @@
 //     delete acknowledged but not effective under another name); anything left, or a delete
 //     refused (the other deletes are still tried), is an error, and lz-live keeps the root for
 //     `--cleanup`. Undo also runs after an interrupted
-//     Observe and on a cleanup; there, a fresh process, only the name is known (the id is in
-//     observations.json, and the leftover check lists `lzprobe-` policies).
+//     Observe and on a cleanup; there, a fresh process, Recorded reads every policy_id from the
+//     run's observations.json first, so the undo deletes those ids as well as the name (T113, T101
+//     gap 2). No observations.json: by name only, said on the terminal; a malformed one, a
+//     policy_id that is not a policy uuid or not on the accepted IAM write, fails the undo step
+//     before any request. A recorded id comes from a file: it is deleted only when the first
+//     listing does not show it under another name (one shown as, say, the admin's own policy is
+//     refused and fails the undo; a name differing in case only counts as the run's).
 //
 // The credentials come from the root's sensitive output iam_check; lz-live has added every value
 // whose key is not public to its redactor. Nothing here prints or records a credential, the
@@ -39,6 +49,7 @@
 package storageiam
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -89,7 +100,7 @@ var (
 // Options are the check's seams; lz-live fills them from the run.
 type Options struct {
 	API   live.API        // the OVHcloud API of the run's endpoint
-	Admin live.Credential // the sandbox admin: Undo's listing and delete; its endpoint is the identities'
+	Admin live.Credential // the sandbox admin: the P25 policy's listing, Undo's listing and delete; its endpoint is the identities'
 	// Bind binds a probe identity to the run's account before its first call (G13); nil binds nothing.
 	Bind func(context.Context, live.Credential) error
 	HTTP *http.Client     // the S3 client; nil: its default
@@ -109,7 +120,10 @@ type Observation struct {
 	SSE        string   `json:"sse,omitempty"`       // the state object's x-amz-server-side-encryption
 	Detail     string   `json:"detail,omitempty"`    // the state object's classification
 	PolicyID   string   `json:"policy_id,omitempty"` // the policy an accepted IAM write created
-	AsExpected bool     `json:"as_expected"`
+	// PolicyAge (p25-read-bucket-a): seconds from the P25 policy's createdAt to the read (T113).
+	PolicyAge  *int64 `json:"policy_age_seconds,omitempty"`
+	Note       string `json:"note,omitempty"` // what the answer does not show (T113)
+	AsExpected bool   `json:"as_expected"`
 }
 
 // Record is observations.json.
@@ -134,7 +148,7 @@ const (
 // same check the ids of the policies an accepted IAM write created.
 func Check(o Options) *live.ProbeCheck {
 	var mu sync.Mutex
-	var written []string
+	var written, recorded []string // ids this process's Observe saw; ids read back from observations.json
 	return &live.ProbeCheck{
 		Output:   Output,
 		Public:   Public,
@@ -159,11 +173,75 @@ func Check(o Options) *live.ProbeCheck {
 				return err
 			}
 			mu.Lock()
-			ids := slices.Clone(written)
+			ids, back := slices.Clone(written), slices.Clone(recorded)
 			mu.Unlock()
-			return o.undo(ctx, env, ids, term)
+			return o.undo(ctx, env, ids, back, term)
+		},
+		// A cleanup in a fresh process: the ids are only in the run's observations.json (T113).
+		Recorded: func(record []byte, term io.Writer) error {
+			if record == nil {
+				fmt.Fprintf(term, "LZ-LIVE undo no observations.json: deleting by name only (lzprobe-p9-write-<run id>)\n")
+				return nil
+			}
+			ids, accepted, err := recordedIDs(record)
+			if err != nil {
+				return err
+			}
+			if accepted && len(ids) == 0 {
+				fmt.Fprintf(term, "LZ-LIVE undo observations.json records an accepted write without its id: deleting by name only (lzprobe-p9-write-<run id>)\n")
+			}
+			mu.Lock()
+			for _, id := range ids {
+				if !slices.Contains(recorded, id) {
+					recorded = append(recorded, id)
+				}
+			}
+			mu.Unlock()
+			return nil
 		},
 	}
+}
+
+// policyUUID is a policy id as DELETE /v2/iam/policy/{policyId} takes it (kb/api/v2/iam.json:
+// policyId is a uuid; lower case, as the API answers it and live.APIChecker admits it).
+var policyUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// recordedIDs reads the policy ids an earlier process's Observe recorded in observations.json: the
+// record must be this check's, strict JSON of Record and nothing after it, and every policy_id a
+// policy uuid; anything else is refused whole, before any request (T113: never a silent name-only
+// undo, never an id of another shape in a request path).
+//
+// Only the IAM-write step observed `allowed` may carry a policy_id (review r1: an id on another
+// step is not the run's write); accepted says whether that step was recorded allowed. Refusals are
+// fixed texts with the observation's index, never the record's content (review r1).
+func recordedIDs(record []byte) (ids []string, accepted bool, err error) {
+	const bad = "observations.json is not a storage-iam record; nothing deleted"
+	var rec *Record
+	dec := json.NewDecoder(bytes.NewReader(record))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&rec); err != nil {
+		return nil, false, errors.New(bad)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, false, errors.New("observations.json: data after the record; nothing deleted")
+	}
+	if rec == nil || rec.Check != "storage-iam" {
+		return nil, false, errors.New(bad)
+	}
+	for i, ob := range rec.Observations {
+		write := ob.Step == "p9-iam-write" && ob.Observed == allowed
+		accepted = accepted || write
+		switch {
+		case ob.PolicyID == "":
+		case !write:
+			return nil, false, fmt.Errorf("observations.json: observation %d carries a policy_id but is not an accepted IAM write; nothing deleted", i)
+		case !policyUUID.MatchString(ob.PolicyID):
+			return nil, false, fmt.Errorf("observations.json: the policy_id of observation %d is not a policy uuid; nothing deleted", i)
+		default:
+			ids = append(ids, ob.PolicyID)
+		}
+	}
+	return ids, accepted, nil
 }
 
 // validate refuses published variables that are not the storage-iam root's of one run: the keys,
@@ -269,9 +347,25 @@ func (o Options) observe(ctx context.Context, env map[string]string, term io.Wri
 		{"p9-iam-write", "tenant", live.APICall{Op: live.APICreatePolicy, Body: write}, refused, writeAction, false},
 	} {
 		ob := Observation{Step: s.name, Operation: string(s.call.Op), Credential: s.who, Expected: s.expected, Observed: notRun}
-		if ctx.Err() != nil {
-			errs = append(errs, fmt.Errorf("%s: not run: %w", s.name, ctx.Err()))
-		} else if c, err := client(s.who); err != nil {
+		c, err := (*live.APIChecker)(nil), ctx.Err()
+		if err == nil {
+			c, err = client(s.who)
+		}
+		if err == nil && s.name == "p25-read-bucket-a" {
+			// T113 (T101 gap 6): a refusal is also what a policy not yet in effect answers, so the
+			// record keeps how old the P25 policy was at the read.
+			created, why := o.p25Created(ctx, env)
+			ob.Note = "the P25 policy's age unknown (" + why + ")"
+			if why == "" {
+				age := int64(o.now().Sub(created) / time.Second)
+				ob.PolicyAge = &age
+				ob.Note = fmt.Sprintf("the P25 policy was created %d s before the read", age)
+				if age < 0 {
+					ob.Note += " (negative: the local clock is behind OVHcloud's)"
+				}
+			}
+		}
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: not run: %w", s.name, err))
 		} else if a, err := c.Do(ctx, s.call); err != nil {
 			ob.Observed = noAnswer
@@ -283,10 +377,44 @@ func (o Options) observe(ctx context.Context, env map[string]string, term io.Wri
 			}
 			ob.AsExpected = ob.Observed == s.expected && (s.expected != refused || a.Status == http.StatusForbidden && (len(a.Actions) == 0 && !s.named || slices.Contains(a.Actions, s.action)))
 		}
+		if ob.Note != "" && ob.Observed == refused {
+			ob.Note += "; " + notInEffect + ", so a refusal does not show the tag condition was evaluated (IAM propagation delay UNVERIFIED)"
+		}
 		errs = append(errs, rec.add(ob, term))
 	}
 	errs = append(errs, rec.add(o.stateObject(ctx, env, &errs), term))
 	return rec, errors.Join(errs...)
+}
+
+// notInEffect is what a refused bucket-A read does not rule out (strong review leg, T101 r2).
+const notInEffect = "a refusal is also what a P25 policy not yet in effect would answer"
+
+// P25Name is the P25 policy the probe root creates (tests/live/probes/storage-iam/main.tf).
+func P25Name(runID string) string { return "lzprobe-p25-" + runID }
+
+// p25Created reads the P25 policy's createdAt from the v2 policy listing, with the sandbox admin's
+// credential; why says, when it cannot, why not (no request text, no secret). The age is context
+// for the bucket-A read, not an observation: an unknown one is no finding.
+func (o Options) p25Created(ctx context.Context, env map[string]string) (created time.Time, why string) {
+	admin, err := live.NewAPIChecker(ctx, o.API, o.Admin)
+	if err != nil {
+		return time.Time{}, "admin identity: " + err.Error()
+	}
+	name := P25Name(env["run_id"])
+	a, err := admin.Do(ctx, live.APICall{Op: live.APIListPolicies, Name: name})
+	switch {
+	case err != nil:
+		return time.Time{}, err.Error()
+	case a.Status < 200 || a.Status > 299:
+		return time.Time{}, fmt.Sprintf("ListPolicies answered %d", a.Status)
+	case len(a.Policies) != 1:
+		return time.Time{}, fmt.Sprintf("%d policies named %s listed", len(a.Policies), name)
+	}
+	at, ok := a.CreatedAt[a.Policies[0].ID]
+	if !ok {
+		return time.Time{}, "no createdAt listed"
+	}
+	return at, ""
 }
 
 // stateObject reads the companion's state object back with the P1 S3 key and classifies it.
@@ -333,6 +461,9 @@ func (r *Record) add(ob Observation, term io.Writer) error {
 		answer = ob.Observed
 	}
 	fmt.Fprintf(term, "LZ-LIVE observe %s %s\n", ob.Step, answer)
+	if ob.Note != "" {
+		fmt.Fprintf(term, "LZ-LIVE observe %s note: %s\n", ob.Step, ob.Note)
+	}
 	if ob.Observed == notRun || ob.Observed == noAnswer || ob.AsExpected {
 		return nil
 	}
@@ -347,6 +478,9 @@ func (r *Record) add(ob Observation, term io.Writer) error {
 		finding += "; D107 expects a 403 naming " + readAction
 	case ob.Step == "p9-iam-write" && ob.Observed == allowed:
 		finding += "; the undo deletes the policy before the root's destroy"
+	}
+	if ob.Step == "p25-read-bucket-a" && ob.Observed == refused {
+		finding += "; " + notInEffect
 	}
 	r.Findings = append(r.Findings, ob.Step)
 	fmt.Fprintf(term, "LZ-LIVE finding %s\n", finding)
@@ -371,27 +505,47 @@ func writeBody(env map[string]string, now time.Time) ([]byte, error) {
 // id in written (the policies an accepted write created), each once, then lists again: one left of
 // the name or of a written id, under any name, is an error. A failed listing or delete does not stop
 // the other deletes (review r1, r2); every failure is in the error.
-func (o Options) undo(ctx context.Context, env map[string]string, written []string, term io.Writer) error {
+//
+// recorded are ids read back from observations.json on a cleanup (T113). They come from a file, not
+// from OVHcloud's answer to this process, so the admin deletes one only when the first listing
+// does not show it under another name (a lagging listing; a name differing in case only counts as
+// the run's: a normalised name, UNVERIFIED): an id the listing shows as another policy, such as
+// the admin's own, is refused and the undo fails (T113 review r1). Without a first listing no
+// recorded id is deleted.
+func (o Options) undo(ctx context.Context, env map[string]string, written, recorded []string, term io.Writer) error {
 	name := WriteName(env["run_id"])
 	admin, err := live.NewAPIChecker(ctx, o.API, o.Admin)
 	if err != nil {
 		return fmt.Errorf("undo: admin identity: %w", err)
 	}
-	mine := func() ([]live.APIPolicy, error) {
-		a, err := admin.Do(ctx, live.APICall{Op: live.APIListPolicies, Name: name, Keep: written})
+	// mine lists the policies of the name and those of the ids in keep, whatever their name.
+	mine := func(keep []string) ([]live.APIPolicy, error) {
+		a, err := admin.Do(ctx, live.APICall{Op: live.APIListPolicies, Name: name, Keep: keep})
 		if err != nil {
 			return nil, fmt.Errorf("undo: %w", err)
 		}
 		if a.Status < 200 || a.Status > 299 {
 			return nil, fmt.Errorf("undo: ListPolicies answered %d %s", a.Status, strings.Join(a.Actions, ","))
 		}
-		return slices.DeleteFunc(a.Policies, func(p live.APIPolicy) bool { return p.Name != name && !slices.Contains(written, p.ID) }), nil
+		return slices.DeleteFunc(a.Policies, func(p live.APIPolicy) bool { return p.Name != name && !slices.Contains(keep, p.ID) }), nil
 	}
-	found, listErr := mine()
+	found, listErr := mine(slices.Concat(written, recorded))
 	var errs []error
 	ids := slices.Clone(written)
+	for _, id := range recorded {
+		i := slices.IndexFunc(found, func(p live.APIPolicy) bool { return p.ID == id })
+		switch {
+		case slices.Contains(ids, id):
+		case listErr != nil:
+			errs = append(errs, errors.New("undo: a recorded policy id is not deleted without a listing"))
+		case i >= 0 && !strings.EqualFold(found[i].Name, name):
+			errs = append(errs, errors.New("undo: a recorded policy id is listed under another name than the run's write; not deleted"))
+		default:
+			ids = append(ids, id)
+		}
+	}
 	for _, p := range found {
-		if !slices.Contains(ids, p.ID) {
+		if p.Name == name && !slices.Contains(ids, p.ID) {
 			ids = append(ids, p.ID)
 		}
 	}
@@ -410,7 +564,7 @@ func (o Options) undo(ctx context.Context, env map[string]string, written []stri
 		}
 	}
 	// The second listing decides what is left, also after a failed first one.
-	left, err := mine()
+	left, err := mine(ids)
 	if err != nil {
 		return errors.Join(append(errs, listErr, err)...)
 	}
