@@ -3,7 +3,7 @@
 // from its row and the stage table (path, state bucket and key, Terramate tags, data and authority
 // edges, naming input).
 //
-// The manifest is YAML written in its JSON-compatible flow form, as harness/checks.yaml is, so it
+// The manifest is YAML written in its JSON-compatible flow form, as tools/harness/checks.yaml is, so it
 // is decoded strictly as JSON (exact keys, duplicate keys refused, no third-party YAML library).
 // Whole-line `#` comments are allowed: a JSON string cannot span lines, so a line whose first
 // non-blank character is `#` is never inside a value. Block-style YAML would need a vendored YAML

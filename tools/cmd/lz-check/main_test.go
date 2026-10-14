@@ -31,7 +31,7 @@ func repo(t *testing.T, files map[string]string) string {
 	base := map[string]string{
 		"specs/001-x/spec.md":             spec,
 		"specs/001-x/tasks.md":            tasks,
-		"harness/checks.yaml":             registry,
+		"tools/harness/checks.yaml":       registry,
 		"docs/adr/0011-opentofu.md":       "# ADR\n",
 		"docs/adr/README.md":              "# ADRs\n",
 		"tools/pin.go":                    "package tools\n",
@@ -77,7 +77,7 @@ func TestSpecsRejected(t *testing.T) {
 		"unmapped":           {map[string]string{"specs/001-x/spec.md": spec + "- **FR-002**: MUST more.\n"}, 1, "UNMAPPED_REQUIREMENT FR-002"},
 		"no tasks":           {map[string]string{"specs/001-x/tasks.md": "# Tasks\n"}, 2, "NO_TASKS"},
 		"no requirements":    {map[string]string{"specs/001-x/spec.md": "# Spec\n"}, 2, "NO_REQUIREMENTS"},
-		"malformed registry": {map[string]string{"harness/checks.yaml": "checks: []\n"}, 2, "REGISTRY_SYNTAX"},
+		"malformed registry": {map[string]string{"tools/harness/checks.yaml": "checks: []\n"}, 2, "REGISTRY_SYNTAX"},
 		"creator never runs": {map[string]string{"specs/001-x/tasks.md": strings.Replace(tasks, "`task pins`", "`go test ./...`", 1)}, 1, "CHECK_NOT_VERIFIED pins"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -111,11 +111,11 @@ const (
 func twoSpecRepo(t *testing.T, files map[string]string) string {
 	t.Helper()
 	base := map[string]string{
-		"specs/005-y/spec.md":    spec005,
-		"specs/005-y/tasks.md":   tasks005,
-		"harness/checks.yaml":    registry005,
-		"docs/adr/0002-x.md":     "# ADR\n",
-		"modules/naming/main.tf": "locals {}\n",
+		"specs/005-y/spec.md":       spec005,
+		"specs/005-y/tasks.md":      tasks005,
+		"tools/harness/checks.yaml": registry005,
+		"docs/adr/0002-x.md":        "# ADR\n",
+		"modules/naming/main.tf":    "locals {}\n",
 	}
 	for name, content := range files {
 		base[name] = content
@@ -151,7 +151,7 @@ func TestSpecsScopedRejected(t *testing.T) {
 		"no Verify": {map[string]string{"specs/005-y/tasks.md": strings.Replace(tasks005, "  - Verify: `task naming`: names derive.\n", "", 1)},
 			[]string{"MISSING_VERIFY T001", "CHECK_NOT_VERIFIED naming", "TRACE_FAIL specs/005-y findings=2"}},
 		// Spec 001's unprefixed FR-001 entry must not stand in for spec 005's.
-		"registered only for spec 001": {map[string]string{"harness/checks.yaml": strings.Replace(strings.Replace(registry005,
+		"registered only for spec 001": {map[string]string{"tools/harness/checks.yaml": strings.Replace(strings.Replace(registry005,
 			`"005/FR-001": {"adrs": ["0002"]}, `, "", 1), `"005/FR-001", "005/FR-002"`, `"005/FR-002"`, 1)},
 			[]string{"UNREGISTERED_REQUIREMENT FR-001", "UNCHECKED_REQUIREMENT FR-001", "TRACE_FAIL specs/005-y findings=2"}},
 	} {
@@ -425,9 +425,9 @@ func TestFoundationCISpecScopedCreators(t *testing.T) {
 	spec005 := strings.Replace(strings.Replace(tasks, "- [ ] T001", "- [x] T055", 1), "T001.md", "T055.md", 1) +
 		strings.Replace(tasks, "T001", "T056", -1)
 	root := repo(t, map[string]string{
-		"specs/001-x/tasks.md": strings.Replace(tasks, "- [ ] T001", "- [x] T001", 1),
-		"specs/005-y/tasks.md": spec005,
-		"harness/checks.yaml":  scoped,
+		"specs/001-x/tasks.md":      strings.Replace(tasks, "- [ ] T001", "- [x] T001", 1),
+		"specs/005-y/tasks.md":      spec005,
+		"tools/harness/checks.yaml": scoped,
 	})
 	withTargets := func(targets string) {
 		t.Helper()
@@ -497,7 +497,7 @@ func runTree(t *testing.T, source []byte) map[string]string {
 	}
 	return map[string]string{
 		"pipelines/github/foundation-source.json": string(source),
-		"harness/checks.yaml": `{"schema_version": 1, "requirements": {"FR-001": {"adrs": ["0011"]}}, "evaluators": [], "producers": [], "procedures": {},
+		"tools/harness/checks.yaml": `{"schema_version": 1, "requirements": {"FR-001": {"adrs": ["0011"]}}, "evaluators": [], "producers": [], "procedures": {},
  "checks": [` + strings.Join(defs, ",\n") + `]}`,
 		"tools/pin.go": "package tools\n",
 	}

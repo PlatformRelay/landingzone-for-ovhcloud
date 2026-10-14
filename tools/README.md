@@ -13,6 +13,7 @@ zone. Most `task` targets in `Taskfile.yml` call one of them.
 | `cmd/json2junit` | Renders a `tofu test -json` stream as JUnit XML. |
 | `internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`. |
 | `vendor/` | Vendored dependencies, so builds need no network. |
+| `harness/` | Data, not Go: the check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
 
 **Rules:** no credentials in code, tests or fixtures; tests use fakes and captured output, never
 a real account. A new dependency is vendored (`go mod vendor`), because the entry has no network.

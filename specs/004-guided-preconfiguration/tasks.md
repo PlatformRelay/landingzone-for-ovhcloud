@@ -19,7 +19,7 @@ Partial prototype evidence does not close a task whose deferred clauses remain u
 
 ## Setup and bounded renderer experiment
 
-- [ ] T001 Owner gate: postponed (D85) with the wizard. Pin the selected renderer after a bounded Huh/Gum comparison in tools/go.mod, mise.toml, harness/configure/limits.yaml and tests/fixtures/configure/terminal/
+- [ ] T001 Owner gate: postponed (D85) with the wizard. Pin the selected renderer after a bounded Huh/Gum comparison in tools/go.mod, mise.toml, tools/harness/configure/limits.yaml and tests/fixtures/configure/terminal/
   - Requirements: FR-003, FR-005, FR-007, SC-001; ADRs: 0011, 0023. Depends on: 001/T001; actual 001/T003 safety/capture qualification, credential-free preparation, reviewed supply-chain pins and exact experiment execution-safety review. Requirements may be recorded now; no prototype implementation or capture before that qualification in this lane.
   - Verify: bounded prototype on Linux amd64, recording exact tool/library versions and commands: help/cancel/back/plain/narrow-terminal controls produce usable output; unsupported terminal/platform and missing pin refuse qualification. Set concrete session/answer/output size and helper duration/process-cleanup bounds before implementation; absent/unlimited limits reject. Capture actual pinned outputs, not hand-written terminal fixtures. This is a feasibility experiment, not a shipped second renderer.
   - Evidence: `.local/evidence/004/t001-renderer.json`; initial status `not-run`.
@@ -36,7 +36,7 @@ cannot be inferred from a standalone prototype. Each partial result names its ex
   - Verify: `go -C tools test ./internal/configure -run TestFlow -count=1`: tests retain valid unusual choices and a compiling controller stub goes behaviorally red for resolved defaults/help/consequences. Exercise explicit X versus suggested X followed by a use-case edit to Y, valid override preservation, invalid dependent answer removal, conditional progress/back/edit and regulated/experimental gates. Unknown/secret fields and unsupported rules reject; remove each guarded clause and confirm red.
   - Evidence: `.local/evidence/004/t002-flow-red.json`; initial status `not-run`.
 
-- [ ] T003 [US1] Owner gate: postponed (D85) with the wizard. Implement the shared strict journey controller and versioned choice rules in tools/internal/configure/flow.go, harness/configure/steps.yaml and Taskfile.yml
+- [ ] T003 [US1] Owner gate: postponed (D85) with the wizard. Implement the shared strict journey controller and versioned choice rules in tools/internal/configure/flow.go, tools/harness/configure/steps.yaml and Taskfile.yml
   - Requirements: FR-001, FR-002, FR-008, FR-009, FR-010, SC-001; ADRs: 0013, 0023. Depends on: T002.
   - Verify: `task test:configure-flow` (creates target): T002 controls pass; exact valid-completed/relevant-required count matches independent vectors after conditional edits; explicit/default provenance and visible reasons survive re-resolution. Unknown/duplicate choice keys, opaque missing help and forged qualification refuse. Zero choice/test discovery fails. UI and noninteractive callers share this controller; no renderer-owned decisions.
   - Evidence: `.local/evidence/004/t003-flow.json`; initial status `not-run`.
@@ -67,7 +67,7 @@ it cannot close deferred integration clauses or enable persistence/export.
   - Verify: `go -C tools test ./internal/configure -run TestChecks -count=1`: actual pinned local-tool capture is the valid control; compiling permissive adapter is behaviorally red. Timeout/hanging descendant, missing/mismatched binary, changed tool/content with unchanged Git HEAD, malicious hooks/answers/session commands, secret input and network attempts must refuse without outside-root writes. Refresh on resume/final review/export; remove each deadline, origin or freshness guard and confirm red.
   - Evidence: `.local/evidence/004/t006-checks-red.json`; initial status `not-run`.
 
-- [ ] T007 Owner gate: postponed (D85) with the wizard. Implement bounded trusted read-only helpers in tools/internal/configure/checks.go, harness/configure/checks.yaml and Taskfile.yml
+- [ ] T007 Owner gate: postponed (D85) with the wizard. Implement bounded trusted read-only helpers in tools/internal/configure/checks.go, tools/harness/configure/checks.yaml and Taskfile.yml
   - Requirements: FR-004, FR-005, FR-008; ADRs: 0019, 0021, 0023. Depends on: T006.
   - Verify: `task test:configure-checks` (creates target): T006 controls pass, including process-tree cleanup and actual source/tool binding refresh; missing observations report blocked, never pass. Checks come from the trusted pinned implementation, not executable repo/session/answer values. Evidence uses the shared envelope; zero helper discovery and unknown limits reject. No cloud credentials or network are required.
   - Evidence: `.local/evidence/004/t007-checks.json`; initial status `not-run`.

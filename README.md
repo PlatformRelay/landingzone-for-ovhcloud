@@ -87,7 +87,7 @@ the layers fit together.
 | Path | What it holds |
 | --- | --- |
 | `tools/` | Go command-line tools: `lz-check` (checks), `lz-offline` (sandboxed entry), `lz-stacks` (stack generation), `lz-live` (live runs), `lz-pack` (runtime packing). |
-| `harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
+| `tools/harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
 | `tests/` | Check fixtures, captured tool output and the live probe roots. |
 | `pipelines/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
 | `Taskfile.yml`, `mise.toml` | Every check as `task <target>`; the pinned tool versions. |

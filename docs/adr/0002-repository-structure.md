@@ -38,8 +38,6 @@ landingzone-for-ovhcloud/
 ├── schemas/                        # JSON Schema only: tenant, profile, deployments, outputs artefacts,
 │                                   #   identity/runtime capability outputs, CONTRACT.yaml, names, guardrails
 ├── releases/<version>/manifest.yaml # immutable release-train closure and evidence (ADR-0022)
-├── harness/                        # agent harness: artifact-kinds.yaml, checks.yaml, capabilities.yaml,
-│                                   #   guides/, schemas/ (diagnostic, evidence, verdict), evals/ (ADR-0019)
 ├── policies/
 │   ├── guardrails.yaml             # rule → enforcement-plane matrix (ADR-0006)
 │   ├── plan/                       # Rego on plan JSON + tests
@@ -52,7 +50,9 @@ landingzone-for-ovhcloud/
 ├── tests/{contracts,security,live,migrations,recovery,snapshots,harness,fixtures}/
 │                                   # cross-cutting only; live/ is a protected discovery root; unit tests live with the code
 ├── tools/                          # one Go module: lz-audit scanner, contract diff, dependency checker,
-│                                   #   json→junit, reaper, budget guard, kb sync
+│   │                               #   json→junit, reaper, budget guard, kb sync
+│   └── harness/                    # data, not Go: artifact-kinds.yaml, checks.yaml, capabilities.yaml,
+│                                   #   guides/, schemas/ (diagnostic, evidence, verdict), evals/ (ADR-0019)
 ├── pipelines/{github,gitlab}/      # thin adapters calling `task …` (ADR-0007)
 ├── pipelines/tacos/<name>/         # generated consumer configs + conformance checklist
 ├── docs/{tutorials,how-to,reference,explanation,adr}/   # Diataxis (ADR-0013)
@@ -81,6 +81,9 @@ Rules:
 - `tools/` is one Go module (static binaries on both forges). Go chosen; Python rejected for runtime
   install cost in CI.
 - Spec Kit files live only in `.specify/` and `specs/`.
+- `modules/`, `components/` and `stages/` stay at the repository root at least through the first
+  release (D110): ADR-0010 makes `//modules/<name>?ref=` and the `<layer>/<name>/v<semver>` tags a
+  consumer contract, so moving them later breaks every consumer.
 
 ## Consequences
 - One PR changes a component, its tests, examples and docs atomically.

@@ -3,8 +3,8 @@ references:
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: tools/internal/checks/dependencies.go
-    blob: 0b80fa0dee492fc6e5375759d1a75c8326ade1d6
-last_verified: 7406a5791afb1ea7049f63c3cae03583d3a3c3c0
+    blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
+last_verified: 7e9e3a80357ab2a0b9b923d888854e2c4835230f
 ---
 
 # Repository map
@@ -46,7 +46,7 @@ ADR-0002 plans to generate it from the tree later. Counts are as of the first sl
 | `tools/cmd/` | Six commands: `lz-check` (checks), `lz-offline` (offline entry), `lz-stacks` (stack generation and order), `lz-live` (live lane), `lz-pack` (runtime packing), `json2junit` (report conversion). |
 | `tools/internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`. |
 | `tools/vendor/` | Vendored Go dependencies, so builds need no network. |
-| `harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
+| `tools/harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
 | `tests/check/` | Fixtures for `lz-check`'s own tests. |
 | `tests/fixtures/` | Manifests, output envelopes, captured `tofu`, Terramate and `ovhcloud` output, probe captures. |
 | `tests/live/probes/` | Live probe roots, one per premise group; owner sessions only. |

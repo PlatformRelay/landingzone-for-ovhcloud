@@ -278,7 +278,7 @@ var singletonComponents = []string{"account-baseline", "project-factory", "guard
 
 // sharedTools are paths every check depends on; a change to them selects the
 // full suite.
-var sharedTools = []string{"tools", "harness", "schemas", "policies", "pipelines", ".github", "Taskfile.yml", "mise.toml", ".tflint.hcl"}
+var sharedTools = []string{"tools", "schemas", "policies", "pipelines", ".github", "Taskfile.yml", "mise.toml", ".tflint.hcl"}
 
 // docRoots hold documentation; a Markdown change there selects no check.
 var docRoots = []string{"docs", "specs"}
