@@ -32,7 +32,7 @@ tasks:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
     cmds:
       - go -C tools test -count=1 -run 'TestFoundation|TestTraceabilityParse' ./internal/checks ./cmd/lz-check
-      - go -C tools run ./cmd/lz-check -root .. ci-source specs/001-offline-foundation specs/005-first-landing-zone-slice
+      - go -C tools run ./cmd/lz-check -root .. ci-source specs/001-offline-foundation specs/005-first-landing-zone-slice specs/006-harden-first-slice
 
   # Judges recorded run evidence, so the workflow defers it: it cannot judge
   # its own run. The record is built on the host from read-only gh captures
@@ -257,9 +257,9 @@ tasks:
       - .local/bin/lz-live chain {{.CLI_ARGS}}
 
   check:specs:
-    desc: 'Trace a spec''s requirements and tasks through its keys in tools/harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001 and 005 (V003, 005 V011)'
+    desc: 'Trace a spec''s requirements and tasks through its keys in tools/harness/checks.yaml, e.g. task check:specs -- specs/005-first-landing-zone-slice; without arguments specs 001, 005 and 006 (V003, 005 V011, 006 V004)'
     vars:
-      SPEC_DIRS: '{{.CLI_ARGS | default "specs/001-offline-foundation specs/005-first-landing-zone-slice"}}'
+      SPEC_DIRS: '{{.CLI_ARGS | default "specs/001-offline-foundation specs/005-first-landing-zone-slice specs/006-harden-first-slice"}}'
     cmds:
       - for: {var: SPEC_DIRS}
         cmd: go -C tools run ./cmd/lz-check -root .. specs "{{.ITEM}}"

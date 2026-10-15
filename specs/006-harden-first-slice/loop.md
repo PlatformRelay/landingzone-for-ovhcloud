@@ -51,6 +51,7 @@ Holistic run at B: not run yet.
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
 |---|---|---|---|
 | T001 | CLOSED; known red `TestTaskfileTracesEverySpec` (3 subtests) until T002 | leg 1, 2 rounds (REQUEST_CHANGES ×2, all verified findings fixed), no strong leg (no trigger) | none |
+| T002 | CLOSED; known red `TestTaskfileTracesEverySpec` cleared | leg 1 APPROVE + strong leg CLEAN (trigger: checks.yaml), 1 round | `foundation-runs.json` stale: coordinator refresh |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
