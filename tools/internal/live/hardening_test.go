@@ -209,6 +209,73 @@ func TestBindingErrorsQuiet(t *testing.T) {
 	})
 }
 
+// TestBindingErrorsActionable (FR-003, guard G16): a binding error names the call, the status or
+// transport class and the next action, and still quotes nothing the answer chose. Defect exposed:
+// a quiet but unactionable error.
+func TestBindingErrorsActionable(t *testing.T) {
+	t.Parallel()
+	status := func(code int, location string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			if location != "" {
+				w.Header().Set("Location", location)
+			}
+			w.WriteHeader(code)
+		}
+	}
+	undecodable := func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"account":"\u`+quietSecret+`"}`)
+	}
+	unreachable := func(t *testing.T) API {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		srv.Close()
+		return API{TokenURL: srv.URL + "/token", BaseURL: srv.URL + "/v1", HTTP: srv.Client()}
+	}
+	for _, tc := range []struct {
+		name, hostile, call string
+		answer              http.HandlerFunc
+		api                 func(*testing.T) API // instead of hostileBindingAPI, when set
+		class               string               // the status or transport class the error names
+	}{
+		{name: "token-redirect", hostile: "POST /token", call: "token endpoint", answer: status(http.StatusFound, quietLocation), class: "3xx"},
+		{name: "auth-details-redirect", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: status(http.StatusFound, quietLocation), class: "3xx"},
+		// A Location Go can parse: the client returns the 302 itself (CheckRedirect), so the
+		// status path must not quote the header either.
+		{name: "auth-details-parseable-redirect", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: status(http.StatusFound, "http://evil.example/"+quietSecret), class: "302"},
+		{name: "token-refused", hostile: "POST /token", call: "token endpoint", answer: status(http.StatusUnauthorized, ""), class: "401"},
+		{name: "auth-details-undecodable", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: undecodable, class: "200"},
+		{name: "unreachable", call: "token endpoint", api: unreachable, class: "request failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var api API
+			if tc.api != nil {
+				api = tc.api(t)
+			} else {
+				api = hostileBindingAPI(t, tc.hostile, tc.answer)
+			}
+			err := Bind(context.Background(), api, quietCredential, bound, "lz")
+			if err == nil {
+				t.Fatal("Bind() bound against a hostile answer")
+			}
+			msg := err.Error()
+			if part := leaksSecretPart(msg); part != "" {
+				t.Errorf("error %q quotes the secret (%q)", msg, part)
+			}
+			if strings.Contains(msg, "evil.example") {
+				t.Errorf("error %q quotes the redirect URL", msg)
+			}
+			for _, want := range []string{tc.call, tc.class} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error %q does not name %q", msg, want)
+				}
+			}
+			if !strings.Contains(msg, "then re-run") {
+				t.Errorf("error %q names no next action (\"… then re-run\")", msg)
+			}
+		})
+	}
+}
+
 // TestFilesWriteRefusesOpenDirectory: data-model "directories 700" holds for directories that
 // already exist too, the root included.
 func TestFilesWriteRefusesOpenDirectory(t *testing.T) {
