@@ -93,6 +93,122 @@ func TestBindingErrorOmitsAnswer(t *testing.T) {
 	}
 }
 
+// quietSecret is the client secret the hostile fakes below echo. It starts with four characters a
+// JSON escape error quotes, so a decode error that quotes the answer quotes part of it. It holds
+// no English, so no four characters of it occur in an honest message ("binding", "decoding").
+const quietSecret = "s3cr7Qx9Zk4vW0j8"
+
+// quietLocation is an unparseable redirect target ("%zz" is no URL escape) that quotes the secret.
+// Go's client parses a 3xx answer's Location before it consults CheckRedirect, and quotes the
+// header in the error it returns (net/http client.go, "failed to parse Location header").
+const quietLocation = "http://evil.example/%zz/" + quietSecret
+
+// leaksSecretPart reports a four-character window of quietSecret inside s: a fragment of the
+// secret is as much a leak as the whole of it.
+func leaksSecretPart(s string) string {
+	for i := 0; i+4 <= len(quietSecret); i++ {
+		if strings.Contains(s, quietSecret[i:i+4]) {
+			return quietSecret[i : i+4]
+		}
+	}
+	return ""
+}
+
+// hostileBindingAPI answers the token request and GET /auth/details well, except the call named
+// by hostile, which answer answers instead.
+func hostileBindingAPI(t *testing.T, hostile string, answer http.HandlerFunc) API {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := r.Method + " " + r.URL.Path
+		if call == hostile {
+			answer(w, r)
+			return
+		}
+		switch call {
+		case "POST /token":
+			_ = r.ParseForm()
+			if r.PostForm.Get("client_secret") != quietSecret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			io.WriteString(w, `{"access_token":"quiet-token","token_type":"Bearer","expires_in":3600}`)
+		case "GET /v1/auth/details":
+			if r.Header.Get("Authorization") != "Bearer quiet-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			io.WriteString(w, `{"account":"`+boundAccount+`"}`)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return API{TokenURL: srv.URL + "/token", BaseURL: srv.URL + "/v1", HTTP: srv.Client()}
+}
+
+var quietCredential = Credential{Endpoint: "ovh-eu", ClientID: "EU.quiet", ClientSecret: quietSecret}
+
+// TestBindingErrorsQuiet (FR-003, guard G16): an error from the binding client never quotes what
+// the answer chose (a redirect's Location, a body) nor the secret; it names the call and the
+// status class.
+func TestBindingErrorsQuiet(t *testing.T) {
+	t.Parallel()
+	redirect := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", quietLocation)
+		w.WriteHeader(http.StatusFound)
+	}
+	// An escape error quotes "\u" and the next four characters of the body.
+	undecodable := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"access_token":"\u`+quietSecret+`","account":"\u`+quietSecret+`"}`)
+	}
+	for _, tc := range []struct {
+		name, hostile, call string
+		answer              http.HandlerFunc
+		class               string // the status class the error names; "" when not asserted
+	}{
+		// Defect exposed: the %w transport path (binding.go:54) quotes the unparseable Location.
+		{"token-redirect", "POST /token", "token endpoint", redirect, "3xx"},
+		{"auth-details-redirect", "GET /v1/auth/details", "GET /auth/details", redirect, "3xx"},
+		// Defect exposed: the %w decode path (binding.go:63) quotes the body.
+		{"token-undecodable", "POST /token", "token endpoint", undecodable, ""},
+		{"auth-details-undecodable", "GET /v1/auth/details", "GET /auth/details", undecodable, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			api := hostileBindingAPI(t, tc.hostile, tc.answer)
+			err := Bind(context.Background(), api, quietCredential, bound, "lz")
+			if err == nil {
+				t.Fatal("Bind() bound against a hostile answer")
+			}
+			msg := err.Error()
+			if part := leaksSecretPart(msg); part != "" {
+				t.Errorf("error %q quotes the secret (%q)", msg, part)
+			}
+			for _, leak := range []string{"evil.example", "%zz"} {
+				if strings.Contains(msg, leak) {
+					t.Errorf("error %q quotes the redirect URL (%q)", msg, leak)
+				}
+			}
+			if !strings.Contains(msg, tc.call) {
+				t.Errorf("error %q does not name the call %q", msg, tc.call)
+			}
+			if tc.class != "" && !strings.Contains(msg, tc.class) {
+				t.Errorf("error %q does not name the status class %q", msg, tc.class)
+			}
+		})
+	}
+	// Positive control (passes from the start): a well-behaved API binds, so a fix that refuses
+	// every answer shows here.
+	t.Run("well-behaved-binds", func(t *testing.T) {
+		t.Parallel()
+		api := hostileBindingAPI(t, "", nil)
+		if err := Bind(context.Background(), api, quietCredential, bound, "lz"); err != nil {
+			t.Fatalf("Bind() = %v, want bound", err)
+		}
+	})
+}
+
 // TestFilesWriteRefusesOpenDirectory: data-model "directories 700" holds for directories that
 // already exist too, the root included.
 func TestFilesWriteRefusesOpenDirectory(t *testing.T) {

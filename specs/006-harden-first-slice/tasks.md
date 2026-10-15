@@ -74,7 +74,7 @@ directory points at the PR and names the red and green commits.
 ## Phase 2: User Story 1 — Secrets stay out of live-lane errors and records (P1)
 Independent test: V001. Test tasks T005–T010, then implementation tasks T011–T016.
 
-- [ ] T005 [US1] Write quiet-binding-error tests in tools/internal/live/hardening_test.go
+- [x] T005 [US1] Write quiet-binding-error tests in tools/internal/live/hardening_test.go — closed 2026-10-15, evidence: evidence/T005.md
   - Requirements: FR-003; ADRs: 0009, 0021. Depends on: T004.
   - Cases (given / when / then → defect exposed):
     - given a fake token endpoint answering 302 with an unparseable `Location` that contains the client secret / when `Bind` runs / then its error and `lz-live`'s stderr contain neither the secret nor the URL and name the call and the status class → exposes the `%w` transport path (`binding.go:54`), since Go's client quotes an unparseable `Location`.
