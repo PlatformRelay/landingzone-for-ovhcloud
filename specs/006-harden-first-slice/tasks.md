@@ -44,7 +44,7 @@ directory points at the PR and names the red and green commits.
   - Verify: `task test:traceability`: the three cases fail on today's tree for the stated reasons.
   - Evidence: `evidence/T001.md`; PR; initial status `not-run`.
 
-- [ ] T002 Trace spec 006 by default in Taskfile.yml and add the 005 and 006 tasks.md to the `test:foundation-ci` inputs in tools/harness/checks.yaml
+- [x] T002 Trace spec 006 by default in Taskfile.yml and add the 005 and 006 tasks.md to the `test:foundation-ci` inputs in tools/harness/checks.yaml — closed 2026-10-15, evidence: evidence/T002.md
   - Requirements: FR-022; ADRs: 0008, 0019. Depends on: T001.
   - Verify: `task test:traceability; task test:foundation-ci; task check:specs`: T001's cases green; `task check:specs` with no argument prints `TRACE_OK` for 001, 005 and 006; `ci-source` reads spec 006.
   - Evidence: `evidence/T002.md`; PR; initial status `not-run`.

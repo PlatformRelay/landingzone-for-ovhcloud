@@ -132,7 +132,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
     {"id": "test:foundation-ci", "requirements": ["FR-010", "SC-005", "006/FR-022"], "command": "task test:foundation-ci", "creator": "T023", "kind": "behavioral",
      "scope": ["tools/internal/checks/foundation_ci.go", ".github/workflows/foundation.yml", "pipelines/github/foundation-source.json", "tools/scripts/fetch-offline-entry.sh"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check", "tools/harness/checks.yaml", "specs/001-offline-foundation/tasks.md"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check", "tools/harness/checks.yaml", "specs/001-offline-foundation/tasks.md", "specs/005-first-landing-zone-slice/tasks.md", "specs/006-harden-first-slice/tasks.md"]},
     {"id": "ci:foundation", "requirements": ["FR-010", "SC-005"], "command": "task ci:foundation", "creator": "T023", "kind": "behavioral",
      "scope": [".github/workflows/foundation.yml", "pipelines/github/foundation-source.json", "pipelines/github/foundation-runs.json"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check"], "review": true},
