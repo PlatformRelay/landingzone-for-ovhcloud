@@ -59,7 +59,7 @@ directory points at the PR and names the red and green commits.
   - Verify: `task test:traceability`: the first two cases fail on today's registry; the third passes and the fourth fails against a fixture registry. If P1 is refuted, the fallback of research R11 is recorded.
   - Evidence: `evidence/T003.md`; PR; initial status `not-run`.
 
-- [ ] T004 Add the missing Go reads to tools/harness/checks.yaml
+- [x] T004 Add the missing Go reads to tools/harness/checks.yaml — closed 2026-10-15, evidence: evidence/T004.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T003.
   - Verify: `task test:traceability`: T003's cases green; removing any added input turns its row red again.
   - Evidence: `evidence/T004.md`; PR; initial status `not-run`.
