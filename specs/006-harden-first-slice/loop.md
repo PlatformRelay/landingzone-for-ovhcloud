@@ -2,7 +2,7 @@
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
 Next: L — dispatch the first open task (`task.sh next`)
-Budget: strong review legs 1/12 (B reserve 3) · active hours — · default
+Budget: strong review legs 8/20 (B reserve 3; 9 left for L) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
 - [x] 0 orient — feature dir created by hand from the templates; spec, plan, research, data model, contracts, quickstart and tasks present; base origin/main
@@ -66,6 +66,7 @@ Holistic run at B: not run yet.
 | tools/cmd/lz-check/main_test.go:TestTaskfileTracesEverySpec (check:specs_default, ci-source_specs, foundation-ci_inputs); `test:traceability` red | Setup | T001 | T002 |
 | tools/cmd/lz-check/main_test.go:TestRegistryInputsCoverGoDeps (go_deps_covered: 57 rows; traceability_reads_the_registry); `test:traceability` red | Setup | T003 | T004 |
 | tools/internal/live/hardening_test.go:TestBindingErrorsQuiet (token-redirect, auth-details-redirect, token-undecodable, auth-details-undecodable); tools/cmd/lz-live/probe_test.go:TestProbeBindingErrorQuiet (token, auth-details); `test:live-lane` red | US1 | T005 | |
+| tools/internal/live/chain_test.go:TestChainLeftoverTokenRedacted (token-as-id, token-inside-longer-id, token-split-across-writes, registered-before-first-listing); `test:live-lane` red | US1 | T006 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -80,6 +81,7 @@ Holistic run at B: not run yet.
 - When waiting for a background review leg, wait on its output file, not a pgrep match: other sessions run review processes too. (T001)
 - A partial-leak check needs a test secret with no English words in it; Go's JSON decode errors quote at most 4 characters of the body, so check fragments, not the whole secret. (T005)
 - `mutate.py` copies only `tools/`; the live and lz-live tests read `../../../stacks` and `mise.toml`, so mutate them in a whole-checkout scratch copy. (T005)
+- A redaction test needs the token to differ from every other token of the same credential; a fake issuing one token per credential lets a wrong-token fix pass. A split-write test through a child process cannot force two reads: pair it with an in-process hold-back test. (T006)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
