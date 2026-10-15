@@ -143,7 +143,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: T005's cases green. Guard G16: the `%w` mutant and a header-quoting mutant are killed. FR-003's "names the call, the status class and the next action" had no case in T005: add one here (given a hostile binding answer / when `Bind` fails / then the error names the call, `3xx` or the transport class, and the next action → exposes a quiet but unactionable error), red before the fix.
   - Evidence: `evidence/T011.md`; PR; initial status `not-run`.
 
-- [ ] T012 [US1] Register the leftover token with the run's redactor in tools/internal/live/leftovers.go and tools/internal/live/chain.go
+- [x] T012 [US1] Register the leftover token with the run's redactor in tools/internal/live/leftovers.go and tools/internal/live/chain.go — closed 2026-10-15, evidence: evidence/T012.md
   - Requirements: FR-004, SC-001; ADRs: 0009, 0021. Depends on: T006.
   - Verify: `task test:live-lane`: T006's cases green. Guard G17: never-register and register-late mutants are killed.
   - Evidence: `evidence/T012.md`; PR; initial status `not-run`.

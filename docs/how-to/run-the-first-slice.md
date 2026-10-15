@@ -9,7 +9,7 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 7143d74f5daeff15644761cc2fdca66fd7aba790
+    blob: 25c706686fc6c9e49961cda7fdd60bb02682fd06
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
-last_verified: f05ade00658aa58a0b1d697dd45753dc0046100a
+last_verified: f39dbf533e4060143d227791fd8a14557fd8cbfa
 ---
 
 # Run the first slice on an OVHcloud account
