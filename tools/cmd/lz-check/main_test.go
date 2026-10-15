@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -697,19 +698,29 @@ var (
 // line is missing, so a reworded Taskfile cannot pass by matching nothing.
 func taskfileSpecDirs(t *testing.T, taskfile, task string, line *regexp.Regexp) []string {
 	t.Helper()
-	start := strings.Index(taskfile, "\n  "+task+":\n")
-	if start < 0 {
+	block, ok := taskBlock(taskfile, task)
+	if !ok {
 		t.Fatalf("BEHAVIORAL_RED: Taskfile.yml has no task %s", task)
-	}
-	block := taskfile[start+1:]
-	if end := regexp.MustCompile(`\n  [^ \n#][^\n]*:\n`).FindStringIndex(block[1:]); end != nil {
-		block = block[:end[0]+1]
 	}
 	m := line.FindStringSubmatch(block)
 	if m == nil {
 		t.Fatalf("BEHAVIORAL_RED: task %s has no line matching %s", task, line)
 	}
 	return regexp.MustCompile(`specs/[0-9]{3}-[^ "'\n]+`).FindAllString(m[1], -1)
+}
+
+// taskBlock returns task's block in the Taskfile, from its two-space-indented
+// header up to the next task's header.
+func taskBlock(taskfile, task string) (string, bool) {
+	start := strings.Index(taskfile, "\n  "+task+":\n")
+	if start < 0 {
+		return "", false
+	}
+	block := taskfile[start+1:]
+	if end := regexp.MustCompile(`\n  [^ \n#][^\n]*:\n`).FindStringIndex(block[1:]); end != nil {
+		block = block[:end[0]+1]
+	}
+	return block, true
 }
 
 // specNumbers maps specs/NNN-… directories to NNN.
@@ -809,6 +820,359 @@ func TestTaskfileTracesEverySpec(t *testing.T) {
 			if !covered(reads, dir+"/tasks.md") {
 				t.Errorf("BEHAVIORAL_RED: test:foundation-ci's ci-source reads %s/tasks.md, but its registry scope and inputs do not name it", dir)
 			}
+		}
+	})
+}
+
+// entryTargets are the checks lz-offline runs with its own trusted code; the
+// Taskfile never defines them (Taskfile.yml header; trustedTargets in
+// tools/cmd/lz-offline/main.go).
+var entryTargets = map[string]bool{"verify:toolchain": true, "test:offline-boundary": true}
+
+// shellWords splits a Taskfile command line into words, honouring single and
+// double quotes. An unquoted command separator (& ; |) is a word of its own,
+// prefixed with NUL so it never equals an argument; an unquoted redirection
+// (<, >, >>, >&, with a leading descriptor number such as 2>&1) is one word
+// prefixed with \x01, its target being the next word. An unquoted # at the
+// start of a word ends the line.
+func shellWords(line string) []string {
+	var words []string
+	var word strings.Builder
+	var quote byte
+	inWord := false
+	flush := func() {
+		if inWord {
+			words = append(words, word.String())
+			word.Reset()
+			inWord = false
+		}
+	}
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+			word.WriteByte(c)
+		case c == '\'' || c == '"':
+			quote, inWord = c, true
+		case c == ' ' || c == '\t':
+			flush()
+		case c == '<' || c == '>':
+			if inWord && strings.Trim(word.String(), "0123456789") == "" {
+				word.Reset()
+				inWord = false
+			}
+			flush()
+			op := string(c)
+			for i+1 < len(line) && (line[i+1] == '>' || line[i+1] == '&') {
+				i++
+				op += string(line[i])
+			}
+			words = append(words, "\x01"+op)
+		case strings.IndexByte("&;|", c) >= 0:
+			flush()
+			words = append(words, "\x00"+string(c))
+		case c == '#' && !inWord:
+			return words
+		default:
+			word.WriteByte(c)
+			inWord = true
+		}
+	}
+	flush()
+	return words
+}
+
+// goRun is one `go -C tools test|run|build` invocation of a Taskfile command:
+// its verb, build tags and the packages it names.
+type goRun struct {
+	verb, tags string
+	pkgs       []string
+}
+
+// goWord finds the word go in a shell word, alone or inside a quoted one;
+// goRuns uses it to fail on a go command it cannot read rather than skip it.
+var goWord = regexp.MustCompile(`(^|[\s'"|>&;(])go(\s|$)`)
+
+// goValueFlags are the go test|run|build flags whose value is the next word.
+var goValueFlags = map[string]bool{"-run": true, "-skip": true, "-o": true, "-timeout": true, "-count": true, "-p": true,
+	"-bench": true, "-parallel": true, "-ldflags": true, "-gcflags": true, "-coverprofile": true}
+
+// goRuns returns the Go invocations of a Taskfile task block. Every line but
+// the task's header, its desc and comments is read, so a command in a YAML
+// block scalar is read too; a leading `- ` or `cmd:` is dropped. A go word in
+// command position starts an invocation; its packages are the words that are
+// neither flags, flag values nor redirections and their targets, and a go run
+// names one package, the words after it being the program's arguments. A go
+// command of any other form, and every go word not read as an invocation (in
+// a quoted YAML scalar, an argument, a redirection target), is returned with
+// no packages, so the caller fails on it rather than skip it.
+func goRuns(block string) []goRun {
+	var runs []goRun
+	for _, line := range strings.Split(block, "\n")[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "desc:") {
+			continue
+		}
+		line = strings.TrimPrefix(strings.TrimPrefix(line, "- "), "cmd:")
+		words := shellWords(line)
+		read, seen := 0, 0
+		for _, w := range words {
+			if goWord.MatchString(w) {
+				seen++
+			}
+		}
+		for i := 0; i < len(words); i++ {
+			if words[i] != "go" || (i > 0 && !strings.HasPrefix(words[i-1], "\x00")) {
+				continue
+			}
+			read++
+			if i+3 >= len(words) || words[i+1] != "-C" || words[i+2] != "tools" || (words[i+3] != "test" && words[i+3] != "run" && words[i+3] != "build") {
+				runs = append(runs, goRun{verb: strings.Join(words[i+1:min(i+4, len(words))], " ")})
+				continue
+			}
+			verb := words[i+3]
+			r := goRun{verb: verb}
+			for j := i + 4; j < len(words) && !strings.HasPrefix(words[j], "\x00"); j++ {
+				w := words[j]
+				switch {
+				case w == "-tags" && j+1 < len(words):
+					j++
+					r.tags = words[j]
+				case strings.HasPrefix(w, "-tags="):
+					r.tags = strings.TrimPrefix(w, "-tags=")
+				case strings.HasPrefix(w, "\x01"):
+					j++
+				case goValueFlags[w]:
+					j++
+				case strings.HasPrefix(w, "-"):
+				default:
+					r.pkgs = append(r.pkgs, w)
+				}
+				if verb == "run" && len(r.pkgs) > 0 {
+					break
+				}
+			}
+			runs = append(runs, r)
+		}
+		if seen > read {
+			runs = append(runs, goRun{verb: fmt.Sprintf("in %q", line)})
+		}
+	}
+	return runs
+}
+
+// goDeps returns the tools-module package directories, relative to the
+// repository root, that r's packages are or import (test imports included
+// for go test), as `go list -deps` resolves them in the vendored module
+// (premise P1). Vendored and standard-library packages are left out.
+func goDeps(repoRoot string, r goRun) ([]string, error) {
+	args := []string{"list", "-deps", "-f", "{{.Dir}}"}
+	if r.verb == "test" {
+		args = append(args, "-test")
+	}
+	if r.tags != "" {
+		args = append(args, "-tags", r.tags)
+	}
+	args = append(args, r.pkgs...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = filepath.Join(repoRoot, "tools")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go %s: %v: %s", strings.Join(args, " "), err, stderr.String())
+	}
+	root, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var dirs []string
+	for _, dir := range strings.Split(string(out), "\n") {
+		if dir == "" {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = real
+		}
+		rel, err := filepath.Rel(root, dir)
+		rel = filepath.ToSlash(rel)
+		if err != nil || (rel != "tools" && !strings.HasPrefix(rel, "tools/")) || rel == "tools/vendor" || strings.HasPrefix(rel, "tools/vendor/") || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		dirs = append(dirs, rel)
+	}
+	sort.Strings(dirs)
+	return dirs, nil
+}
+
+// creatorsDone reports, per registry creator, whether its task is ticked in
+// the tasks.md of the spec that owns it (a bare id is spec 001's, NNN/Tnnn
+// spec NNN's). An id that tasks.md does not list is open.
+func creatorsDone(t *testing.T, root string, reg checks.Registry) map[string]bool {
+	t.Helper()
+	ticks := map[string]map[string]bool{}
+	done := map[string]bool{}
+	for _, c := range reg.Checks {
+		spec, id, ok := strings.Cut(c.Creator, "/")
+		if !ok {
+			spec, id = "001", c.Creator
+		}
+		if ticks[spec] == nil {
+			found, _ := filepath.Glob(filepath.Join(root, "specs", spec+"-*", "tasks.md"))
+			if len(found) != 1 {
+				t.Fatalf("BEHAVIORAL_RED: creator %s of %s: want one specs/%s-*/tasks.md, found %d", c.Creator, c.ID, spec, len(found))
+			}
+			data, err := os.ReadFile(found[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			list, err := checks.ParseTasks(string(data))
+			if err != nil {
+				t.Fatalf("%s: %v", found[0], err)
+			}
+			ticks[spec] = map[string]bool{}
+			for _, task := range list {
+				ticks[spec][task.ID] = task.Done
+			}
+		}
+		done[c.Creator] = ticks[spec][id]
+	}
+	return done
+}
+
+// judgeGoDeps judges the registry under root against the Go its checks run
+// (006 FR-012): every in-module directory a behavioural check's Taskfile
+// target depends on lies in the check's scope or inputs. A check without a
+// target is planned while its creator is open and a failure once it is
+// ticked; the entry's own targets have none by design. It returns the
+// planned checks and one failure per check and directory.
+func judgeGoDeps(t *testing.T, root string) (planned, failures []string) {
+	t.Helper()
+	taskfile, err := os.ReadFile(filepath.Join(root, "Taskfile.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "tools", "harness", "checks.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := checks.ParseRegistry(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := registryReads(t, root)
+	done := creatorsDone(t, root, reg)
+	deps := map[string][]string{}
+	for _, c := range reg.Checks {
+		if c.Kind != checks.KindBehavioral {
+			continue
+		}
+		block, ok := taskBlock(string(taskfile), c.ID)
+		switch {
+		case !ok && entryTargets[c.ID]:
+			continue
+		case !ok && !done[c.Creator]:
+			planned = append(planned, c.ID)
+			continue
+		case !ok:
+			failures = append(failures, fmt.Sprintf("%s: its creator %s is ticked, but Taskfile.yml has no target %s", c.ID, c.Creator, c.ID))
+			continue
+		}
+		reported := map[string]bool{}
+		for _, r := range goRuns(block) {
+			if len(r.pkgs) == 0 {
+				failures = append(failures, fmt.Sprintf("%s: go %s: the test reads only go -C tools test|run|build naming packages", c.ID, r.verb))
+				continue
+			}
+			key := fmt.Sprintf("%t %s %s", r.verb == "test", r.tags, strings.Join(r.pkgs, " "))
+			dirs, seen := deps[key]
+			if !seen {
+				if dirs, err = goDeps(root, r); err != nil {
+					t.Fatalf("BEHAVIORAL_RED: premise P1: %v", err)
+				}
+				deps[key] = dirs
+			}
+			for _, dir := range dirs {
+				if !reported[dir] && !covered(reads[c.ID], dir) {
+					reported[dir] = true
+					failures = append(failures, fmt.Sprintf("%s runs Go that depends on %s (go %s %s), but its registry scope and inputs do not name it", c.ID, dir, r.verb, strings.Join(r.pkgs, " ")))
+				}
+			}
+		}
+	}
+	return planned, failures
+}
+
+// goDepsFixture is a tree whose registry has a check with a target, one
+// without a target and an open creator (planned), one without a target and a
+// ticked creator, and an entry target; no target runs Go.
+func goDepsFixture(t *testing.T) string {
+	t.Helper()
+	task := func(box, id string) string {
+		return "- [" + box + "] " + id + " Write pins in tools/pin.go\n" +
+			"  - Requirements: FR-001; ADRs: 0011. Depends on: none.\n" +
+			"  - Verify: `task pins`: missing tool rejected.\n" +
+			"  - Evidence: `evidence/" + id + ".md`.\n"
+	}
+	check := func(id, creator string) string {
+		return `{"id": "` + id + `", "requirements": ["FR-001"], "command": "task ` + id + `", "creator": "` + creator + `", "kind": "behavioral", "scope": ["tools/pin.go"]}`
+	}
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"Taskfile.yml":         "version: '3'\ntasks:\n  test:present:\n    cmds:\n      - echo present\n",
+		"specs/001-x/tasks.md": task("x", "T001"),
+		"specs/006-y/tasks.md": task("x", "T001") + task(" ", "T002"),
+		"tools/harness/checks.yaml": `{"schema_version": 1, "requirements": {"FR-001": {"adrs": ["0011"]}}, "evaluators": [], "producers": [], "procedures": {},
+ "checks": [` + strings.Join([]string{check("test:present", "T001"), check("test:planned", "006/T002"),
+			check("test:orphan", "006/T001"), check("verify:toolchain", "T001")}, ",\n  ") + `]}`,
+	})
+	return root
+}
+
+// Every check that runs Go reselects on a change to any tools-module package
+// it builds, and the check that judges the registry reads it (006 FR-012,
+// V004; research R11).
+func TestRegistryInputsCoverGoDeps(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("go deps covered", func(t *testing.T) {
+		live, err := goDeps(root, goRun{verb: "test", pkgs: []string{"./internal/live"}})
+		if err != nil {
+			t.Fatalf("BEHAVIORAL_RED: premise P1: %v", err)
+		}
+		t.Logf("P1: go list -deps -test ./internal/live: in-module %v", live)
+		planned, failures := judgeGoDeps(t, root)
+		t.Logf("planned: %v", planned)
+		for _, f := range failures {
+			t.Errorf("BEHAVIORAL_RED: %s", f)
+		}
+	})
+	t.Run("traceability reads the registry", func(t *testing.T) {
+		if !covered(registryReads(t, root)["test:traceability"], "tools/harness/checks.yaml") {
+			t.Error("BEHAVIORAL_RED: test:traceability judges tools/harness/checks.yaml, but its registry scope and inputs do not name it")
+		}
+	})
+	t.Run("planned check skipped", func(t *testing.T) {
+		planned, failures := judgeGoDeps(t, goDepsFixture(t))
+		if strings.Join(planned, " ") != "test:planned" {
+			t.Errorf("BEHAVIORAL_RED: planned %v, want [test:planned]", planned)
+		}
+		for _, f := range failures {
+			if strings.HasPrefix(f, "test:planned") || strings.HasPrefix(f, "verify:toolchain") {
+				t.Errorf("BEHAVIORAL_RED: a planned check or an entry target failed: %s", f)
+			}
+		}
+	})
+	t.Run("closed creator without target", func(t *testing.T) {
+		_, failures := judgeGoDeps(t, goDepsFixture(t))
+		if len(failures) != 1 || !strings.HasPrefix(failures[0], "test:orphan: ") {
+			t.Errorf("BEHAVIORAL_RED: want one failure naming test:orphan, got %q", failures)
 		}
 	})
 }
