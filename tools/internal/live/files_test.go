@@ -717,6 +717,10 @@ func TestFilesCredentialSetDurableSwitch(t *testing.T) {
 		filepath.Join(gen, "tenants"):          {filepath.Join(gen, "tenants", "alpha")},
 		filepath.Join(gen, "tenants", "alpha"): {filepath.Join(gen, csRels[1])},
 		setDir:                                 {gen},
+		filepath.Dir(setDir):                   {setDir},
+		acct:                                   {filepath.Dir(setDir)},
+		filepath.Dir(acct):                     {acct},
+		root:                                   {filepath.Dir(acct)},
 		tmp:                                    {},
 		filepath.Join(gen, csRels[0]):          {},
 		filepath.Join(gen, csRels[1]):          {},
@@ -738,6 +742,42 @@ func TestFilesCredentialSetDurableSwitch(t *testing.T) {
 	}
 	if flatAtSwitchSync != "kept" {
 		t.Errorf("the set directory's first sync after the switch found the flat files %q, want kept: the switch must be durable before they go", flatAtSwitchSync)
+	}
+}
+
+// TestFilesCredentialSetRefusesPaths (T013 review round 1, FR-005, data-model *Credential set*): a
+// set holds only the files data-model names for a set, at their canonical relative paths; anything
+// else is refused before the disk changes. Exposes a non-canonical key written as an empty file
+// (its values looked up under the cleaned name), and a key naming a file no set holds (the binding,
+// the passphrase, a set's pointer), which step 5 would remove as a flat file.
+func TestFilesCredentialSetRefusesPaths(t *testing.T) {
+	withUmask(t)
+	for _, rel := range []string{
+		"./platform-deployer.env",
+		filepath.Join("tenants", "", "alpha", "deployer.env") + string(filepath.Separator),
+		"tenants//alpha/deployer.env",
+		"account.env",
+		"state-passphrase.env",
+		"state.env",
+		filepath.Join("sets", csInstance, "current"),
+		filepath.Join("tenants", "alpha", "notes.env"),
+		filepath.Join("..", "platform-deployer.env"),
+		"/platform-deployer.env",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			root, acct, _ := csRoot(t)
+			if err := WriteCredentialFile(root, filepath.Join("accounts", csAccount, "account.env"), map[string]string{"OVH_ACCOUNT": csAccount}); err != nil {
+				t.Fatal(err)
+			}
+			s := csSet(root, csRunID, "new")
+			s.Files[rel] = map[string]string{"OVH_CLIENT_ID": "x"}
+			if err := WriteCredentialSet(s, 0); err == nil {
+				t.Errorf("WriteCredentialSet with file %q succeeded, want a refusal", rel)
+			}
+			if got, want := csEntries(t, acct), []string{"account.env"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("after the refusal the account directory holds %v, want %v", got, want)
+			}
+		})
 	}
 }
 

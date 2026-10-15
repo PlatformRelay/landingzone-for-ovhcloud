@@ -106,21 +106,12 @@ func privateDir(dir string) error {
 	return nil
 }
 
-// belowRel returns rel cleaned, refusing a path that is empty, absolute or leaves its base.
-func belowRel(rel string) (string, error) {
-	clean := filepath.Clean(rel)
-	if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q is not below its base", rel)
-	}
-	return clean, nil
-}
-
 // credentialDir checks that rel stays below root and creates its missing directories with mode
 // 0700, never through a symlink; an existing directory others can use is refused. It returns the
 // directory and the file name.
 func credentialDir(root, rel string) (string, string, error) {
-	clean, err := belowRel(rel)
-	if err != nil {
+	clean := filepath.Clean(rel)
+	if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("credential path %q is not below %s", rel, root)
 	}
 	parts := strings.Split(clean, string(filepath.Separator))
@@ -265,6 +256,12 @@ var ErrInjectedCrash = errors.New("credential set: injected crash")
 // genName is a generation directory's name (data-model *Credential set*): gen-<run_id>.
 var genName = regexp.MustCompile(`^gen-[0-9A-Za-z-]+$`)
 
+// setFile is a file a credential set may hold, at the canonical path readers use (data-model
+// *Credential set*): the deployer clients of account-governance and the S3 keys of tenant-state.
+// The binding, the passphrase, sandbox.env and the bootstrap's state.env never match, so step 5
+// never removes them as flat files.
+var setFile = regexp.MustCompile(`^(platform-deployer\.env|tenants/[A-Za-z0-9][A-Za-z0-9_-]*/(deployer|state|platform-state)\.env)$`)
+
 // setSync and setRename are the set writer's fsync and its switch. They are variables only so a
 // test can see what crash injection cannot: every file and directory of the generation synced
 // before the switch, and the switch one rename over an existing `current`.
@@ -298,17 +295,16 @@ func WriteCredentialSet(s CredentialSet, failAfter SetStep) error {
 	if len(s.Files) == 0 {
 		return errors.New("credential set: no files")
 	}
-	// Every file is checked before anything is written: a refused value leaves no generation.
+	// Every file is checked before anything is written: a refused path or value leaves no trace.
 	rels := make([]string, 0, len(s.Files))
 	for rel, values := range s.Files {
-		clean, err := belowRel(rel)
-		if err != nil {
-			return fmt.Errorf("credential set: %w", err)
+		if !setFile.MatchString(rel) {
+			return fmt.Errorf("credential set: %q is not a set file at its canonical path", rel)
 		}
 		if err := checkCredentialValues(values); err != nil {
 			return err
 		}
-		rels = append(rels, clean)
+		rels = append(rels, rel)
 	}
 	sort.Strings(rels)
 	setRel := filepath.Join("accounts", s.Account, "sets", s.Instance)
@@ -357,14 +353,14 @@ func WriteCredentialSet(s CredentialSet, failAfter SetStep) error {
 		return ErrInjectedCrash
 	}
 
-	// Step 2: the generation's directories deepest first, then the set directory and its parents,
-	// which may have gained an entry.
+	// Step 2: the generation's directories deepest first, then the set directory and its parents
+	// up to the root, any of which may have gained an entry.
 	order := make([]string, 0, len(dirs)+3)
 	for d := range dirs {
 		order = append(order, d)
 	}
 	sort.Slice(order, func(i, j int) bool { return len(order[i]) > len(order[j]) })
-	order = append(order, setDir, filepath.Dir(setDir), acct)
+	order = append(order, setDir, filepath.Dir(setDir), acct, filepath.Dir(acct), s.Root)
 	for _, d := range order {
 		if err := syncDir(d); err != nil {
 			return err
