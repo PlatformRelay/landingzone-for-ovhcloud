@@ -46,6 +46,8 @@ Holistic run at B: not run yet.
 | R1 | T001's control could not fail | note | strong | fix | TestTaskfileTracesEverySpec | no |
 | R1 | Repository-map committed path inventory (proposed fix) | — | leg 1 | reject | the author: a generator by another name; a stale inventory hides drift | no |
 | R | Combined test-and-implementation tasks (spec-loop P rule) | warning | coordinator | fix | split, test tasks first | no |
+| L T004 | `test:traceability`'s inputs miss the task lists its judge reads | minor | review leg 1 | fix | T047 | no |
+| L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
