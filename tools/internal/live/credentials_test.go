@@ -7,6 +7,7 @@ package live
 // tenant's or another account's, and never sandbox.env as a fallback.
 
 import (
+	"bytes"
 	"errors"
 	"maps"
 	"os"
@@ -436,5 +437,315 @@ func TestCredentialsMissingFileNamesProducer(t *testing.T) {
 				t.Errorf("err %v does not name %s, which writes %s", err, c.producer, c.rel)
 			}
 		})
+	}
+}
+
+// T008 (spec 006 FR-005, data-model *Credential set*): the readers of credential sets and the
+// migration from 005's flat files. A set lives under accounts/<a>/sets/<instance>/; `current` names
+// its generation gen-<run_id>/, which holds the set's files at the paths readers use today. While
+// `current` does not exist, readers use the flat files. Every generation here is laid down by hand,
+// so a reader case judges the reader alone; the binding case judges the writer.
+
+const (
+	csetGov     = "account-governance"
+	csetPrev    = "gen-20261014T090000Z-0aa0"
+	csetCur     = "gen-20261015T101500Z-1a2b"
+	csetPartial = "gen-20261016T090000Z-0bb0" // sorts last: a crashed write that never switched
+	csetTenant  = "gen-20261015T111500Z-3c4d" // a tenant-state write after account-governance's
+)
+
+// csetGovFiles is the account-governance set (paths relative to the account directory); every
+// value carries tag.
+func csetGovFiles(tag string) map[string]map[string]string {
+	return map[string]map[string]string{
+		"platform-deployer.env":                          oauthValues(tag + "-platform"),
+		filepath.Join("tenants", "demo", "deployer.env"): oauthValues(tag + "-demo-deployer"),
+		filepath.Join("tenants", "ops", "deployer.env"):  oauthValues(tag + "-ops-deployer"),
+	}
+}
+
+// csetStateFiles is the set of tenant's tenant-state instance.
+func csetStateFiles(tenant, tag string) map[string]map[string]string {
+	return map[string]map[string]string{
+		filepath.Join("tenants", tenant, "state.env"):          s3Values(tag + "-" + tenant + "-tenant"),
+		filepath.Join("tenants", tenant, "platform-state.env"): s3Values(tag + "-" + tenant + "-platform"),
+	}
+}
+
+func csetDir(root, instance string) string {
+	return filepath.Join(root, "accounts", credAccount, "sets", instance)
+}
+
+// csetLay writes generation gen of instance's set by hand (through WriteCredentialFile: 0600
+// files below 0700 directories), not through a writer under test.
+func csetLay(t *testing.T, root, instance, gen string, files map[string]map[string]string) {
+	t.Helper()
+	for rel, values := range files {
+		if err := WriteCredentialFile(root, filepath.Join("accounts", credAccount, "sets", instance, gen, rel), values); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// csetCrashed leaves the leftovers of crashed later writes of instance at once (data-model steps 1
+// and 3): a newer generation holding only the first file of files, and a stale `current.tmp`
+// naming it. Neither may be followed while `current` names another generation or is absent.
+func csetCrashed(t *testing.T, root, instance string, files map[string]map[string]string) {
+	t.Helper()
+	first := slices.Sorted(maps.Keys(files))[0]
+	csetLay(t, root, instance, csetPartial, map[string]map[string]string{first: files[first]})
+	if err := os.WriteFile(filepath.Join(csetDir(root, instance), "current.tmp"), []byte(csetPartial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// csetView is what a reader must see: the flat files of credRoot, with each listed set's files
+// (relative to the account directory) in place of the flat ones.
+func csetView(sets ...map[string]map[string]string) map[string]map[string]string {
+	view := map[string]map[string]string{}
+	for _, f := range credFiles() {
+		view[filepath.ToSlash(f.rel)] = f.values
+	}
+	for _, s := range sets {
+		for rel, v := range s {
+			view["accounts/"+credAccount+"/"+filepath.ToSlash(rel)] = v
+		}
+	}
+	return view
+}
+
+// csetLoadAll checks LoadCredentials for every row of the two-tenant manifest against view.
+func csetLoadAll(t *testing.T, root string, view map[string]map[string]string) {
+	t.Helper()
+	m := credManifest(t, true)
+	for _, in := range m.Instances {
+		_, got, err := LoadCredentials(root, credAccount, m, in.ID)
+		credNoValue(t, err)
+		if err != nil {
+			t.Errorf("%s: LoadCredentials: %v", in.ID, err)
+			continue
+		}
+		files := credExpected[in.ID].files
+		want := map[string]string{}
+		maps.Copy(want, view[files[0]])
+		maps.Copy(want, view[files[1]])
+		if !maps.Equal(got, want) {
+			t.Errorf("%s: client %q, access key %q; want client %q (%s), access key %q (%s)",
+				in.ID, got["OVH_CLIENT_ID"], got["AWS_ACCESS_KEY_ID"], want["OVH_CLIENT_ID"], files[0], want["AWS_ACCESS_KEY_ID"], files[1])
+		}
+	}
+}
+
+// CredentialSetPath resolves `current` to its generation, and falls back to the flat path only
+// while `current` does not exist (a first write that crashed before its switch included). A
+// previous generation, and a newer one that `current.tmp` names (a later write that crashed), are
+// not followed.
+func TestCredentialSetPathResolves(t *testing.T) {
+	t.Parallel()
+	rels := []string{"platform-deployer.env", filepath.Join("tenants", "demo", "deployer.env")}
+	cases := []struct {
+		name  string
+		lay   func(t *testing.T, root string)
+		inGen string // "" for the flat path
+	}{
+		{"current-names-generation", func(t *testing.T, root string) {
+			csetLay(t, root, csetGov, csetPrev, csetGovFiles("prev"))
+			csetLay(t, root, csetGov, csetCur, csetGovFiles("cur"))
+			csPoint(t, csetDir(root, csetGov), csetCur)
+			csetCrashed(t, root, csetGov, csetGovFiles("partial"))
+		}, csetCur},
+		{"no-set-flat", func(t *testing.T, root string) {}, ""},
+		{"first-write-crashed-flat", func(t *testing.T, root string) {
+			csetCrashed(t, root, csetGov, csetGovFiles("partial"))
+		}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			root := credRoot(t)
+			c.lay(t, root)
+			for _, rel := range rels {
+				want := filepath.Join(root, "accounts", credAccount, rel)
+				if c.inGen != "" {
+					want = filepath.Join(csetDir(root, csetGov), c.inGen, rel)
+				}
+				got, err := CredentialSetPath(root, credAccount, csetGov, rel)
+				if err != nil || filepath.Clean(got) != want {
+					t.Errorf("CredentialSetPath(%s) = %q, %v; want %q", rel, got, err, want)
+				}
+			}
+		})
+	}
+}
+
+// A `current` that does not name a gen- directory beside it is refused, never followed and never
+// replaced by the flat files (which exist here): a missing generation, a parent path (`../x` with
+// a set there, `../..` which is the account directory holding the flat files), a name outside the
+// pattern with a directory of that name, an absolute path, an empty pointer, a generation that is
+// a file, and a generation that is a symlink to a directory outside the set.
+func TestCredentialSetPathPointerInvalid(t *testing.T) {
+	t.Parallel()
+	rel := "platform-deployer.env"
+	cases := []struct {
+		name string
+		lay  func(t *testing.T, root string) string // returns the pointer's content
+	}{
+		{"missing-directory", func(t *testing.T, root string) string {
+			csetLay(t, root, csetGov, csetPrev, csetGovFiles("prev"))
+			return csetCur
+		}},
+		{"parent-escape", func(t *testing.T, root string) string {
+			csetLay(t, root, "x", "", csetGovFiles("escaped"))
+			return "../x"
+		}},
+		{"account-directory", func(t *testing.T, root string) string { return "../.." }},
+		{"not-a-generation-name", func(t *testing.T, root string) string {
+			csetLay(t, root, csetGov, "x", csetGovFiles("other"))
+			return "x"
+		}},
+		{"absolute", func(t *testing.T, root string) string {
+			csetLay(t, root, csetGov, csetCur, csetGovFiles("cur"))
+			return filepath.Join(csetDir(root, csetGov), csetCur)
+		}},
+		{"empty", func(t *testing.T, root string) string {
+			csetLay(t, root, csetGov, csetCur, csetGovFiles("cur"))
+			return ""
+		}},
+		{"generation-is-a-file", func(t *testing.T, root string) string {
+			csetLay(t, root, csetGov, csetPrev, csetGovFiles("prev"))
+			if err := os.WriteFile(filepath.Join(csetDir(root, csetGov), csetCur), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return csetCur
+		}},
+		{"generation-is-a-symlink", func(t *testing.T, root string) string {
+			csetLay(t, root, "outside", "", csetGovFiles("outside"))
+			csetLay(t, root, csetGov, csetPrev, csetGovFiles("prev"))
+			if err := os.Symlink(filepath.Join(root, "accounts", credAccount, "sets", "outside"), filepath.Join(csetDir(root, csetGov), csetCur)); err != nil {
+				t.Fatal(err)
+			}
+			return csetCur
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			root := credRoot(t)
+			if err := os.MkdirAll(csetDir(root, csetGov), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			csPoint(t, csetDir(root, csetGov), c.lay(t, root))
+			got, err := CredentialSetPath(root, credAccount, csetGov, rel)
+			if err == nil || !strings.HasPrefix(err.Error(), "CREDENTIAL_POINTER_INVALID") {
+				t.Errorf("CredentialSetPath = %q, %v; want an error starting CREDENTIAL_POINTER_INVALID", got, err)
+			}
+		})
+	}
+}
+
+// Migration and per-writer pointers through LoadCredentials (two tenants): every row gets its
+// authority's variables from the set its writer owns, and from the flat files while that set has
+// no `current`. The bootstrap rows keep reading sandbox.env and the account state.env, which no set
+// holds.
+func TestCredentialsFromSets(t *testing.T) {
+	t.Parallel()
+	// Today's flat files, no `current` (a first write that crashed before its switch included):
+	// the flat files are read.
+	t.Run("flat-files-without-current", func(t *testing.T) {
+		t.Parallel()
+		root := credRoot(t)
+		csetCrashed(t, root, csetGov, csetGovFiles("partial"))
+		csetLoadAll(t, root, csetView())
+	})
+	// Flat files and a `current` for every writer (a crash after the switch, before the flat files
+	// were removed): the generations win; neither the previous generation nor a newer one that
+	// `current.tmp` names is read.
+	t.Run("generation-after-switch", func(t *testing.T) {
+		t.Parallel()
+		root := credRoot(t)
+		gov, demo, ops := csetGovFiles("cur"), csetStateFiles("demo", "cur"), csetStateFiles("ops", "cur")
+		csetLay(t, root, csetGov, csetPrev, csetGovFiles("prev"))
+		csetLay(t, root, csetGov, csetCur, gov)
+		csPoint(t, csetDir(root, csetGov), csetCur)
+		csetCrashed(t, root, csetGov, csetGovFiles("partial"))
+		for inst, files := range map[string]map[string]map[string]string{"demo-state": demo, "ops-state": ops} {
+			csetLay(t, root, inst, csetCur, files)
+			csPoint(t, csetDir(root, inst), csetCur)
+		}
+		csetLoadAll(t, root, csetView(gov, demo, ops))
+	})
+	// demo's tenant-state wrote its set after account-governance: each set has its own pointer and
+	// generation name, and each also holds a stale generation under the other's current name, so a
+	// reader that takes one pointer for all writers reads stale values. ops-state has written no set
+	// yet: its files stay flat while the others are sets.
+	t.Run("each-writer-its-own-pointer", func(t *testing.T) {
+		t.Parallel()
+		root := credRoot(t)
+		gov, demo := csetGovFiles("gov"), csetStateFiles("demo", "demo")
+		csetLay(t, root, csetGov, csetCur, gov)
+		csetLay(t, root, csetGov, csetTenant, csetGovFiles("stale"))
+		csPoint(t, csetDir(root, csetGov), csetCur)
+		csetLay(t, root, "demo-state", csetTenant, demo)
+		csetLay(t, root, "demo-state", csetCur, csetStateFiles("demo", "stale"))
+		csPoint(t, csetDir(root, "demo-state"), csetTenant)
+		csetLoadAll(t, root, csetView(gov, demo))
+	})
+}
+
+// A set write never touches the account binding (account.env), the passphrase, sandbox.env or the
+// bootstrap's state.env, nor the flat files of a writer that has no set yet: after a first
+// account-governance write (the migration), demo's tenant-state write and a second
+// account-governance write, each is byte-identical and still a 0600 regular file.
+func TestCredentialSetWriteKeepsBinding(t *testing.T) {
+	t.Parallel()
+	root := credRoot(t)
+	acct := filepath.Join("accounts", credAccount)
+	for rel, v := range map[string]map[string]string{
+		"account.env":          {"OVH_ACCOUNT": credAccount, "OVH_ENDPOINT": "ovh-eu"},
+		"state-passphrase.env": {"TF_VAR_state_passphrase": "lz-seed-t008-passphrase"},
+	} {
+		if err := WriteCredentialFile(root, filepath.Join(acct, rel), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept := []string{
+		"sandbox.env",
+		filepath.Join(acct, "account.env"),
+		filepath.Join(acct, "state-passphrase.env"),
+		filepath.Join(acct, "state.env"),
+		filepath.Join(acct, "tenants", "ops", "state.env"),
+		filepath.Join(acct, "tenants", "ops", "platform-state.env"),
+	}
+	before := map[string][]byte{}
+	for _, rel := range kept {
+		b, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[rel] = b
+	}
+	writes := []CredentialSet{
+		{Root: root, Account: credAccount, Instance: csetGov, RunID: "20261015T101500Z-1a2b", Files: csetGovFiles("first")},
+		{Root: root, Account: credAccount, Instance: "demo-state", RunID: "20261015T111500Z-3c4d", Files: csetStateFiles("demo", "first")},
+		{Root: root, Account: credAccount, Instance: csetGov, RunID: "20261015T121500Z-5e6f", Files: csetGovFiles("second")},
+	}
+	for _, w := range writes {
+		if err := WriteCredentialSet(w, 0); err != nil {
+			t.Fatalf("WriteCredentialSet(%s, run %s): %v", w.Instance, w.RunID, err)
+		}
+		for _, rel := range kept {
+			p := filepath.Join(root, rel)
+			b, err := os.ReadFile(p)
+			switch {
+			case err != nil:
+				t.Errorf("after the %s write of run %s: %s: %v", w.Instance, w.RunID, rel, err)
+			case !bytes.Equal(b, before[rel]):
+				t.Errorf("after the %s write of run %s: %s changed", w.Instance, w.RunID, rel)
+			default:
+				if fi, err := os.Lstat(p); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+					t.Errorf("after the %s write of run %s: %s is no longer a 0600 regular file", w.Instance, w.RunID, rel)
+				}
+			}
+		}
 	}
 }

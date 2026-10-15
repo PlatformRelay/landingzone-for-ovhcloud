@@ -73,6 +73,15 @@ func writerOf(m *stacks.Manifest, a Authority, i int, tenant string) string {
 	return "the tenant-state instance of tenant " + tenant
 }
 
+// CredentialSetPath returns the path of file rel (relative to the account directory, as readers
+// use it today) of instance's credential set under root (FR-005, data-model *Credential set*):
+// below the generation `current` names, or the flat path while `current` does not exist. A
+// pointer that is not a `gen-` name of an existing sibling directory is refused, the error text
+// starting CREDENTIAL_POINTER_INVALID.
+func CredentialSetPath(root, account, instance, rel string) (string, error) {
+	return "", errors.New("CredentialSetPath: not implemented")
+}
+
 // LoadCredentials returns the child variables of instance id's authority (OVH_ENDPOINT,
 // OVH_CLIENT_ID, OVH_CLIENT_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), taken from that
 // authority's two files for account under configRoot and from no other file (the other
