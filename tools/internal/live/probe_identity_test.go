@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -703,10 +704,17 @@ type bindCall struct {
 // with a Bind that records every identity it is given. It returns the published environment.
 func (w *runWorld) pairingProbe(t *testing.T, root string, extra map[string]string, binds *[]bindCall) (Probe, map[string]string) {
 	t.Helper()
-	p := w.identityProbe(t, root, tofuStack{})
 	env := map[string]string{"OVH_CLIENT_ID": pairDefaultID, "OVH_CLIENT_SECRET": pairDefaultSecret,
 		"AWS_ACCESS_KEY_ID": "fake-pair-s3-access-key", "AWS_SECRET_ACCESS_KEY": pairS3Secret}
 	maps.Copy(env, extra)
+	return w.publishingProbe(t, root, env, binds), env
+}
+
+// publishingProbe is identityProbe whose stage publishes exactly env, with a Bind that records
+// every identity it is given (T010: a pair left out, which pairingProbe cannot express).
+func (w *runWorld) publishingProbe(t *testing.T, root string, env map[string]string, binds *[]bindCall) Probe {
+	t.Helper()
+	p := w.identityProbe(t, root, tofuStack{})
 	raw, err := json.Marshal(map[string]any{companionOutput: map[string]any{"sensitive": true, "value": env}})
 	if err != nil {
 		t.Fatal(err)
@@ -724,7 +732,7 @@ func (w *runWorld) pairingProbe(t *testing.T, root string, extra map[string]stri
 		*binds = append(*binds, bindCall{c, bytes.Count(raw, []byte("\n"))})
 		return nil
 	}
-	return p, env
+	return p
 }
 
 // companionChildren returns the indexes of the companion's child calls.
@@ -1071,6 +1079,120 @@ func oddCase(name string) string {
 	return string(b)
 }
 
+// Companion allow-list (T010, FR-006, D115): a published name is admitted only as TF_VAR_ followed by
+// [A-Za-z0-9_]+, matched case-sensitively, except the run's own four TF_VAR_ names in any case, or as
+// a half of the OAuth2 pair OVH_CLIENT_ID/OVH_CLIENT_SECRET or the S3 pair
+// AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, each pair complete or absent. Any other name is refused
+// with COMPANION_NAME_REFUSED <name>. Before T016 companionEnv refused a deny-list (reserved names and
+// TF_* but TF_VAR_*, any case), so every name nobody foresaw passed.
+
+// runVarNames are the run's own TF_VAR_ names: refused in any case, the prefix included.
+var runVarNames = []string{"TF_VAR_state_passphrase", "TF_VAR_state_path", "TF_VAR_run_id", "TF_VAR_project_id"}
+
+// admittedNeighbours are TF_VAR_ names that only begin like a run's own or a tofu setting: admitted.
+var admittedNeighbours = []string{"TF_VAR_x", "TF_VAR_X9_y", "TF_VAR_run_id_suffix", "TF_VAR_project_ids",
+	"TF_VAR_state_passphrase_hint", "TF_VAR_tf_cli_args", "TF_VAR_tf_log_path", "TF_VAR_state_path_hint", "TF_VAR_state"}
+
+// unlistedNames are on no allow-list: unforeseen names, a TF_VAR_ prefix in another case, and names
+// that only resemble a reserved or admitted one (the neighbours spec 005 passed, T082).
+var unlistedNames = []string{"FOO", "LZ_ANYTHING", "tf_var_x", "Tf_Var_x", "HOMEPAGE", "XPATH", "TMPDIRS",
+	"OVH_ENDPOINT_URL", "ovh_endpoint_url", "MY_OVH_ENDPOINT", "MY_TF_CLI_ARGS", "MY_TF_LOG", "XTF_LOG_PATH",
+	"TFLOG", "TF", "tf_var_tf_plugin_cache_dir", "Tf_Var_Tf_Log"}
+
+// TestAdmitCompanionName (T010 cases 1–4 and 6, on the judge alone).
+func TestAdmitCompanionName(t *testing.T) {
+	t.Parallel()
+	admitted := append([]string{"OVH_CLIENT_ID", "OVH_CLIENT_SECRET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}, admittedNeighbours...)
+	for _, n := range admitted {
+		if err := admitCompanionName(n); err != nil {
+			t.Errorf("admitCompanionName(%q) = %v, want nil: the name is on the allow-list", n, err)
+		}
+	}
+	refused := slices.Concat(unlistedNames, []string{
+		// Names the deny-list refused: still refused, now by name.
+		"PATH", "HOME", "TMPDIR", "TF_CLI_ARGS", "TF_LOG", "TF_DATA_DIR", "OVH_ENDPOINT",
+		// Not TF_VAR_ followed by [A-Za-z0-9_]+.
+		"", "TF_VAR", "TF_VAR_", "TF_VAR_a-b", "TF_VAR_a b", "TF_VAR_é", " TF_VAR_x", "XTF_VAR_x",
+		// Resembling a pair's half: another case, another name of the same provider.
+		"ovh_client_id", "Ovh_Client_Secret", "aws_access_key_id", "Aws_Secret_Access_Key", "OVH_CLIENT_ID_X",
+		"MY_OVH_CLIENT_ID", "OVH_APPLICATION_KEY", "OVH_CONSUMER_KEY", "AWS_SESSION_TOKEN", "AWS_ACCESS_KEY",
+	})
+	for _, n := range runVarNames {
+		suffix := strings.TrimPrefix(n, "TF_VAR_")
+		refused = append(refused, n, strings.ToLower(n), strings.ToUpper(n), oddCase(n), "TF_VAR_"+oddCase(suffix))
+	}
+	for _, n := range refused {
+		err := admitCompanionName(n)
+		switch {
+		case err == nil:
+			t.Errorf("admitCompanionName(%q) = nil, want COMPANION_NAME_REFUSED: the name is on no allow-list", n)
+		case err.Error() != "COMPANION_NAME_REFUSED "+n:
+			t.Errorf("admitCompanionName(%q) = %q, want %q", n, err.Error(), "COMPANION_NAME_REFUSED "+n)
+		}
+	}
+}
+
+// namesRefusal: the run's error names the refused name as FR-006 words it, the whole name.
+func namesRefusal(t *testing.T, name string, err error) {
+	t.Helper()
+	if err == nil {
+		return // the exit check reports it
+	}
+	re := regexp.MustCompile(`COMPANION_NAME_REFUSED ` + regexp.QuoteMeta(name) + `($|[^A-Za-z0-9_])`)
+	if !re.MatchString(err.Error()) {
+		t.Errorf("the run's error does not name the refused name as COMPANION_NAME_REFUSED %s", name)
+	}
+}
+
+// TestCompanionPairs (T010 cases 1 and 5, through companionEnv): each identity pair is complete or
+// absent; a half pair is refused before the companion starts.
+func TestCompanionPairs(t *testing.T) {
+	ovh := map[string]string{"OVH_CLIENT_ID": pairDefaultID, "OVH_CLIENT_SECRET": pairDefaultSecret}
+	t.Run("admitted/s3-absent", func(t *testing.T) {
+		withUmask(t)
+		root := tempPrivate(t)
+		w := newRunWorld(t)
+		var binds []bindCall
+		env := maps.Clone(ovh)
+		env["TF_VAR_x"] = "fake-pair-x"
+		p := w.publishingProbe(t, root, env, &binds)
+		if err := p.Start(context.Background()); err != nil {
+			t.Errorf("Start: %v: the OAuth2 pair and a TF_VAR_ name, no S3 pair, were refused", err)
+		}
+		calls := w.calls(t, "tofu.log")
+		comp := companionChildren(calls)
+		if len(comp) == 0 {
+			t.Fatalf("the companion never ran (inits %v)", sequence(calls, "init"))
+		}
+		for k, v := range env {
+			if envOf(calls[comp[0]])[k] != v {
+				t.Errorf("the companion did not get %s under its own name", k)
+			}
+		}
+		checkNoUnbound(t, calls, env, binds)
+		checkNoPairSecret(t, w, root)
+	})
+	for name, env := range map[string]map[string]string{
+		"oauth2-id-alone":     {"OVH_CLIENT_ID": pairDefaultID, "AWS_ACCESS_KEY_ID": "fake-pair-s3-access-key", "AWS_SECRET_ACCESS_KEY": pairS3Secret},
+		"oauth2-secret-alone": {"OVH_CLIENT_SECRET": pairDefaultSecret, "AWS_ACCESS_KEY_ID": "fake-pair-s3-access-key", "AWS_SECRET_ACCESS_KEY": pairS3Secret},
+		"s3-access-alone":     {"OVH_CLIENT_ID": pairDefaultID, "OVH_CLIENT_SECRET": pairDefaultSecret, "AWS_ACCESS_KEY_ID": "fake-pair-s3-access-key"},
+		"s3-secret-alone":     {"OVH_CLIENT_ID": pairDefaultID, "OVH_CLIENT_SECRET": pairDefaultSecret, "AWS_SECRET_ACCESS_KEY": pairS3Secret},
+	} {
+		t.Run("refused/"+name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p := w.publishingProbe(t, root, env, &binds)
+			err := p.Start(context.Background())
+			calls := w.calls(t, "tofu.log")
+			checkRefused(t, err, calls)
+			checkNoUnbound(t, calls, env, binds)
+			checkNoPairSecret(t, w, root)
+		})
+	}
+}
+
 // TestProbeIdentityReservedNames (T081 Verify line).
 func TestProbeIdentityReservedNames(t *testing.T) {
 	scanned := func(t *testing.T, w *runWorld) {
@@ -1103,7 +1225,7 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 	checkReserved := func(t *testing.T, name string, err error, calls []tofuCall) {
 		t.Helper()
 		if ExitCode(err) == 0 {
-			t.Errorf("the run exited 0: %s, a name reserved for the run, was published and not refused", name)
+			t.Errorf("the run exited 0: %s, a name reserved for the run or on no allow-list, was published and not refused", name)
 		}
 		if comp := companionChildren(calls); len(comp) > 0 {
 			t.Errorf("the companion ran %d tofu calls (first: %s) although the root published %s (the published value reached it: %t)", len(comp), calls[comp[0]].Cmd, name, envOf(calls[comp[0]])[name] == pairReservedValue)
@@ -1123,6 +1245,8 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 	cases := map[string]bool{}
 	for _, n := range reservedNames {
 		cases[n], cases[strings.ToLower(n)], cases[oddCase(n)] = true, true, true
+		// T010: the exact TF_VAR_ prefix with the rest in another case (FR-006: "in any case").
+		cases[strings.ToUpper(n)] = true
 	}
 	// Any TF_CLI_* name, not only the families tofu documents today (review r1).
 	for _, n := range []string{"TF_CLI_ARGS", "TF_CLI_ARGS_apply", "TF_CLI_ARGS_destroy", "TF_CLI_CONFIG_FILE", "tf_cli_args_plan", "Tf_Cli_Config_File", "tF_cLi_aRgS_InIt",
@@ -1153,19 +1277,37 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 		})
 	}
 
-	// Names that only begin or end like a reserved one: passed on under their own name, and the
-	// companion keeps the run's own values.
+	// T010 (FR-006, inverting T082's neighbours): a name on no allow-list is refused like a reserved
+	// one, and the run's error names it.
+	for _, name := range unlistedNames {
+		t.Run("unlisted/"+name, func(t *testing.T) {
+			withUmask(t)
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			var binds []bindCall
+			p, env := w.pairingProbe(t, root, map[string]string{name: pairReservedValue}, &binds)
+			scanned(t, w)
+			err := p.Start(context.Background())
+			calls := w.calls(t, "tofu.log")
+			checkReserved(t, name, err, calls)
+			checkUnbound(t, name, binds)
+			checkNoUnbound(t, calls, env, binds)
+			checkNoPairSecret(t, w, root)
+			checkNoReserved(t, w, root, err)
+			namesRefusal(t, name, err)
+		})
+	}
+
+	// TF_VAR_ names that only begin like a reserved one: passed on under their own name, and the
+	// companion keeps the run's own values (T010: only TF_VAR_ names stay here; the rest of T082's
+	// neighbours are unlisted above).
 	t.Run("passed/neighbours", func(t *testing.T) {
 		withUmask(t)
 		root := tempPrivate(t)
 		w := newRunWorld(t)
 		var binds []bindCall
 		extra := map[string]string{}
-		for _, n := range []string{"OVH_ENDPOINT_URL", "ovh_endpoint_url", "MY_OVH_ENDPOINT", "TF_VAR_run_id_suffix", "TF_VAR_project_ids",
-			"TF_VAR_state_passphrase_hint", "HOMEPAGE", "XPATH", "TMPDIRS", "MY_TF_CLI_ARGS", "TF_VAR_tf_cli_args",
-			// T082: TF_VAR_* in any case, and names that only contain or nearly begin with TF_.
-			"TF_VAR_tf_log_path", "tf_var_tf_plugin_cache_dir", "Tf_Var_Tf_Log", "TF_VAR_state_path_hint", "TF_VAR_state",
-			"MY_TF_LOG", "XTF_LOG_PATH", "TFLOG", "TF"} {
+		for _, n := range admittedNeighbours {
 			extra[n] = "fake-neighbour-" + strings.ToLower(n)
 		}
 		p, env := w.pairingProbe(t, root, extra, &binds)
@@ -1208,8 +1350,8 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 	})
 
 	// `--cleanup` re-reads companion_env from the root's retained state: the same refusal applies, to
-	// a listed name and to a TF_* one (T082; T081 pinned the first only).
-	for _, row := range [][2]string{{"cleanup/refused", "Ovh_Endpoint"}, {"cleanup/refused-tf", "tf_Log_Path"}} {
+	// a listed name and to a TF_* one (T082; T081 pinned the first only), and to an unlisted one (T010).
+	for _, row := range [][2]string{{"cleanup/refused", "Ovh_Endpoint"}, {"cleanup/refused-tf", "tf_Log_Path"}, {"cleanup/refused-unlisted", "LZ_ANYTHING"}} {
 		name := row[1]
 		t.Run(row[0], func(t *testing.T) {
 			withUmask(t)
@@ -1245,6 +1387,9 @@ func TestProbeIdentityReservedNames(t *testing.T) {
 			checkNoUnbound(t, calls, env, binds)
 			checkNoPairSecret(t, w, root)
 			checkNoReserved(t, w, root, err)
+			if row[0] == "cleanup/refused-unlisted" {
+				namesRefusal(t, name, err)
+			}
 		})
 	}
 }

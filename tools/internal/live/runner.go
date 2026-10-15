@@ -544,6 +544,13 @@ func reservedCompanionName(k string) bool {
 	return slices.ContainsFunc(reservedCompanionNames, func(r string) bool { return strings.EqualFold(k, r) })
 }
 
+// admitCompanionName judges one published name against the companion allow-list (FR-006): nil for
+// an admitted name, else COMPANION_NAME_REFUSED <name>. Stub of the signature data-model fixes; T016
+// implements it and makes companionEnv use it.
+func admitCompanionName(name string) error {
+	return errors.New("admitCompanionName: not implemented")
+}
+
 // companionEnv reads the variables the stage published (under the admin credential), has
 // files.go write them to the run's probe directory, binds every published identity to the run's
 // account (P26) and makes them the companion's environment in place of the admin credential. On a
