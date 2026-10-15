@@ -2,6 +2,7 @@ package live
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -218,6 +219,39 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 	}
 	done = true
 	return nil
+}
+
+// SetStep names the steps of a credential-set write (FR-005, data-model *Credential set*), in
+// write order: the generation's first file, all its files, the generation directory's fsync,
+// `current.tmp`, the switch (the rename over `current`), the removal of older generations.
+type SetStep int
+
+const (
+	SetStepFirstFile SetStep = iota + 1
+	SetStepFiles
+	SetStepDirSync
+	SetStepPointerTmp
+	SetStepSwitch
+	SetStepCleanup
+)
+
+// CredentialSet is one writing instance's set of credential files, written below
+// <Root>/accounts/<Account>/sets/<Instance>/ as generation gen-<RunID>. Files maps each file's
+// relative path (the one readers use today) to its variables.
+type CredentialSet struct {
+	Root, Account, Instance, RunID string
+	Files                          map[string]map[string]string
+}
+
+// ErrInjectedCrash is what WriteCredentialSet returns right after the step a test named, leaving
+// the disk as a crash there would.
+var ErrInjectedCrash = errors.New("credential set: injected crash")
+
+// WriteCredentialSet writes s as a fresh generation and makes it current through one rename of
+// the pointer file `current`. failAfter is 0 in production; a non-zero step makes it return
+// ErrInjectedCrash right after that step.
+func WriteCredentialSet(s CredentialSet, failAfter SetStep) error {
+	return errors.New("WriteCredentialSet: not implemented")
 }
 
 // Run record (.local/live/<run-id>/) and scratch files of the run core: directories 0700, files

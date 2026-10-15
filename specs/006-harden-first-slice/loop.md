@@ -59,6 +59,7 @@ Holistic run at B: not run yet.
 | T047 | CLOSED; own red recorded and cleared in-task, no known red | leg 1 APPROVE + strong leg CLEAN (trigger: checks.yaml; notes only), 1 round | other non-Go reads of `test:traceability` unpinned: proposed task; `foundation-runs.json` stale: coordinator refresh |
 | T005 | CLOSED; known red `TestBindingErrorsQuiet` (4 subtests), `TestProbeBindingErrorQuiet` (2 subtests); `test:live-lane` red until US1's FR-003 implementation | leg 1 + strong leg (trigger: live lane), 2 rounds (round 1 REQUEST_CHANGES + CONCERNS, round 2 REQUEST_CHANGES + CLEAN; all verified findings fixed) | FR-003 "next action" has no case: proposed for the implementation task |
 | T006 | CLOSED; known red `TestChainLeftoverTokenRedacted` (4 subtests) until T012 | leg 1 + strong leg (trigger: live lane), 2 rounds (round 1 REQUEST_CHANGES + CONCERNS: one verified behaviour finding fixed; round 2 APPROVE + CLEAN) | token-name prefix collision at 10+ admin tokens: deferred to T012 |
+| T007 | CLOSED; known red `TestFilesCredentialSetWriter` (7 subtests) until T013 | leg 1 only (no trigger: tests plus a no-behaviour stub), 2 rounds (round 1 REQUEST_CHANGES: two verified behaviour findings fixed; round 2 APPROVE, two evidence minors fixed) | fsync and single-rename atomicity are invisible to step-boundary crash injection: for T013 review |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
