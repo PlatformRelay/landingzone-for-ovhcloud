@@ -148,7 +148,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: T006's cases green. Guard G17: never-register and register-late mutants are killed.
   - Evidence: `evidence/T012.md`; PR; initial status `not-run`.
 
-- [ ] T013 [US1] Implement `WriteCredentialSet` in tools/internal/live/files.go
+- [x] T013 [US1] Implement `WriteCredentialSet` in tools/internal/live/files.go — closed 2026-10-16, evidence: evidence/T013.md
   - Requirements: FR-005, SC-001; ADRs: 0009. Depends on: T007.
   - Verify: `task test:live-lane`: T007's cases green. Guard G18 writer mutants (files into live paths before the switch; switch before fsync; previous generation removed before the switch) are killed.
   - Evidence: `evidence/T013.md`; PR; initial status `not-run`.
