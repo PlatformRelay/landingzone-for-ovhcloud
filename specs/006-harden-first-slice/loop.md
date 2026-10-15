@@ -55,6 +55,7 @@ Holistic run at B: not run yet.
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
+| tools/cmd/lz-check/main_test.go:TestTaskfileTracesEverySpec (check:specs_default, ci-source_specs, foundation-ci_inputs); `test:traceability` red | Setup | T001 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -64,6 +65,8 @@ Holistic run at B: not run yet.
 - The entry admits only `task <target> [-- <path>]`; run it from $HOME, because mise shims refuse the untrusted worktree mise.toml. (spec R1, 005)
 - `test:live-lane` is not the whole CI: run `docs:check`, and re-pin pages whose `references:` name a file you changed. (005 T102)
 - No review tool or model names in committed files (D111). (005)
+- A test that parses config as text passes vacuously unless it has controls for a commented-out line, an inline comment and a matching line in another block; write them with the test, before review. (T001)
+- Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
 ## Where a human should look first
