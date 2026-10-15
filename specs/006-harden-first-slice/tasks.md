@@ -94,7 +94,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: all four cases fail on today's code.
   - Evidence: `evidence/T006.md`; PR; initial status `not-run`.
 
-- [ ] T007 [US1] Write credential-set writer tests in tools/internal/live/files_test.go
+- [x] T007 [US1] Write credential-set writer tests in tools/internal/live/files_test.go — closed 2026-10-15, evidence: evidence/T007.md
   - Requirements: FR-005; ADRs: 0009. Depends on: T004.
   - Cases (given / when / then → defect exposed), per data-model *Credential set*:
     - given an empty account directory / when `WriteCredentialSet` writes the `account-governance` set / then `sets/<instance>/gen-<run_id>/` holds every file at mode 600 and `current` names it → exposes a writer that skips the generation or the pointer.
