@@ -135,9 +135,6 @@ func (a API) Account(ctx context.Context, c Credential) (string, error) {
 	return account, nil
 }
 
-// maxAccountID bounds an account id from GET /auth/details (ids look like ab12345-ovh).
-const maxAccountID = 64
-
 // bindNext is the next action on a failed binding call (FR-003).
 const bindNext = "check the API endpoint, the network and the credential, then re-run"
 
@@ -157,11 +154,8 @@ func (a API) account(ctx context.Context, c Credential) (string, error) {
 	if err := a.do(req, "GET /auth/details", &d); err != nil {
 		return "", err
 	}
-	// The account id is answer-chosen and Bind's mismatch refusal quotes it: only a plain id that
-	// is not one of the credential's values goes on.
-	if len(d.Account) > maxAccountID || !accountID.MatchString(d.Account) ||
-		(c.ClientSecret != "" && strings.Contains(d.Account, c.ClientSecret)) || strings.Contains(d.Account, tok) {
-		return "", &callError{"GET /auth/details answered 200 without a usable account id"}
+	if d.Account == "" {
+		return "", &callError{"GET /auth/details answered 200 without an account id"}
 	}
 	return d.Account, nil
 }
@@ -185,7 +179,8 @@ func Bind(ctx context.Context, api API, c Credential, b Binding, manifestOrg str
 		return err
 	}
 	if account != b.AccountID {
-		return refuse(CondAccount, "credential account %q, bound %q", account, b.AccountID)
+		// The answered id is not quoted: it is answer-chosen text (FR-003).
+		return refuse(CondAccount, "the credential authenticates as another account than the bound %q", b.AccountID)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -238,6 +239,7 @@ func TestBindingErrorsActionable(t *testing.T) {
 		answer              http.HandlerFunc
 		api                 func(*testing.T) API // instead of hostileBindingAPI, when set
 		cancel              bool                 // Bind runs with a cancelled context
+		refused             bool                 // the call succeeds; Bind refuses the account
 		class               string               // the status or transport class the error names
 	}{
 		{name: "token-redirect", hostile: "POST /token", call: "token endpoint", answer: status(http.StatusFound, quietLocation), class: "3xx"},
@@ -249,13 +251,14 @@ func TestBindingErrorsActionable(t *testing.T) {
 		{name: "auth-details-undecodable", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: undecodable, class: "200"},
 		{name: "unreachable", call: "token endpoint", api: unreachable, class: "request failed"},
 		{name: "cancelled", hostile: "-", call: "token endpoint", answer: nil, cancel: true, class: "cancelled"},
-		// A well-formed answer whose fields are missing or answer-chosen: the account id is quoted
-		// by Bind's mismatch refusal, so one holding the secret must not reach it.
+		// A well-formed answer whose fields are missing.
 		{name: "token-empty", hostile: "POST /token", call: "token endpoint", answer: body(`{}`), class: "200"},
 		{name: "auth-details-empty", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{}`), class: "200"},
-		{name: "auth-details-account-is-secret", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{"account":"` + quietSecret + `"}`), class: "200"},
-		{name: "auth-details-account-holds-secret", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{"account":"ab1-` + quietSecret + `-ovh"}`), class: "200"},
-		{name: "auth-details-account-not-an-id", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{"account":"http://evil.example/x"}`), class: "200"},
+		// A well-formed account id that is not the bound one: Bind refuses (G13) without quoting
+		// the answered id, which is answer-chosen text and may hold the secret or part of it.
+		{name: "account-is-secret", hostile: "GET /v1/auth/details", answer: body(`{"account":"` + quietSecret + `"}`), refused: true},
+		{name: "account-holds-secret-fragment", hostile: "GET /v1/auth/details", answer: body(`{"account":"ab1-` + quietSecret[:4] + `-ovh"}`), refused: true},
+		{name: "account-not-an-id", hostile: "GET /v1/auth/details", answer: body(`{"account":"http://evil.example/x"}`), refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -281,6 +284,13 @@ func TestBindingErrorsActionable(t *testing.T) {
 			}
 			if strings.Contains(msg, "evil.example") {
 				t.Errorf("error %q quotes the redirect URL", msg)
+			}
+			if tc.refused {
+				var r *Refusal
+				if !errors.As(err, &r) || r.Condition != CondAccount {
+					t.Errorf("error %q, want a %s refusal", msg, CondAccount)
+				}
+				return
 			}
 			for _, want := range []string{tc.call, tc.class} {
 				if !strings.Contains(msg, want) {
