@@ -225,6 +225,9 @@ func TestBindingErrorsActionable(t *testing.T) {
 	undecodable := func(w http.ResponseWriter, _ *http.Request) {
 		io.WriteString(w, `{"account":"\u`+quietSecret+`"}`)
 	}
+	body := func(s string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, s) }
+	}
 	unreachable := func(t *testing.T) API {
 		srv := httptest.NewServer(http.NotFoundHandler())
 		srv.Close()
@@ -234,6 +237,7 @@ func TestBindingErrorsActionable(t *testing.T) {
 		name, hostile, call string
 		answer              http.HandlerFunc
 		api                 func(*testing.T) API // instead of hostileBindingAPI, when set
+		cancel              bool                 // Bind runs with a cancelled context
 		class               string               // the status or transport class the error names
 	}{
 		{name: "token-redirect", hostile: "POST /token", call: "token endpoint", answer: status(http.StatusFound, quietLocation), class: "3xx"},
@@ -244,6 +248,14 @@ func TestBindingErrorsActionable(t *testing.T) {
 		{name: "token-refused", hostile: "POST /token", call: "token endpoint", answer: status(http.StatusUnauthorized, ""), class: "401"},
 		{name: "auth-details-undecodable", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: undecodable, class: "200"},
 		{name: "unreachable", call: "token endpoint", api: unreachable, class: "request failed"},
+		{name: "cancelled", hostile: "-", call: "token endpoint", answer: nil, cancel: true, class: "cancelled"},
+		// A well-formed answer whose fields are missing or answer-chosen: the account id is quoted
+		// by Bind's mismatch refusal, so one holding the secret must not reach it.
+		{name: "token-empty", hostile: "POST /token", call: "token endpoint", answer: body(`{}`), class: "200"},
+		{name: "auth-details-empty", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{}`), class: "200"},
+		{name: "auth-details-account-is-secret", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{"account":"` + quietSecret + `"}`), class: "200"},
+		{name: "auth-details-account-holds-secret", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{"account":"ab1-` + quietSecret + `-ovh"}`), class: "200"},
+		{name: "auth-details-account-not-an-id", hostile: "GET /v1/auth/details", call: "GET /auth/details", answer: body(`{"account":"http://evil.example/x"}`), class: "200"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -253,7 +265,13 @@ func TestBindingErrorsActionable(t *testing.T) {
 			} else {
 				api = hostileBindingAPI(t, tc.hostile, tc.answer)
 			}
-			err := Bind(context.Background(), api, quietCredential, bound, "lz")
+			ctx := context.Background()
+			if tc.cancel {
+				c, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = c
+			}
+			err := Bind(ctx, api, quietCredential, bound, "lz")
 			if err == nil {
 				t.Fatal("Bind() bound against a hostile answer")
 			}

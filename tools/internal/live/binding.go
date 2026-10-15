@@ -79,8 +79,8 @@ func (a API) do(req *http.Request, what string, v any) error {
 	c.Transport = rec
 	resp, err := c.Do(req)
 	if err != nil {
-		if rec.code != 0 {
-			return &callError{fmt.Sprintf("%s answered %dxx", what, rec.code/100)}
+		if rec.code/100 == 3 {
+			return &callError{fmt.Sprintf("%s answered 3xx", what)}
 		}
 		// Do's errors are *url.Error (net/http Client.Do), so quiet keeps only the class.
 		return &callError{quiet(what, err).Error()}
@@ -108,7 +108,7 @@ func (a API) token(ctx context.Context, c Credential) (string, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", &callError{"token endpoint: the request cannot be built from the configured URL"}
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var t struct {
@@ -118,7 +118,7 @@ func (a API) token(ctx context.Context, c Credential) (string, error) {
 		return "", err
 	}
 	if t.AccessToken == "" {
-		return "", fmt.Errorf("token endpoint returned no access token")
+		return "", &callError{"token endpoint answered 200 without an access token"}
 	}
 	return t.AccessToken, nil
 }
@@ -135,6 +135,9 @@ func (a API) Account(ctx context.Context, c Credential) (string, error) {
 	return account, nil
 }
 
+// maxAccountID bounds an account id from GET /auth/details (ids look like ab12345-ovh).
+const maxAccountID = 64
+
 // bindNext is the next action on a failed binding call (FR-003).
 const bindNext = "check the API endpoint, the network and the credential, then re-run"
 
@@ -145,7 +148,7 @@ func (a API) account(ctx context.Context, c Credential) (string, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL+"/auth/details", nil)
 	if err != nil {
-		return "", err
+		return "", &callError{"GET /auth/details: the request cannot be built from the configured URL"}
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
 	var d struct {
@@ -154,8 +157,11 @@ func (a API) account(ctx context.Context, c Credential) (string, error) {
 	if err := a.do(req, "GET /auth/details", &d); err != nil {
 		return "", err
 	}
-	if d.Account == "" {
-		return "", fmt.Errorf("GET /auth/details returned no account")
+	// The account id is answer-chosen and Bind's mismatch refusal quotes it: only a plain id that
+	// is not one of the credential's values goes on.
+	if len(d.Account) > maxAccountID || !accountID.MatchString(d.Account) ||
+		(c.ClientSecret != "" && strings.Contains(d.Account, c.ClientSecret)) || strings.Contains(d.Account, tok) {
+		return "", &callError{"GET /auth/details answered 200 without a usable account id"}
 	}
 	return d.Account, nil
 }
