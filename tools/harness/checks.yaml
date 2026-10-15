@@ -82,7 +82,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
     {"id": "test:traceability", "requirements": ["FR-004", "SC-003", "005/FR-014", "006/FR-012", "006/FR-022"], "command": "task test:traceability", "creator": "T007", "kind": "behavioral",
      "scope": ["tools/internal/checks", "tools/cmd/lz-check"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/report", "tools/harness/checks.yaml"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/report", "tools/harness/checks.yaml", "specs/001-offline-foundation/tasks.md", "specs/005-first-landing-zone-slice/tasks.md", "specs/006-harden-first-slice/tasks.md"]},
     {"id": "check:specs", "requirements": ["FR-004", "SC-003", "005/FR-014", "006/FR-021", "006/FR-022", "006/SC-002"], "command": "task check:specs", "creator": "T007", "kind": "behavioral",
      "scope": ["specs/001-offline-foundation", "specs/005-first-landing-zone-slice", "specs/006-harden-first-slice", "tools/harness/checks.yaml", "docs/adr"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check", "tools/internal/report"]},

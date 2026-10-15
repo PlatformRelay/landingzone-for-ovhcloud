@@ -64,7 +64,7 @@ directory points at the PR and names the red and green commits.
   - Verify: `task test:traceability`: T003's cases green; removing any added input turns its row red again.
   - Evidence: `evidence/T004.md`; PR; initial status `not-run`.
 
-- [ ] T047 Pin the task lists `test:traceability`'s judge reads in its registry inputs, test first in tools/cmd/lz-check/main_test.go (found in T004's review)
+- [x] T047 Pin the task lists `test:traceability`'s judge reads in its registry inputs, test first in tools/cmd/lz-check/main_test.go (found in T004's review) — closed 2026-10-15, evidence: evidence/T047.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T004.
   - Cases (given / when / then → defect exposed):
     - given the registry / when the test lists the files the traceability judge reads (every `specs/*/tasks.md` it opens, `main_test.go` near line 1025) / then each is in `test:traceability`'s inputs → exposes a ticked task box that leaves the check's evidence digest unchanged.

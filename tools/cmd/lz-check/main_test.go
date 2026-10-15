@@ -1009,37 +1009,45 @@ func goDeps(repoRoot string, r goRun) ([]string, error) {
 	return dirs, nil
 }
 
+// creatorTaskList names the tasks.md that owns a check's creator (a bare id
+// is spec 001's, NNN/Tnnn spec NNN's) and the creator's id in it.
+func creatorTaskList(t *testing.T, root string, c checks.CheckDefinition) (path, id string) {
+	t.Helper()
+	spec, id, ok := strings.Cut(c.Creator, "/")
+	if !ok {
+		spec, id = "001", c.Creator
+	}
+	found, _ := filepath.Glob(filepath.Join(root, "specs", spec+"-*", "tasks.md"))
+	if len(found) != 1 {
+		t.Fatalf("BEHAVIORAL_RED: creator %s of %s: want one specs/%s-*/tasks.md, found %d", c.Creator, c.ID, spec, len(found))
+	}
+	return found[0], id
+}
+
 // creatorsDone reports, per registry creator, whether its task is ticked in
-// the tasks.md of the spec that owns it (a bare id is spec 001's, NNN/Tnnn
-// spec NNN's). An id that tasks.md does not list is open.
+// the tasks.md of the spec that owns it (creatorTaskList). An id that
+// tasks.md does not list is open.
 func creatorsDone(t *testing.T, root string, reg checks.Registry) map[string]bool {
 	t.Helper()
 	ticks := map[string]map[string]bool{}
 	done := map[string]bool{}
 	for _, c := range reg.Checks {
-		spec, id, ok := strings.Cut(c.Creator, "/")
-		if !ok {
-			spec, id = "001", c.Creator
-		}
-		if ticks[spec] == nil {
-			found, _ := filepath.Glob(filepath.Join(root, "specs", spec+"-*", "tasks.md"))
-			if len(found) != 1 {
-				t.Fatalf("BEHAVIORAL_RED: creator %s of %s: want one specs/%s-*/tasks.md, found %d", c.Creator, c.ID, spec, len(found))
-			}
-			data, err := os.ReadFile(found[0])
+		file, id := creatorTaskList(t, root, c)
+		if ticks[file] == nil {
+			data, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
 			}
 			list, err := checks.ParseTasks(string(data))
 			if err != nil {
-				t.Fatalf("%s: %v", found[0], err)
+				t.Fatalf("%s: %v", file, err)
 			}
-			ticks[spec] = map[string]bool{}
+			ticks[file] = map[string]bool{}
 			for _, task := range list {
-				ticks[spec][task.ID] = task.Done
+				ticks[file][task.ID] = task.Done
 			}
 		}
-		done[c.Creator] = ticks[spec][id]
+		done[c.Creator] = ticks[file][id]
 	}
 	return done
 }
@@ -1156,6 +1164,36 @@ func TestRegistryInputsCoverGoDeps(t *testing.T) {
 	t.Run("traceability reads the registry", func(t *testing.T) {
 		if !covered(registryReads(t, root)["test:traceability"], "tools/harness/checks.yaml") {
 			t.Error("BEHAVIORAL_RED: test:traceability judges tools/harness/checks.yaml, but its registry scope and inputs do not name it")
+		}
+	})
+	t.Run("traceability reads the task lists", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(root, "tools", "harness", "checks.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg, err := checks.ParseRegistry(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reads := registryReads(t, root)["test:traceability"]
+		seen := map[string]bool{}
+		for _, c := range reg.Checks {
+			file, _ := creatorTaskList(t, root, c)
+			rel, err := filepath.Rel(root, file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rel = filepath.ToSlash(rel)
+			if seen[rel] {
+				continue
+			}
+			seen[rel] = true
+			if !covered(reads, rel) {
+				t.Errorf("BEHAVIORAL_RED: test:traceability judges creator status in %s, but its registry scope and inputs do not name it", rel)
+			}
+		}
+		if len(seen) == 0 {
+			t.Fatal("BEHAVIORAL_RED: the registry names no creators, so the judge reads no task list")
 		}
 	})
 	t.Run("planned check skipped", func(t *testing.T) {
