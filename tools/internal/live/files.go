@@ -256,11 +256,16 @@ var ErrInjectedCrash = errors.New("credential set: injected crash")
 // genName is a generation directory's name (data-model *Credential set*): gen-<run_id>.
 var genName = regexp.MustCompile(`^gen-[0-9A-Za-z-]+$`)
 
-// setFile is a file a credential set may hold, at the canonical path readers use (data-model
-// *Credential set*): the deployer clients of account-governance and the S3 keys of tenant-state.
-// The binding, the passphrase, sandbox.env and the bootstrap's state.env never match, so step 5
-// never removes them as flat files.
-var setFile = regexp.MustCompile(`^(platform-deployer\.env|tenants/[A-Za-z0-9][A-Za-z0-9_-]*/(deployer|state|platform-state)\.env)$`)
+// The files a credential set may hold, at the canonical paths readers use (data-model *Credential
+// set*): account-governance's set holds the deployer clients, every other writing instance is a
+// tenant-state and holds S3 keys. The binding, the passphrase, sandbox.env, the bootstrap's
+// state.env and the other kind's files never match, so step 5 never removes them as flat files.
+const setInstanceGovernance = "account-governance"
+
+var (
+	setFilesGovernance = regexp.MustCompile(`^(platform-deployer\.env|tenants/[A-Za-z0-9][A-Za-z0-9_-]*/deployer\.env)$`)
+	setFilesState      = regexp.MustCompile(`^tenants/[A-Za-z0-9][A-Za-z0-9_-]*/(state|platform-state)\.env$`)
+)
 
 // setSync and setRename are the set writer's fsync and its switch. They are variables only so a
 // test can see what crash injection cannot: every file and directory of the generation synced
@@ -296,10 +301,14 @@ func WriteCredentialSet(s CredentialSet, failAfter SetStep) error {
 		return errors.New("credential set: no files")
 	}
 	// Every file is checked before anything is written: a refused path or value leaves no trace.
+	setFile := setFilesState
+	if s.Instance == setInstanceGovernance {
+		setFile = setFilesGovernance
+	}
 	rels := make([]string, 0, len(s.Files))
 	for rel, values := range s.Files {
 		if !setFile.MatchString(rel) {
-			return fmt.Errorf("credential set: %q is not a set file at its canonical path", rel)
+			return fmt.Errorf("credential set: %q is not a file of %s's set at its canonical path", rel, s.Instance)
 		}
 		if err := checkCredentialValues(values); err != nil {
 			return err
