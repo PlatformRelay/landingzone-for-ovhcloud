@@ -106,7 +106,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: every case fails against the stub `WriteCredentialSet`.
   - Evidence: `evidence/T007.md`; PR; initial status `not-run`.
 
-- [ ] T008 [US1] Write credential-set reader and migration tests in tools/internal/live/credentials_test.go
+- [x] T008 [US1] Write credential-set reader and migration tests in tools/internal/live/credentials_test.go — closed 2026-10-15, evidence: evidence/T008.md
   - Requirements: FR-005; ADRs: 0009. Depends on: T004.
   - Cases (given / when / then → defect exposed):
     - given `current` naming a missing directory, `../x`, or a name not matching `gen-…` / when `CredentialSetPath` resolves / then it refuses with `CREDENTIAL_POINTER_INVALID` → exposes a pointer that escapes the set directory.
