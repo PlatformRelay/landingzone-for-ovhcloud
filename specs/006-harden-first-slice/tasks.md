@@ -84,7 +84,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: the first three cases fail on today's code for the stated reasons; the fourth passes.
   - Evidence: `evidence/T005.md`; PR; initial status `not-run`.
 
-- [ ] T006 [US1] Write leftover-token redaction tests in tools/internal/live/chain_test.go
+- [x] T006 [US1] Write leftover-token redaction tests in tools/internal/live/chain_test.go — closed 2026-10-15, evidence: evidence/T006.md
   - Requirements: FR-004; ADRs: 0009, 0021. Depends on: T004.
   - Cases (given / when / then → defect exposed):
     - given a fake listing that returns the bearer token as a resource id / when the chain's leftover check runs / then no file of the run record (`listings/*.json`, `leftovers.json`, logs) and no captured stream contains it, and the listing is recorded with the id redacted → exposes the token never reaching the redactor.

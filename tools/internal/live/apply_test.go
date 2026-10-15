@@ -187,7 +187,16 @@ type laneStack struct {
 	// calls of ReadFail.Call ("init", or "show-state": `show -json` without a plan file) print
 	// their answer on stderr and exit 1.
 	ReadFail *laneReadFail `json:"read_fail,omitempty"`
+	// PlanSays (T006) is printed on the plan's stdout before its summary, one write per element
+	// with a pause between, so a text split across them usually reaches the run as two writes
+	// (pipe reads may still merge them; the redactor's hold-back has its own test);
+	// laneBearerHead and laneBearerTail stand for the halves of the token in <log>.bearer.
+	PlanSays []string `json:"plan_says,omitempty"`
 }
+
+// laneBearerHead and laneBearerTail in laneStack.PlanSays are the first and second half of the
+// bearer token the chain harness last saw on a listing request (chainBearers).
+const laneBearerHead, laneBearerTail = "<bearer-head>", "<bearer-tail>"
 
 // laneReadFail is a run of failing state reads (laneStack.ReadFail).
 type laneReadFail struct {
@@ -501,6 +510,15 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		raw, _ := json.Marshal(lanePlanFile{Stack: st.ID, Nonce: call.Nonce, Serial: state.Serial, PassSHA: pass, Destroy: call.Destroy})
 		if os.WriteFile(out, raw, 0o600) != nil {
 			return fail("cannot write the plan file")
+		}
+		if len(st.PlanSays) > 0 {
+			raw, _ := os.ReadFile(w.Log + ".bearer")
+			tok := string(raw)
+			halves := strings.NewReplacer(laneBearerHead, tok[:len(tok)/2], laneBearerTail, tok[len(tok)/2:])
+			for _, s := range st.PlanSays {
+				_, _ = os.Stdout.WriteString(halves.Replace(s))
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 		fmt.Print("Plan: 1 to add, 0 to change, 0 to destroy.\n" + echo)
 		return done(0)

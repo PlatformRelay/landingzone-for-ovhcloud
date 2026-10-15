@@ -80,6 +80,9 @@ type LeftoverCheck struct {
 	// nil the check lists through them, GET only (T083, T084).
 	API  API
 	Cred Credential
+	// Red is the run's redactor (FR-004): when non-nil, the bearer token the check obtains is
+	// added to it before the first listing. Not implemented yet (T012).
+	Red *Redactor
 }
 
 // Leftover is a listed resource that should not exist.
