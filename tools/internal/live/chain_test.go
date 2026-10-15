@@ -23,6 +23,7 @@ package live
 // applied, its state present) and the chain applies the other five.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -348,16 +349,35 @@ type chainAdminTransport struct {
 	done    *bool
 	mu      *sync.Mutex
 	adminTo string // "Bearer fake-token-<admin name>"
+	// bearers (T006; nil: the lane's one admin token) gives the admin credential a distinct token
+	// per token request and echoes the listing's token into its answer.
+	bearers *chainBearers
 }
 
 func (c chainAdminTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Path == "/auth/oauth2/token" || r.URL.Path == "/v1/auth/details" {
+	if r.URL.Path == "/auth/oauth2/token" {
+		resp, err := c.lane.RoundTrip(r)
+		if err != nil || c.bearers == nil {
+			return resp, err
+		}
+		return c.bearers.issue(resp)
+	}
+	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if r.URL.Path == "/v1/auth/details" {
+		if c.bearers != nil && c.bearers.known(tok) {
+			r = r.Clone(r.Context())
+			r.Header.Set("Authorization", "Bearer "+c.bearers.base)
+		}
 		return c.lane.RoundTrip(r)
 	}
 	c.mu.Lock()
 	chainLate(c.log, c.late, c.done)
 	c.mu.Unlock()
-	if r.Header.Get("Authorization") != c.adminTo {
+	authorized := r.Header.Get("Authorization") == c.adminTo
+	if c.bearers != nil {
+		authorized = c.bearers.known(tok)
+	}
+	if !authorized {
 		laneAppend(c.log, laneCall{Cmd: "list", Stack: r.URL.Path, Exit: http.StatusUnauthorized})
 		return &http.Response{StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized", Body: io.NopCloser(strings.NewReader(`{"message":"Invalid credentials"}`)),
 			Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
@@ -367,7 +387,78 @@ func (c chainAdminTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 	out := r.Clone(r.Context())
 	out.URL.Scheme, out.URL.Host, out.Host = u.Scheme, u.Host, u.Host
 	out.Header.Set("Authorization", "Bearer "+listToken)
-	return c.list.Client().Transport.RoundTrip(out)
+	resp, err := c.list.Client().Transport.RoundTrip(out)
+	if err != nil || c.bearers == nil {
+		return resp, err
+	}
+	if err := c.bearers.carry(tok); err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
+	return chainRewriteBody(resp, func(b []byte) []byte { return bytes.ReplaceAll(b, []byte(chainEchoBearer), []byte(tok)) })
+}
+
+// chainEchoBearer in a listing answer stands for the bearer token the listing request carried
+// (chainBearers): a listing that echoes the leftover check's token (spec 006 FR-004).
+const chainEchoBearer = "T006-ECHO-BEARER"
+
+// chainBearers (T006): the lane's fake API issues one token per credential, so the binding's
+// token (GET /auth/details) and each leftover check's are the same and a test cannot tell which
+// was redacted. A token endpoint may issue a new token per request (for OVHcloud UNVERIFIED);
+// chainBearers gives the admin credential that behaviour: the n-th token request is answered
+// <base>-<n>, mapped back to <base> for the lane's GET /auth/details. Each token a listing
+// request carried is recorded, the last also in file, which the fake tofu reads
+// (laneStack.PlanSays).
+type chainBearers struct {
+	mu      sync.Mutex
+	base    string   // the token the lane's fake API issues to the admin credential
+	file    string   // the last carried token, for the fake tofu
+	issued  []string // in order
+	carried []string // distinct, in order
+}
+
+func (b *chainBearers) issue(resp *http.Response) (*http.Response, error) {
+	return chainRewriteBody(resp, func(body []byte) []byte {
+		var m map[string]any
+		if json.Unmarshal(body, &m) != nil || m["access_token"] != b.base {
+			return body
+		}
+		b.mu.Lock()
+		tok := fmt.Sprintf("%s-%d", b.base, len(b.issued)+1)
+		b.issued = append(b.issued, tok)
+		b.mu.Unlock()
+		m["access_token"] = tok
+		out, _ := json.Marshal(m)
+		return out
+	})
+}
+
+func (b *chainBearers) known(tok string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Contains(b.issued, tok)
+}
+
+func (b *chainBearers) carry(tok string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !slices.Contains(b.carried, tok) {
+		b.carried = append(b.carried, tok)
+	}
+	return os.WriteFile(b.file, []byte(tok), 0o600)
+}
+
+// chainRewriteBody is resp with its body passed through f.
+func chainRewriteBody(resp *http.Response, f func([]byte) []byte) (*http.Response, error) {
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	body = f(body)
+	resp.Body, resp.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
+	resp.Header.Del("Content-Length")
+	return resp, nil
 }
 
 // chainExec is one chain run's setup beyond the fake world.
@@ -386,6 +477,9 @@ type chainExec struct {
 	atBlock    func(runDir string)
 	atFinal    func(runDir string, f *fakeListAPI)
 	production bool
+	// bearers (T006): on the production path, a distinct admin token per token request
+	// (chainBearers); the run's chainRun.bearers is it.
+	bearers bool
 	// signalAtBaseline is sent on the first listing request, which then waits for the run to stop
 	// (T091: an interrupted baseline is not a blocked run); production must be false.
 	signalAtBaseline os.Signal
@@ -470,6 +564,8 @@ type chainRun struct {
 	invAtBlock []InventoryEntry
 	// list are the requests the fake listing API received (T091: none writes).
 	list []listCall
+	// bearers are the admin tokens of the run (chainExec.bearers; nil otherwise).
+	bearers *chainBearers
 }
 
 func (h *laneHarness) nextRunID() string {
@@ -573,10 +669,14 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		}
 	}
 	var lister Lister = cl
+	var bearers *chainBearers
 	if c.production {
 		lister = nil
+		if c.bearers {
+			bearers = &chainBearers{base: "fake-token-" + laneAPINames[AuthorityBootstrap], file: h.world.Log + ".bearer"}
+		}
 		api.HTTP = &http.Client{Transport: chainAdminTransport{lane: api.HTTP.Transport, list: f, log: h.world.Log, late: late, done: &lateDone,
-			mu: &sync.Mutex{}, adminTo: "Bearer fake-token-" + laneAPINames[AuthorityBootstrap]}}
+			mu: &sync.Mutex{}, adminTo: "Bearer fake-token-" + laneAPINames[AuthorityBootstrap], bearers: bearers}}
 	}
 	obs := c.observer
 	if obs == nil {
@@ -600,7 +700,8 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	close(stop)
 	<-watched
 	_ = os.Remove(h.world.Log + ".blocked")
-	r := chainRun{laneRun: laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: process}, runID: runID, invAtBlock: invAtBlock, list: f.Calls()}
+	_ = os.Remove(h.world.Log + ".bearer")
+	r := chainRun{laneRun: laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: process}, runID: runID, invAtBlock: invAtBlock, list: f.Calls(), bearers: bearers}
 	h.chainRun = true
 	h.judge(r.laneRun, before)
 	h.chainRun = false
@@ -1686,6 +1787,165 @@ func TestChainDestroyProducer(t *testing.T) {
 		}
 		if len(h.record(consumer)) == 0 {
 			t.Errorf("record of %s removed although its destroy failed", consumer)
+		}
+	})
+}
+
+// ---------------------------------------------------------------- spec 006 T006 (FR-004)
+
+// chainTokenPolicy is w's IAM policy listing with one more policy, in the shape chainWorld lists
+// them, as a seed.
+func chainTokenPolicy(t *testing.T, w syntheticWorld, id, name string) syntheticSeed {
+	t.Helper()
+	elem := `{"id":"` + id + `","owner":"` + laneAccount + `","name":"` + name + `","readOnly":false,"identities":[],"resources":[],"permissions":{},"permissionsGroups":[],"createdAt":"2026-10-08T12:00:00Z"}`
+	return syntheticSeed{Replace: map[string][]json.RawMessage{"/iam/policy": chainAppend(t, w, "/iam/policy", elem)}}
+}
+
+// chainListingTokens are the bearer tokens the run's listing requests carried: the leftover
+// checks' tokens. It fails when there is none, or when one is the binding's (the run's first
+// admin token), so the run cannot pass on the binding's token alone.
+func chainListingTokens(t *testing.T, r chainRun) []string {
+	t.Helper()
+	b := r.bearers
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.carried) == 0 || len(b.issued) < 2 || slices.Contains(b.carried, b.issued[0]) {
+		t.Fatalf("listing tokens %v of issued %v: want the leftover checks' own tokens, none the binding's", b.carried, b.issued)
+	}
+	return slices.Clone(b.carried)
+}
+
+// chainNoTokenInRecord fails when any file below the run directory, the terminal or the process
+// streams hold one of toks.
+func chainNoTokenInRecord(t *testing.T, h *laneHarness, r chainRun, toks []string) {
+	t.Helper()
+	err := filepath.WalkDir(r.runDir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, tok := range toks {
+			if strings.Contains(string(raw), tok) {
+				rel, _ := filepath.Rel(r.runDir, p)
+				t.Errorf("the run record's %s holds the leftover check's bearer token %s", rel, tok)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Errorf("walking the run directory: %v", err)
+	}
+	for _, tok := range toks {
+		if strings.Contains(h.term.String(), tok) {
+			t.Errorf("the terminal holds the leftover check's bearer token %s", tok)
+		}
+		if strings.Contains(r.process, tok) {
+			t.Errorf("the process streams hold the leftover check's bearer token %s", tok)
+		}
+	}
+}
+
+// chainListedPolicy is the element named name of the run's final listing record of IAM policies
+// (listings/ovh_iam_policy.json), and whether it is there.
+func chainListedPolicy(t *testing.T, runDir, name string) (map[string]any, bool) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(runDir, "listings", tPolicy+".json"))
+	if err != nil {
+		t.Errorf("no listing record of %s: %v", tPolicy, err)
+		return nil, false
+	}
+	var pols []map[string]any
+	if err := json.Unmarshal(raw, &pols); err != nil {
+		t.Errorf("listing record of %s: %v", tPolicy, err)
+		return nil, false
+	}
+	for _, p := range pols {
+		if p["name"] == name {
+			return p, true
+		}
+	}
+	t.Errorf("the listing record of %s has no policy named %s: the seeded listing did not run", tPolicy, name)
+	return nil, false
+}
+
+// FR-004 (spec 006, A3): the bearer token the chain's leftover check obtains is registered with
+// the run's redactor before its first listing, so no file of the run record and no stream holds
+// it: not where a listing echoes it as an id, not inside a longer id, not split across two writes
+// of a stream. The chain lists on the production path (ApplyOptions.API with the sandbox admin
+// credential), where the check obtains the token itself; every token request gets its own token
+// (chainBearers), so registering the binding's token does not pass.
+func TestChainLeftoverTokenRedacted(t *testing.T) {
+	t.Run("token-as-id", func(t *testing.T) {
+		h := newChainHarness(t)
+		_, w := chainWorld(t, h.nextRunID())
+		const name = "audit-t006-token-as-id"
+		r := h.chain(chainExec{production: true, bearers: true, early: true, seed: chainTokenPolicy(t, w, chainEchoBearer, name)})
+		chainNoTokenInRecord(t, h, r, chainListingTokens(t, r))
+		if p, ok := chainListedPolicy(t, r.runDir, name); ok && p["id"] != redacted {
+			t.Errorf("listed policy %s recorded with id %q, want %q", name, p["id"], redacted)
+		}
+	})
+	t.Run("token-inside-longer-id", func(t *testing.T) {
+		h := newChainHarness(t)
+		_, w := chainWorld(t, h.nextRunID())
+		const name = "lz-t006-token-inside"
+		r := h.chain(chainExec{production: true, bearers: true, early: true, seed: chainTokenPolicy(t, w, "lz-"+chainEchoBearer+"-t006", name)})
+		chainNoTokenInRecord(t, h, r, chainListingTokens(t, r))
+		want := "lz-" + redacted + "-t006"
+		if p, ok := chainListedPolicy(t, r.runDir, name); ok && p["id"] != want {
+			t.Errorf("listed policy %s recorded with id %q, want %q", name, p["id"], want)
+		}
+		// The slice prefix makes it a leftover: leftovers.json names it, the token part redacted.
+		rep := chainReport(t, r.runDir)
+		if !slices.ContainsFunc(rep.Leftovers, func(l Leftover) bool { return l.Type == tPolicy && l.ID == want }) {
+			t.Errorf("leftovers %v, want %s %s", leftoverKeys(rep.Leftovers), tPolicy, want)
+		}
+	})
+	t.Run("token-split-across-writes", func(t *testing.T) {
+		h := newChainHarness(t)
+		const before, after = "T006-split-before:", ":T006-split-after"
+		// The plan runs after the baseline listed: it prints the baseline check's token in two
+		// writes, split in the middle (laneStack.PlanSays).
+		h.setStack("demo-dev-gra11-network", func(st *laneStack) {
+			st.PlanSays = []string{before + laneBearerHead, laneBearerTail + after + "\n"}
+		})
+		r := h.chain(chainExec{production: true, bearers: true})
+		toks := chainListingTokens(t, r)
+		chainNoTokenInRecord(t, h, r, toks)
+		term := h.term.String()
+		for _, tok := range toks {
+			k := len(tok) / 2
+			if strings.Contains(term, before+tok[:k]) || strings.Contains(term, tok[k:]+after) {
+				t.Errorf("a half of the split token (%s) reached the terminal unredacted", tok)
+			}
+		}
+		if !strings.Contains(term, before+redacted+after) {
+			t.Errorf("the terminal does not show %q: the plan's two writes did not pass the redactor's hold-back", before+redacted+after)
+		}
+	})
+	t.Run("registered-before-first-listing", func(t *testing.T) {
+		w, _ := loadSynthetic(t)
+		f := newFakeListAPI(t, w.Responses)
+		c, inv := apiCheck(t, w, syntheticSeed{}, f)
+		c.Red = NewRedactor()
+		var once sync.Once
+		listed, held := false, false
+		inner := f.Client().Transport
+		c.API.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path != "/auth/oauth2/token" && !strings.HasSuffix(r.URL.Path, "/auth/details") {
+				once.Do(func() { listed, held = true, c.Red.Redact(listToken) == redacted })
+			}
+			return inner.RoundTrip(r)
+		})}
+		rep := c.Check(context.Background(), inv)
+		if !listed {
+			t.Fatalf("the check sent no listing request (outcome %q, errors %v)", rep.Outcome, rep.Errors)
+		}
+		if !held {
+			t.Errorf("LeftoverCheck.Red did not hold the bearer token when the first listing was requested")
 		}
 	})
 }
