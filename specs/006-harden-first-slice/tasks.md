@@ -117,7 +117,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: every case except the flat-file read fails against the stub.
   - Evidence: `evidence/T008.md`; PR; initial status `not-run`.
 
-- [ ] T009 [US1] Write scratch-home tests in tools/internal/live/env_test.go and tools/internal/live/bootstrap_state_test.go
+- [x] T009 [US1] Write scratch-home tests in tools/internal/live/env_test.go and tools/internal/live/bootstrap_state_test.go — closed 2026-10-15, evidence: evidence/T009.md
   - Requirements: FR-007; ADRs: 0009, 0021. Depends on: T004.
   - Cases (given / when / then → defect exposed):
     - given a sentinel `HOME` in the test process / when `Command` builds a child with an explicit home / then the child's `HOME` is that home → exposes `os.Getenv("HOME")` in `env.go:26-29`.
