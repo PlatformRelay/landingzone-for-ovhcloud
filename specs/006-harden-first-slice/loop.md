@@ -59,7 +59,7 @@ Holistic run at B: not run yet.
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
 | tools/cmd/lz-check/main_test.go:TestTaskfileTracesEverySpec (check:specs_default, ci-source_specs, foundation-ci_inputs); `test:traceability` red | Setup | T001 | T002 |
-| tools/cmd/lz-check/main_test.go:TestRegistryInputsCoverGoDeps (go_deps_covered: 57 rows; traceability_reads_the_registry); `test:traceability` red | Setup | T003 | |
+| tools/cmd/lz-check/main_test.go:TestRegistryInputsCoverGoDeps (go_deps_covered: 57 rows; traceability_reads_the_registry); `test:traceability` red | Setup | T003 | T004 |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
