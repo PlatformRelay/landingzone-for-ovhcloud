@@ -126,7 +126,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:bootstrap; task test:live-lane`: the first case fails against the stub of the new `Command` signature; the other two are pins of behaviour that holds today.
   - Evidence: `evidence/T009.md`; PR; initial status `not-run`.
 
-- [ ] T010 [US1] Write companion allow-list tests in tools/internal/live/probe_identity_test.go
+- [x] T010 [US1] Write companion allow-list tests in tools/internal/live/probe_identity_test.go — closed 2026-10-15, evidence: evidence/T010.md
   - Requirements: FR-006; ADRs: 0009, 0021. Depends on: T004.
   - Cases (given / when / then → defect exposed):
     - given `TF_VAR_x`, a complete OAuth2 pair, a complete S3 pair / when `admitCompanionName` and `companionEnv` judge them / then they are admitted → exposes an allow-list that is too narrow.
