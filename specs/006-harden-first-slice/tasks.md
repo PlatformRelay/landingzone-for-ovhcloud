@@ -138,7 +138,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: the refusal cases for unforeseen, lower-case and neighbour names fail on today's deny-list; the reserved-name and cleanup rows of `TestProbeIdentityReservedNames` stay green.
   - Evidence: `evidence/T010.md`; PR; initial status `not-run`.
 
-- [ ] T011 [US1] Route binding errors through `quiet` in tools/internal/live/binding.go
+- [x] T011 [US1] Route binding errors through `quiet` in tools/internal/live/binding.go — closed 2026-10-15, evidence: evidence/T011.md
   - Requirements: FR-003, SC-001; ADRs: 0009, 0021. Depends on: T005.
   - Verify: `task test:live-lane`: T005's cases green. Guard G16: the `%w` mutant and a header-quoting mutant are killed. FR-003's "names the call, the status class and the next action" had no case in T005: add one here (given a hostile binding answer / when `Bind` fails / then the error names the call, `3xx` or the transport class, and the next action → exposes a quiet but unactionable error), red before the fix.
   - Evidence: `evidence/T011.md`; PR; initial status `not-run`.
