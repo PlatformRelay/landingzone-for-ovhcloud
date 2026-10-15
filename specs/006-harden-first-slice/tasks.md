@@ -35,7 +35,7 @@ directory points at the PR and names the red and green commits.
 
 ## Phase 1: Setup
 
-- [ ] T001 Write the Taskfile spec-tracing test `TestTaskfileTracesEverySpec` in tools/cmd/lz-check/main_test.go
+- [x] T001 Write the Taskfile spec-tracing test `TestTaskfileTracesEverySpec` in tools/cmd/lz-check/main_test.go — closed 2026-10-15, evidence: evidence/T001.md
   - Requirements: FR-022; ADRs: 0008, 0019. Depends on: none.
   - Cases (given / when / then → defect exposed):
     - given today's Taskfile.yml / when the test parses the `check:specs` default `SPEC_DIRS` / then every spec directory owning registry keys (`NNN/…`, or spec 001's unprefixed keys) is listed → exposes spec 006 missing from the default trace.

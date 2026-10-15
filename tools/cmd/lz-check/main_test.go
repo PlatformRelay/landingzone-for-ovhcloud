@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -680,4 +682,133 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Lines read by TestTaskfileTracesEverySpec: active (uncommented) lines only,
+// and the ci-source arguments stop at an inline YAML comment.
+var (
+	specDirsLine = regexp.MustCompile(`(?m)^ +SPEC_DIRS:[^\n]*default "([^"]*)"`)
+	ciSourceLine = regexp.MustCompile(`(?m)^ +- go -C tools run \./cmd/lz-check -root \.\. ci-source ([^#\n]*)`)
+)
+
+// taskfileSpecDirs returns the specs/NNN-… arguments on the active line of
+// task's block in the Taskfile that line matches; a commented-out line or
+// one in another task is never read. It fails the test when the task or the
+// line is missing, so a reworded Taskfile cannot pass by matching nothing.
+func taskfileSpecDirs(t *testing.T, taskfile, task string, line *regexp.Regexp) []string {
+	t.Helper()
+	start := strings.Index(taskfile, "\n  "+task+":\n")
+	if start < 0 {
+		t.Fatalf("BEHAVIORAL_RED: Taskfile.yml has no task %s", task)
+	}
+	block := taskfile[start+1:]
+	if end := regexp.MustCompile(`\n  [^ \n#][^\n]*:\n`).FindStringIndex(block[1:]); end != nil {
+		block = block[:end[0]+1]
+	}
+	m := line.FindStringSubmatch(block)
+	if m == nil {
+		t.Fatalf("BEHAVIORAL_RED: task %s has no line matching %s", task, line)
+	}
+	return regexp.MustCompile(`specs/[0-9]{3}-[^ "'\n]+`).FindAllString(m[1], -1)
+}
+
+// specNumbers maps specs/NNN-… directories to NNN.
+func specNumbers(dirs []string) []string {
+	var numbers []string
+	for _, d := range dirs {
+		numbers = append(numbers, strings.TrimPrefix(d, "specs/")[:3])
+	}
+	return numbers
+}
+
+// registrySpecs returns the specs that own registry keys: NNN for an NNN/…
+// key, 001 for spec 001's unprefixed keys. The keys are requirement ids,
+// each check's requirements and creator, and procedure task ids.
+func registrySpecs(reg checks.Registry) map[string]bool {
+	owners := map[string]bool{}
+	add := func(key string) {
+		if number, _, ok := strings.Cut(key, "/"); ok {
+			owners[number] = true
+		} else {
+			owners["001"] = true
+		}
+	}
+	for key := range reg.Requirements {
+		add(key)
+	}
+	for key := range reg.Procedures {
+		add(key)
+	}
+	for _, c := range reg.Checks {
+		add(c.Creator)
+		for _, key := range c.Requirements {
+			add(key)
+		}
+	}
+	return owners
+}
+
+// Every spec with registry keys is traced by `task check:specs` with no
+// argument and read by the CI source check, and the CI source check's
+// digest changes with each tasks.md it reads (006 FR-022, V004).
+func TestTaskfileTracesEverySpec(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	data, err := os.ReadFile(filepath.Join(root, "Taskfile.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskfile := string(data)
+	reg, err := os.ReadFile(filepath.Join(root, "tools", "harness", "checks.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := checks.ParseRegistry(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for number := range registrySpecs(registry) {
+		want = append(want, number)
+	}
+	sort.Strings(want)
+	if len(want) == 0 {
+		t.Fatal("BEHAVIORAL_RED: the registry names no spec keys")
+	}
+	missing := func(listed []string) []string {
+		got := map[string]bool{}
+		for _, n := range listed {
+			got[n] = true
+		}
+		var out []string
+		for _, n := range want {
+			if !got[n] {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+
+	t.Run("check:specs default", func(t *testing.T) {
+		listed := specNumbers(taskfileSpecDirs(t, taskfile, "check:specs", specDirsLine))
+		if gap := missing(listed); len(gap) > 0 {
+			t.Errorf("BEHAVIORAL_RED: task check:specs with no argument does not trace spec(s) %v that own registry keys; it traces %v", gap, listed)
+		}
+	})
+	t.Run("ci-source specs", func(t *testing.T) {
+		listed := specNumbers(taskfileSpecDirs(t, taskfile, "test:foundation-ci", ciSourceLine))
+		if gap := missing(listed); len(gap) > 0 {
+			t.Errorf("BEHAVIORAL_RED: test:foundation-ci's ci-source does not read spec(s) %v that own registry keys; it reads %v", gap, listed)
+		}
+	})
+	t.Run("foundation-ci inputs", func(t *testing.T) {
+		reads := registryReads(t, root)["test:foundation-ci"]
+		if reads == nil {
+			t.Fatal("BEHAVIORAL_RED: test:foundation-ci is not in the registry")
+		}
+		for _, dir := range taskfileSpecDirs(t, taskfile, "test:foundation-ci", ciSourceLine) {
+			if !covered(reads, dir+"/tasks.md") {
+				t.Errorf("BEHAVIORAL_RED: test:foundation-ci's ci-source reads %s/tasks.md, but its registry scope and inputs do not name it", dir)
+			}
+		}
+	})
 }
