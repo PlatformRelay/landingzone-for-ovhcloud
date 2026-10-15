@@ -763,21 +763,37 @@ func TestFilesCredentialSetRefusesPaths(t *testing.T) {
 		filepath.Join("tenants", "alpha", "notes.env"),
 		filepath.Join("..", "platform-deployer.env"),
 		"/platform-deployer.env",
+		// a tenant-state file in account-governance's set (review round 2)
+		filepath.Join("tenants", "alpha", "state.env"),
 	} {
 		t.Run(rel, func(t *testing.T) {
-			root, acct, _ := csRoot(t)
-			if err := WriteCredentialFile(root, filepath.Join("accounts", csAccount, "account.env"), map[string]string{"OVH_ACCOUNT": csAccount}); err != nil {
-				t.Fatal(err)
-			}
-			s := csSet(root, csRunID, "new")
-			s.Files[rel] = map[string]string{"OVH_CLIENT_ID": "x"}
-			if err := WriteCredentialSet(s, 0); err == nil {
-				t.Errorf("WriteCredentialSet with file %q succeeded, want a refusal", rel)
-			}
-			if got, want := csEntries(t, acct), []string{"account.env"}; !reflect.DeepEqual(got, want) {
-				t.Errorf("after the refusal the account directory holds %v, want %v", got, want)
-			}
+			csRefused(t, csInstance, rel)
 		})
+	}
+	// An account-governance file in a tenant-state set (review round 2).
+	t.Run("state-instance/platform-deployer.env", func(t *testing.T) {
+		csRefused(t, "alpha-state", "platform-deployer.env")
+	})
+}
+
+// csRefused writes instance's set holding rel (beside a valid file of that instance's kind) and
+// fails t unless the write is refused with the account directory unchanged.
+func csRefused(t *testing.T, instance, rel string) {
+	t.Helper()
+	root, acct, _ := csRoot(t)
+	if err := WriteCredentialFile(root, filepath.Join("accounts", csAccount, "account.env"), map[string]string{"OVH_ACCOUNT": csAccount}); err != nil {
+		t.Fatal(err)
+	}
+	s := csSet(root, csRunID, "new")
+	if s.Instance = instance; instance != csInstance {
+		s.Files = map[string]map[string]string{filepath.Join("tenants", "alpha", "state.env"): {"AWS_ACCESS_KEY_ID": "x"}}
+	}
+	s.Files[rel] = map[string]string{"OVH_CLIENT_ID": "x"}
+	if err := WriteCredentialSet(s, 0); err == nil {
+		t.Errorf("WriteCredentialSet of %s with file %q succeeded, want a refusal", instance, rel)
+	}
+	if got, want := csEntries(t, acct), []string{"account.env"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("after the refusal the account directory holds %v, want %v", got, want)
 	}
 }
 
