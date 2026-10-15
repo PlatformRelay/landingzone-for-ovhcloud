@@ -46,21 +46,53 @@ func (a API) client() *http.Client {
 	return &c
 }
 
-// do sends req and decodes a 200 JSON answer into v. The answer body never enters an error: it
-// is the API's, and the request may carry a secret.
+// callError is a failed binding call that names the call and the status or transport class and
+// quotes nothing the answer chose (FR-003): no header, no body, no redirect URL.
+type callError struct{ msg string }
+
+func (e *callError) Error() string { return e.msg }
+
+// statusRecorder keeps the status of the last answer: Go's client parses a 3xx answer's Location
+// before it consults CheckRedirect and, when that fails, returns an error that quotes the header
+// and no response (net/http client.go, "failed to parse Location header").
+type statusRecorder struct {
+	next http.RoundTripper
+	code int
+}
+
+func (s *statusRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := s.next.RoundTrip(r)
+	if resp != nil {
+		s.code = resp.StatusCode
+	}
+	return resp, err
+}
+
+// do sends req and decodes a 200 JSON answer into v. No error quotes the answer (body, headers, a
+// redirect target) or the request: they are the API's, and the request may carry a secret.
 func (a API) do(req *http.Request, what string, v any) error {
-	resp, err := a.client().Do(req)
+	c := a.client()
+	rec := &statusRecorder{next: c.Transport}
+	if rec.next == nil {
+		rec.next = http.DefaultTransport
+	}
+	c.Transport = rec
+	resp, err := c.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s: %w", what, err)
+		if rec.code != 0 {
+			return &callError{fmt.Sprintf("%s answered %dxx", what, rec.code/100)}
+		}
+		// Do's errors are *url.Error (net/http Client.Do), so quiet keeps only the class.
+		return &callError{quiet(what, err).Error()}
 	}
 	defer resp.Body.Close()
 	body := io.LimitReader(resp.Body, maxBody)
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, body)
-		return fmt.Errorf("%s answered %d", what, resp.StatusCode)
+		return &callError{fmt.Sprintf("%s answered %d", what, resp.StatusCode)}
 	}
 	if err := json.NewDecoder(body).Decode(v); err != nil {
-		return fmt.Errorf("%s: %w", what, err)
+		return &callError{fmt.Sprintf("%s answered 200 with a body that does not decode", what)}
 	}
 	return nil
 }
@@ -94,7 +126,19 @@ func (a API) token(ctx context.Context, c Credential) (string, error) {
 // Account returns the account the credential authenticates as, from GET /auth/details, which
 // every credential class may call without an IAM action (premise P26). It never calls GET /me,
 // which needs account:apiovh:me/get and fails for both deployer classes.
+// A failed call's error ends with the next action (FR-003).
 func (a API) Account(ctx context.Context, c Credential) (string, error) {
+	account, err := a.account(ctx, c)
+	if err != nil {
+		return "", fmt.Errorf("%w; %s", err, bindNext)
+	}
+	return account, nil
+}
+
+// bindNext is the next action on a failed binding call (FR-003).
+const bindNext = "check the API endpoint, the network and the credential, then re-run"
+
+func (a API) account(ctx context.Context, c Credential) (string, error) {
 	tok, err := a.token(ctx, c)
 	if err != nil {
 		return "", err
