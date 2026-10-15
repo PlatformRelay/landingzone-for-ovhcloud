@@ -76,10 +76,12 @@ Holistic run at B: not run yet.
 | tools/internal/live/files_test.go:TestFilesCredentialSetWriter (fresh-write, crash-after-first-file, crash-after-files, crash-after-dir-sync, crash-after-pointer-tmp, crash-after-switch, keeps-current-and-previous); `test:live-lane` red | US1 | T007 | |
 | tools/internal/live/credentials_test.go:TestCredentialSetPathResolves (3), TestCredentialSetPathPointerInvalid (8), TestCredentialsFromSets (generation-after-switch, each-writer-its-own-pointer) — cleared by T014; TestCredentialSetWriteKeepsBinding — cleared by T013; `test:live-lane` red | US1 | T008 | |
 | tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | |
+| tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
 |---|---|---|---|
+| tools/internal/live/probe_identity_test.go:TestProbeIdentityReservedNames/passed/neighbours | before spec 006 | T010 | FR-006 (D115 allow-list): names outside `TF_VAR_` were asserted admitted; now refused `unlisted/*` rows |
 | tools/internal/live/hardening_test.go:TestEnvCredsCannotReplacePathOrHome; tools/internal/live/env_test.go:TestEnvChildFromScratch | before spec 006 | T009 | not wrong: call sites follow the `Command(a, creds, home, name, arg...)` signature data-model fixes; no claim changed |
 
 ## Lessons
@@ -95,6 +97,7 @@ Holistic run at B: not run yet.
 - A crash-window test must compare the pointer file's identity across the switch (`os.SameFile`), or a rewrite in place passes; a retention test must read the kept generation, not list it; crash injection proves ordering, not durability. (T007)
 - A reader crash-window fixture lays a partial newer generation and a stale `current.tmp` beside a valid `current`; give each set a stale generation under the other writer's name so a shared-pointer bug reads wrong values instead of failing. A stub in a file a docs page pins is also a docs edit (re-pin it). (T008)
 - A pin over a harness run checks that the run succeeded and the verb did its work (never `_, _ = execute(...)`); a caller-HOME leak check searches every variable's value for the sentinel; `plan -- all` on a fresh lane harness exits 2 by design. (T009)
+- An allow-list test needs, per reserved name, a row with the exact prefix and the rest in another case; refusal rows run through the same closures as existing refused rows and check the error names the refused name. (T010)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
