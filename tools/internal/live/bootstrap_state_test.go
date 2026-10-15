@@ -2288,3 +2288,32 @@ func TestBootstrapPartial(t *testing.T) {
 		})
 	}
 }
+
+// TestBootstrapStateChildHome (FR-007, T009): the state, publish and verify phases start every
+// child with a HOME that is not the caller's (a sentinel directory, env_test.go). Publish starts no
+// child today (stateRun.publish); every child of the run is judged, whichever phase starts it.
+func TestBootstrapStateChildHome(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	sentinel := sentinelHome(t)
+	rs, err := h.run(false)
+	if err != nil {
+		t.Errorf("run: %v", err)
+	}
+	for _, p := range []string{PhaseState, PhasePublish, PhaseVerify} {
+		if r, ok := bsResult(rs, p); !ok || (r.Status != StatusRan && r.Status != StatusUnchanged) {
+			t.Errorf("%s %s (%s), want it to pass", p, r.Status, r.Detail)
+		}
+	}
+	roots := map[string]bool{}
+	for _, c := range h.runCalls() {
+		roots[c.Root] = true
+		childHomeNotCallers(t, "tofu "+c.Cmd+" "+c.Root, sentinel, c.Env)
+	}
+	// state runs tofu in the bootstrap root, verify in account-governance.
+	for _, root := range []string{"bootstrap", "account-governance"} {
+		if !roots[root] {
+			t.Errorf("no child ran in the %s root", root)
+		}
+	}
+}

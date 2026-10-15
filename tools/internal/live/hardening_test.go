@@ -19,7 +19,7 @@ import (
 func TestEnvCredsCannotReplacePathOrHome(t *testing.T) {
 	t.Parallel()
 	creds := map[string]string{"PATH": "/evil/bin", "HOME": "/evil/home", "PATH=/evil/bin:": "v", "OVH_CLIENT_ID": "id"}
-	cmd := Command(AuthorityTenant, creds, "true")
+	cmd := Command(AuthorityTenant, creds, os.Getenv("HOME"), "true")
 	for _, want := range []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "OVH_CLIENT_ID=id"} {
 		if !slices.Contains(cmd.Env, want) {
 			t.Errorf("child env lacks %s: %v", want, cmd.Env)
