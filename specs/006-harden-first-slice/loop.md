@@ -58,6 +58,7 @@ Holistic run at B: not run yet.
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
 | tools/cmd/lz-check/main_test.go:TestTaskfileTracesEverySpec (check:specs_default, ci-source_specs, foundation-ci_inputs); `test:traceability` red | Setup | T001 | T002 |
+| tools/cmd/lz-check/main_test.go:TestRegistryInputsCoverGoDeps (go_deps_covered: 57 rows; traceability_reads_the_registry); `test:traceability` red | Setup | T003 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -68,6 +69,8 @@ Holistic run at B: not run yet.
 - `test:live-lane` is not the whole CI: run `docs:check`, and re-pin pages whose `references:` name a file you changed. (005 T102)
 - No review tool or model names in committed files (D111). (005)
 - A test that parses config as text passes vacuously unless it has controls for a commented-out line, an inline comment and a matching line in another block; write them with the test, before review. (T001)
+- A test that parses shell commands out of YAML must read every command form (block and quoted scalars, import-path packages, redirections), or count the `go` words against the invocations it read and fail on a gap. (T003)
+- When waiting for a background review leg, wait on its output file, not a pgrep match: other sessions run review processes too. (T001)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
