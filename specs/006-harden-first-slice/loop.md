@@ -48,6 +48,7 @@ Holistic run at B: not run yet.
 | R | Combined test-and-implementation tasks (spec-loop P rule) | warning | coordinator | fix | split, test tasks first | no |
 | L T004 | `test:traceability`'s inputs miss the task lists its judge reads | minor | review leg 1 | fix | T047 | no |
 | L T007 | A writer that unlinks `current` then renames `current.tmp` passes every step-boundary check; real `fsync` is invisible to crash injection | minor | review leg 1 | defer | T013's review must check both (G18) | no |
+| L T008 | No case pins "resolve `current` once per load" | minor | review leg 1 | defer | T014's review checks one `current` read per load | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
@@ -71,6 +72,7 @@ Holistic run at B: not run yet.
 | tools/internal/live/hardening_test.go:TestBindingErrorsQuiet (token-redirect, auth-details-redirect, token-undecodable, auth-details-undecodable); tools/cmd/lz-live/probe_test.go:TestProbeBindingErrorQuiet (token, auth-details); `test:live-lane` red | US1 | T005 | |
 | tools/internal/live/chain_test.go:TestChainLeftoverTokenRedacted (token-as-id, token-inside-longer-id, token-split-across-writes, registered-before-first-listing); `test:live-lane` red | US1 | T006 | |
 | tools/internal/live/files_test.go:TestFilesCredentialSetWriter (fresh-write, crash-after-first-file, crash-after-files, crash-after-dir-sync, crash-after-pointer-tmp, crash-after-switch, keeps-current-and-previous); `test:live-lane` red | US1 | T007 | |
+| tools/internal/live/credentials_test.go:TestCredentialSetPathResolves (3), TestCredentialSetPathPointerInvalid (8), TestCredentialsFromSets (generation-after-switch, each-writer-its-own-pointer) — cleared by T014; TestCredentialSetWriteKeepsBinding — cleared by T013; `test:live-lane` red | US1 | T008 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -87,6 +89,7 @@ Holistic run at B: not run yet.
 - `mutate.py` copies only `tools/`; the live and lz-live tests read `../../../stacks` and `mise.toml`, so mutate them in a whole-checkout scratch copy. (T005)
 - A redaction test needs the token to differ from every other token of the same credential; a fake issuing one token per credential lets a wrong-token fix pass. A split-write test through a child process cannot force two reads: pair it with an in-process hold-back test. (T006)
 - A crash-window test must compare the pointer file's identity across the switch (`os.SameFile`), or a rewrite in place passes; a retention test must read the kept generation, not list it; crash injection proves ordering, not durability. (T007)
+- A reader crash-window fixture lays a partial newer generation and a stale `current.tmp` beside a valid `current`; give each set a stale generation under the other writer's name so a shared-pointer bug reads wrong values instead of failing. A stub in a file a docs page pins is also a docs edit (re-pin it). (T008)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
