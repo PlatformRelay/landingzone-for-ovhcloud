@@ -362,7 +362,7 @@ func (r *laneRunner) stateObject(ctx context.Context, in stacks.Instance, keys m
 // (coordinator decision 1, T047); the account's projects; the slice prefix; the admin exemption.
 func (r *laneRunner) leftoverCheck(ctx context.Context, c *ChainOptions) (LeftoverCheck, error) {
 	o := r.o
-	check := LeftoverCheck{Lister: c.Lister, Prefix: o.Manifest.Org + "-", RunID: o.RunID, API: o.API}
+	check := LeftoverCheck{Lister: c.Lister, Prefix: o.Manifest.Org + "-", RunID: o.RunID, API: o.API, Red: r.red}
 	var err error
 	if check.Projects, err = r.projects(); err != nil {
 		return check, err

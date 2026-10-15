@@ -81,7 +81,7 @@ type LeftoverCheck struct {
 	API  API
 	Cred Credential
 	// Red is the run's redactor (FR-004): when non-nil, the bearer token the check obtains is
-	// added to it before the first listing. Not implemented yet (T012).
+	// added to it before the first listing.
 	Red *Redactor
 }
 
@@ -148,6 +148,9 @@ type apiLister struct {
 	tok  string
 	// tokErr is the first token failure: a rejected credential is not sent again per listing.
 	tokErr error
+	// red, when non-nil, gets the token as soon as it is obtained, before any request carries it
+	// (FR-004): every record and stream the run redacts through it hides the token from then on.
+	red *Redactor
 }
 
 // quiet is a failed request's error without what Go quotes from the answer (an unparseable
@@ -204,6 +207,9 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 		if err != nil {
 			l.tokErr = quietToken(err)
 			return nil, "", l.tokErr
+		}
+		if l.red != nil {
+			l.red.Add(tok)
 		}
 		l.tok = tok
 	}
@@ -424,7 +430,9 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		if c.API.BaseURL == "" {
 			fail("no API client")
 		} else {
-			src = newAPILister(c.API, c.Cred)
+			al := newAPILister(c.API, c.Cred)
+			al.red = c.Red
+			src = al
 		}
 	}
 	if len(c.Projects) == 0 {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -702,5 +703,67 @@ func TestLeftoversAPIRunStartsNoOvhcloud(t *testing.T) {
 	assertNoCredentialIn(t, "terminal", w.term.String())
 	if raw, err := os.ReadFile(w.runDir + "/leftovers.json"); err == nil {
 		assertNoCredentialIn(t, "leftovers.json", string(raw))
+	}
+}
+
+// TestRunnerLeftoverTokenRedacted (FR-004, review of T012): a Runner's leftover check (the probe's
+// path, lz-live probe) that lists through the API registers its bearer token with the run's
+// redactor, whether the check it is handed carries no Red or another one: a listing that echoes the
+// token as an id reaches no file of the run record and not the terminal, and the listing records it
+// redacted.
+func TestRunnerLeftoverTokenRedacted(t *testing.T) {
+	for name, red := range map[string]*Redactor{"no-red": nil, "caller-red": NewRedactor()} {
+		t.Run(name, func(t *testing.T) { runnerLeftoverTokenRedacted(t, red) })
+	}
+}
+
+func runnerLeftoverTokenRedacted(t *testing.T, red *Redactor) {
+	syn, _ := loadSynthetic(t)
+	const name = "audit-t012-token-as-id"
+	elem := `{"id":"` + listToken + `","owner":"` + laneAccount + `","name":"` + name + `","readOnly":false,"identities":[],"resources":[],"permissions":{},"permissionsGroups":[],"createdAt":"2026-10-08T12:00:00Z"}`
+	f := newFakeListAPI(t, seededResponses(syn, syntheticSeed{Replace: map[string][]json.RawMessage{"/iam/policy": chainAppend(t, syn, "/iam/policy", elem)}}))
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}))
+	r.Leftovers.Lister = nil
+	r.Leftovers.API = f.API()
+	r.Leftovers.Cred = listCred
+	r.Leftovers.Red = red
+	execute(t, r)
+	err := filepath.WalkDir(w.runDir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := os.ReadFile(p)
+		if err == nil && strings.Contains(string(raw), listToken) {
+			rel, _ := filepath.Rel(w.runDir, p)
+			t.Errorf("the run record's %s holds the leftover check's bearer token", rel)
+		}
+		return err
+	})
+	if err != nil {
+		t.Errorf("walking the run directory: %v", err)
+	}
+	if strings.Contains(w.term.String(), listToken) {
+		t.Error("the terminal holds the leftover check's bearer token")
+	}
+	raw, err := os.ReadFile(filepath.Join(w.runDir, "listings", tPolicy+".json"))
+	if err != nil {
+		t.Fatalf("listing record of %s: %v", tPolicy, err)
+	}
+	var pols []map[string]any
+	if err := json.Unmarshal(raw, &pols); err != nil {
+		t.Fatalf("listing record of %s: %v", tPolicy, err)
+	}
+	found := false
+	for _, p := range pols {
+		if p["name"] == name {
+			found = true
+			if p["id"] != redacted {
+				t.Errorf("listed policy %s recorded with id %q, want %q", name, p["id"], redacted)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the listing record of %s has no policy named %s: the seeded listing did not run", tPolicy, name)
 	}
 }

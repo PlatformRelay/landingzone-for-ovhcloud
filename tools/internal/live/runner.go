@@ -991,7 +991,11 @@ func (r Runner) Execute(ctx context.Context) error {
 	if errors.Is(invErr, os.ErrNotExist) {
 		invErr = nil
 	}
-	rep := r.Leftovers.Check(dctx, entries)
+	// The token the check obtains goes to this run's redactor before its first listing (FR-004):
+	// the one every record below and the terminal go through, whatever Red the caller set.
+	check := r.Leftovers
+	check.Red = red
+	rep := check.Check(dctx, entries)
 	var recErr error
 	for typ, items := range rep.Listings {
 		raw, e := json.Marshal(items)
