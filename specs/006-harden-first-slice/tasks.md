@@ -49,7 +49,7 @@ directory points at the PR and names the red and green commits.
   - Verify: `task test:traceability; task test:foundation-ci; task check:specs`: T001's cases green; `task check:specs` with no argument prints `TRACE_OK` for 001, 005 and 006; `ci-source` reads spec 006.
   - Evidence: `evidence/T002.md`; PR; initial status `not-run`.
 
-- [ ] T003 Write the Go-dependency registry test `TestRegistryInputsCoverGoDeps` in tools/cmd/lz-check/main_test.go
+- [x] T003 Write the Go-dependency registry test `TestRegistryInputsCoverGoDeps` in tools/cmd/lz-check/main_test.go — closed 2026-10-15, evidence: evidence/T003.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T002.
   - Cases (given / when / then → defect exposed):
     - given each registered check whose Taskfile command runs Go / when the test runs `go list -deps` on the packages it names (premise P1, observed through the entry and recorded) / then every in-module directory is covered by the check's scope or inputs → exposes `test:stacks` missing `tools/internal/report` and other unread packages.
