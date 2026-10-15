@@ -680,6 +680,62 @@ func TestProbeEntry(t *testing.T) {
 	}
 }
 
+// TestProbeBindingErrorQuiet (FR-003, guard G16): an answer that quotes the secret in an
+// unparseable redirect Location never reaches lz-live's stderr; the line names the call and the
+// status class.
+func TestProbeBindingErrorQuiet(t *testing.T) {
+	// marker is answer-chosen text with no English in it: no four characters of it may reach the
+	// output, so a fix that quotes part of the Location shows.
+	const marker = "Lk7Qx9Zp4vW0"
+	location := "http://evil.example/%zz/" + probeSecret + "/" + marker
+	for _, tc := range []struct{ name, hostile, call string }{
+		{"token", "POST /token", "token endpoint"},
+		{"auth-details", "GET /v1/auth/details", "GET /auth/details"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newProbeWorld(t)
+			w.apiHook = func(rw http.ResponseWriter, r *http.Request) bool {
+				if r.Method+" "+r.URL.Path != tc.hostile {
+					return false
+				}
+				rw.Header().Set("Location", location)
+				rw.WriteHeader(http.StatusFound)
+				return true
+			}
+			code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
+			if code == 0 {
+				t.Fatalf("probe passed against a redirecting %s\nstdout:\n%s", tc.call, stdout)
+			}
+			w.noSecret(t, stdout, stderr)
+			// probeSecret's English head ("probe-admin-secret") may occur in an honest line; its
+			// hex tail may not, in part either. It is checked on stderr only: stdout may carry
+			// random hex (a run id) that could share four characters with it.
+			tail := probeSecret[strings.LastIndex(probeSecret, "-")+1:]
+			for i := 0; i+4 <= len(tail); i++ {
+				if strings.Contains(stderr, tail[i:i+4]) {
+					t.Errorf("stderr quotes part of the secret (%q):\n%s", tail[i:i+4], stderr)
+				}
+			}
+			out := stdout + stderr
+			for i := 0; i+4 <= len(marker); i++ {
+				if strings.Contains(out, marker[i:i+4]) {
+					t.Errorf("output quotes part of the Location (%q):\n%s", marker[i:i+4], out)
+				}
+			}
+			for _, leak := range []string{"evil.example", "%zz"} {
+				if strings.Contains(out, leak) {
+					t.Errorf("output quotes the redirect URL (%q):\n%s", leak, out)
+				}
+			}
+			for _, want := range []string{tc.call, "3xx"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr does not name %q:\n%s", want, stderr)
+				}
+			}
+		})
+	}
+}
+
 // writeAccount binds account dir `dir` to account id `id` (a mismatch when they differ).
 func writeAccount(w *probeWorld, dir, id string) {
 	path := filepath.Join(w.cfg, "accounts", dir, "account.env")
