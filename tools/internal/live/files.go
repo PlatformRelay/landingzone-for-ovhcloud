@@ -106,12 +106,21 @@ func privateDir(dir string) error {
 	return nil
 }
 
+// belowRel returns rel cleaned, refusing a path that is empty, absolute or leaves its base.
+func belowRel(rel string) (string, error) {
+	clean := filepath.Clean(rel)
+	if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q is not below its base", rel)
+	}
+	return clean, nil
+}
+
 // credentialDir checks that rel stays below root and creates its missing directories with mode
 // 0700, never through a symlink; an existing directory others can use is refused. It returns the
 // directory and the file name.
 func credentialDir(root, rel string) (string, string, error) {
-	clean := filepath.Clean(rel)
-	if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	clean, err := belowRel(rel)
+	if err != nil {
 		return "", "", fmt.Errorf("credential path %q is not below %s", rel, root)
 	}
 	parts := strings.Split(clean, string(filepath.Separator))
@@ -162,14 +171,8 @@ func checkCredentialValues(values map[string]string) error {
 	return nil
 }
 
-// WriteCredentialFile writes values as sorted KEY=value lines to <root>/<rel>, mode 0600,
-// creating missing directories below root with mode 0700. rel must stay below root without
-// passing through a symlink; a symlink at the target itself is replaced, never followed. The file
-// is written to a temporary name and renamed, so a reader never sees it partly written.
-func WriteCredentialFile(root, rel string, values map[string]string) error {
-	if err := checkCredentialValues(values); err != nil {
-		return err
-	}
+// credentialLines is values as sorted KEY=value lines.
+func credentialLines(values map[string]string) string {
 	var b strings.Builder
 	keys := make([]string, 0, len(values))
 	for k := range values {
@@ -179,6 +182,18 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 	for _, k := range keys {
 		fmt.Fprintf(&b, "%s=%s\n", k, values[k])
 	}
+	return b.String()
+}
+
+// WriteCredentialFile writes values as sorted KEY=value lines to <root>/<rel>, mode 0600,
+// creating missing directories below root with mode 0700. rel must stay below root without
+// passing through a symlink; a symlink at the target itself is replaced, never followed. The file
+// is written to a temporary name and renamed, so a reader never sees it partly written.
+func WriteCredentialFile(root, rel string, values map[string]string) error {
+	if err := checkCredentialValues(values); err != nil {
+		return err
+	}
+	content := credentialLines(values)
 
 	dir, name, err := credentialDir(root, rel)
 	if err != nil {
@@ -203,7 +218,7 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.WriteString(b.String()); err != nil {
+	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -247,11 +262,267 @@ type CredentialSet struct {
 // the disk as a crash there would.
 var ErrInjectedCrash = errors.New("credential set: injected crash")
 
+// genName is a generation directory's name (data-model *Credential set*): gen-<run_id>.
+var genName = regexp.MustCompile(`^gen-[0-9A-Za-z-]+$`)
+
+// setSync and setRename are the set writer's fsync and its switch. They are variables only so a
+// test can see what crash injection cannot: every file and directory of the generation synced
+// before the switch, and the switch one rename over an existing `current`.
+var (
+	setSync   = func(f *os.File) error { return f.Sync() }
+	setRename = os.Rename
+)
+
 // WriteCredentialSet writes s as a fresh generation and makes it current through one rename of
 // the pointer file `current`. failAfter is 0 in production; a non-zero step makes it return
 // ErrInjectedCrash right after that step.
+//
+// Steps (data-model *Credential set*): 1 create gen-<RunID>/, write and fsync its files; 2 fsync
+// its directories and the directories that gained an entry on the way; 3 write and fsync
+// current.tmp; 4 rename it over `current` (the switch) and fsync the set directory; 5 remove every
+// generation except the new and the previous one, a stale current.tmp, and the flat files the set
+// replaces. Nothing a reader follows changes before step 4, and step 4 is one rename(2): a crash
+// before it leaves the previous set current, after it the new one.
 func WriteCredentialSet(s CredentialSet, failAfter SetStep) error {
-	return errors.New("WriteCredentialSet: not implemented")
+	acct, err := AccountDir(s.Root, s.Account)
+	if err != nil {
+		return err
+	}
+	if !accountID.MatchString(s.Instance) {
+		return fmt.Errorf("credential set: instance %q is not a plain path segment", s.Instance)
+	}
+	gen := "gen-" + s.RunID
+	if !genName.MatchString(gen) {
+		return fmt.Errorf("credential set: run id %q does not make a generation name", s.RunID)
+	}
+	if len(s.Files) == 0 {
+		return errors.New("credential set: no files")
+	}
+	// Every file is checked before anything is written: a refused value leaves no generation.
+	rels := make([]string, 0, len(s.Files))
+	for rel, values := range s.Files {
+		clean, err := belowRel(rel)
+		if err != nil {
+			return fmt.Errorf("credential set: %w", err)
+		}
+		if err := checkCredentialValues(values); err != nil {
+			return err
+		}
+		rels = append(rels, clean)
+	}
+	sort.Strings(rels)
+	setRel := filepath.Join("accounts", s.Account, "sets", s.Instance)
+	setDir := filepath.Join(s.Root, setRel)
+	// credentialDir creates sets/<instance>/ 0700 and refuses a symlink or an open directory on
+	// the way.
+	if _, _, err := credentialDir(s.Root, filepath.Join(setRel, "current")); err != nil {
+		return err
+	}
+	prev, err := currentGeneration(setDir)
+	if err != nil {
+		return err
+	}
+	if prev == gen {
+		return fmt.Errorf("credential set: %s is current; a run's generation is never rewritten", gen)
+	}
+
+	// Step 1. A directory of this name is a crashed earlier write of the same run, never current.
+	genDir := filepath.Join(setDir, gen)
+	if err := os.RemoveAll(genDir); err != nil {
+		return err
+	}
+	if err := os.Mkdir(genDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(genDir, 0o700); err != nil {
+		return err
+	}
+	dirs := map[string]bool{genDir: true}
+	for i, rel := range rels {
+		dir, name, err := credentialDir(s.Root, filepath.Join(setRel, gen, rel))
+		if err != nil {
+			return err
+		}
+		for d := dir; strings.HasPrefix(d, genDir+string(filepath.Separator)); d = filepath.Dir(d) {
+			dirs[d] = true
+		}
+		if err := writeSynced(filepath.Join(dir, name), credentialLines(s.Files[rel])); err != nil {
+			return err
+		}
+		if i == 0 && failAfter == SetStepFirstFile {
+			return ErrInjectedCrash
+		}
+	}
+	if failAfter == SetStepFiles {
+		return ErrInjectedCrash
+	}
+
+	// Step 2: the generation's directories deepest first, then the set directory and its parents,
+	// which may have gained an entry.
+	order := make([]string, 0, len(dirs)+3)
+	for d := range dirs {
+		order = append(order, d)
+	}
+	sort.Slice(order, func(i, j int) bool { return len(order[i]) > len(order[j]) })
+	order = append(order, setDir, filepath.Dir(setDir), acct)
+	for _, d := range order {
+		if err := syncDir(d); err != nil {
+			return err
+		}
+	}
+	if failAfter == SetStepDirSync {
+		return ErrInjectedCrash
+	}
+
+	// Step 3.
+	tmp, cur := filepath.Join(setDir, "current.tmp"), filepath.Join(setDir, "current")
+	if err := removeFiles(tmp); err != nil {
+		return err
+	}
+	if err := writeSynced(tmp, gen); err != nil {
+		return err
+	}
+	if failAfter == SetStepPointerTmp {
+		return ErrInjectedCrash
+	}
+
+	// Step 4, the switch: one rename over `current`, never an unlink first (that would leave a
+	// moment with no pointer, when readers fall back to the flat files). The set directory is
+	// synced before step 5 removes anything: on a first write, a removal of the flat files that
+	// outlived a lost rename would leave readers with no set at all.
+	if err := setRename(tmp, cur); err != nil {
+		return err
+	}
+	if err := syncDir(setDir); err != nil {
+		return err
+	}
+	if failAfter == SetStepSwitch {
+		return ErrInjectedCrash
+	}
+
+	// Step 5. Its leftovers are removed by the next writer.
+	des, err := os.ReadDir(setDir)
+	if err != nil {
+		return err
+	}
+	for _, de := range des {
+		n := de.Name()
+		if n == "current" || n == gen || n == prev || n != "current.tmp" && !genName.MatchString(n) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(setDir, n)); err != nil {
+			return err
+		}
+	}
+	for _, rel := range rels {
+		if err := removeFlat(acct, rel); err != nil {
+			return err
+		}
+	}
+	if err := syncDir(setDir); err != nil {
+		return err
+	}
+	if failAfter == SetStepCleanup {
+		return ErrInjectedCrash
+	}
+	return nil
+}
+
+// currentGeneration is the generation `current` names in setDir, "" while `current` does not
+// exist. A pointer that is not a regular file whose whole content names a sibling gen- directory
+// is refused: the writer could not tell which generation is the previous one to keep.
+func currentGeneration(setDir string) (string, error) {
+	cur := filepath.Join(setDir, "current")
+	fi, err := os.Lstat(cur)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("CREDENTIAL_POINTER_INVALID: %s is not a regular file", cur)
+	}
+	b, err := os.ReadFile(cur)
+	if err != nil {
+		return "", err
+	}
+	gen := string(b)
+	if !genName.MatchString(gen) {
+		return "", fmt.Errorf("CREDENTIAL_POINTER_INVALID: %s does not hold a generation name", cur)
+	}
+	if gi, err := os.Lstat(filepath.Join(setDir, gen)); err != nil || !gi.IsDir() {
+		return "", fmt.Errorf("CREDENTIAL_POINTER_INVALID: %s names no generation directory beside it", cur)
+	}
+	return gen, nil
+}
+
+// writeSynced creates path (which must not exist), mode 0600, writes content and fsyncs it.
+func writeSynced(path, content string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		return err
+	}
+	if err := setSync(f); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir fsyncs a directory, making the entries created, renamed or removed in it durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := setSync(d); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
+}
+
+// removeFlat removes the flat (005) file acct/rel that a set replaces, after the switch. A missing
+// file or directory is not an error; a directory on the way that is a symlink is refused, never
+// followed, and a directory at the path itself is left alone.
+func removeFlat(acct, rel string) error {
+	dir := acct
+	if parent := filepath.Dir(rel); parent != "." {
+		for _, p := range strings.Split(parent, string(filepath.Separator)) {
+			dir = filepath.Join(dir, p)
+			fi, err := os.Lstat(dir)
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !fi.IsDir() {
+				return fmt.Errorf("%s is not a directory (symlinks are not followed)", dir)
+			}
+		}
+	}
+	p := filepath.Join(dir, filepath.Base(rel))
+	fi, err := os.Lstat(p)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if fi.IsDir() {
+		return nil
+	}
+	return removeFiles(p)
 }
 
 // Run record (.local/live/<run-id>/) and scratch files of the run core: directories 0700, files

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -647,4 +648,134 @@ func TestFilesCredentialSetWriter(t *testing.T) {
 		}
 		csKept(t, setDir, gens[0], "rollback", "after the write")
 	})
+}
+
+// TestFilesCredentialSetDurableSwitch (T013, FR-005, guard G18): what crash injection cannot see.
+// Through the writer's fsync and rename seams, given a previous set, when a set is written, then
+// every file and directory of the new generation and current.tmp are synced before the switch,
+// each directory after what it holds; the switch is one rename of current.tmp onto a `current`
+// that still exists; the set directory is synced after it, before the flat files the set replaces
+// are removed. Exposes a switch before the fsyncs, a dropped fsync, an unlink of `current` before
+// the rename (a moment with no pointer), and flat files removed while the switch may still be lost.
+func TestFilesCredentialSetDurableSwitch(t *testing.T) {
+	withUmask(t)
+	root, acct, setDir := csRoot(t)
+	const prev = "gen-20261014T090000Z-0aa0"
+	csSeed(t, root, prev, "prev")
+	csPoint(t, setDir, prev)
+	for _, rel := range csRels {
+		if err := WriteCredentialFile(root, filepath.Join("accounts", csAccount, rel), map[string]string{"FLAT": "flat"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gen := filepath.Join(setDir, "gen-"+csRunID)
+	tmp, cur := filepath.Join(setDir, "current.tmp"), filepath.Join(setDir, "current")
+
+	var events []string // "sync <path>" or "rename"
+	pointerHeld, renamed, flatAtSwitchSync := true, false, ""
+	oldSync, oldRename := setSync, setRename
+	t.Cleanup(func() { setSync, setRename = oldSync, oldRename })
+	setSync = func(f *os.File) error {
+		events = append(events, "sync "+f.Name())
+		if renamed && f.Name() == setDir && flatAtSwitchSync == "" {
+			flatAtSwitchSync = "kept"
+			for _, rel := range csRels {
+				if _, err := os.Lstat(filepath.Join(acct, rel)); err != nil {
+					flatAtSwitchSync = "removed"
+				}
+			}
+		}
+		return f.Sync()
+	}
+	setRename = func(from, to string) error {
+		if from != tmp || to != cur {
+			t.Errorf("rename %s -> %s, want %s -> %s", from, to, tmp, cur)
+		}
+		if fi, err := os.Lstat(cur); err != nil || !fi.Mode().IsRegular() {
+			pointerHeld = false
+		}
+		events = append(events, "rename")
+		renamed = true
+		return os.Rename(from, to)
+	}
+
+	if err := WriteCredentialSet(csSet(root, csRunID, "new"), 0); err != nil {
+		t.Fatalf("WriteCredentialSet: %v", err)
+	}
+	csWant(t, setDir, "gen-"+csRunID, "new", "after the write")
+	if !pointerHeld {
+		t.Error("current was gone when the switch ran: the switch must be one rename over the existing pointer")
+	}
+	at := func(e string) int { return slices.Index(events, e) }
+	switchAt := at("rename")
+	if n := slices.Index(events[switchAt+1:], "rename"); switchAt < 0 || n >= 0 {
+		t.Fatalf("want exactly one rename, events %v", events)
+	}
+	// Before the switch, each path synced, and after everything inside it.
+	inside := map[string][]string{
+		gen:                                    {filepath.Join(gen, csRels[0]), filepath.Join(gen, "tenants")},
+		filepath.Join(gen, "tenants"):          {filepath.Join(gen, "tenants", "alpha")},
+		filepath.Join(gen, "tenants", "alpha"): {filepath.Join(gen, csRels[1])},
+		setDir:                                 {gen},
+		tmp:                                    {},
+		filepath.Join(gen, csRels[0]):          {},
+		filepath.Join(gen, csRels[1]):          {},
+	}
+	for p, held := range inside {
+		i := at("sync " + p)
+		if i < 0 || i > switchAt {
+			t.Errorf("%s not synced before the switch (events %v)", p, events)
+			continue
+		}
+		for _, h := range held {
+			if j := at("sync " + h); j < 0 || j > i {
+				t.Errorf("%s synced before %s, which it holds (events %v)", p, h, events)
+			}
+		}
+	}
+	if j := at("sync " + gen); j > at("sync "+tmp) {
+		t.Errorf("current.tmp synced before the generation directory (events %v)", events)
+	}
+	if flatAtSwitchSync != "kept" {
+		t.Errorf("the set directory's first sync after the switch found the flat files %q, want kept: the switch must be durable before they go", flatAtSwitchSync)
+	}
+}
+
+// TestFilesCredentialSetRemovesFlat (T013, FR-005 migration, data-model step 5): the flat (005)
+// files a set replaces stay until the switch and are removed after it; a flat file outside the set
+// stays. Exposes flat files removed before the switch (a crash would leave readers, which use them
+// while `current` is absent, with nothing) and flat files never removed.
+func TestFilesCredentialSetRemovesFlat(t *testing.T) {
+	withUmask(t)
+	for _, c := range []struct {
+		name     string
+		step     SetStep
+		flatGone bool
+	}{
+		{"crash-before-switch", SetStepPointerTmp, false},
+		{"completed", 0, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root, acct, _ := csRoot(t)
+			other := filepath.Join("tenants", "alpha", "state.env")
+			for _, rel := range append(slices.Clone(csRels), other) {
+				if err := WriteCredentialFile(root, filepath.Join("accounts", csAccount, rel), map[string]string{"FLAT": "flat"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := WriteCredentialSet(csSet(root, csRunID, "new"), c.step)
+			if c.step == 0 && err != nil || c.step != 0 && !errors.Is(err, ErrInjectedCrash) {
+				t.Fatalf("WriteCredentialSet stopping after step %d: %v", c.step, err)
+			}
+			for _, rel := range csRels {
+				_, err := os.Lstat(filepath.Join(acct, rel))
+				if gone := os.IsNotExist(err); gone != c.flatGone {
+					t.Errorf("%s: flat %s removed = %v, want %v", c.name, rel, gone, c.flatGone)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(acct, other)); err != nil {
+				t.Errorf("%s: flat %s outside the set: %v, want it kept", c.name, other, err)
+			}
+		})
+	}
 }
