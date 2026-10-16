@@ -163,7 +163,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:bootstrap; task test:live-lane`: T009's cases green; `hardening_test.go` follows the new signature. Guard G20 bootstrap-path mutant is killed.
   - Evidence: `evidence/T015.md`; PR; initial status `not-run`.
 
-- [ ] T016 [US1] Replace the companion deny-list with `admitCompanionName` in tools/internal/live/runner.go
+- [x] T016 [US1] Replace the companion deny-list with `admitCompanionName` in tools/internal/live/runner.go — closed 2026-10-16, evidence: evidence/T016.md
   - Requirements: FR-006, SC-001; ADRs: 0009, 0021. Depends on: T010.
   - Verify: `task test:live-lane`: T010's cases green. Guard G19 mutants are killed.
   - Evidence: `evidence/T016.md`; PR; initial status `not-run`.
