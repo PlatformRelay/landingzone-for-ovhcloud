@@ -60,6 +60,8 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | L T034 | Bucket listing not retried after an indexing delay; control success assumed to cover the policy's other actions | minor | review | defer | T027 records bucket_listing and bucket_urns_listed; UNVERIFIED in evidence | no |
 | L T034 | Tag key may contain `:` (verified, kb iam.json AddTag pattern); bucket URN form UNVERIFIED | — | task | accept | evidence T034 | no |
 | R2 | The lost-create-response gap also exists in spec 005's probes and chains | — | coordinator | defer | hand-off: what no sensor covers; the leftover check and the stop rule are the guard | no |
+| L T027/T028 | The leftover check failed on transient OVHcloud listing errors in 2 of the probe runs (1 and 13 errors); `--cleanup` passed both: a bounded retry on leftover listings | minor | task | defer | backlog: bounded listing retry (spec 005's "bounded listing retry" follow-up) | no |
+| L T025/T027 | Swift returned 404 on every own-bucket control (other Swift endpoint or container forms untried); `iam/resource/edit` had no owned IAM target (the bucket was not listed as an IAM resource) | — | task | defer | backlog: a follow-up probe for the Swift endpoint and container forms, and an owned IAM target for `iam/resource/edit` | no |
 
 ## Tasks
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
@@ -75,6 +77,10 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | T034 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fix unreviewed (last round); bucket listed as an IAM resource and its URN form UNVERIFIED, so T027's write may be `blocked (no owned target)`; decision request: Observe fails on that expected result (keep, or record it as a non-failure) before T027; the root's `lz-check unit` line waits for T036 (ran via `test:unit`); clears T033's urn_test.go red |
 | T036 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fixes unreviewed (last round); seam and classifiers checked against the real OpenTofu 1.13.0 offline only (fake S3); RecoveryOptions gains Project (Undo's absence check); a 501 on the conditional PUT fails Observe (T035 fixed point, T028 observes); `test:live-lane` fully green, every probe root's `lz-check unit` line ran; clears T035's recovery_test.go red |
 | T039 | CLOSED-WITH-GAPS | leg 1 + strong leg, 1 round (APPROVE/CLEAN; wording and evidence findings fixed) | added after live run 20261016T145959Z-42fd (empty tenant_id); tenant id = service_name from documentation only (T025 confirms); Validate's present-empty/malformed tenant_id refusal unpinned by a test; project-import's resource `project_id` output unchecked live |
+| T025 | CLOSED-WITH-GAPS | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | C005.1 not shown on the Swift plane: every own-bucket control 404; Keystone accepted the `service_name` tenant id (T039's claim observed) |
+| T026 | CLOSED | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | `refused-before-expiry`, OAuth2-client token refused within ~0.07 s of the delete; C007.6 not shown (no approved maximum; other types not probed) |
+| T027 | CLOSED-WITH-GAPS | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | `iam/policy/get` → account URN; `iam/resource/edit` blocked (no owned target); transient leftover error, `--cleanup` passed |
+| T028 | CLOSED | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | `recovered`; conditional PUT honoured (412); transient leftover errors, `--cleanup` passed |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -95,6 +101,11 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 ## Live runs
 | Task | Run id | Reviewed SHA | Observation | Cost | Leftovers |
 |---|---|---|---|---|---|
+| T025 | 20261016T145959Z-42fd | 1fe496e | fail before any step: empty `tenant_id` (T039) | negligible | clean |
+| T025 | 20261016T153639Z-6159 | 9093b14 | blocked: every Swift call 404, own-bucket controls included; C005.1 not shown | negligible | clean |
+| T026 | 20261016T150719Z-fd06 | 1fe496e | `refused-before-expiry`, refused within ~0.07 s of the delete (expires_in 3599 s) | none billable | clean |
+| T027 | 20261016T150207Z-be89 | 1fe496e | `iam/policy/get` → account; `iam/resource/edit` blocked (no owned target) | negligible | clean after `--cleanup` (1 transient error) |
+| T028 | 20261016T150441Z-eb3a | 1fe496e | `recovered`; conditional PUT 412 | negligible | clean after `--cleanup` (13 transient errors) |
 
 ## Lessons
 - `test:live-lane` stops at its first red Go line: in a red window, later lines do not run; each task's final run must say which lines ran. (T029)
@@ -108,4 +119,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 - A "gone" answer from a credential the cleanup may itself have deleted proves only that the credential is gone: confirm absence through an identity the cleanup keeps (the admin's listing) or fail closed; a tool that prints the state it finds after any failure (OpenTofu's lock info) needs classifying on the failure's own status; check a prompt-waiting seam once against the real tool offline. (T036)
 - Validate server text for secrets after shape: a listed URN or key of the right shape can still hold a run's token, so filter it against every identity's token and secret; when dropping malformed listed text, keep the validated key (blank its value) so a cleanup still sees it. (T034)
 - A mock that fills every attribute hides one the real API leaves empty: when a root publishes a provider attribute, mock it as the live answer looked (or set the attributes the code must not read to empty or a decoy), and prefer the attribute the root already selects by (here `service_name`). (T039)
+- `--cleanup <run-id>` rewrites the run's `summary.json` and `leftovers.json`: quote the first leftover check's failure from the terminal log, whose error detail is otherwise lost; recompute a truncated bound (`upper_seconds: 0`) from the record's timestamps before reading it as "immediate". (T025–T028)
 - See spec 006's loop.md *Lessons*; they apply here, especially the entry command shape, whole-checkout scratch copies for live-package mutants, and vacuity checks on harness runs.

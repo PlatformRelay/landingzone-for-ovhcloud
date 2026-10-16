@@ -40,8 +40,9 @@ a delete without a version id only adds a delete marker and is allowed (T010 row
 state buckets (spec 005 T049 run 4, `state-lock-contention`). Each released lock leaves a retained
 noncurrent version until the retention ends. The state credential cannot delete a locked version or
 bypass the retention, so emptying a bucket needs the admin's governance bypass or the end of the
-retention. Stale-lock recovery (`force-unlock`) and restoring an earlier state version on a locked
-bucket are not yet observed (spec 003 T028).
+retention. Stale-lock recovery (`tofu force-unlock` after the writer was killed) and restoring an
+earlier version by copy were observed on a governance-locked probe bucket with the state credential
+alone (spec 003 T028, run 20261016T150441Z-eb3a, OpenTofu 1.13.0), not yet on a lane stack's state.
 
 **Known sandbox deviation (2026-10-06, D88).** The maintainer sandbox has one Public Cloud project,
 which holds both tenant resources and every state bucket. OVHcloud IAM grants bucket management

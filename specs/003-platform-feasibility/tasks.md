@@ -272,7 +272,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: a probe-root test (`task test:unit -- tests/live/probes/swift-reach`) red first with a mock whose `project_id` is empty and whose `service_name` is the project id, then green; `task test:live-lane`, `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T039.md`; initial status `not-run`.
 
-- [ ] T025 [US2] Live run: the swift-reach probe on spec 005's runner with tests/live/probes/swift-reach/
+- [x] T025 [US2] Live run: the swift-reach probe on spec 005's runner with tests/live/probes/swift-reach/ — closed 2026-10-16, evidence: evidence/T025.md
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T030 on `main` at a reviewed SHA.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone at that SHA: records each Swift call's status and reason in both directions (own-bucket control and its repeat, other-bucket list, read of the seed, write), and each tenant user's role names (for example `objectstore_operator`, `tests/live/probes/state-backend/main.tf`), since a project-wide Swift role explains reach. Observed reach refutes the S3-plane isolation claim and stops T012's claim; a `blocked` control (for example Swift not serving S3-API buckets) is recorded as the observation, with its reason. The run destroys in finally and sweeps its run-id leftovers with the bucket-scoped cleanup credentials; the leftover check is clean.
   - Evidence: `specs/003-platform-feasibility/evidence/T025.md`: run id, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
@@ -305,7 +305,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: `task test:live-lane`: T031's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T032.md`; initial status `not-run`.
 
-- [ ] T026 [US3] Live run: the token-residual probe on spec 005's runner with tests/live/probes/token-residual/
+- [x] T026 [US3] Live run: the token-residual probe on spec 005's runner with tests/live/probes/token-residual/ — closed 2026-10-16, evidence: evidence/T026.md
   - Requirements: FR-007 (C007.5, C007.6); ADRs: 0009, 0018. Depends on: T032 on `main` at a reviewed SHA.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> --deadline <D> tests/live/probes/token-residual` from the clean live clone at that SHA, with `<D>` the token lifetime plus the teardown margin (for a 3599 s token, 60 min plus 15 min: `75m`; lz-live's default of 45 min would stop the probe before a token that outlives its client expires, tools/internal/live/deadline.go). A disposable client with a one-read policy takes a token, the client is deleted, the read repeats at bounded intervals; records the token's `expires_in`, each poll's status, and the result (`refused-before-expiry` with its bounds, `valid-until-expiry`, or `blocked` with its lower bound). The run destroys in finally and sweeps its run-id leftovers; the policy and the client are removed on exit and the leftover check is clean. T019 records the window.
   - Evidence: `specs/003-platform-feasibility/evidence/T026.md`: run id, `expires_in`, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
@@ -337,7 +337,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: `task test:live-lane`: T033's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T034.md`; initial status `not-run`.
 
-- [ ] T027 [US3] Live run: the iam-urn probe on spec 005's runner with tests/live/probes/iam-urn/
+- [x] T027 [US3] Live run: the iam-urn probe on spec 005's runner with tests/live/probes/iam-urn/ — closed 2026-10-16, evidence: evidence/T027.md
   - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T034 on `main` at a reviewed SHA.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/iam-urn` from the clean live clone at that SHA: records each identity's control attempts and probed call, status and the actions a refusal names, and, per probed action, the URN it is checked against (or `either`, or `blocked` with the reason, `propagation` and `no owned target` included), each result recorded with its action. The run destroys in finally and sweeps its run-id leftovers; the policies, clients and the probe bucket's tag key are removed on exit and the leftover check is clean. T015 binds a floor denial only for an action whose result is a URN, and only to that URN.
   - Evidence: `specs/003-platform-feasibility/evidence/T027.md`: run id, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
@@ -373,7 +373,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: `task test:live-lane`: T035's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T036.md`; initial status `not-run`.
 
-- [ ] T028 [US2] Live run: the locked-recovery probe on spec 005's runner with tests/live/probes/locked-recovery/
+- [x] T028 [US2] Live run: the locked-recovery probe on spec 005's runner with tests/live/probes/locked-recovery/ — closed 2026-10-16, evidence: evidence/T028.md
   - Requirements: FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: T036 on `main` at a reviewed SHA.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/locked-recovery` from the clean live clone at that SHA, on a one-day governance-locked probe bucket: records that A exited on SIGKILL, whether the pinned `tofu force-unlock` and the version restore (an earlier version of the probe key `lzprobe-locked-recovery/restore`, never the backend's live state key) succeed with the state credential, whether the second writer then acquires the lock, whether the live diagnostics matched the fixtures, and whether the conditional PUT is honoured (`condition-ignored` is a refutation); the janitor's bypass empties the bucket before the destroy. The run destroys in finally and sweeps its run-id leftovers; the leftover check is clean; the cost records any version left to its retention.
   - Evidence: `specs/003-platform-feasibility/evidence/T028.md`: run id, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
