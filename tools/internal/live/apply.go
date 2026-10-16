@@ -256,7 +256,7 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 	if r.binding.AccountID != o.Account {
 		return refuse(CondAccount, "account.env of %s names account %q", o.Account, r.binding.AccountID)
 	}
-	if r.account, err = BoundAccountFromEnv(acc); err != nil {
+	if r.account, err = boundUnaliased(m, acc); err != nil {
 		return err
 	}
 	if o.Verb == VerbDestroy {

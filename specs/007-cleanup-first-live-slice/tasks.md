@@ -124,7 +124,7 @@ Independent test: V002. Test task T008, then implementation task T009.
   - Verify: `task test:stacks; task test:live-lane; task test:bootstrap`: every case except the *pins* fails against the stub `CheckProjectAliases`.
   - Evidence: `evidence/T008.md`; initial status `not-run`.
 
-- [ ] T009 [US2] Refuse aliased project refs in tools/internal/stacks/adapter.go, in the lane's setup in tools/internal/live/apply.go and in `(*stateRun).setup` in tools/internal/live/bootstrap_state.go
+- [x] T009 [US2] Refuse aliased project refs in tools/internal/stacks/adapter.go, in the lane's setup in tools/internal/live/apply.go and in `(*stateRun).setup` in tools/internal/live/bootstrap_state.go — closed 2026-10-16, evidence: evidence/T009.md
   - Requirements: FR-003, SC-004; ADRs: 0009, 0021. Depends on: T008.
   - Verify: `task test:stacks; task test:live-lane; task test:bootstrap`: T008's cases green; G26 mutants (tenant/tenant under the flag, check after the first child, bootstrap checked only at publish or verify, id printed) each turn a case red.
   - Evidence: `evidence/T009.md`; initial status `not-run`.

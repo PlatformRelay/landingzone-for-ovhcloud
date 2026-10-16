@@ -158,3 +158,15 @@ func TestProjectAliasUnusedRefPin(t *testing.T) {
 		t.Errorf("LZ_PROJECT_ID_SPARE beside the growth manifest: %v, want nil", err)
 	}
 }
+
+// TestProjectAliasUnresolvedPin (pin, T009): two used refs the bound account does not resolve are
+// not one project: their empty ids are no alias, and the binding that needs a ref refuses it as
+// unbound-project.
+func TestProjectAliasUnresolvedPin(t *testing.T) {
+	a := aliasAccount(nil)
+	delete(a.ProjectIDs, "SHOP_DEV")
+	delete(a.ProjectIDs, "SHOP_PROD")
+	if err := CheckProjectAliases(decodeFixture(t, "growth"), a); err != nil {
+		t.Errorf("growth with SHOP_DEV and SHOP_PROD unresolved: %v, want nil", err)
+	}
+}

@@ -143,6 +143,21 @@ func BoundAccountFromEnv(env map[string]string) (stacks.BoundAccount, error) {
 	return acct, nil
 }
 
+// boundUnaliased is BoundAccountFromEnv plus the project-alias refusal (007 FR-003, A17): the
+// lane's and the bootstrap's setup call it before any child process. The refusal names the two
+// refs, never the id.
+func boundUnaliased(m *stacks.Manifest, env map[string]string) (stacks.BoundAccount, error) {
+	acct, err := BoundAccountFromEnv(env)
+	if err != nil {
+		return acct, err
+	}
+	err = stacks.CheckProjectAliases(m, acct)
+	if ref := (*stacks.RefusalError)(nil); errors.As(err, &ref) && ref.Reason == stacks.ReasonProjectAlias {
+		return acct, refuse(CondProjectAlias, "%s", ref.Detail)
+	}
+	return acct, err
+}
+
 // Record is an instance's last-applied record, `records/<id>.json` (data-model *Live run record*,
 // FR-009): what selection compares the next run against. It is selection's own type, so the file
 // the lane writes is the file stacks.ReadRecords reads (T041; stacks never imports live).

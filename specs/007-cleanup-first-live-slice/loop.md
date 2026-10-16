@@ -42,6 +42,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T006 | CLOSED: retry and attempt records in leftovers.go, budget/clock/terminal from chain.go and runner.go; T003's 16 and T004's 3 known-red rows green; 8 cases for the T003/T004 deferrals and 9 for review findings added; 36 G24 mutants, 35 killed, 1 equivalent (chain-level copy where the check starts) | leg 1 and strong leg, rounds 1 and 2; round-2 behaviour fixes unreviewed by rule | deferred: an element-decode row takes the last page's attempt number; `attempts` checked before the context's end (record only); the chain's baseline listing retries nothing (nil budget, data-model wires only the final check) |
 | T007 | CLOSED: `keepRecord` (sweep.go) with its writes in files.go, wired through `Runner.recordDir` on `--cleanup` only; T005's 5 known-red rows green; 2 tests added (archive on cleanup only; a failed archive fails the cleanup, record unchanged); 18 G25 mutants in 32 runs, each killed in its unit or entry scope (T005's slot-reuse deferral: copy-instead-of-move killed by the suite, not by `TestKeepRecordNextSlot` alone); every CI target green | leg 1 and strong leg, round 1 | rejected: leg 1's run-lock, symlink and mode findings (no new exposure; reasons in evidence). Nits accepted: a partial archive splits one attempt across two slots; an `observations.json`-only directory archives nothing |
 | T008 | CLOSED: 8 unit cases (5 refusals, 3 pins red on the stub's "not implemented"), lane table (plan, apply, destroy, chain) and bootstrap case red on the stub for their stated reasons; lane and bootstrap KD-1 pins pass; scratch reference green, 11 of 11 mutants killed (4 G26, the case defects, 2 from review) | leg 1 and strong leg, rounds 1 and 2 (round 1: bootstrap stdout id scan, two-tenant KD-1 pin) | for T009: `TestObserveChainReported/kd1-without-flag` runs the KD-1 account with the flag cleared and is refused by a correct FR-003 check; T009 changes it as a TEST-class correction |
+| T009 | CLOSED: `CheckProjectAliases` (state ref and tenant environments' refs, pairwise; KD-1 only state-beside-tenant and never when a tenant owns `STATE`; unresolved refs skipped) wired through `boundUnaliased` in the lane's `runLane` and the bootstrap's `(*stateRun).setup`; all 12 of T008's known-red rows green; 2 tests added (unresolved-refs pin, bootstrap malformed binding); 20 mutant runs (17 distinct), each killed, one of them by a crash rather than an assertion; every CI target green | leg 1 and strong leg, round 1 (no behaviour defect, so no round 2) | deferred to stage B: `identify --fresh-account` writes an aliased answer before `state` refuses it (optional earlier check). Rejected: `destroy` refused on an already-aliased account (FR-003 names destroy) |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -70,20 +71,21 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | sweep_record_test.go:TestKeepRecordNothingToMove | US1 | T005 | T007 |
 | probe_cleanup_record_test.go:TestProbeCleanupKeepsRecord | US1 | T005 | T007 |
 | probe_cleanup_record_test.go:TestProbeCleanupKeepsObservationsForUndo | US1 | T005 | T007 |
-| alias_test.go:TestProjectAliasTenants | US2 | T008 | |
-| alias_test.go:TestProjectAliasEnvironments | US2 | T008 | |
-| alias_test.go:TestProjectAliasSandboxPin (pin; red on the stub's "not implemented" only) | US2 | T008 | |
-| alias_test.go:TestProjectAliasFlagTwoTenantsPin (pin; red on the stub's "not implemented" only) | US2 | T008 | |
-| alias_test.go:TestProjectAliasStateWithoutFlag | US2 | T008 | |
-| alias_test.go:TestProjectAliasFlagNotTenants | US2 | T008 | |
-| alias_test.go:TestProjectAliasTenantOwnsState | US2 | T008 | |
-| alias_test.go:TestProjectAliasUnusedRefPin (pin; red on the stub's "not implemented" only) | US2 | T008 | |
-| alias_lane_test.go:TestLaneProjectAlias (plan, apply, destroy, chain) | US2 | T008 | |
-| bootstrap_alias_test.go:TestBootstrapProjectAlias | US2 | T008 | |
+| alias_test.go:TestProjectAliasTenants | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasEnvironments | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasSandboxPin (pin; red on the stub's "not implemented" only) | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasFlagTwoTenantsPin (pin; red on the stub's "not implemented" only) | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasStateWithoutFlag | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasFlagNotTenants | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasTenantOwnsState | US2 | T008 | T009 |
+| alias_test.go:TestProjectAliasUnusedRefPin (pin; red on the stub's "not implemented" only) | US2 | T008 | T009 |
+| alias_lane_test.go:TestLaneProjectAlias (plan, apply, destroy, chain) | US2 | T008 | T009 |
+| bootstrap_alias_test.go:TestBootstrapProjectAlias | US2 | T008 | T009 |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
 |---|---|---|---|
+| observe_test.go:TestObserveChainReported/kd1-without-flag | spec 005/006 | T009 | FR-003 refuses its world (KD-1 account `STATE` = `DEMO_DEV` with the flag cleared) at setup; coordinator decision 2026-10-16. `STATE` now has its own project in account.env, the fake tofu and the fake API; assertions unchanged |
 
 ## Live runs
 | Task | Run id | Reviewed SHA | Observation | Cost | Leftovers |
@@ -108,3 +110,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - A wiring mutant that no entry test reaches (an ignored error, a gate on the wrong flag) needs a unit case on the wiring function itself. (T007)
 - A "zero children before the refusal" case needs a world in which the run would otherwise reach a child: with an unrelated earlier refusal (growth's two-environment tenants stop at `tenant-environments`) the count is zero for the wrong reason; check the stub run shows children. (T008)
 - Before closing a test task, run a scratch implementation against the whole package, not only the new tests: it finds earlier tests whose premise the requirement retires (`kd1-without-flag` under FR-003). (T008)
+- A chain test moved to a second project needs it in three fakes: account.env, the fake tofu's `state_project_id` (`laneWorld.State`) and the fake API's listings (regions with empty storage, empty lists, an untagged IAM resource), seeded from the first request (`early`). (T009)
+- `gocognit` `min-complexity: 15` reports only above 15; to hold "under 15" run it at a lower setting (10 or 14). (T009)

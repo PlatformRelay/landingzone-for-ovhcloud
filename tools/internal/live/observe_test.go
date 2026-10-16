@@ -1031,6 +1031,40 @@ func chainSummaryLine(t *testing.T, h *laneHarness, runID, outcome, deviations s
 	}
 }
 
+// chainOwnStateProject is the state project of the unflagged chain case: without
+// spec.sandbox.shared_state_project, STATE on DEMO_DEV's id is a project alias the lane refuses at
+// setup (007 FR-003), so STATE gets a project of its own.
+const chainOwnStateProject = "f0000000000000000000000000000059"
+
+// chainUnflagged is c on the harness's manifest without the KD-1 flag and an account.env whose
+// STATE is chainOwnStateProject, which the fake API lists from the first request with the lane
+// project's regions and nothing in them.
+func chainUnflagged(h *laneHarness, c chainExec) chainExec {
+	h.t.Helper()
+	h.m.SharedStateProject = false
+	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+		"LZ_PROJECT_ID_STATE": chainOwnStateProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject, "LZ_ADMIN_CLIENT_ID": laneAdminID, "LZ_ADMIN_POLICY_ID": chainAdminPolicy})
+	h.world.State = chainOwnStateProject // the fake tofu's state_project_id
+	h.save()
+	_, w := chainWorld(h.t, h.nextRunID())
+	pr := "/cloud/project/" + laneProject
+	c.seed.Replace = map[string][]json.RawMessage{}
+	for path, pages := range w.Responses {
+		rest, ok := strings.CutPrefix(path, pr)
+		if !ok {
+			continue
+		}
+		if rest != "/region" && !strings.HasPrefix(rest, "/region/") || strings.HasSuffix(rest, "/storage") {
+			pages = []json.RawMessage{json.RawMessage("[]")}
+		}
+		c.seed.Replace["/cloud/project/"+chainOwnStateProject+rest] = pages
+	}
+	urn := "urn:v1:eu:resource:publicCloudProject:" + chainOwnStateProject
+	c.seed.Replace["/iam/resource/"+urn] = []json.RawMessage{json.RawMessage(`{"urn":"` + urn + `","name":"` + chainOwnStateProject + `","type":"publicCloudProject","tags":{}}`)}
+	c.early = true
+	return c
+}
+
 // The chain observes once every stack is applied, before the destroy-on-exit; it writes the set
 // to observations.json (redacted, with the manifest's sandbox flag), judges it, and reports the
 // known deviations observed in summary.json and the summary line. A known deviation does not
@@ -1088,15 +1122,15 @@ func TestObserveChainReported(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newChainHarness(t)
-			if tc.unflagged {
-				h.m.SharedStateProject = false
-			}
 			o := &chainObserver{obs: tc.obs, err: tc.obsErr, cleanupErr: tc.cleanupErr}
-			var sig os.Signal
-			if tc.interrupt {
-				sig = syscall.SIGINT
+			c := chainExec{observer: o}
+			if tc.unflagged {
+				c = chainUnflagged(h, c)
 			}
-			r := h.chain(chainExec{observer: o, signalAtObserve: sig})
+			if tc.interrupt {
+				c.signalAtObserve = syscall.SIGINT
+			}
+			r := h.chain(c)
 			laneExit(t, r.laneRun, tc.exit)
 			if tc.reason != "" && (r.err == nil || !strings.Contains(r.err.Error(), tc.reason)) {
 				t.Errorf("err %v, want one naming %s", r.err, tc.reason)
