@@ -749,3 +749,75 @@ func TestCredentialSetWriteKeepsBinding(t *testing.T) {
 		}
 	}
 }
+
+// T014 (FR-005, data-model *Credential set*): the reader takes `current`'s whole content as the
+// generation name, as the writer does: a pointer with a line break or surrounding whitespace,
+// beside a directory of the trimmed name, is refused by both, never trimmed by one of them.
+func TestCredentialSetPointerExact(t *testing.T) {
+	t.Parallel()
+	for name, pointer := range map[string]string{
+		"trailing-newline": csetCur + "\n",
+		"trailing-crlf":    csetCur + "\r\n",
+		"leading-space":    " " + csetCur,
+		"trailing-space":   csetCur + " ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := credRoot(t)
+			csetLay(t, root, csetGov, csetCur, csetGovFiles("cur"))
+			csPoint(t, csetDir(root, csetGov), pointer)
+			got, err := CredentialSetPath(root, credAccount, csetGov, "platform-deployer.env")
+			if err == nil || !strings.HasPrefix(err.Error(), "CREDENTIAL_POINTER_INVALID") {
+				t.Errorf("reader: CredentialSetPath = %q, %v; want an error starting CREDENTIAL_POINTER_INVALID", got, err)
+			}
+			w := CredentialSet{Root: root, Account: credAccount, Instance: csetGov, RunID: "20261016T101500Z-7a7b", Files: csetGovFiles("next")}
+			if err := WriteCredentialSet(w, 0); err == nil || !strings.HasPrefix(err.Error(), "CREDENTIAL_POINTER_INVALID") {
+				t.Errorf("writer: WriteCredentialSet = %v; want an error starting CREDENTIAL_POINTER_INVALID", err)
+			}
+		})
+	}
+}
+
+// One load resolves each set's `current` once (data-model: "readers resolve `current` once per
+// load"): a pointer switched between two of its files would otherwise give one load files of two
+// generations. Every row of the two-tenant manifest is loaded with each writer's set in place.
+func TestCredentialsResolveCurrentOnce(t *testing.T) {
+	notParallel(t)
+	root := credRoot(t)
+	csetLay(t, root, csetGov, csetCur, csetGovFiles("gov"))
+	csPoint(t, csetDir(root, csetGov), csetCur)
+	for _, tenant := range []string{"demo", "ops"} {
+		csetLay(t, root, tenant+"-state", csetCur, csetStateFiles(tenant, tenant))
+		csPoint(t, csetDir(root, tenant+"-state"), csetCur)
+	}
+	old := setCurrent
+	t.Cleanup(func() { setCurrent = old })
+	resolved := map[string]int{}
+	setCurrent = func(setDir string) (string, error) {
+		resolved[filepath.Base(setDir)]++
+		return old(setDir)
+	}
+	m := credManifest(t, true)
+	for _, in := range m.Instances {
+		clear(resolved)
+		if _, _, err := LoadCredentials(root, credAccount, m, in.ID); err != nil {
+			t.Errorf("%s: LoadCredentials: %v", in.ID, err)
+			continue
+		}
+		a, _ := AuthorityOf(m, in.ID)
+		var own []string
+		if a != AuthorityBootstrap {
+			own = []string{csetGov, in.Tenant + "-state"}
+		}
+		for _, set := range own {
+			if resolved[set] != 1 {
+				t.Errorf("%s: the %s set's current resolved %d times in one load, want once", in.ID, set, resolved[set])
+			}
+		}
+		for set, n := range resolved {
+			if n > 1 {
+				t.Errorf("%s: the %s set's current resolved %d times in one load, want at most once", in.ID, set, n)
+			}
+		}
+	}
+}

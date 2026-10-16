@@ -538,8 +538,7 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 			return fmt.Errorf("%s output %s is not sensitive: it would be published", in.Stage, name)
 		}
 	}
-	acct := filepath.Join("accounts", r.o.Account)
-	files := map[string]map[string]string{}
+	files := map[string]map[string]string{} // relative to the account directory
 	switch in.Stage {
 	case "account-governance":
 		var pd struct {
@@ -561,7 +560,7 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 		if pd.ClientID == "" || ps == "" {
 			return errors.New("account-governance outputs: the platform deployer has no client id or secret")
 		}
-		files[filepath.Join(acct, "platform-deployer.env")] = map[string]string{"OVH_ENDPOINT": r.account.Endpoint, "OVH_CLIENT_ID": pd.ClientID, "OVH_CLIENT_SECRET": ps}
+		files["platform-deployer.env"] = map[string]string{"OVH_ENDPOINT": r.account.Endpoint, "OVH_CLIENT_ID": pd.ClientID, "OVH_CLIENT_SECRET": ps}
 		var names []string
 		for _, t := range r.o.Manifest.Tenants {
 			names = append(names, t.Name)
@@ -580,7 +579,7 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 			if tenants[t].ClientID == "" || ts[t] == "" {
 				return fmt.Errorf("account-governance outputs: tenant %s has no deployer client id or secret", t)
 			}
-			files[filepath.Join(acct, "tenants", t, "deployer.env")] = map[string]string{"OVH_ENDPOINT": r.account.Endpoint, "OVH_CLIENT_ID": tenants[t].ClientID, "OVH_CLIENT_SECRET": ts[t]}
+			files[filepath.Join("tenants", t, "deployer.env")] = map[string]string{"OVH_ENDPOINT": r.account.Endpoint, "OVH_CLIENT_ID": tenants[t].ClientID, "OVH_CLIENT_SECRET": ts[t]}
 		}
 	case "tenant-state":
 		type s3 struct {
@@ -596,7 +595,7 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 			if k.AK == "" || k.SK == "" {
 				return fmt.Errorf("tenant-state outputs: no S3 key for %s", name)
 			}
-			files[filepath.Join(acct, "tenants", in.Tenant, name)] = map[string]string{"AWS_ACCESS_KEY_ID": k.AK, "AWS_SECRET_ACCESS_KEY": k.SK}
+			files[filepath.Join("tenants", in.Tenant, name)] = map[string]string{"AWS_ACCESS_KEY_ID": k.AK, "AWS_SECRET_ACCESS_KEY": k.SK}
 		}
 	}
 	for rel, values := range files {
@@ -604,10 +603,66 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 			return fmt.Errorf("%s outputs for %s: %w", in.Stage, rel, err)
 		}
 	}
-	for _, rel := range slices.Sorted(maps.Keys(files)) {
-		if err := WriteCredentialFile(r.o.ConfigRoot, rel, files[rel]); err != nil {
+	if len(files) == 0 {
+		return nil
+	}
+	// FR-005: the files form the applied instance's credential set, a fresh generation that
+	// becomes current in one switch; readers see the previous set or this one, never a mix.
+	return writeRunSet(CredentialSet{Root: r.o.ConfigRoot, Account: r.o.Account, Instance: in.ID, RunID: r.o.RunID, Files: files})
+}
+
+// writeRunSet writes s as its writer's new credential set (FR-005). A retry of the same run that
+// finds its own generation current (a crash after the switch, or a completed write) treats the set
+// as written when that generation holds exactly s's files with s's values; anything else is
+// refused, naming no value: a run's generation is never rewritten, a new run writes a new one.
+func writeRunSet(s CredentialSet) error {
+	acct, err := AccountDir(s.Root, s.Account)
+	if err != nil {
+		return err
+	}
+	if !accountID.MatchString(s.Instance) {
+		return fmt.Errorf("credential set: instance %q is not a plain path segment", s.Instance)
+	}
+	setDir := filepath.Join(acct, "sets", s.Instance)
+	cur, err := currentGeneration(setDir)
+	if err != nil || cur != "gen-"+s.RunID {
+		return WriteCredentialSet(s, 0) // it refuses an invalid pointer itself
+	}
+	gen := filepath.Join(setDir, cur)
+	held := 0
+	err = filepath.WalkDir(gen, func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir():
+			return nil
+		}
+		rel, err := filepath.Rel(gen, p)
+		if err != nil {
 			return err
 		}
+		want, ok := s.Files[filepath.ToSlash(rel)]
+		switch {
+		case !d.Type().IsRegular():
+			return fmt.Errorf("holds %s, which is not a regular file", rel)
+		case !ok:
+			return fmt.Errorf("holds %s, which the retry does not write", rel)
+		}
+		got, err := ReadCredentialFile(p)
+		if err != nil {
+			return err
+		}
+		if !maps.Equal(got, want) {
+			return fmt.Errorf("holds other values in %s", rel)
+		}
+		held++
+		return nil
+	})
+	if err == nil && held != len(s.Files) {
+		err = errors.New("lacks files the retry writes")
+	}
+	if err != nil {
+		return fmt.Errorf("credential set %s: this run's generation %s is current and %v; a run's generation is never rewritten, start a new run", s.Instance, cur, err)
 	}
 	return nil
 }

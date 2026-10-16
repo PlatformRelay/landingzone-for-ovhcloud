@@ -59,18 +59,82 @@ func authorityFiles(account string, a Authority, tenant string) ([2]string, erro
 // 2026-10-08: a missing file says what to run): bootstrap:account the bootstrap files,
 // account-governance the deployer clients, the tenant's tenant-state instance its S3 keys.
 func writerOf(m *stacks.Manifest, a Authority, i int, tenant string) string {
+	if a == AuthorityBootstrap {
+		return "bootstrap:account"
+	}
+	if w := setOf(m, a, i, tenant); w != "" {
+		return w
+	}
+	return "the tenant-state instance of tenant " + tenant
+}
+
+// setOf names the writing instance whose credential set holds file i (0 OAuth2, 1 S3) of authority
+// a for tenant (FR-005): account-governance the deployer clients, the tenant's tenant-state
+// instance its S3 keys. It is "" for the bootstrap files, which no set holds, and for a tenant
+// without a tenant-state row.
+func setOf(m *stacks.Manifest, a Authority, i int, tenant string) string {
 	switch {
 	case a == AuthorityBootstrap:
-		return "bootstrap:account"
+		return ""
 	case i == 0:
-		return "account-governance"
+		return setInstanceGovernance
 	}
 	for _, in := range m.Instances {
 		if in.Stage == "tenant-state" && in.Tenant == tenant {
 			return in.ID
 		}
 	}
-	return "the tenant-state instance of tenant " + tenant
+	return ""
+}
+
+// setCurrent resolves the generation `current` names in a set directory ("" while `current` does
+// not exist). It is a variable only so a test can count the resolutions of one load.
+var setCurrent = currentGeneration
+
+// setLoad resolves the credential-set paths of one load. Each set's `current` is resolved at most
+// once (data-model: "readers resolve `current` once per load"): a switch between two reads of one
+// load cannot give it files of two generations.
+type setLoad struct {
+	root, account string
+	gens          map[string]setGen // by writing instance
+}
+
+type setGen struct {
+	name string // "" while `current` does not exist
+	err  error
+}
+
+func newSetLoad(root, account string) *setLoad {
+	return &setLoad{root: root, account: account, gens: map[string]setGen{}}
+}
+
+// path is the path of file rel (relative to the account directory) of instance's set: below the
+// generation `current` names, or the flat path while `current` does not exist.
+func (l *setLoad) path(instance, rel string) (string, error) {
+	acct, err := AccountDir(l.root, l.account)
+	if err != nil {
+		return "", err
+	}
+	if !accountID.MatchString(instance) {
+		return "", fmt.Errorf("credential set: instance %q is not a plain path segment", instance)
+	}
+	if !filepath.IsLocal(rel) || filepath.Clean(rel) != rel {
+		return "", fmt.Errorf("credential set: %q is not a path below the account directory", rel)
+	}
+	g, ok := l.gens[instance]
+	if !ok {
+		// currentGeneration is the writer's own check: a regular file whose whole content (no
+		// trimming) is a gen- name of a sibling directory, CREDENTIAL_POINTER_INVALID otherwise.
+		g.name, g.err = setCurrent(filepath.Join(acct, "sets", instance))
+		l.gens[instance] = g
+	}
+	switch {
+	case g.err != nil:
+		return "", g.err
+	case g.name == "":
+		return filepath.Join(acct, rel), nil
+	}
+	return filepath.Join(acct, "sets", instance, g.name, rel), nil
 }
 
 // CredentialSetPath returns the path of file rel (relative to the account directory, as readers
@@ -79,16 +143,19 @@ func writerOf(m *stacks.Manifest, a Authority, i int, tenant string) string {
 // pointer that is not a `gen-` name of an existing sibling directory is refused, the error text
 // starting CREDENTIAL_POINTER_INVALID.
 func CredentialSetPath(root, account, instance, rel string) (string, error) {
-	return "", errors.New("CredentialSetPath: not implemented")
+	return newSetLoad(root, account).path(instance, rel)
 }
 
 // LoadCredentials returns the child variables of instance id's authority (OVH_ENDPOINT,
 // OVH_CLIENT_ID, OVH_CLIENT_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), taken from that
 // authority's two files for account under configRoot and from no other file (the other
-// authorities' files of the account are only compared against). A missing file is *Blocked naming
-// what writes it; a file others can read is a CondFileMode refusal; a file without a needed
-// variable, or whose client id or access key another authority's file of the account holds, is a
-// CondCredentials refusal. No error carries a value.
+// authorities' files of the account are only compared against). A file a credential set holds is
+// read from the generation its writer's `current` names, each `current` resolved once per load,
+// and from the flat path while that writer has no `current` (FR-005 migration). A missing file is
+// *Blocked naming what writes it; an invalid pointer is refused (CREDENTIAL_POINTER_INVALID); a
+// file others can read is a CondFileMode refusal; a file without a needed variable, or whose
+// client id or access key another authority's file of the account holds, is a CondCredentials
+// refusal. No error carries a value.
 func LoadCredentials(configRoot, account string, m *stacks.Manifest, id string) (Authority, map[string]string, error) {
 	if !accountID.MatchString(account) {
 		return "", nil, fmt.Errorf("account id %q is not a plain path segment", account)
@@ -102,15 +169,43 @@ func LoadCredentials(configRoot, account string, m *stacks.Manifest, id string) 
 	if err != nil {
 		return a, nil, err
 	}
+	sets := newSetLoad(configRoot, account)
+	acct := filepath.Join("accounts", account)
+	// resolve is the path of file rel (relative to configRoot) as this load reads it, and that
+	// path relative to configRoot for messages.
+	resolve := func(rel, set string) (string, string, error) {
+		if set == "" {
+			return filepath.Join(configRoot, rel), rel, nil
+		}
+		inAcct, err := filepath.Rel(acct, rel)
+		if err != nil {
+			return "", "", err
+		}
+		p, err := sets.path(set, inAcct)
+		if err != nil {
+			return "", "", err
+		}
+		shown, err := filepath.Rel(configRoot, p)
+		if err != nil {
+			shown = rel
+		}
+		return p, shown, nil
+	}
 	vars := map[string]string{}
+	shown := [2]string{}
 	for i, rel := range files {
 		keys := oauthKeys
 		if i == 1 {
 			keys = s3Keys
 		}
-		v, err := ReadCredentialFile(filepath.Join(configRoot, rel))
+		p, s, err := resolve(rel, setOf(m, a, i, in.Tenant))
+		if err != nil {
+			return a, nil, fmt.Errorf("%s: %w", id, err)
+		}
+		shown[i] = s
+		v, err := ReadCredentialFile(p)
 		if errors.Is(err, fs.ErrNotExist) {
-			return a, nil, &Blocked{Phase: "credentials", Detail: fmt.Sprintf("%s: %s does not exist; %s writes it", id, rel, writerOf(m, a, i, in.Tenant))}
+			return a, nil, &Blocked{Phase: "credentials", Detail: fmt.Sprintf("%s: %s does not exist; %s writes it", id, s, writerOf(m, a, i, in.Tenant))}
 		}
 		if err != nil {
 			return a, nil, err
@@ -118,7 +213,7 @@ func LoadCredentials(configRoot, account string, m *stacks.Manifest, id string) 
 		// Only the needed variables: whatever else the file holds never reaches a child.
 		for _, k := range keys {
 			if v[k] == "" {
-				return a, nil, refuse(CondCredentials, "%s: %s has no %s", id, rel, k)
+				return a, nil, refuse(CondCredentials, "%s: %s has no %s", id, s, k)
 			}
 			vars[k] = v[k]
 		}
@@ -131,30 +226,36 @@ func LoadCredentials(configRoot, account string, m *stacks.Manifest, id string) 
 			tenants = append(tenants, row.Tenant)
 		}
 	}
-	var others []string
+	type other struct{ rel, set string }
+	var others []other
 	for _, oa := range []Authority{AuthorityBootstrap, AuthorityPlatform, AuthorityTenant} {
 		for _, t := range append([]string{""}, tenants...) {
 			if (oa == AuthorityBootstrap) != (t == "") {
 				continue
 			}
 			f, _ := authorityFiles(account, oa, t)
-			for _, rel := range f {
-				if rel != files[0] && rel != files[1] && !slices.Contains(others, rel) {
-					others = append(others, rel)
+			for i, rel := range f {
+				o := other{rel, setOf(m, oa, i, t)}
+				if rel != files[0] && rel != files[1] && !slices.Contains(others, o) {
+					others = append(others, o)
 				}
 			}
 		}
 	}
-	for _, rel := range others {
-		o, err := ReadCredentialFile(filepath.Join(configRoot, rel))
+	for _, of := range others {
+		p, s, err := resolve(of.rel, of.set)
+		if err != nil {
+			continue // an invalid pointer: nothing to compare (its own stacks refuse it)
+		}
+		o, err := ReadCredentialFile(p)
 		if err != nil {
 			continue // absent or unreadable: nothing to compare (its own stack refuses it)
 		}
 		if o["OVH_CLIENT_ID"] != "" && o["OVH_CLIENT_ID"] == vars["OVH_CLIENT_ID"] {
-			return a, nil, refuse(CondCredentials, "%s: the client of %s is also the client of %s", id, files[0], rel)
+			return a, nil, refuse(CondCredentials, "%s: the client of %s is also the client of %s", id, shown[0], s)
 		}
 		if o["AWS_ACCESS_KEY_ID"] != "" && o["AWS_ACCESS_KEY_ID"] == vars["AWS_ACCESS_KEY_ID"] {
-			return a, nil, refuse(CondCredentials, "%s: the access key of %s is also the access key of %s", id, files[1], rel)
+			return a, nil, refuse(CondCredentials, "%s: the access key of %s is also the access key of %s", id, shown[1], s)
 		}
 	}
 	return a, vars, nil
