@@ -2,7 +2,7 @@
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
 Next: L — dispatch the first open task (`task.sh next`)
-Budget: strong review legs 19/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
+Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
 - [x] 0 orient — feature dir created by hand from the templates; spec, plan, research, data model, contracts, quickstart and tasks present; base origin/main
@@ -56,6 +56,7 @@ Holistic run at B: not run yet.
 | L T013 | T013's added tests were written after the code (not test-first) | minor | task | accept | red shown by 17 mutants and the pre-fix runs; recorded in evidence | no |
 | L T014 | Symlink refusal is a plain error, not a `CondFileMode` refusal; refused-retry cases do not check this account's flat files survive; the retry path skips `privateDir` on set and generation dirs | minor | both | defer | stage B | no |
 | L T014 | Round-2 fix (symlinked `accounts/` ancestors) went unreviewed | — | task | accept | two-round limit; stage B reads it | no |
+| L T015 | `tofu version` probe runs with a shared HOME=os.TempDir() (stacks/plan.go:67) | minor | strong | defer | stage B: private home for pinnedTofu's version probe | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
@@ -87,12 +88,13 @@ Holistic run at B: not run yet.
 | tools/internal/live/chain_test.go:TestChainLeftoverTokenRedacted (token-as-id, token-inside-longer-id, token-split-across-writes, registered-before-first-listing); `test:live-lane` red | US1 | T006 | T012 |
 | tools/internal/live/files_test.go:TestFilesCredentialSetWriter (fresh-write, crash-after-first-file, crash-after-files, crash-after-dir-sync, crash-after-pointer-tmp, crash-after-switch, keeps-current-and-previous); `test:live-lane` red | US1 | T007 | T013 |
 | tools/internal/live/credentials_test.go:TestCredentialSetPathResolves (3), TestCredentialSetPathPointerInvalid (8), TestCredentialsFromSets (generation-after-switch, each-writer-its-own-pointer) — cleared by T014; TestCredentialSetWriteKeepsBinding — cleared by T013; `test:live-lane` red | US1 | T008 | T013, T014 |
-| tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | |
+| tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | T015 |
 | tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
 |---|---|---|---|
+| tools/internal/live/hardening_test.go:TestEnvCredsCannotReplacePathOrHome | before spec 006 | T015 | FR-007: passed the caller's HOME; now a t.TempDir() home; claim unchanged, kills the env-caller-home mutant |
 | tools/internal/live/apply_test.go:TestApplyFirstRunAllInOrder (lane judge: secret scan and file check) | spec 005 | T014 | FR-005: credentials now live in a generation set and the flat file is gone; no claim weakened |
 | tools/internal/live/probe_identity_test.go:TestProbeIdentityReservedNames/passed/neighbours | before spec 006 | T010 | FR-006 (D115 allow-list): names outside `TF_VAR_` were asserted admitted; now refused `unlisted/*` rows |
 | tools/internal/live/hardening_test.go:TestEnvCredsCannotReplacePathOrHome; tools/internal/live/env_test.go:TestEnvChildFromScratch | before spec 006 | T009 | not wrong: call sites follow the `Command(a, creds, home, name, arg...)` signature data-model fixes; no claim changed |
@@ -115,6 +117,7 @@ Holistic run at B: not run yet.
 - A requirement naming "the run's redactor" covers every caller of the guarded type: grep the production callers before calling it done; the owner of a redactor sets it on what it calls, a caller's redactor never wins. (T012)
 - A writer that deletes old copies needs a per-kind allow-list of what it may write; validate map keys as given, never look values up by a cleaned key; an fsync/rename seam makes durability ordering testable (check the first sync after the switch). Mutant loops must always end. (T013)
 - A reader that must agree with a writer runs the writer's path checks from the same base directory; a retry that treats an interrupted write as done owes its unfinished cleanup; symlink tests cover every ancestor from the root. (T014)
+- "No child process on any path" covers every exec.Command in the binary: grep exec.Command and "HOME=" across its packages first. git reads $HOME/.config/git/ignore even with GIT_CONFIG_GLOBAL=/dev/null. A helper that creates a resource and can then fail cleans it up itself. (T015)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
