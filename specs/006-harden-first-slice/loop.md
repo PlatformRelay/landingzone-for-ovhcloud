@@ -1,7 +1,7 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: L — dispatch the first open task (`task.sh next`)
+Next: L — T048 (grant the state users s3:GetBucketObjectLockConfiguration), then US4 (T027/T028)
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
@@ -58,6 +58,22 @@ Holistic run at B: not run yet.
 | L T014 | Round-2 fix (symlinked `accounts/` ancestors) went unreviewed | — | task | accept | two-round limit; stage B reads it | no |
 | L T015 | `tofu version` probe runs with a shared HOME=os.TempDir() (stacks/plan.go:67) | minor | strong | defer | stage B: private home for pinnedTofu's version probe | no |
 | L T017 | Case 1 and the entry test check the deadline run.json records, not the run's context | minor | both | defer | T022's review: a `Deadline` of 0 resolves into the run's context | no |
+| L T018 | Destroy's own context is seen only through the listings; mutant split-ctx-long-destroy survives (row 3a) | minor | both | defer | T023's review: one destroyContext serves destroys and the leftover check; consider an observer seam | no |
+| L T018 | Test changes: TestChainStateUnreadable/deadline-too-close and TestProbeCompanionDestroyRetry/backoff-beyond-deadline now wait DefaultDeadline+1m (FR-002); claims unchanged | — | task | accept | loop.md Test changes at story end | no |
+| L T019 | The clock parameter on readRetained departs from the fixed signature | warning | strong | defer | T024 moves the backoff and clock onto laneRunner; its review checks the budget reads clk.Now() against the destroy context's deadline | no |
+| L T020 | data-model's FR-009 row says "through ChainOptions"; the tests call ObserveCanary directly | minor | review | defer | stage B (data-model wording) | no |
+| L T021 | Collector's read error should be observed as `error`, not `violated` | minor | review | defer | T026's collector test | no |
+| L T021 | Wire XML and the ObjectLockConfigurationNotFoundError code are AWS's; OVHcloud behaviour UNVERIFIED | — | task | defer | premise P5: the next chain run observes it (coordinator) | no |
+| L T021 | Coordinator's dispatch named FR-013 for T021; tasks.md traces FR-010 (Object Lock); the task followed tasks.md | — | coordinator | accept | dispatch wording error, no effect | no |
+| note T026 | Adding the 11th L7 assertion turns ~15 spec 005 tests red (chainPassing, the chain harness's default observations, TestL7Subjects, collectComplete's count of 10, TestCollect); T026 makes TEST-class changes citing FR-010 | — | task | plan | name them in T026's dispatch | no |
+| L T022 | S3 store calls ignore the run's context (30 s client timeout each) | minor | strong | defer | stage B: a context-aware ObjectStore across stacks | no |
+| L T022 | verification-status.md:64 says these verbs have no deadline or inventory | minor | review | defer | T043 (docs) | no |
+| L T022 | A refusal records `fail` while data-model also lists `not-run` | minor | review | reject | the chain's mapping; stage B may define not-run | no |
+| known-red fix | T018's rows (TestDestroyBudget ×6, TestChainDestroyBudget/{from-destroy-start,outlives-run-deadline}, TestRunnerDestroyBudget/{…}) were never added to the Known red table; add them with Cleared in T023 | — | coordinator | fix | story-end commit | no |
+| L T023 | Probe destroy-phase calls before the first plan -destroy (undo, companion, cleanup init) not compared; no destroy-budget field in summary.json | minor | strong | defer | stage B (data-model question) | no |
+| L T024 | The reserve keeps time for one read and the final listing, not for the retained reads still to come | minor | strong | defer | stage B (matches FR-008's text; fails closed) | no |
+| L T025 | Create answers 5xx on a name read as absent: remove (T020's 500-after-create) or report? | — | task | decide remove | Coordinator minor decision 2026-10-16: the canary name carries the run id, so another creator in the read→create gap is not credible; keep T020's fixed test | no |
+| L T025 | Trap mode's zero value means "delete"; reportCanary's failure paths untested; ReadPresent does not check both KD-1 subjects; OVHcloud 404 for an absent bucket UNVERIFIED | minor | review | defer | stage B; the 404 is observed on the next live chain | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
@@ -103,6 +119,7 @@ Holistic run at B: not run yet.
 | tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | T015 |
 | tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | T016 |
 | tools/internal/live/apply_test.go: TestBoundedApplyDefaultDeadline, TestBoundedApplyInventory, TestBoundedVerbSummary (3), TestBoundedVerbHangStops (3), TestBoundedApplyStopKeepsInventory (4); tools/cmd/lz-live/lane_test.go: TestLaneEntryBounded (3); `test:live-lane` red | US2 | T017 | T022 |
+| tools/internal/live/*_test.go: TestDestroyBudget (6), TestChainDestroyBudget/{from-destroy-start,outlives-run-deadline}, TestRunnerDestroyBudget/{from-destroy-start,outlives-run-deadline}; `test:live-lane` red | US2 | T018 | T023 |
 | tools/internal/live/chain_test.go:TestRetryBudgetAdmit (exactly-the-reserve, fits-but-eats-the-reserve, counts-from-now, larger-reserve, reserve-already-gone), TestChainRetryBudgetShared (third-does-not-fit), TestChainRetryBudgetRefused (reserve-not-left, beyond-the-budget), TestChainStateUnreadable (deadline-too-close); `test:live-lane` red | US2 | T019 | T024 |
 | tools/internal/live/observe_test.go:TestObserveCanaryCreateError (500-after-create, 503-after-create, dropped-after-create, 500-after-create-delete-fails, 500-after-create-read-fails, 500-without-bucket), TestObserveCanaryNameTaken (blocked); `test:live-lane` red | US2 | T020 | T025 |
 | tools/internal/live/s3check_test.go:TestS3CheckerObjectLock (15 rows), TestJudgeObjectLock (11 rows); tools/internal/live/observe_test.go:TestObserveChainObjectLock (both-locked, not-observed, one-bucket-unobserved, one-bucket-violated, one-bucket-unreadable); `test:live-lane` red | US2 | T021 | T026 |
@@ -148,7 +165,6 @@ Holistic run at B: not run yet.
 - A budget whose only state is its end time makes "one budget per check" untestable by sharing alone: a new budget with the same end is equivalent. Give it state that carries across instances (a reserve raised by the slowest read) and pin it with a slow call on the fake clock; test an outcome precedence (`blocked` only when alone) with a mixed-error row. (T024)
 - A cleanup armed before a create must know who owns the name when the create's answer is ambiguous (5xx, dropped, or success on a name that existed): read it first, remove only what the read found absent, report (never remove) what it found, and walk every read × create answer pair in a table before review; a 409 alone settles only one cell. (T025)
 - Before wiring a live read, check the credential's policy grants the action (the module's Allow list), not only that the fake admits the key; and check how the judge maps the observed value against the outcome the requirement names, at the chain (`summary.json`), whatever an earlier note said to observe. (T026)
-- Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
 ## Where a human should look first
