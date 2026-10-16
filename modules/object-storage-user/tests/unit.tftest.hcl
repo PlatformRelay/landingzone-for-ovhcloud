@@ -13,8 +13,9 @@
 # The actions an S3 state backend with `use_lockfile` needs: s3:GetObject, s3:PutObject,
 # s3:DeleteObject, s3:ListBucket (s3-conditional-writes.mdx:287: no permission beyond PutObject and
 # DeleteObject for conditional writes). Every allowed action is an object or listing action of the
-# read-write example (plus s3:ListBucketVersions): no bucket configuration action (versioning,
-# lifecycle, policy, deletion) and no version delete, so the policy grants nothing that undoes the
+# read-write example (plus s3:ListBucketVersions), and the one bucket configuration read
+# s3:GetBucketObjectLockConfiguration (spec 006 T048): no bucket configuration write (versioning,
+# lifecycle, policy, lock, deletion) and no version delete, so the policy grants nothing that undoes the
 # protected bucket's versioning or purges old state versions. No s3:GetObjectVersion: OVHcloud
 # refuses that name (T094, tests/fixtures/ovhcloud/s3-policy-actions.json).
 # The secret is checked against the module's other outputs; an output added later is not seen
@@ -111,9 +112,9 @@ run "policy_allows_only_the_given_buckets" {
   assert {
     condition = length(setsubtract(
       flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload", "s3:GetBucketObjectLockConfiguration"],
     )) == 0
-    error_message = "two buckets: every allowed action is an object or listing action"
+    error_message = "two buckets: every allowed action is an object or listing action or the Object Lock read"
   }
 }
 
@@ -138,9 +139,74 @@ run "policy_actions_state_backend_no_wildcard" {
   assert {
     condition = length(setsubtract(
       flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload", "s3:GetBucketObjectLockConfiguration"],
     )) == 0
-    error_message = "every allowed action is an object or listing action: no bucket configuration, no s3:DeleteObjectVersion"
+    error_message = "every allowed action is an object or listing action or the Object Lock read: no bucket configuration write, no s3:DeleteObjectVersion"
+  }
+}
+
+# Spec 006 T048 (FR-010): the chain reads each state bucket's Object Lock configuration with a state
+# credential, so the policy allows s3:GetBucketObjectLockConfiguration, a Bucket-scope read
+# (s3-identity-and-access-management.mdx:279; s3-managing-object-lock.mdx:114), unconditioned, on
+# the bucket ARN of each given bucket only: not its objects, not another bucket.
+run "policy_allows_object_lock_read_on_the_bucket_only" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : flatten([lookup(s, "Resource", [])])
+      if lookup(s, "Effect", "") == "Allow" && contains(flatten([lookup(s, "Action", [])]), "s3:GetBucketObjectLockConfiguration")
+    ])) == toset(["arn:aws:s3:::lz-demo-bkt-state"])
+    error_message = "s3:GetBucketObjectLockConfiguration is allowed on the given bucket only, not on its objects or another bucket"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : !contains(keys(s), "Condition")
+      if lookup(s, "Effect", "") == "Allow" && contains(flatten([lookup(s, "Action", [])]), "s3:GetBucketObjectLockConfiguration")
+    ])
+    error_message = "the Object Lock read is unconditioned"
+  }
+}
+
+run "policy_allows_object_lock_read_on_the_given_buckets" {
+  command = plan
+
+  variables {
+    buckets = ["lz-demo-bkt-state", "lz-bkt-state"]
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : flatten([lookup(s, "Resource", [])])
+      if lookup(s, "Effect", "") == "Allow" && contains(flatten([lookup(s, "Action", [])]), "s3:GetBucketObjectLockConfiguration")
+    ])) == toset(["arn:aws:s3:::lz-demo-bkt-state", "arn:aws:s3:::lz-bkt-state"])
+    error_message = "two buckets: s3:GetBucketObjectLockConfiguration is allowed on exactly the two given buckets"
+  }
+}
+
+# T048: the grant adds exactly one read. The allowed actions are the object and listing actions
+# above plus s3:GetBucketObjectLockConfiguration, nothing else: no lock or retention write and no
+# governance bypass, which would let a locked state version be removed.
+run "policy_adds_only_the_object_lock_read" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : flatten([lookup(s, "Action", [])]) if lookup(s, "Effect", "") == "Allow"
+      ])) == toset([
+      "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions",
+      "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload", "s3:GetBucketObjectLockConfiguration",
+    ])
+    error_message = "the allowed actions are exactly the object and listing actions and the Object Lock read"
+  }
+
+  assert {
+    condition = length(setintersection(
+      flatten([for s in jsondecode(ovh_cloud_project_user_s3_policy.this.policy).Statement : flatten([lookup(s, "Action", [])]) if lookup(s, "Effect", "") == "Allow"]),
+      ["s3:PutBucketObjectLockConfiguration", "s3:BypassGovernanceRetention", "s3:PutObjectRetention", "s3:PutObjectLegalHold", "s3:PutBucketVersioning"],
+    )) == 0
+    error_message = "no Allow grants a lock, retention, legal-hold or versioning write or the governance bypass"
   }
 }
 

@@ -152,9 +152,9 @@ run "account_policy_confined_to_the_bucket" {
   assert {
     condition = length(setsubtract(
       flatten([for s in jsondecode(output.s3_users["platform"].policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+      ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload", "s3:GetBucketObjectLockConfiguration"],
     )) == 0
-    error_message = "every allowed action is an object or listing action (no wildcard, no bucket configuration)"
+    error_message = "every allowed action is an object or listing action or the Object Lock read (no wildcard, no bucket configuration write)"
   }
 }
 
@@ -172,6 +172,40 @@ run "account_policy_denies_history_and_bucket_configuration" {
       ])
     ])
     error_message = "an unconditioned Deny refuses version deletes (s3:DeleteObjectVersion*), retention bypass, the versioning, lock, lifecycle, policy, CORS, encryption and ACL writes and s3:DeleteBucket on this bucket and its objects"
+  }
+}
+
+# Spec 006 T048 (FR-010): each state user reads its state bucket's Object Lock configuration (the
+# chain's `state-bucket-object-lock` assertion), allowed on the bucket ARN only, and no Deny action
+# matches it, reading `*` as any characters.
+run "state_users_read_object_lock" {
+  command = plan
+
+  variables {
+    tenant     = "demo"
+    instance   = "demo-state"
+    managed_in = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/tenant-state/demo"
+    s3_users   = ["tenant", "platform"]
+  }
+
+  assert {
+    condition = alltrue([
+      for u in ["tenant", "platform"] : toset(flatten([
+        for s in jsondecode(output.s3_users[u].policy).Statement : flatten([lookup(s, "Resource", [])])
+        if lookup(s, "Effect", "") == "Allow" && !contains(keys(s), "Condition") && contains(flatten([lookup(s, "Action", [])]), "s3:GetBucketObjectLockConfiguration")
+      ])) == toset(["arn:aws:s3:::lz-demo-bkt-state"])
+    ])
+    error_message = "every state user may read the Object Lock configuration of its state bucket, and of no other resource"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for u in ["tenant", "platform"] : [
+        for d in flatten([for s in jsondecode(output.s3_users[u].policy).Statement : flatten([lookup(s, "Action", [])]) if lookup(s, "Effect", "") == "Deny"]) :
+        !can(regex("^${replace(d, "*", ".*")}$", "s3:GetBucketObjectLockConfiguration"))
+      ]
+    ]))
+    error_message = "no Deny action matches s3:GetBucketObjectLockConfiguration"
   }
 }
 
@@ -364,10 +398,10 @@ run "tenant_users_confined_to_the_tenant_bucket" {
     condition = alltrue([
       for u in ["tenant", "platform"] : length(setsubtract(
         flatten([for s in jsondecode(output.s3_users[u].policy).Statement : lookup(s, "Action", []) if lookup(s, "Effect", "") == "Allow"]),
-        ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload"],
+        ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketVersions", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:AbortMultipartUpload", "s3:GetBucketObjectLockConfiguration"],
       )) == 0
     ])
-    error_message = "every user's allowed actions are object or listing actions"
+    error_message = "every user's allowed actions are object or listing actions or the Object Lock read"
   }
 
   assert {

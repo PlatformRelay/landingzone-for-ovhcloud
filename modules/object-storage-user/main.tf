@@ -1,7 +1,8 @@
 # One S3 user confined to the given buckets (FR-004, FR-013; research R5 *Per-tenant buckets*): the
 # `objectstore_operator` role, one S3 credential, and a policy that allows object and listing
 # actions on the given buckets only (form of docs.ovhcloud.com storage-and-backup/object-storage/
-# s3-identity-and-access-management.mdx:116-125). Every S3 user may list all buckets of the account
+# s3-identity-and-access-management.mdx:116-125), plus the read of each given bucket's Object Lock
+# configuration (spec 006 T048). Every S3 user may list all buckets of the account
 # by default; the policy denies it explicitly (same guide, :145 and :150-158). The caller may add
 # one unconditioned Deny on every resource for the actions it names (`deny_actions`); the
 # state-backend component names its list. Every action is one OVHcloud accepts
@@ -45,6 +46,16 @@ resource "ovh_cloud_project_user_s3_policy" "this" {
           "s3:AbortMultipartUpload",
         ]
         Resource = flatten([for b in var.buckets : ["arn:aws:s3:::${b}", "arn:aws:s3:::${b}/*"]])
+      },
+      # Spec 006 T048 (FR-010): the chain reads each state bucket's Object Lock configuration with
+      # this credential. A Bucket-scope read (s3-identity-and-access-management.mdx:279,
+      # s3-managing-object-lock.mdx:114), so on the bucket ARN only. Its writes and the governance
+      # bypass stay ungranted.
+      {
+        Sid      = "GivenBucketsObjectLockRead"
+        Effect   = "Allow"
+        Action   = ["s3:GetBucketObjectLockConfiguration"]
+        Resource = [for b in var.buckets : "arn:aws:s3:::${b}"]
       },
       {
         Sid      = "DenyListAllBuckets"
