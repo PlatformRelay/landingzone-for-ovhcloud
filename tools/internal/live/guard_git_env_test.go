@@ -2,6 +2,7 @@ package live
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -79,6 +80,43 @@ func TestGuardGitEnvironment(t *testing.T) {
 		// A local branch or tag named origin/main shadows the remote-tracking ref.
 		if len(c.Args) > 0 && c.Args[0] == "merge-base" && c.Args[len(c.Args)-1] != "refs/remotes/origin/main" {
 			t.Errorf("merge-base against %q, want refs/remotes/origin/main", c.Args[len(c.Args)-1])
+		}
+	}
+}
+
+// TestGuardGitHome (FR-007): the guard's git does not run with the caller's HOME, which would let
+// the caller's ~/.config/git/ignore hide an untracked file from status even with
+// GIT_CONFIG_GLOBAL=/dev/null (host git, T015). Each call gets an existing private home that is
+// gone once Check returns.
+func TestGuardGitHome(t *testing.T) {
+	sentinel := sentinelHome(t)
+	w := newGuardWorld(t)
+	h := w.host(t, guardCase{})
+	if err := h.Check(); err != nil {
+		t.Fatalf("Check() = %v, want admitted", err)
+	}
+	calls := gitCalls(t, h.Git)
+	if len(calls) == 0 {
+		t.Fatal("no git calls logged")
+	}
+	for _, line := range calls {
+		var c struct {
+			Args    []string `json:"args"`
+			Home    string   `json:"home"`
+			HomeDir bool     `json:"home_dir"`
+		}
+		if err := json.Unmarshal([]byte(line), &c); err != nil {
+			t.Fatal(err)
+		}
+		if c.Home == "" || strings.Contains(c.Home, sentinel) {
+			t.Errorf("git %v ran with HOME=%q, want a private home that is not the caller's %s", c.Args, c.Home, sentinel)
+			continue
+		}
+		if !c.HomeDir {
+			t.Errorf("git %v ran with HOME=%s, which is not a directory", c.Args, c.Home)
+		}
+		if _, err := os.Lstat(c.Home); !os.IsNotExist(err) {
+			t.Errorf("git %v: its HOME %s is left after Check (%v)", c.Args, c.Home, err)
 		}
 	}
 }

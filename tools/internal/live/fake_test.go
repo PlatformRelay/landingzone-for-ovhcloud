@@ -115,7 +115,11 @@ parsed:
 			gitEnv = append(gitEnv, kv)
 		}
 	}
-	logLine, _ := json.Marshal(map[string]any{"args": args, "cwd": cwd, "argv": os.Args[1:], "env": gitEnv})
+	// HOME and whether it is a directory while git runs, for TestGuardGitHome (FR-007).
+	home := os.Getenv("HOME")
+	st, err := os.Stat(home)
+	homeDir := home != "" && err == nil && st.IsDir()
+	logLine, _ := json.Marshal(map[string]any{"args": args, "cwd": cwd, "argv": os.Args[1:], "env": gitEnv, "home": home, "home_dir": homeDir})
 	if f, err := os.OpenFile(filepath.Join(dir, "git.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		fmt.Fprintln(f, string(logLine))
 		f.Close()
