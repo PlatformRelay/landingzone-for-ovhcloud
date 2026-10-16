@@ -37,8 +37,50 @@ const ReasonProjectAlias = "project-alias"
 
 // CheckProjectAliases is nil, or a *RefusalError{Reason: ReasonProjectAlias} whose Detail names
 // both refs and never the id (007 FR-003; data-model *Project alias refusal*).
+// The judged refs are the state ref and every tenant environment's ref; a ref the bound account
+// does not resolve is left to the binding that needs it. The first aliased pair in ref order is
+// named.
 func CheckProjectAliases(m *Manifest, a BoundAccount) error {
-	return errors.New("CheckProjectAliases: not implemented")
+	tenant := map[string]bool{}
+	for _, t := range m.Tenants {
+		for _, e := range t.Environments {
+			tenant[e.ProjectRef] = true
+		}
+	}
+	refs := judgedRefs(m.StateProjectRef, tenant, a)
+	for i, x := range refs {
+		for _, y := range refs[i+1:] {
+			if a.ProjectIDs[x] == a.ProjectIDs[y] && !aliasAdmitted(m, tenant, x, y) {
+				return refuse(ReasonProjectAlias, "project refs %s and %s resolve to one project in account.env; give each its own project or drop one row", x, y)
+			}
+		}
+	}
+	return nil
+}
+
+// judgedRefs are the state ref and the tenant environments' refs that the bound account resolves,
+// sorted.
+func judgedRefs(state string, tenant map[string]bool, a BoundAccount) []string {
+	judged := map[string]bool{state: true}
+	for ref := range tenant {
+		judged[ref] = true
+	}
+	refs := make([]string, 0, len(judged))
+	for ref := range judged {
+		if ref != "" && a.ProjectIDs[ref] != "" {
+			refs = append(refs, ref)
+		}
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+// aliasAdmitted is KD-1's one admitted alias: under spec.sandbox.shared_state_project, the state
+// ref beside a tenant environment's ref, when no tenant environment owns the state ref itself (a
+// tenant on STATE would put two tenant environments on one project).
+func aliasAdmitted(m *Manifest, tenant map[string]bool, x, y string) bool {
+	state := m.StateProjectRef
+	return m.SharedStateProject && !tenant[state] && (x == state || y == state)
 }
 
 // ResolvedFile is the name of the resolved-reference input in a consumer's input directory.

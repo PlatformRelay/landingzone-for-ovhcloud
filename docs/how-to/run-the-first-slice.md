@@ -5,7 +5,7 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
-    blob: 7bc10bd1cd777e35c6777e3901d71668c687b9b9
+    blob: 37a13cfb4292d39d98c5f8aefe3073adb5c84354
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: b34b198ff38ef36a2ef50ef757e5a9c0c47e0d0a
-last_verified: 8b3e46e9d4e9c52a0ba57c44c74b253111a1a461
+last_verified: 52f9f9b2ea10319dc37176e3866c8c19cb99f14f
 ---
 
 # Run the first slice on an OVHcloud account
@@ -144,7 +144,10 @@ The rest sits under `accounts/<account>/`, where `<account>` is the account that
 
 `<REF>` is a project `ref` from the manifest. In the one-project sandbox, `STATE` and `DEMO_DEV`
 hold the same project id. The manifest allows that only with
-`spec.sandbox.shared_state_project: true` (KD-1).
+`spec.sandbox.shared_state_project: true` (KD-1). Any other pair of refs on one project id is
+refused before any child process, by the lane (plan, apply, destroy, chain) and by the
+bootstrap's `state` phase: `project-alias` (exit 3) names the two refs, never the id. Two tenant
+environments never share a project, with or without the flag.
 
 The lane writes each instance's credential files as a set: a new `gen-<run-id>/` directory, made
 current by one rename of `current`. Readers use the generation `current` names, so a crash leaves
@@ -328,7 +331,7 @@ Exit codes for every `lz-live` verb:
 | 0 | pass, also with recorded known deviations |
 | 1 | fail |
 | 2 | blocked (a missing prerequisite or producer artefact, or a failed baseline) |
-| 3 | refused (guard, lock, binding, retained-resource protection, `consumer-applied`, a drifted or unusable admin under `--fresh-account`) |
+| 3 | refused (guard, lock, binding, `project-alias`, retained-resource protection, `consumer-applied`, a drifted or unusable admin under `--fresh-account`) |
 
 ## Destroy
 

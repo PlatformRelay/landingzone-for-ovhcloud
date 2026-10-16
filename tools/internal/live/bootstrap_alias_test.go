@@ -85,3 +85,27 @@ func TestBootstrapProjectAliasSandboxPin(t *testing.T) {
 		t.Error("the state phase started no tofu")
 	}
 }
+
+// TestBootstrapBindingMalformed (T009, review round 1): an account.env whose LZ_PROJECT_ID_<REF>
+// is not a project id fails the state phase in its setup (exit 1, not a refusal), with no tofu,
+// no publish or verify, and a detail naming the variable, not its value. Before T009 the binding
+// was read only at publish, after state had run tofu.
+func TestBootstrapBindingMalformed(t *testing.T) {
+	const bad = "not-a-project-id"
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	p := h.accountPath("account.env")
+	bsWrite(t, p, bsRead(t, p)+"LZ_PROJECT_ID_SPARE="+bad+"\n")
+	rs, err := h.run(false)
+	bsExit(t, err, 1)
+	bssNoTofu(t, h)
+	bsWantStatus(t, rs, PhaseState, StatusFail)
+	for _, ph := range []string{PhasePublish, PhaseVerify} {
+		if r, ok := bsResult(rs, ph); ok {
+			t.Errorf("%s %s after the malformed binding", ph, r.Status)
+		}
+	}
+	if err == nil || !strings.Contains(err.Error(), "LZ_PROJECT_ID_SPARE") || strings.Contains(err.Error(), bad) {
+		t.Errorf("err %v, want one naming LZ_PROJECT_ID_SPARE without its value", err)
+	}
+}

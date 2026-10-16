@@ -81,7 +81,10 @@ var laneAliasVerbs = []struct {
 }{
 	{VerbPlan, func(h *laneHarness, _ *childDeadlines) laneRun { r, _ := h.exec(VerbPlan, TargetAll); return r }},
 	{VerbApply, func(h *laneHarness, _ *childDeadlines) laneRun { r, _ := h.exec(VerbApply, TargetAll); return r }},
-	{VerbDestroy, func(h *laneHarness, _ *childDeadlines) laneRun { r, _ := h.exec(VerbDestroy, laneAliasTarget); return r }},
+	{VerbDestroy, func(h *laneHarness, _ *childDeadlines) laneRun {
+		r, _ := h.exec(VerbDestroy, laneAliasTarget)
+		return r
+	}},
 	{"chain", func(h *laneHarness, children *childDeadlines) laneRun {
 		return h.chain(chainExec{children: children}).laneRun
 	}},

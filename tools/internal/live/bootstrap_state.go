@@ -186,6 +186,9 @@ func (r *stateRun) setup(ctx context.Context) error {
 	if r.project = r.binding[ref]; r.project == "" {
 		return r.fail(PhaseState, "account.env has no "+ref)
 	}
+	if _, err = boundUnaliased(o.Manifest, r.binding); err != nil {
+		return r.bindingFailed(err)
+	}
 	if o.Region == "" {
 		return r.fail(PhaseState, "no Object Storage region for the account bucket")
 	}
@@ -200,6 +203,16 @@ func (r *stateRun) setup(ctx context.Context) error {
 		return r.fail(PhaseState, err.Error())
 	}
 	return nil
+}
+
+// bindingFailed is the state phase's end on an account.env the binding does not admit: a refusal
+// (project-alias, 007 FR-003) stays a refusal (exit 3), anything else fails the phase.
+func (r *stateRun) bindingFailed(err error) error {
+	var ref *Refusal
+	if errors.As(err, &ref) {
+		return r.refuse(PhaseState, ref.Condition, ref.Detail)
+	}
+	return r.fail(PhaseState, err.Error())
 }
 
 func (r *stateRun) report(phase, status, detail string) {
