@@ -58,13 +58,14 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | T038 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 APPROVE/CONCERNS; verified findings fixed) | round-2 fix unreviewed (last round); tofu on a missing encrypted state UNVERIFIED (a no-state `--cleanup` that fails its destroy keeps its files); decision request: a root whose Undo passed and destroy failed is swept, recommended A (each probe's Undo tolerates swept resources, T030/T032/T034/T036); clears T037's sweep_test.go red |
 | T030 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fixes unreviewed (last round); the root's `lz-check unit` line waits for T031/T033/T035 (ran via `test:unit`); Swift/S3 listing sharing, seed propagation, API object shapes UNVERIFIED (T025); clears T029's swiftreach_test.go red |
 | T032 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fixes unreviewed (last round); the root's `lz-check unit` line waits for T033/T035 (ran via `test:unit`); decides flapping (blocked), an allowed read at the expiry instant (within the lifetime), read_path exactly the project path; `expires_in` truncation tolerance deferred to T026/owner (a T031 fixed point forbids it); clears T031's residual_test.go red |
+| T034 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fix unreviewed (last round); bucket listed as an IAM resource and its URN form UNVERIFIED, so T027's write may be `blocked (no owned target)`; decision request: Observe fails on that expected result (keep, or record it as a non-failure) before T027; the root's `lz-check unit` line waits for T036 (ran via `test:unit`); clears T033's urn_test.go red |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
 | tools/internal/probes/live/storageiam/swiftreach_test.go: TestJudgeReach, TestSwiftObserve, TestSwiftUndo, TestSwiftSweep, TestSwiftValidate, TestSwiftLeak; `test:live-lane` red | US2 swift-reach | T029 | T030 |
 | tools/internal/probes/live/identity/residual_test.go: TestResidualWindow, TestResidualObserve, TestResidualUndo, TestResidualSweep, TestResidualValidate, TestResidualLeak; `test:live-lane` red | US3 token-residual | T031 | T032 |
-| tools/internal/probes/live/identity/urn_test.go: TestJudgeURN, TestURNObserve, TestURNUndo, TestURNSweep, TestURNValidate, TestURNLeak; `test:live-lane` red | US3 iam-urn | T033 | |
+| tools/internal/probes/live/identity/urn_test.go: TestJudgeURN, TestURNObserve, TestURNUndo, TestURNSweep, TestURNValidate, TestURNLeak; `test:live-lane` red | US3 iam-urn | T033 |T034 |
 | tools/internal/probes/live/state/recovery_test.go: TestRecoveryLock, UnlockRefused, Blocked, TofuEnv, ConditionalPut, Restore, NoAnswer, Undo, Sweep, Validate, Leak; `test:live-lane` red | US2 locked-recovery | T035 | |
 | tools/internal/live/sweep_test.go: TestSweepLostCreateAnswer, TestSweepAfterCrash, TestSweepKeepsRunFiles, TestSweepRemovesRunFiles, TestSweepWithUndo, TestSweepRedacted | US1 runner sweep | T037 | T038 |
 
@@ -72,6 +73,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
 |---|---|---|---|
 | tools/internal/probes/live/storageiam/swiftreach_test.go: swWorld (fake S3 and API) | T029 | T030 | not wrong, extended: the seed write the provider cannot do (tasks.md T030), 404/InvalidAccessKeyId after a Sweep and the API's object listing and bulk delete (coordinator decision 2026-10-16); no assertion changed |
+| tools/internal/probes/live/identity/urn_test.go: uuWorld (fake API) | T033 | T034 | not wrong, extended: the GRA bucket listing and delete a Sweep needs to remove a bucket a lost create answer left (data-model.md ProbeCheck.Sweep; spec-set review R2); empty by default; no assertion changed |
 
 ## Live runs
 | Task | Run id | Reviewed SHA | Observation | Cost | Leftovers |
@@ -86,4 +88,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 - A "keep the files until X passes" rule needs a case where the run fails before X runs; a fake's tolerance added for one case is opt-in per stack; a mutant that deletes a condition keeps its variables used. (T038)
 - Server text reaches errors through listings too: validate every listed name (regions, keys) before printing it, check an XML answer's root, and filter fields from a successful answer (role names) against every secret of the run, not only the caller's. A mutant that deletes a condition keeps its variables used. (T030)
 - A probe timing a window from its own clock owns two edges per event (sent, answered): take per claim the edge that cannot overstate it, record both, check the clock again before each send, and give the fake a transport that advances time before and after the server sees a request, with a latency above the interval. (T032)
+- Validate server text for secrets after shape: a listed URN or key of the right shape can still hold a run's token, so filter it against every identity's token and secret; when dropping malformed listed text, keep the validated key (blank its value) so a cleanup still sees it. (T034)
 - See spec 006's loop.md *Lessons*; they apply here, especially the entry command shape, whole-checkout scratch copies for live-package mutants, and vacuity checks on harness runs.

@@ -25,6 +25,8 @@ import (
 // (its client is the S3 one: Keystone, Swift and S3 hosts) and sweeps with the sandbox admin.
 // Spec 003 T032: the token-residual probe creates, deletes and sweeps its OAuth2 client and policy
 // with the sandbox admin and binds nothing (its claim is about exactly one token of that client).
+// Spec 003 T034: the iam-urn probe creates its two identities and policies and writes and sweeps
+// its tag key with the sandbox admin, and binds nothing (each identity is the admin's own client).
 func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error) *live.ProbeCheck {
 	switch root {
 	case "state-backend":
@@ -35,6 +37,8 @@ func probeCheck(root string, d deps, api live.API, admin live.Credential, bind f
 		return storageiam.SwiftReach(storageiam.SwiftOptions{HTTP: d.S3HTTP, API: api, Admin: admin})
 	case "token-residual":
 		return identity.TokenResidual(identity.Options{API: api, Admin: admin})
+	case "iam-urn":
+		return identity.IamURN(identity.Options{API: api, Admin: admin})
 	}
 	return nil
 }

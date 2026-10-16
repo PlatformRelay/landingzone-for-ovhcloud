@@ -242,3 +242,15 @@ func TestProbeCheckTokenResidual(t *testing.T) {
 		t.Errorf("probeCheck(token-residual-x) = %+v, want none", c)
 	}
 }
+
+// TestProbeCheckIamURN (spec 003 T034): the iam-urn root gets the iam-urn check with a Sweep; a
+// root of another name still gets none.
+func TestProbeCheckIamURN(t *testing.T) {
+	c := probeCheck("iam-urn", deps{}, live.API{}, live.Credential{}, nil)
+	if c == nil || c.Output != "urn_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
+		t.Fatalf("probeCheck(iam-urn) = %+v, want the iam-urn check with a Sweep", c)
+	}
+	if c := probeCheck("iam-urn-x", deps{}, live.API{}, live.Credential{}, nil); c != nil {
+		t.Errorf("probeCheck(iam-urn-x) = %+v, want none", c)
+	}
+}
