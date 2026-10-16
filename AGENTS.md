@@ -59,6 +59,22 @@ Credentials never enter the repository, a worktree, a command line or any output
   protected branches. Until those pipeline lanes exist, live spikes run from the maintainer's
   workstation with the credentials above. This is a temporary exception, not the design.
 
+  **Bounded extension (owner grant of 2026-10-16).** Until **2026-10-24 23:59**, or until the
+  remaining credit falls below **20 €**, whichever comes first, the coordinating session (the one
+  automated session the maintainer runs directly) may run `task live:probe`, `live:plan`,
+  `live:chain` and `live:destroy` on the maintainer's workstation. `live:apply` runs only inside a
+  chain. `bootstrap:*` stays the owner's. Subagents never run live targets; review and their
+  briefs enforce this, not a permission rule. Every run keeps these guards:
+  - a reviewed SHA on `main`, run from the owner's clean live clone (`LZ_OWNER_CHECKOUT` in
+    `live.env`, never a worktree); `live.env` is never edited to admit another checkout;
+  - credentials only in the child process, and redacted output;
+  - destroy in `finally`, then the leftover check;
+  - code under `tests/live/` or `tools/internal/live/` runs live only after an independent
+    review, never after an admin-merge.
+
+  The spend stop is a manual cost check (Control Panel or `ovhcloud`), not code. After the expiry,
+  live targets are owner-only again.
+
 ## Tools
 
 - **OpenTofu** — the design targets ≥ 1.13
