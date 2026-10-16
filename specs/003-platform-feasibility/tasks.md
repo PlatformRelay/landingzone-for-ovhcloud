@@ -273,7 +273,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
 ### Probe 2: an access token after its OAuth2 client is deleted
 
-- [ ] T031 [US3] Write the token-residual check's tests in tools/internal/probes/live/identity/residual_test.go with the stub of tools/internal/probes/live/identity/residual.go, and add the package to `test:live-lane` in Taskfile.yml
+- [x] T031 [US3] Write the token-residual check's tests in tools/internal/probes/live/identity/residual_test.go with the stub of tools/internal/probes/live/identity/residual.go, and add the package to `test:live-lane` in Taskfile.yml — closed 2026-10-16, evidence: evidence/T031.md
   - Requirements: FR-007 (C007.5, C007.6); ADRs: 0009, 0018. Depends on: 005/T010 iam root (OAuth2 client and policy create/delete observed, P7, P8). The residual window of an already-issued access token after its client is deleted is not observed (UNVERIFIED). The token's lifetime is the `expires_in` of its token answer; spec 005's fixtures model 3599 s (tools/internal/live/leftovers_api_test.go), which is UNVERIFIED for the sandbox.
   - Cases (given / when / then → defect exposed), against a fake OVHcloud API (`live.API`), a fake clock and a fake sleep:
     - given a token answer with `expires_in` missing, zero, negative or above 24 h / then Observe stops before the delete with `blocked` and the reason → exposes a window judged against an expiry nobody validated.
