@@ -55,26 +55,61 @@ same exposure: "a baseline listing with errors ends the run there" (`chain.go:9-
 ## R2 Resolved-project aliasing (FR-003, FR-004)
 **Question for T001.** Does FR-003's rule refuse two tenants on the one sandbox project?
 
-**What the code and records say (to be confirmed by T001 against the code at its start).**
+**What the code and records say (confirmed by T001 against `8dc5c2d`, 2026-10-16; line numbers
+corrected there).**
 - The decoder lets one project ref belong to one tenant environment only: a second owner is
   `DUPLICATE_NAME` (`tools/internal/stacks/manifest.go:483-486`).
 - The decoder never sees ids. Refs resolve to ids only in the lane, from `account.env`
-  (`BoundAccountFromEnv`, `tools/internal/live/publish.go:117-145`, called in the lane's setup at
-  `apply.go:213`), and in the bootstrap, whose `setup` reads `account.env` before the `state` phase
-  (`bootstrap_state.go:172-188`; `Rest` runs `setup` then `state`, `:157-161`). The bootstrap's
+  (`BoundAccountFromEnv`, `tools/internal/live/publish.go:116-144`, called in `runLane`'s setup at
+  `apply.go:258`), and in the bootstrap, whose `setup` reads `account.env` before the `state` phase
+  (`bootstrap_state.go:172-188`; `Rest` runs `setup` then `state`, `:156-159`). The bootstrap's
   later binding calls (`:527`, `:575`) run after `state` has already run `tofu` (`init` at `:304`,
   apply at `:356`), so the check belongs in `setup`, not there.
 - Nothing compares resolved ids today, so two refs on one id pass `DUPLICATE_NAME` and
   `DUPLICATE_VLAN` (T098 *Harness gaps*).
 - The only sharing the manifest admits is the state ref on a tenant ref, under
   `spec.sandbox.shared_state_project` (`manifest.go:583-590`, KD-1, D88).
-- T098's decision request, option A; inventory Q8 "refuse at the adapter"; D119: "Don't weaken A17
-  to stage a two-tenant demo"; the coordinator confirmed "one ref per project" (round 1).
+- T098's decision request, option A; inventory Q8 "refuse at the adapter"; D119's tie-break
+  record: "Don't weaken A17 to stage a two-tenant demo"; the coordinator confirmed "one ref per project" (round 1).
 
 **Expected outcome.** A second tenant in the one project needs a second ref with the same id as
 `DEMO_DEV`; FR-003 refuses it. A17 **refuses** two tenants on one project; B5 stays offline.
 
-**Outcome (T001):** _not yet recorded._
+**Outcome (T001, 2026-10-16): A17 refuses two tenants on one project.** The rule: in a bound
+account, two refs the manifest uses must not resolve to one project id; the only alias admitted is
+the state ref on a tenant environment's id under `spec.sandbox.shared_state_project` (KD-1). What
+decides it, in order:
+1. A second tenant environment needs its own ref: one ref has one owner
+   (`manifest.go:483-486`), across tenants as well as within one, and the ref check runs over every
+   tenant's environments.
+2. The sandbox has one Public Cloud project (KD-1, `stacks/deployments.yaml:16-18`; D119 Q1, no
+   second project), so that ref's `LZ_PROJECT_ID_<REF>` in `account.env` holds the id `DEMO_DEV`
+   holds. `BoundAccountFromEnv` reads each ref independently (`publish.go:128-142`), so the id is
+   the same whatever the ref is called.
+3. FR-003 refuses two tenant-environment refs on one id with or without the flag. The flag's only
+   effect in the code is to admit a tenant environment on the state ref (`manifest.go:583-590`);
+   nothing in it speaks of tenant/tenant sharing, and the open question on widening it is answered
+   "no" (spec *Clarifications*; D119's tie-break record: "Don't weaken A17 to stage a two-tenant
+   demo").
+4. The escape through the state ref is closed too: with the flag true the decoder admits a second
+   tenant environment whose ref *is* `STATE` (`manifest.go:583-590` judges only the flag-false
+   case), but `STATE` is then a tenant-environment ref as well, and it shares `DEMO_DEV`'s id, so
+   FR-003 as written refuses it.
+
+**Today** nothing refuses it: refs resolve to ids only in `BoundAccountFromEnv` and
+`BoundAccount.Binding` (`stacks/adapter.go:113-121`), and neither compares ids (`project-alias`
+appears nowhere under `tools/`, 2026-10-16), so the refusal exists only once T009 lands; until then the sandbox's two
+refs (`STATE` = `DEMO_DEV`) are the only aliasing the account file holds.
+
+**Consequence.**
+- B5 stays offline (FR-009): the two-tenant fixture binds with distinct ids and is refused with
+  both tenant refs on one id. A24 stays out of scope (D119: A24 and B5 live only if A17 permits). No
+  owner decision is filed (FR-004 asks for one only on `permits`).
+- For T008/T009: the check must treat a ref as a tenant-environment ref whenever a tenant
+  environment names it, even when it is also the state ref. An implementation that exempts every
+  pair containing the state ref under the flag would admit the step-4 manifest (`STATE` owned by
+  `lab/dev`, `DEMO_DEV` by `demo/dev`, one id) and so permit a second tenant on the one project.
+  T008's listed rows do not hold that case; it is the row to add.
 
 ## R3 Nameless resources: baseline, sweep and recovery (FR-006, FR-007, FR-008)
 **Finding.** `ovh_cloud_project_alerting` takes `service_name`, `delay`, `email` and

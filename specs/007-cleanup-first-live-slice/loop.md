@@ -30,6 +30,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 ## Tasks
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
 |---|---|---|---|
+| T001 | CLOSED: A17 refuses; B5 offline, A24 out | leg 1, round 1; no strong leg (docs-only) | T008 lacks the row "second tenant owns `STATE`" (R2 *Consequence*): coordinator to add |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -45,3 +46,4 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 
 ## Lessons
 - See spec 006's and spec 003's loop.md *Lessons*; they apply here. Key ones: the entry command shape; whole-checkout scratch copies for live-package mutants; fakes must mock attributes the live API leaves empty (spec 003 T039); a create whose id is returned but whose wait fails leaves the resource outside state (2026-10-16 chain incident).
+- An exemption keyed on a name (the state ref under KD-1) needs a case where that name is also used in the role the rule protects (a tenant environment owning `STATE`). (T001)

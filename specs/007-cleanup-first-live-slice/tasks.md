@@ -40,7 +40,7 @@ SHA, outcome, retries seen, approximate cost and the credit left.
 
 ## Phase 1: Setup
 
-- [ ] T001 Establish whether A17 refuses two tenants on one project and record the rule and its consequence in specs/007-cleanup-first-live-slice/research.md (R2)
+- [x] T001 Establish whether A17 refuses two tenants on one project and record the rule and its consequence in specs/007-cleanup-first-live-slice/research.md (R2) — closed 2026-10-16, evidence: evidence/T001.md
   - Requirements: FR-004; ADRs: 0009, 0021. Depends on: none. First task.
   - Scope: read `tools/internal/stacks/manifest.go` (project-ref ownership, `DUPLICATE_NAME`; the `shared_state_project` rule), `tools/internal/live/publish.go` (`BoundAccountFromEnv`) and its callers, `tools/internal/live/bootstrap_state.go` (`setup`), T098's decision request, inventory Q8 and D119's conditions; decide whether a second tenant on the sandbox's one project is possible under FR-003 as written. Fill R2's *Outcome* with `refuses` or `permits` and the lines that decide it. On `permits`, file the owner decision FR-004 names; do not change FR-003 to reach `permits`.
   - Verify: `task check:specs -- specs/007-cleanup-first-live-slice`: `TRACE_OK`; R2 has an outcome with cited lines.
