@@ -5,11 +5,11 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
-    blob: d703eefcb29c92c6212fa36e84d4c718b3c547cc
+    blob: e2432c7e5080f5bc2e4e330cb278cce5166eae8d
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 79b31f596571d36bdcbaf7e4ab92101322692384
+    blob: a6f62e8f56021fd72e5578274bc70eee99e003c5
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: d7d14f151ffa44c3be077f530489741562f0f697
-last_verified: b2a1cfff7f3813e6dc25a1e9c79b1c1723776004
+last_verified: 5d620e6dabc9bad0cbf1c92ffabbe65e893b585e
 ---
 
 # Run the first slice on an OVHcloud account
@@ -384,7 +384,13 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   transport errors too (evidence T087). Only its read of a retained instance's state is
   retried: after a 5xx, a reset or a timed-out connection, at most twice, 10 s and 30 s later,
   each retry printing one `LZ-LIVE retry state read <instance>` line; a 4xx or a read that still
-  fails is a state error in `leftovers.json` (T110). No verb runs the leftover check on its
+  fails is a state error in `leftovers.json` (T110). The retained instances share one retry
+  budget, the destroy-on-exit's time: a wait is taken only if the time for a read and the final
+  listing (at least 30 s, more after a slower read or baseline listing) is still left after it.
+  A refused wait records `blocked waiting-for=<instance>` in `leftovers.json`; when refused waits
+  are its only errors the outcome is `blocked`, otherwise `fail`, and the run does not pass
+  (spec 006 FR-008). A `blocked` report can still list real leftovers next to the unread
+  instance's objects: check each one by hand before you re-run anything. No verb runs the leftover check on its
   own. Before you conclude that something was left behind, read `leftovers.json` and look by
   hand (below).
 - If an ephemeral destroy failed, run `task live:destroy` for that instance in the same session.

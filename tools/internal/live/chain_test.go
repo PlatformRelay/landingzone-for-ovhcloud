@@ -38,6 +38,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -2197,6 +2198,8 @@ func TestChainDestroyBudgetExceeded(t *testing.T) {
 type childDeadlines struct {
 	mu    sync.Mutex
 	calls []childDeadline
+	// onStart, when set, sees each child's arguments as it starts (T024: moves a fake clock).
+	onStart func(args []string)
 }
 
 type childDeadline struct {
@@ -2209,6 +2212,9 @@ func (c *childDeadlines) started(ctx context.Context, args []string) {
 	c.mu.Lock()
 	c.calls = append(c.calls, childDeadline{args: slices.Clone(args), at: at})
 	c.mu.Unlock()
+	if c.onStart != nil {
+		c.onStart(args)
+	}
 }
 
 // destroyPhase is every call from the first `plan -destroy` on (nil: no destroy started).
@@ -2560,5 +2566,144 @@ func TestChainRetryBudgetRefused(t *testing.T) {
 			}
 			retryBlocked(t, h, r, rep, "account-governance")
 		})
+	}
+}
+
+// ---------------------------------------------------------------- T024 (spec 006 FR-008)
+
+// TestRetryBudgetKeep (FR-008: the time for the read and the remaining listings): keep raises the
+// reserve to a slower read or listing seen so far and never lowers it.
+func TestRetryBudgetKeep(t *testing.T) {
+	t0 := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	b := newRetryBudget(t0.Add(10*time.Minute), minRetryReserve)
+	b.keep(2 * time.Minute)
+	if b.admit(t0, 8*time.Minute+time.Second) {
+		t.Errorf("after keep(2m), a wait leaving 1m59s was admitted: the reserve was not raised")
+	}
+	if !b.admit(t0, 8*time.Minute) {
+		t.Errorf("after keep(2m), a wait leaving exactly 2m was refused")
+	}
+	b.keep(time.Second)
+	if b.admit(t0, 8*time.Minute+time.Second) || !b.admit(t0, 8*time.Minute) {
+		t.Errorf("keep(1s) after keep(2m) changed the reserve: it never lowers it")
+	}
+}
+
+// slowBaseline wraps the chain's Lister and moves clk on by d at its first call (the baseline
+// listing, before the first apply), so the run sees a baseline listing that took d without
+// waiting for it.
+type slowBaseline struct {
+	Lister
+	clk    *retryClock
+	d      time.Duration
+	slowed *atomic.Bool // set by the first call
+}
+
+func (s *slowBaseline) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
+	if s.slowed.CompareAndSwap(false, true) {
+		s.clk.advance(s.d)
+	}
+	return s.Lister.Get(ctx, path, cursor)
+}
+
+// advance moves c on by d, as a call that took d would.
+func (c *retryClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.spent += d
+	c.mu.Unlock()
+}
+
+// TestChainRetryBudgetReserve (FR-008: a wait is admitted only if the time for the read and the
+// remaining listings is still left after it; data-model *Retry budget*: estimated from the slowest
+// so far, floor 30 s). account-governance answers one 503; before its wait, either the baseline
+// listing (before the first apply) or account-bootstrap's read in the leftover check took slow
+// (3 min, on the fake clock). A wait leaving at least the floor but less than slow is refused; one
+// leaving more than slow is taken. left is what the check has when the wait is asked.
+func TestChainRetryBudgetReserve(t *testing.T) {
+	const slow = 3 * time.Minute
+	for _, c := range []struct {
+		name    string
+		read    bool // the slow call is account-bootstrap's state read, not the baseline listing
+		left    time.Duration
+		blocked bool
+	}{
+		{name: "listing-fits", left: retryWait + slow + retryMargin},
+		{name: "listing-does-not-fit", left: retryWait + slow - retryMargin, blocked: true},
+		{name: "read-fits", read: true, left: retryWait + slow + retryMargin},
+		{name: "read-does-not-fit", read: true, left: retryWait + slow - retryMargin, blocked: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newChainHarness(t)
+			h.setStack("account-governance", func(s *laneStack) {
+				s.ReadFail = &laneReadFail{Call: "show-state", Answers: []string{
+					"Error: reading the state: GET /v1/iam/policy: 503 Service Unavailable (" + chainAnswerMark + ")"}}
+			})
+			clk := &retryClock{spent: budgetLongRun - c.left - slow}
+			ex := chainExec{deadline: budgetLongRun, clock: clk, stateBackoff: []time.Duration{retryWait, retryWait}}
+			var slowed atomic.Bool
+			if c.read {
+				// The leftover check's first state read (`-chdir=<dir> show -json` with no plan
+				// file, once the destroys started: account-bootstrap's) takes slow.
+				var destroying atomic.Bool
+				ex.children = &childDeadlines{onStart: func(args []string) {
+					if slices.Contains(args, "plan") && slices.Contains(args, "-destroy") {
+						destroying.Store(true)
+					}
+					if destroying.Load() && len(args) == 3 && args[1] == "show" && args[2] == "-json" &&
+						slowed.CompareAndSwap(false, true) {
+						clk.advance(slow)
+					}
+				}}
+			} else {
+				ex.wrapLister = func(l Lister) Lister { return &slowBaseline{Lister: l, clk: clk, d: slow, slowed: &slowed} }
+			}
+			r := h.chain(ex)
+			if !slowed.Load() {
+				t.Fatalf("the slow call never ran (events %v)", laneEvents(r.calls))
+			}
+			rep := chainReport(t, r.runDir)
+			_, n := clk.total()
+			if c.blocked {
+				if n != 0 {
+					t.Errorf("the check took %d waits with %v left: a wait of %v leaves less than the %v a read or listing took",
+						n, c.left, retryWait, slow)
+				}
+				retryBlocked(t, h, r, rep, "account-governance")
+				return
+			}
+			laneExit(t, r.laneRun, 0)
+			if n != 1 || rep.Outcome != "pass" || len(rep.Errors) != 0 {
+				t.Errorf("%d waits, report outcome %q, errors %v; want one wait and pass: %v left covers the wait, the read and the listing",
+					n, rep.Outcome, rep.Errors, c.left)
+			}
+		})
+	}
+}
+
+// TestChainRetryBudgetBlockedAlone (FR-008, constitution V): `blocked` is the report's outcome only
+// when refused waits are its only errors. account-governance's wait is refused (2 min left) and
+// demo-dev-project's state read answers a 403 (not retried): the report is `fail`, still naming
+// the instance waited for, and the run does not exit 0.
+func TestChainRetryBudgetBlockedAlone(t *testing.T) {
+	h := newChainHarness(t)
+	h.setStack("account-governance", func(s *laneStack) {
+		s.ReadFail = &laneReadFail{Call: "show-state", Answers: []string{
+			"Error: reading the state: GET /v1/iam/policy: 503 Service Unavailable (" + chainAnswerMark + ")"}}
+	})
+	h.setStack("demo-dev-project", func(s *laneStack) {
+		s.ReadFail = &laneReadFail{Call: "show-state", Answers: []string{
+			"Error: reading the state: GET /v1/iam/resource: 403 Forbidden (" + chainAnswerMark + ")", "x"}}
+	})
+	clk := &retryClock{spent: budgetLongRun - retryWait/2}
+	r := h.chain(chainExec{deadline: budgetLongRun, clock: clk, stateBackoff: []time.Duration{retryWait, retryWait}})
+	rep := chainReport(t, r.runDir)
+	want := "blocked waiting-for=account-governance"
+	if rep.Outcome != "fail" || !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, want) }) ||
+		!slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, "demo-dev-project") }) {
+		t.Errorf("report outcome %q, errors %v; want fail with %q and the state error of demo-dev-project: "+
+			"a refused wait next to another error is not only blocked", rep.Outcome, rep.Errors, want)
+	}
+	if ExitCode(r.err) == 0 {
+		t.Errorf("the run exited 0 (%v)", r.err)
 	}
 }
