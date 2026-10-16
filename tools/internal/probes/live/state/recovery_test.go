@@ -417,10 +417,17 @@ func (w *rcWorld) tofu(ctx context.Context, env map[string]string, kill bool, ar
 		w.addMarker(rcLockKey)
 		return w.answer("plan-ok", ""), nil
 	case "force-unlock":
+		// T036: like OpenTofu, the unlock compares the given id with the ID the lock object holds
+		// now (internal/backend/remote-state/s3/client.go:524-557), not with the id A took: a
+		// conditional PUT whose condition was ignored has replaced that object.
+		var now struct{ ID string }
+		if v, ok := w.current(rcLockKey); ok {
+			_ = json.Unmarshal(v.body, &now)
+		}
 		switch {
 		case w.lockID == "":
 			return w.answer("unlock-no-lock", given), nil
-		case given != w.lockID:
+		case given != now.ID:
 			return w.answer("unlock-id-mismatch", given), nil
 		}
 		if !w.unlockInert {

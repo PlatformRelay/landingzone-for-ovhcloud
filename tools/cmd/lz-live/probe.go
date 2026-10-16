@@ -27,7 +27,9 @@ import (
 // with the sandbox admin and binds nothing (its claim is about exactly one token of that client).
 // Spec 003 T034: the iam-urn probe creates its two identities and policies and writes and sweeps
 // its tag key with the sandbox admin, and binds nothing (each identity is the admin's own client).
-func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error) *live.ProbeCheck {
+// Spec 003 T036: the locked-recovery probe runs the pinned tofu on its backend root through
+// recoverySeam (tofu: its run method; unused by every other root) and sweeps with the sandbox admin.
+func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error, tofu func(context.Context, map[string]string, bool, ...string) (state.TofuRun, error), project string) *live.ProbeCheck {
 	switch root {
 	case "state-backend":
 		return state.Check(state.Options{HTTP: d.S3HTTP})
@@ -39,6 +41,8 @@ func probeCheck(root string, d deps, api live.API, admin live.Credential, bind f
 		return identity.TokenResidual(identity.Options{API: api, Admin: admin})
 	case "iam-urn":
 		return identity.IamURN(identity.Options{API: api, Admin: admin})
+	case "locked-recovery":
+		return state.LockedRecovery(state.RecoveryOptions{HTTP: d.S3HTTP, Tofu: tofu, API: api, Admin: admin, Project: project})
 	}
 	return nil
 }
@@ -248,7 +252,10 @@ func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs)
 	pr := live.Probe{Run: r, ConfigRoot: cfg, Account: account, Bind: func(ctx context.Context, c live.Credential) error {
 		return live.Bind(ctx, api, c, b, b.Org)
 	}}
-	pr.Check = probeCheck(filepath.Base(root), d, api, cred, pr.Bind)
+	// The locked-recovery check's tofu seam (T036): its scratch HOME lives as long as the run.
+	seam := newRecoverySeam(tofu, root)
+	defer seam.close()
+	pr.Check = probeCheck(filepath.Base(root), d, api, cred, pr.Bind, seam.run, projectID)
 	rel, _ := filepath.Rel(checkout, root)
 	if p.cleanup != "" {
 		fmt.Fprintf(d.Stdout, "LZ-LIVE run %s start cleanup %s\n", runID, rel)

@@ -222,11 +222,11 @@ func TestProbeEntryCheck(t *testing.T) {
 // is read from probe.go, not asserted: the options are inside the check's closures.)
 func TestProbeCheckSwiftReach(t *testing.T) {
 	s3 := &http.Client{}
-	c := probeCheck("swift-reach", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil)
+	c := probeCheck("swift-reach", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil, nil, "")
 	if c == nil || c.Output != "swift_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(swift-reach) = %+v, want the swift-reach check with a Sweep", c)
 	}
-	if c := probeCheck("swift-reach-x", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil); c != nil {
+	if c := probeCheck("swift-reach-x", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
 		t.Errorf("probeCheck(swift-reach-x) = %+v, want none", c)
 	}
 }
@@ -234,11 +234,11 @@ func TestProbeCheckSwiftReach(t *testing.T) {
 // TestProbeCheckTokenResidual (spec 003 T032): the token-residual root gets the token-residual
 // check with a Sweep; a root of another name still gets none.
 func TestProbeCheckTokenResidual(t *testing.T) {
-	c := probeCheck("token-residual", deps{}, live.API{}, live.Credential{}, nil)
+	c := probeCheck("token-residual", deps{}, live.API{}, live.Credential{}, nil, nil, "")
 	if c == nil || c.Output != "residual_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(token-residual) = %+v, want the token-residual check with a Sweep", c)
 	}
-	if c := probeCheck("token-residual-x", deps{}, live.API{}, live.Credential{}, nil); c != nil {
+	if c := probeCheck("token-residual-x", deps{}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
 		t.Errorf("probeCheck(token-residual-x) = %+v, want none", c)
 	}
 }
@@ -246,11 +246,11 @@ func TestProbeCheckTokenResidual(t *testing.T) {
 // TestProbeCheckIamURN (spec 003 T034): the iam-urn root gets the iam-urn check with a Sweep; a
 // root of another name still gets none.
 func TestProbeCheckIamURN(t *testing.T) {
-	c := probeCheck("iam-urn", deps{}, live.API{}, live.Credential{}, nil)
+	c := probeCheck("iam-urn", deps{}, live.API{}, live.Credential{}, nil, nil, "")
 	if c == nil || c.Output != "urn_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(iam-urn) = %+v, want the iam-urn check with a Sweep", c)
 	}
-	if c := probeCheck("iam-urn-x", deps{}, live.API{}, live.Credential{}, nil); c != nil {
+	if c := probeCheck("iam-urn-x", deps{}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
 		t.Errorf("probeCheck(iam-urn-x) = %+v, want none", c)
 	}
 }

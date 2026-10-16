@@ -605,6 +605,16 @@ func scratchHome() (string, error) {
 	return d, nil
 }
 
+// ScratchHome is scratchHome for a child lz-live runs beside the run core (spec 003 T036: the
+// locked-recovery check's tofu seam), with the function that removes it.
+func ScratchHome() (home string, remove func(), err error) {
+	d, err := scratchHome()
+	if err != nil {
+		return "", nil, err
+	}
+	return d, func() { _ = removeTree(d) }, nil
+}
+
 // CondScratch names the refusal of a TMPDIR inside the checkout: the children's scratch HOME and
 // their tofu data directories (<HOME>/tofu-data/<stack>) go under it (T077/T078).
 const CondScratch = "scratch"
