@@ -213,7 +213,7 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
 - **FR-002 Run record kept** — `leftovers.json` carries every failed attempt (path, attempt number,
   status or failure class, whether a retry followed, why not), redacted. A probe `--cleanup` (`lz-live
   probe --cleanup <run-id>`) first moves the run directory's whole record, except `inventory.jsonl`,
-  `baseline.json` and `observations.json`, into `attempts/<n>/` (`n` the next free number), copies
+  `baseline.json` and `observations.json`, into `attempts/<n>/` (`n` one more than the highest existing number, so a slot is never reused), copies
   `observations.json` there too, then writes its own; `observations.json` stays in place unchanged,
   so `Recorded` and the undo step of every later cleanup still read what the run observed
   (`tools/internal/live/runner.go:786-794`). A run directory without a record is cleaned up as
