@@ -36,6 +36,38 @@ func destroyBudget(run time.Duration) time.Duration {
 	return 0 // not implemented
 }
 
+// retryBudget is the one retry budget a leftover check shares across every retained instance it
+// reads (spec 006 FR-008, data-model *Retry budget*): it ends at end, and a wait is admitted only
+// while reserve (the read and the remaining listings) is still left after it. Stub of the signature
+// data-model fixes; T024 implements it and has readRetained ask it before every wait.
+type retryBudget struct{}
+
+// newRetryBudget is the budget ending at end that keeps reserve. Stub (T024).
+func newRetryBudget(end time.Time, reserve time.Duration) *retryBudget {
+	return &retryBudget{} // not implemented
+}
+
+// admit reports whether a wait of wait starting at now leaves at least the reserve before the end:
+// end - now - wait >= reserve. Stub (T024).
+func (b *retryBudget) admit(now time.Time, wait time.Duration) bool {
+	return false // not implemented
+}
+
+// waitClock is the time the leftover check's state-read retries read and wait on: Now against the
+// destroy context's deadline, After for a wait. nil is the wall clock (production); tests pass a
+// clock that skips the waits and starts late, so a budget of tens of minutes runs out without
+// waiting for it (spec 006 FR-008, T019).
+type waitClock interface {
+	Now() time.Time
+	After(d time.Duration) <-chan time.Time
+}
+
+// wallClock is the production waitClock.
+type wallClock struct{}
+
+func (wallClock) Now() time.Time                         { return time.Now() }
+func (wallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
 // destroyContext is the destroy-on-exit's context: detached from ctx's cancellation and bounded by
 // budget from now. When at is non-nil (tests only: production passes nil), its closing ends the
 // context as the budget running out does, so a test exhausts a 45-minute budget at the call it

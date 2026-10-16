@@ -196,7 +196,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: the first three cases fail on today's code; the fourth passes today and pins the behaviour.
   - Evidence: `evidence/T018.md`; PR; initial status `not-run`.
 
-- [ ] T019 [US2] Write retry-budget tests in tools/internal/live/chain_test.go
+- [x] T019 [US2] Write retry-budget tests in tools/internal/live/chain_test.go — closed 2026-10-16, evidence: evidence/T019.md
   - Requirements: FR-008; ADRs: 0008, 0024. Depends on: T016.
   - Cases (given / when / then → defect exposed):
     - given `newRetryBudget(end, reserve)` / when `admit` is asked for a wait that leaves at least the reserve, and one that leaves less / then true, then false → exposes a wait taken with no time left for the read and listings (`chain.go:616`).
