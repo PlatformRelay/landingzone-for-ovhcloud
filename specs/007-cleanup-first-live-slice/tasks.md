@@ -94,7 +94,7 @@ Independent test: V001. Test tasks T003–T005, then implementation tasks T006�
   - Verify: `task test:live-lane`: all four cases fail against the stub `keepRecord`.
   - Evidence: `evidence/T005.md`; initial status `not-run`.
 
-- [ ] T006 [US1] Retry transient listing errors and record each failed attempt in tools/internal/live/leftovers.go and pass the shared budget from tools/internal/live/chain.go and tools/internal/live/runner.go
+- [x] T006 [US1] Retry transient listing errors and record each failed attempt in tools/internal/live/leftovers.go and pass the shared budget from tools/internal/live/chain.go and tools/internal/live/runner.go — closed 2026-10-16, evidence: evidence/T006.md
   - Requirements: FR-001, SC-001; ADRs: 0008, 0024. Depends on: T003, T004.
   - Scope: `transientListing`, `transportError` (send, body read, token request), `defaultListingBackoff`, the `LeftoverCheck` fields and `waitClock` of data-model.md; `ListingAttempt` and `Report.Attempts`, written into `leftovers.json`; the retry in `lister.pages`, `lister.objectRaw` and the token request; the chain hands its reconciliation budget and clock to the check; the probe core builds its budget from the destroy deadline.
   - Verify: `task test:live-lane`: T003's cases (record rows included) and T004's cases green; G24 mutants (retry every error; retry 4xx; ignore budget, deadline or cancellation; fresh budget for listings; restart from page 1) each turn a case red.

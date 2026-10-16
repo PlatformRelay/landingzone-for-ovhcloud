@@ -1,6 +1,7 @@
 package live
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,8 +48,14 @@ func (a API) client() *http.Client {
 }
 
 // callError is a failed binding call that names the call and the status or transport class and
-// quotes nothing the answer chose (FR-003): no header, no body, no redirect URL.
-type callError struct{ msg string }
+// quotes nothing the answer chose (FR-003): no header, no body, no redirect URL. code (a non-200
+// status) and sent (the transport failure, never in the text) let the leftover check classify a
+// failed token request (spec 007 FR-001); neither is unwrapped.
+type callError struct {
+	msg  string
+	code int
+	sent error
+}
 
 func (e *callError) Error() string { return e.msg }
 
@@ -80,19 +87,25 @@ func (a API) do(req *http.Request, what string, v any) error {
 	resp, err := c.Do(req)
 	if err != nil {
 		if rec.code/100 == 3 {
-			return &callError{fmt.Sprintf("%s answered 3xx", what)}
+			return &callError{msg: fmt.Sprintf("%s answered 3xx", what), code: rec.code}
 		}
 		// Do's errors are *url.Error (net/http Client.Do), so quiet keeps only the class.
-		return &callError{quiet(what, err).Error()}
+		return &callError{msg: quiet(what, err).Error(), sent: err}
 	}
 	defer resp.Body.Close()
 	body := io.LimitReader(resp.Body, maxBody)
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, body)
-		return &callError{fmt.Sprintf("%s answered %d", what, resp.StatusCode)}
+		return &callError{msg: fmt.Sprintf("%s answered %d", what, resp.StatusCode), code: resp.StatusCode}
 	}
-	if err := json.NewDecoder(body).Decode(v); err != nil {
-		return &callError{fmt.Sprintf("%s answered 200 with a body that does not decode", what)}
+	// The body is read before it is decoded, so a connection that fails mid-body is a transport
+	// failure (sent), not an answer that does not decode (spec 007 FR-001).
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return &callError{msg: fmt.Sprintf("%s: reading the answer failed", what), sent: err}
+	}
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(v); err != nil {
+		return &callError{msg: fmt.Sprintf("%s answered 200 with a body that does not decode", what)}
 	}
 	return nil
 }
@@ -115,7 +128,7 @@ func (a API) tokenAnswer(ctx context.Context, c Credential) (string, json.RawMes
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", nil, &callError{"token endpoint: the request cannot be built from the configured URL"}
+		return "", nil, &callError{msg: "token endpoint: the request cannot be built from the configured URL"}
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var t struct {
@@ -126,7 +139,7 @@ func (a API) tokenAnswer(ctx context.Context, c Credential) (string, json.RawMes
 		return "", nil, err
 	}
 	if t.AccessToken == "" {
-		return "", nil, &callError{"token endpoint answered 200 without an access token"}
+		return "", nil, &callError{msg: "token endpoint answered 200 without an access token"}
 	}
 	return t.AccessToken, t.ExpiresIn, nil
 }
@@ -153,7 +166,7 @@ func (a API) account(ctx context.Context, c Credential) (string, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL+"/auth/details", nil)
 	if err != nil {
-		return "", &callError{"GET /auth/details: the request cannot be built from the configured URL"}
+		return "", &callError{msg: "GET /auth/details: the request cannot be built from the configured URL"}
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
 	var d struct {
@@ -163,7 +176,7 @@ func (a API) account(ctx context.Context, c Credential) (string, error) {
 		return "", err
 	}
 	if d.Account == "" {
-		return "", &callError{"GET /auth/details answered 200 without an account id"}
+		return "", &callError{msg: "GET /auth/details answered 200 without an account id"}
 	}
 	return d.Account, nil
 }

@@ -781,12 +781,14 @@ func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into m
 // report (fail closed). The retained reads share one retry budget ending at ctx's deadline (the
 // destroy context's, spec 006 FR-008; none: no retry admitted); a refused wait makes the report
 // `blocked` when it is the report's only kind of error, whatever was listed: the unread instance's
-// objects cannot be told from leftovers.
+// objects cannot be told from leftovers. The listings' retries wait in the same budget, on the
+// same clock (spec 007 FR-001), and print their lines to the run's terminal.
 func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck) Report {
 	o, m := r.o, r.o.Manifest
 	check.Retained = map[string][]string{}
 	end, _ := ctx.Deadline()
 	budget := newRetryBudget(end, minRetryReserve)
+	check.Budget, check.Clock, check.Term = budget, r.stateReadClock, r.term
 	var errs []string
 	refused := 0
 	for _, in := range m.Instances {

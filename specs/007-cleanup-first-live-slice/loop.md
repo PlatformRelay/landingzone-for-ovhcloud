@@ -35,29 +35,30 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T003 | CLOSED: 16 tests (14 task cases, a bounds case, the classifier table) red on the stubs for their stated reasons; 3 pins pass | leg 1 and strong leg, rounds 1 and 2 | deferred to T006: distinct backoff values, nil/empty `Backoff`, 428/430/600 rows, `transportError` text |
 | T004 | CLOSED: 3 tests (chain budget spent, chain budget left, probe at the destroy deadline: admitted/refused) red on today's code for their stated reasons | leg 1 and strong leg, round 1 | deferred to T006: probe retry-line assertion with a `Term` mutant; shared-versus-copied budget mutant |
 | T005 | CLOSED: 5 tests (keepRecord: whole record, next slot, nothing to move; entry: cleanup keeps the record, second cleanup's undo still reads observations.json) red on the stub for their stated reasons; 1 entry pin (cleanup without a record) passes | leg 1 and strong leg, round 1 | deferred to T007: `TestKeepRecordNextSlot` move check via G25 "slot reuse"; spec.md "next free number" vs data-model "1 + highest": coordinator to align spec.md wording |
+| T006 | CLOSED: retry and attempt records in leftovers.go, budget/clock/terminal from chain.go and runner.go; T003's 16 and T004's 3 known-red rows green; 8 cases for the T003/T004 deferrals and 9 for review findings added; 36 G24 mutants, 35 killed, 1 equivalent (chain-level copy where the check starts) | leg 1 and strong leg, rounds 1 and 2; round-2 behaviour fixes unreviewed by rule | deferred: an element-decode row takes the last page's attempt number; `attempts` checked before the context's end (record only); the chain's baseline listing retries nothing (nil budget, data-model wires only the final check) |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
-| leftovers_retry_test.go:TestListingRetryTransient500 | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryClasses | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryBodyReadReset | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryToken (503-once, 401) | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryResumesPage | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryObjectRead | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryExhausted | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryStillReconciles | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryPermanent/*/record | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryRepeatingCursor/record | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryRecordedInLeftoversJSON | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryDeadline | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryBudget (refuses, nil) | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryCancelled | US1 | T003 | |
-| leftovers_retry_test.go:TestListingRetryRedacted | US1 | T003 | |
-| leftovers_retry_test.go:TestTransientListing | US1 | T003 | |
-| chain_retry_budget_test.go:TestChainListingRetryBudgetSpent | US1 | T004 | |
-| chain_retry_budget_test.go:TestChainListingRetryBudgetLeft | US1 | T004 | |
-| chain_retry_budget_test.go:TestProbeListingRetryBudget (admitted, refused) | US1 | T004 | |
+| leftovers_retry_test.go:TestListingRetryTransient500 | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryClasses | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryBodyReadReset | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryToken (503-once, 401) | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryResumesPage | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryObjectRead | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryExhausted | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryStillReconciles | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryPermanent/*/record | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryRepeatingCursor/record | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryRecordedInLeftoversJSON | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryDeadline | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryBudget (refuses, nil) | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryCancelled | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestListingRetryRedacted | US1 | T003 | T006 |
+| leftovers_retry_test.go:TestTransientListing | US1 | T003 | T006 |
+| chain_retry_budget_test.go:TestChainListingRetryBudgetSpent | US1 | T004 | T006 |
+| chain_retry_budget_test.go:TestChainListingRetryBudgetLeft | US1 | T004 | T006 |
+| chain_retry_budget_test.go:TestProbeListingRetryBudget (admitted, refused) | US1 | T004 | T006 |
 | sweep_record_test.go:TestKeepRecordArchivesWholeRecord | US1 | T005 | |
 | sweep_record_test.go:TestKeepRecordNextSlot (second-cleanup, after-a-gap) | US1 | T005 | |
 | sweep_record_test.go:TestKeepRecordNothingToMove | US1 | T005 | |
@@ -80,3 +81,9 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - A stub for a case whose answer is the empty value ("" when there is nothing to move) must return an error, or that case is a pin against the stub. (T005)
 - When a test task's case only bites once a later task wires the code (observations.json hidden by the archive), add an assertion only the wiring satisfies (the archive copy) for the red, and prove the other half on a scratch implementation plus its mutant. (T005)
 - `TestFilesOnlyWriter` confines file writers (`os.Rename`, `os.Mkdir*`, `os.WriteFile`) to `files.go`: T007's `keepRecord` writes through `files.go`. (T005)
+- A "shared, not copied" requirement is testable only where something reads the shared object after the copy point: put the copy mutant there, and name a copy no later code reads equivalent. (T006)
+- A suite red on another task's known red cannot judge a mutant by exit code: run each mutant's target tests only and read their failure lines (`t006-mutate.py` in the records directory). (T006)
+- A request the check needs once (the token) is one request for the whole check: count its attempts and its give-up apart from the listing that asked for it. (T006)
+- Judge an HTTP answer by its status before its body or headers: a 4xx with a broken body, or a 3xx whose Location Go cannot parse, is still that status, not a transport failure. (T006)
+- A `select` on a timer and `ctx.Done()` may pick the timer when both are ready: re-check the context before the next attempt, and test with a clock that cancels as it fires. (T006)
+- SonarCloud's complexity gate can be checked before the PR: host `~/go/bin/golangci-lint-v2.13.1 run` with a config enabling only `gocognit` (`min-complexity: 15`) over the package. (T006)

@@ -9,7 +9,7 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 59d718f16c937ba08d69be0f4bf0803c6ce0d58c
+    blob: 518aa41abaa33d8263da347b023c8cd28a418ac7
   - path: tools/internal/live/observe.go
     blob: 5203e71f8c2a9c3092d3873daab9d9be52fe94c9
   - path: stacks/deployments.yaml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: b34b198ff38ef36a2ef50ef757e5a9c0c47e0d0a
-last_verified: 4dab0d310c969c0c16f18f2339f2a6bc6d7d795d
+last_verified: f8bf25aafa8d6465d6078240021156d3852c2dcc
 ---
 
 # Run the first slice on an OVHcloud account
@@ -389,13 +389,20 @@ outcomes and the known deviations into the evidence or PR, never the record itse
 ## Clean up and check for leftovers
 
 - The chain cleans up after itself: ephemeral destroy, trap, then the leftover check. A
-  leftover or listing error makes the run `fail`. The check fails closed on transient 5xx and
-  transport errors too (evidence T087). Only its read of a retained instance's state is
-  retried: after a 5xx, a reset or a timed-out connection, at most twice, 10 s and 30 s later,
-  each retry printing one `LZ-LIVE retry state read <instance>` line; a 4xx or a read that still
-  fails is a state error in `leftovers.json` (T110). The retained instances share one retry
-  budget, the destroy-on-exit's time: a wait is taken only if the time for a read and the final
-  listing (at least 30 s, more after a slower read or baseline listing) is still left after it.
+  leftover or listing error makes the run `fail`. A listing request (an array page, a
+  single-object read or the token request) that answers 429 or 5xx, or fails in transport, is
+  retried at most twice, 5 s and 15 s later, at the page it failed on, each retry printing one
+  `LZ-LIVE retry listing <path> in <wait>: <status or class> (attempt <n> of 3)` line; any other
+  failure, and every 4xx of the token endpoint (429 included), is tried once, and a listing that
+  still fails is a listing error. The token request counts its attempts once for the whole check. Every failed attempt
+  is in `leftovers.json` under `attempts` (spec 007 FR-001, FR-002). The baseline listing before
+  the first apply is not retried. The read of a retained instance's state is retried too: after
+  a 5xx, a reset or a timed-out connection, at most twice, 10 s and 30 s later, each retry
+  printing one `LZ-LIVE retry state read <instance>` line; a 4xx or a read that still fails is a
+  state error in `leftovers.json` (T110). The retained reads and the final listings share one
+  retry budget, the destroy-on-exit's time: a wait is taken only if the time for a read and the
+  final listing (at least 30 s, more after a slower read, listing request or baseline listing) is
+  still left after it.
   A refused wait records `blocked waiting-for=<instance>` in `leftovers.json`; when refused waits
   are its only errors the outcome is `blocked`, otherwise `fail`, and the run does not pass
   (spec 006 FR-008). A `blocked` report can still list real leftovers next to the unread
