@@ -153,7 +153,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: T007's cases green. Guard G18 writer mutants (files into live paths before the switch; switch before fsync; previous generation removed before the switch) are killed.
   - Evidence: `evidence/T013.md`; PR; initial status `not-run`.
 
-- [ ] T014 [US1] Resolve credential sets in tools/internal/live/credentials.go and write them from tools/internal/live/apply.go
+- [x] T014 [US1] Resolve credential sets in tools/internal/live/credentials.go and write them from tools/internal/live/apply.go — closed 2026-10-16, evidence: evidence/T014.md
   - Requirements: FR-005, SC-001; ADRs: 0009. Depends on: T008, T013.
   - Verify: `task test:live-lane`: T008's cases green; `credentialFiles` (`apply.go:597-608`) writes through `WriteCredentialSet`. Guard G18 reader mutant (accept a `current` naming no sibling `gen-` directory) is killed.
   - Evidence: `evidence/T014.md`; PR; initial status `not-run`.
