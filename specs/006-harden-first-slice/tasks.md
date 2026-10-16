@@ -214,7 +214,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: the first two cases fail on today's code; the third is a pin if today's code already refuses adoption, otherwise it fails too (recorded either way); `TestObserveCanaryTrap` stays green.
   - Evidence: `evidence/T020.md`; PR; initial status `not-run`.
 
-- [ ] T021 [US2] Write Object Lock assertion tests in tools/internal/live/s3check_test.go and tools/internal/live/observe_test.go
+- [x] T021 [US2] Write Object Lock assertion tests in tools/internal/live/s3check_test.go and tools/internal/live/observe_test.go — closed 2026-10-16, evidence: evidence/T021.md
   - Requirements: FR-010; ADRs: 0008, 0009. Depends on: T016.
   - Cases (given / when / then → defect exposed):
     - given a fake S3 answering `GetObjectLockConfiguration` with governance mode and a default retention / when `S3Checker.ObjectLock` and `judgeObjectLock` run / then `pass` → exposes a parser that misreads the AWS shape.
