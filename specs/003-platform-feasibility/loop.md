@@ -2,14 +2,14 @@
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `lane-003-probes` (worktree `003-probes`) · Base: `origin/main` · Started: 2026-10-16 · Reviewers: two-model (review leg 1, plus the strong review leg on triggers); duo rules under D117
 Scope: the four live probes only — test task, implementation task, then the live run: T029→T030→T025, T031→T032→T026, T033→T034→T027, T035→T036→T028. Tasks T001–T024 are out of this lane.
-Next: L — T037 (Sweep tests), then T038; then T030, T032, T034, T036; then the live runs T025–T028
+Next: land the lane (PR), then live runs T025, T026 (--deadline 75m), T027, T028 from the reviewed main SHA
 Budget: strong review legs are counted in spec 006's loop.md against D117's cap of 120.
 
 ## Stages
 - [x] 0 orient — worktree from origin/main; spec set present
 - [x] P amendment — probe tasks made agent-runnable (3f610df)
 - [x] R spec-set review of the amendment — round 1 on 3f610df: both legs BLOCK (CRITICAL: probe cleanup could not find its own resources without outputs); fixed in ffe2a21. Round 2 on ffe2a21: leg 1 BLOCK (CRITICAL: a lost create response leaves root resources outside cleanup), strong leg CONCERNS; all verified findings fixed in bd23d8d with no further round (two-round limit). Implementation is checked by each task's own review.
-- [ ] L task loop — offline tasks, then live runs by the coordinator (D117)
+- [ ] L task loop — offline tasks T029–T038 closed; live runs T025–T028 by the coordinator (D117, D118) next
 - [ ] B branch review
 - [ ] Hand-off
 
@@ -45,6 +45,20 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | L T035 | tasks.md says "two state versions", but the tests forbid writing the backend's live state key | minor | task | defer | T036 aligns the T036/T028 wording with the tests (restore a version of a probe key, not the live state key) | no |
 | L T035 | The fake's unlock ignores an overwritten lock object in the condition-ignored case | minor | review | defer | T036/T028 | no |
 | L T035 | The tofu diagnostic fixtures are composed from OpenTofu 1.13.0 source, not captured | — | task | accept | T028 records whether live output matches | no |
+| L T037 | Does Sweep run when the root is kept (Undo failed or companion not destroyed)? | — | task | decide B | Coordinator minor decision 2026-10-16: no; the final `--cleanup <run-id>` sweeps after Undo succeeds, so Sweep never removes a credential a kept root's Undo still needs. T038 implements and tests it. | no |
+| L T037 | `--cleanup` of a run that wrote no state untested (fake destroy fails without a state file) | minor | review | defer | T038 | no |
+| L T038 | Undo passed but destroy failed: the run still sweeps; a later --cleanup reruns Undo, which may need a credential Sweep removed | — | task | decide A | Coordinator minor decision 2026-10-16: every probe Undo treats an already-removed resource or credential as undone (idempotent), pinned in T030/T032/T034/T036; no change to T037's tests | no |
+| L T038 | Whether tofu treats a missing encrypted state as empty | — | task | defer | live runs T025–T028 observe it (UNVERIFIED) | no |
+| L T030 | Swift not serving S3-API buckets: a control 404 on every route | — | task | decide | Coordinator minor decision 2026-10-16: stays `blocked` for the first T025 run; decide on that run's record | no |
+| L T030 | Seed write not retried while a new S3 policy propagates; ListObjects 404 during a sweep fails it | minor | review | defer | T025 reruns once; --cleanup sweeps again (fails closed) | no |
+| L T030 | Undo cannot see Swift-only writes if Swift and S3 do not share listings | minor | review | defer | T025 observes (UNVERIFIED) | no |
+| L T030 | Design: the seed is written by the bucket's cleanup key and removed by destroy/Sweep, not Undo (T029 forbids Undo deleting it); buckets unversioned (s3:DeleteObjectVersion not an accepted action) | — | task | accept | evidence T030 | no |
+| L T030 | Landing order | — | coordinator | decide | Coordinator minor decision 2026-10-16: finish T032, T034, T036, land one PR (test:live-lane must be green), then run T025–T028 back to back | no |
+| L T032 | Tolerate ~1 s expires_in truncation for "allowed after expiry"? | — | task | decide no (for now) | Coordinator minor decision 2026-10-16: keep T031's case; the result is `blocked (expiry)`, inconclusive and fail-closed; revisit on T026's live record | no |
+| L T032 | Client listing fails on an unreadable unrelated client | minor | review | reject | fails closed; the admin holds me/*; listed under Gaps | no |
+| L T034 | Observe fails on `no owned target` (an S3 bucket is likely not an IAM resource) | — | task | decide A | Coordinator minor decision 2026-10-16: keep it for the first T027 run; the read action still yields its URN; choose another owned target from the run's record if needed | no |
+| L T034 | Bucket listing not retried after an indexing delay; control success assumed to cover the policy's other actions | minor | review | defer | T027 records bucket_listing and bucket_urns_listed; UNVERIFIED in evidence | no |
+| L T034 | Tag key may contain `:` (verified, kb iam.json AddTag pattern); bucket URN form UNVERIFIED | — | task | accept | evidence T034 | no |
 | R2 | The lost-create-response gap also exists in spec 005's probes and chains | — | coordinator | defer | hand-off: what no sensor covers; the leftover check and the stop rule are the guard | no |
 
 ## Tasks
