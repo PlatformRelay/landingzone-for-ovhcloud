@@ -124,14 +124,7 @@ func (r *laneRunner) summary(err error, deadline time.Duration) error {
 	if deadline <= 0 {
 		deadline = DefaultDeadline
 	}
-	outcome := "pass"
-	switch ExitCode(err) {
-	case 0:
-	case BlockedExit:
-		outcome = "blocked"
-	default:
-		outcome = "fail"
-	}
+	outcome := outcomeOf(err)
 	as := r.assessments
 	if as == nil {
 		why := r.notRun
@@ -158,7 +151,52 @@ func (r *laneRunner) summary(err error, deadline time.Duration) error {
 	if len(kd) > 0 {
 		kdLine = strings.Join(kd, ",")
 	}
-	fmt.Fprintf(r.term, "LZ-LIVE summary %s %s known-deviations=%s\nrecord approximate cost for run %s in the PR\n", r.o.RunID, outcome, kdLine, r.o.RunID)
+	fmt.Fprintf(r.term, "LZ-LIVE summary %s %s known-deviations=%s\n"+costReminder, r.o.RunID, outcome, kdLine, r.o.RunID)
+	return err
+}
+
+// costReminder is the line every run that may have created resources ends with (the chain, apply,
+// destroy).
+const costReminder = "record approximate cost for run %s in the PR\n"
+
+// outcomeOf is a run's outcome by its exit code: pass, blocked (exit 2) or fail.
+func outcomeOf(err error) string {
+	switch ExitCode(err) {
+	case 0:
+		return "pass"
+	case BlockedExit:
+		return "blocked"
+	default:
+		return "fail"
+	}
+}
+
+// runSummary ends every plan, apply and destroy run, whichever way it ends (runLane defers it, so
+// the run locks are released first; spec 006 FR-001, data-model *Live run record, non-chain
+// verbs*): run.json in the run directory, then the summary line `LZ_RUN <run_id> <verb> <outcome>`
+// (` inventory=<path>` for apply) and, for apply and destroy, the cost reminder. A run.json that
+// cannot be written fails the run.
+func (r *laneRunner) runSummary(err error, deadline time.Duration) error {
+	outcome := outcomeOf(err)
+	instances := r.instances
+	if instances == nil {
+		instances = []string{}
+	}
+	rec, _ := json.Marshal(map[string]any{"run_id": r.o.RunID, "verb": r.o.Verb, "instances": instances,
+		"deadline_seconds": deadline.Seconds(), "outcome": outcome, "reviewed_sha": r.o.Revision})
+	if r.o.RunDir == "" {
+		err, outcome = errors.Join(err, errors.New("no run directory for run.json")), "fail"
+	} else if werr := writeRecord(filepath.Join(r.o.RunDir, "run.json"), []byte(r.red.Redact(string(rec)))); werr != nil {
+		err, outcome = errors.Join(err, werr), "fail"
+	}
+	line := "LZ_RUN " + r.o.RunID + " " + r.o.Verb + " " + outcome
+	if r.o.Verb == VerbApply {
+		line += " inventory=" + filepath.Join(r.o.RunDir, "inventory.jsonl")
+	}
+	fmt.Fprintln(r.term, line)
+	if r.o.Verb == VerbApply || r.o.Verb == VerbDestroy {
+		fmt.Fprintf(r.term, costReminder, r.o.RunID)
+	}
 	return err
 }
 

@@ -167,10 +167,12 @@ func run(args []string, d deps) int {
 				return lane(context.Background(), d, dir, filepath.Join(home, ".config", "ovh-lz"), reviewed, tofu, verb, positional[0], p.deadline)
 			}
 			// plan, apply, destroy: SIGINT/SIGTERM cancel the run: the running tofu gets SIGINT (its
-			// own process group) and the run locks and saved plan are released on the way out.
+			// own process group) and the run locks and saved plan are released on the way out. These
+			// verbs take no --deadline (p.deadline stays 0): live.Apply bounds them by
+			// live.DefaultDeadline (spec 006 FR-001).
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return lane(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), reviewed, tofu, verb, positional[0], 0)
+			return lane(ctx, d, dir, filepath.Join(home, ".config", "ovh-lz"), reviewed, tofu, verb, positional[0], p.deadline)
 		})
 	}()
 	if err != nil {

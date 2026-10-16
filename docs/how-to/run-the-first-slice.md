@@ -1,15 +1,15 @@
 ---
 references:
   - path: tools/cmd/lz-live/main.go
-    blob: 4aa02c56bf1ec151929c1e0433761a069800afe4
+    blob: 806b7b39745efff0c4619cf89ac6c8c1e7e06cce
   - path: tools/cmd/lz-live/lane.go
-    blob: 34e5596e6bfacffe7be9c1e71a640d3e45077182
+    blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
-    blob: 3267a6634984913b4979728dbef8662888f2b448
+    blob: 741e8426e57b1998b81e56652f9ce51059c26738
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 3d528829cb97ab15c0e1f0be08fd40299ad73ecc
+    blob: 199e999242cde6f24bb46c2af9419461c33bcc40
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: d7d14f151ffa44c3be077f530489741562f0f697
-last_verified: 450f29f6a75a0d86551979a3e2d4a2f904c18ac7
+last_verified: 055851bf77591e11474095822705623ee27b58a3
 ---
 
 # Run the first slice on an OVHcloud account
@@ -261,9 +261,14 @@ task live:apply -- --reviewed-sha "$S" demo-dev-gra11-runtime    # one instance
   `plan -- <consumer>` refuses while its producer is selected.
 - After `account-governance` and `tenant-state` apply, the lane writes the deployer credential
   files listed above.
-- `plan`, `apply` and `destroy` have no run deadline and no inventory of what they create, and
-  print no summary line (evidence T059 gap 2, T047 gap 10). Use `chain` when you want a bounded
-  run that cleans up after itself.
+- `plan`, `apply` and `destroy` run under the default deadline (45 min; they take no
+  `--deadline`). `apply` appends every created resource to the run's `inventory.jsonl` as it is
+  created. Each ends with `LZ_RUN <run-id> <verb> <outcome>` (`apply` adds `inventory=<path>`);
+  `apply` and `destroy` add the cost reminder. At the deadline or on SIGINT the verb stops the
+  running `tofu`, keeps the inventory, destroys nothing and exits non-zero (spec 006 FR-001).
+  The inventory lists created resources only, not those an apply updated or deleted. A failure
+  before the run starts (no `sandbox.env`, the account lookup) prints no `LZ_RUN` line: there is
+  no run id yet. Use `chain` when you want a run that cleans up after itself.
 
 For an offline approximation of the next selection, run `task stacks:order -- all` in the clone.
 It is credential-free and reads the records under `.local/live/records`. It compares code
@@ -344,15 +349,16 @@ field, the record is described in the
 [data-model](../../specs/005-first-landing-zone-slice/data-model.md#live-run-record-gitignored-locallive).
 What a run writes depends on the verb:
 
-- `chain` writes every file below.
-- `plan`, `apply` and `destroy` write only the rendered plans and the inputs: no summary,
-  inventory or leftover report.
+- `chain` writes every file below but `run.json`.
+- `plan`, `apply` and `destroy` write the rendered plans, the inputs and `run.json`; `apply`
+  also `inventory.jsonl`. No summary.json or leftover report.
 - `probe` writes its own set (see the
   [probe run sheet](../../tests/live/probes/README.md#before-a-session)).
 - `bootstrap:account` writes no run directory.
 
 | File | Read it for |
 | --- | --- |
+| `run.json` | `plan`, `apply`, `destroy` only: `run_id`, `verb`, `instances`, `deadline_seconds`, `outcome` (`pass`, `fail`, `blocked`), `reviewed_sha` |
 | `summary.json` | `outcome` (`pass`, `fail`, `blocked`), `deadline`, `known_deviations` (e.g. `["KD-1"]`), `assertions` (one `{assertion, outcome, deviation, detail}` each, `not-run` with a reason when the chain did not judge it) |
 | `leftovers.json` | the leftover check: every leftover and every listing error; `before_run` marks what the baseline already listed |
 | `baseline.json`, `listings-before/<kind>.json` | the chain's listings before its first apply |
@@ -422,8 +428,8 @@ The trial credit is one-off (AGENTS.md *Sandbox budget*). Spend it only on what 
 show.
 
 - Prefer `--plan-only` probes and `task live:plan` over applies.
-- Use `chain` rather than a bare `apply` for anything ephemeral: it has a deadline and
-  destroy-on-exit.
+- Use `chain` rather than a bare `apply` for anything ephemeral: it destroys on exit; a bare
+  `apply` stopped by its deadline keeps what it created.
 - Run the full chain before a release, and after a change to IAM, state or credentials. Do not
   run it on every PR.
 - Leave `budget_alert` and `quota_guard` off in the manifest unless you want them. Switching

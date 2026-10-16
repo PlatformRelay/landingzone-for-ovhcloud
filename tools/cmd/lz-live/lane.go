@@ -23,8 +23,9 @@ import (
 
 // lane runs plan, apply, destroy or chain. A TMPDIR inside the checkout is refused first (the
 // children's scratch HOME goes under it); a missing sandbox.env is blocked (exit 2) naming
-// bootstrap:account. tofu is the resolved pinned OpenTofu (T093); deadline is chain's (0:
-// live.DefaultDeadline).
+// bootstrap:account. tofu is the resolved pinned OpenTofu (T093); deadline bounds the run (0:
+// live.DefaultDeadline; spec 006 FR-001): ChainOptions.Deadline for chain, ApplyOptions.Deadline
+// for plan, apply and destroy.
 func lane(ctx context.Context, d deps, checkout, cfg, reviewed, tofu, verb, target string, deadline time.Duration) error {
 	if err := live.ScratchOutside(checkout); err != nil {
 		return err
@@ -83,6 +84,7 @@ func lane(ctx context.Context, d deps, checkout, cfg, reviewed, tofu, verb, targ
 		Store:      store,
 		Terminal:   d.Stdout,
 		API:        api,
+		Deadline:   deadline,
 	}
 	if verb == "chain" {
 		chain := d.Chain

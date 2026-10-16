@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +307,60 @@ func TestInventoryRedacts(t *testing.T) {
 	sc := bufio.NewScanner(bytes.NewReader(raw))
 	if !sc.Scan() || !strings.Contains(sc.Text(), e.Hook.Resource.Addr) {
 		t.Errorf("inventory.jsonl lost the entry: %q", raw)
+	}
+}
+
+// T022 (spec 006 FR-001, review round 1): `apply` outside the chain often re-applies a stack that
+// exists, and OpenTofu reports every completed action as apply_complete. The captured re-apply
+// (testdata/tofu/apply-reapply.jsonl: pinned OpenTofu 1.13.0, two terraform_data, one updated in
+// place, one replaced as a delete and a create; generating script in evidence/T022.md) records the
+// created resource only: no line for the update (it existed before) and none for the delete (no
+// id, gone). An apply_complete without an action is still recorded (a stream that omits it loses
+// no id).
+func TestInventoryCreatedOnly(t *testing.T) {
+	t.Parallel()
+	lines := streamLines(t, "apply-reapply.jsonl")
+	for _, c := range []struct {
+		name   string
+		stream string
+	}{
+		{"captured", strings.Join(lines, "\n") + "\n"},
+		{"no-action", strings.ReplaceAll(strings.Join(lines, "\n")+"\n", `"action":"create",`, "")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			dir := tempPrivate(t)
+			inv, err := OpenInventory(dir, NewRedactor())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ConsumeApply(strings.NewReader(c.stream), "reapply", inv, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			inv.Close()
+			want := []InventoryEntry{{Stack: "reapply", Address: "terraform_data.b", Type: "terraform_data", ID: "807dbc05-ef8c-a8a4-67f9-f8aeb474c6ee"}}
+			if got := readInventory(t, dir); !slices.Equal(got, want) {
+				t.Errorf("inventory = %+v, want only the created resource %+v", got, want)
+			}
+		})
+	}
+}
+
+// T022 (review round 1): the terminal gets a diagnostic's detail after its message, where the
+// provider's error usually is (testdata/tofu/apply-provisioner-fail.jsonl: pinned OpenTofu
+// 1.13.0, a local-exec provisioner that exits 3).
+func TestInventoryDiagnosticDetail(t *testing.T) {
+	t.Parallel()
+	dir := tempPrivate(t)
+	inv, err := OpenInventory(dir, NewRedactor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	_ = ConsumeApply(strings.NewReader(strings.Join(streamLines(t, "apply-provisioner-fail.jsonl"), "\n")+"\n"), "fail", inv, &out)
+	inv.Close()
+	want := "Error: local-exec provisioner error\nError running command 'exit 3': exit status 3. Output:\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("terminal %q lacks the diagnostic's detail %q", out.String(), want)
 	}
 }
