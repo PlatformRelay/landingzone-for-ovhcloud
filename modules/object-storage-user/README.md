@@ -20,12 +20,17 @@ module "state_user" {
   `s3:ListBucket`, `s3:GetBucketLocation`, the multipart actions, and `s3:ListBucketVersions`) on
   `arn:aws:s3:::<bucket>` and `arn:aws:s3:::<bucket>/*` of each given bucket, nothing else. No
   `s3:GetObjectVersion`: OVHcloud refuses the name (T094); whether a versioned GET is authorised as
-  `s3:GetObject` is UNVERIFIED. No bucket configuration action and no version delete is named in an
+  `s3:GetObject` is UNVERIFIED. No bucket configuration write and no version delete is named in an
   Allow; whether OVHcloud authorises a versioned DELETE as `s3:DeleteObject` (allowed here), and
   whether the ACL fallback below still lets the
   credential suspend versioning or purge old state versions, are UNVERIFIED. Form and action set as in the read-write example of docs.ovhcloud.com
   `storage-and-backup/object-storage/s3-identity-and-access-management` (*Read/write access to a
   bucket and its objects*).
+- **Allow** `s3:GetBucketObjectLockConfiguration` on `arn:aws:s3:::<bucket>` of each given bucket
+  (statement `GivenBucketsObjectLockRead`, spec 006 T048): the chain reads each state bucket's Object
+  Lock configuration with the state credential (spec 006 FR-010). A Bucket-scope read (same guide,
+  *List of supported actions*; `s3-managing-object-lock`, *Permissions*); no lock, retention or
+  legal-hold write and no governance bypass is allowed.
 - **Deny** `s3:ListAllMyBuckets` on `*`: every S3 user may list all buckets of the account by default
   (same guide, *Deny listing of all buckets owned by the parent account*).
 - **Deny** the actions in `deny_actions` on `*` (statement `DenyGivenActions`, unconditioned), when

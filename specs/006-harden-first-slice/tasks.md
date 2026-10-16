@@ -249,6 +249,14 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: T021's cases green; with T022–T026 closed the target is green.
   - Evidence: `evidence/T026.md`; PR; initial status `not-run`.
 
+- [x] T048 [US2] Grant the state buckets' S3 users `s3:GetBucketObjectLockConfiguration` in modules/object-storage-user/main.tf, test first in that module's tests (found in T026) — closed 2026-10-16, evidence: evidence/T048.md
+  - Requirements: FR-010; ADRs: 0008, 0009. Depends on: T026.
+  - Cases (given / when / then → defect exposed):
+    - given the module's policy for a state user / when it is planned / then the bucket statement allows `s3:GetBucketObjectLockConfiguration` on that bucket only → exposes a live chain reporting `state-bucket-object-lock blocked` because the state credential cannot read the lock configuration.
+    - given the same policy / when it is planned / then no write or bypass action is added → exposes a widened grant.
+  - Verify: `task test:unit -- modules/object-storage-user` and `task test:unit -- components/state-backend`: the cases fail before the grant and pass after; the policy diff adds exactly one read action.
+  - Evidence: `evidence/T048.md`; PR; initial status `not-run`.
+
 ## Phase 4: User Story 4 — Checks re-run when what they read changes (P2)
 Independent test: V003, V004 (T001–T004 above).
 

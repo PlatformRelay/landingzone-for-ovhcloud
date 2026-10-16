@@ -300,9 +300,11 @@ It does this:
    (`GetObjectLockConfiguration`) with the S3 keys of the first row whose state lives there: it
    holds for an enabled lock in governance mode with a positive default retention; a read that
    fails makes the assertion `blocked` (never `pass`; `fail` next to a violated bucket). The state
-   buckets' S3 users are not granted `s3:GetBucketObjectLockConfiguration`
-   (`modules/object-storage-user`), so expect the read to be refused and the assertion `blocked`
-   until they are (UNVERIFIED, evidence T026).
+   buckets' S3 users are granted `s3:GetBucketObjectLockConfiguration` on their bucket
+   (`modules/object-storage-user`, spec 006 T048); users deployed before that get it only when the
+   bootstrap and tenant-state stacks are re-applied, and until then the read is refused and the
+   assertion `blocked`. That this action authorises the read on OVHcloud is UNVERIFIED until a
+   chain reads `holds`.
 5. Destroys the two ephemeral stacks in reverse order, each through a saved `plan -destroy`.
    The destroy also fires when an apply fails, on SIGINT or SIGTERM, and at the deadline.
 6. Runs the trap (the KD-1 canary bucket, the lock object, a wrongly created policy).
