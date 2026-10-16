@@ -21,10 +21,12 @@ func qualifiedInput() Prepared {
 			"tflint":    "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
 		},
 		Image: "cgr.dev/chainguard/wolfi-base@sha256:fd536778d12e19bff29cfcf73265a14f585152a49d7f7cd6739ebe48dff01e26",
-		// Wolfi packages verified against the signed APKINDEX (evidence/T025.md).
+		// Wolfi packages verified against the signed APKINDEX (evidence/T025.md)
+		// and the mirrored provider (spec 006 FR-014: its pin joined the table).
 		Packages: map[string]string{
-			"git-2.56.0-r0.apk":         "33bc6d38714d6a65e412b87e7ef9392a27b4f2ca71f3506bd8e9eaa42d59c10d",
-			"libpcre2-8-0-10.49-r1.apk": "c2e8dacd8fe2f1c3de9eabd274532f74fcbbd3e919301fc95453ab3af850c38c",
+			"git-2.56.0-r0.apk":                             "33bc6d38714d6a65e412b87e7ef9392a27b4f2ca71f3506bd8e9eaa42d59c10d",
+			"libpcre2-8-0-10.49-r1.apk":                     "c2e8dacd8fe2f1c3de9eabd274532f74fcbbd3e919301fc95453ab3af850c38c",
+			"terraform-provider-ovh_2.21.0_linux_amd64.zip": "54dc88d0e863d9f87e9a9c63407f9d9e6a73c0f29d16b226f9bafc6fd2507712",
 		},
 	}
 }
@@ -79,7 +81,7 @@ func TestToolchainCaptureAdmission(t *testing.T) {
 	})
 	t.Run("missing-image", func(t *testing.T) { p := qualifiedInput(); p.Image = ""; assertCaptureDenied(t, p) })
 	// The packages unpacked over the image are pinned like the image itself.
-	for _, name := range []string{"git-2.56.0-r0.apk", "libpcre2-8-0-10.49-r1.apk"} {
+	for _, name := range []string{"git-2.56.0-r0.apk", "libpcre2-8-0-10.49-r1.apk", "terraform-provider-ovh_2.21.0_linux_amd64.zip"} {
 		t.Run("package-"+name, func(t *testing.T) {
 			p := qualifiedInput()
 			p.Packages[name] = "synthetic-wrong-digest"
@@ -139,5 +141,41 @@ func assertCaptureDenied(t *testing.T, p Prepared) {
 	err, invoked, published := captureMarkers(t, p, syntheticIsolation)
 	if err == nil || invoked || published {
 		t.Errorf("BEHAVIORAL_RED: capture must refuse before invocation/publication: err=%v invoked=%v published=%v", err, invoked, published)
+	}
+}
+
+// TestPackagesRows: every row of the one pin table names its kind, version,
+// HTTPS source and digest, its source ends in its file name, and exactly one
+// row is the provider the runtime mirrors; a bundle records every row's
+// digest.
+func TestPackagesRows(t *testing.T) {
+	providers := 0
+	for name, row := range Packages {
+		if row.Kind == KindProvider {
+			providers++
+		}
+		checkPackageRow(t, name, row)
+	}
+	if providers != 1 || len(PackagePins()) != len(Packages) {
+		t.Errorf("BEHAVIORAL_RED: %d provider rows, %d recorded pins for %d rows", providers, len(PackagePins()), len(Packages))
+	}
+}
+
+func checkPackageRow(t *testing.T, name string, row Package) {
+	t.Helper()
+	if row.Kind != KindAPK && row.Kind != KindProvider {
+		t.Errorf("BEHAVIORAL_RED: %s: kind %q", name, row.Kind)
+	}
+	if row.Version == "" || !strings.Contains(name, row.Version) {
+		t.Errorf("BEHAVIORAL_RED: %s: version %q not in its file name", name, row.Version)
+	}
+	if !strings.HasPrefix(row.URL, "https://") || !strings.HasSuffix(row.URL, "/"+name) {
+		t.Errorf("BEHAVIORAL_RED: %s: source %q", name, row.URL)
+	}
+	if len(row.SHA256) != 64 || strings.Trim(row.SHA256, "0123456789abcdef") != "" {
+		t.Errorf("BEHAVIORAL_RED: %s: digest %q", name, row.SHA256)
+	}
+	if PackagePins()[name] != row.SHA256 {
+		t.Errorf("BEHAVIORAL_RED: %s: recorded digest differs from the row", name)
 	}
 }
