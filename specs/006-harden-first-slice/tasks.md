@@ -239,7 +239,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: T019's cases green.
   - Evidence: `evidence/T024.md`; PR; initial status `not-run`.
 
-- [ ] T025 [US2] Register the canary trap before the create in tools/internal/live/observe.go
+- [x] T025 [US2] Register the canary trap before the create in tools/internal/live/observe.go — closed 2026-10-16, evidence: evidence/T025.md
   - Requirements: FR-009; ADRs: 0008, 0024. Depends on: T020.
   - Verify: `task test:live-lane`: T020's cases green.
   - Evidence: `evidence/T025.md`; PR; initial status `not-run`.

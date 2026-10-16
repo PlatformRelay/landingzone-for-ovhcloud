@@ -749,6 +749,150 @@ func TestObserveCanaryNameTaken(t *testing.T) {
 	})
 }
 
+// Spec 006 FR-009 (T025): a name that existed before the call is never removed, also when the
+// create answers an error other than 409 (the trap removes only a name read as absent; one read
+// as present it names in its error while it exists, so the run fails) and when it appeared
+// between the read and the create (409: nothing); a read of the name that fails sets nothing up:
+// no create, no write.
+func TestObserveCanaryTakenNotRemoved(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		answer   string
+		code     int
+		create   bool // the create is sent
+		reported bool // the trap's error names the canary
+	}{
+		{name: "taken-create-500", answer: "admin POST create", code: http.StatusInternalServerError, create: true, reported: true},
+		{name: "taken-create-503", answer: "admin POST create", code: http.StatusServiceUnavailable, create: true, reported: true},
+		{name: "read-fails", answer: "admin GET get", code: http.StatusInternalServerError},
+		// Another creator between the read and the create: the 409 disarms the trap.
+		{name: "read-absent-create-409", answer: "admin GET get", code: http.StatusNotFound, create: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newCanaryAPI(t, nil)
+			f.buckets[canaryName] = map[string]string{"theirs": "someone else's object"}
+			f.answer[tc.answer] = tc.code
+			obs := ObserveCanary(context.Background(), f.options())
+			canaryJudge(t, f, obs)
+			for _, o := range obs {
+				if o.Observed == "denied" || o.Observed == "allowed" {
+					t.Errorf("kd1-canary %s observed %q: the tenant's calls were never made", o.Subject, o.Observed)
+				}
+			}
+			delete(f.answer, tc.answer)
+			err := f.trap.Run(context.Background())
+			if objs, ok := f.buckets[canaryName]; !ok || objs["theirs"] == "" {
+				t.Errorf("bucket %s holds %v (exists %t) after the run and its trap: a name taken before the run is never removed", canaryName, objs, ok)
+			}
+			if named := err != nil && strings.Contains(err.Error(), canaryName); named != tc.reported {
+				t.Errorf("trap error %v, want one naming %s: %t", err, canaryName, tc.reported)
+			}
+			created := false
+			for _, c := range f.Calls() {
+				created = created || c.Op == "create"
+				if c.Cred == "tenant-deployer" {
+					t.Errorf("tenant %s %s on a bucket this run did not create", c.Method, c.Path)
+				}
+				if c.Method != http.MethodGet && c.Op != "create" {
+					t.Errorf("%s %s as %s: a bucket this run did not create is never written", c.Method, c.Path, c.Cred)
+				}
+			}
+			if created != tc.create {
+				t.Errorf("create sent %t, want %t", created, tc.create)
+			}
+		})
+	}
+}
+
+// Spec 006 FR-009 (T025): a name the read found, whose create then makes a bucket (the name was
+// freed in between, or the create is idempotent: the run cannot tell), is neither adopted nor
+// removed: `kd1-canary` is `blocked`, the tenant makes no call, and the trap leaves the bucket and
+// names it in its error, so a create that answered success or an error after making it is still
+// reported.
+func TestObserveCanaryReadPresent(t *testing.T) {
+	t.Parallel()
+	for _, after := range []int{0, http.StatusInternalServerError} {
+		t.Run(fmt.Sprintf("create-answers-%d", after), func(t *testing.T) {
+			t.Parallel()
+			f := newCanaryAPI(t, nil)
+			f.answer["admin GET get"] = http.StatusOK // the read says present; no bucket exists yet
+			f.createAfter = after
+			obs := ObserveCanary(context.Background(), f.options())
+			delete(f.answer, "admin GET get")
+			canaryJudge(t, f, obs)
+			if _, ok := f.buckets[canaryName]; !ok {
+				t.Fatalf("no bucket %s after its create (fake)", canaryName)
+			}
+			if after == 0 {
+				for _, o := range obs {
+					if o.Observed != "blocked" {
+						t.Errorf("kd1-canary %s observed %q, want blocked (a name the read found is not adopted)", o.Subject, o.Observed)
+					}
+				}
+			}
+			err := f.trap.Run(context.Background())
+			if _, ok := f.buckets[canaryName]; !ok {
+				t.Errorf("bucket %s removed by the trap: a name the read found is never removed", canaryName)
+			}
+			if err == nil || !strings.Contains(err.Error(), canaryName) {
+				t.Errorf("trap error %v, want one naming %s (it exists and was not removed)", err, canaryName)
+			}
+			for _, c := range f.Calls() {
+				if c.Cred == "tenant-deployer" {
+					t.Errorf("tenant %s %s on a bucket this run may not own", c.Method, c.Path)
+				}
+				if c.Method != http.MethodGet && c.Op != "create" {
+					t.Errorf("%s %s as %s: a bucket this run may not own is never written", c.Method, c.Path, c.Cred)
+				}
+			}
+		})
+	}
+}
+
+// Spec 006 FR-009 (T025): a `blocked` observation makes the assertion `blocked` only when it is
+// the only one short of the expected value; next to an error or a gap (a KD-1 `allowed` with
+// shared_state_project included) the assertion is a fail, so `blocked` never hides behind a pass
+// or a known deviation.
+func TestAssessBlockedAlone(t *testing.T) {
+	t.Parallel()
+	ob := func(subject, observed string) Observation {
+		return Observation{Assertion: "kd1-canary", Subject: subject, Observed: observed}
+	}
+	cases := []struct {
+		name string
+		obs  []Observation
+		want string
+	}{
+		{name: "both-blocked", obs: []Observation{ob("bulkDeleteObjects", "blocked"), ob("DELETE", "blocked")}, want: "blocked"},
+		{name: "blocked-and-denied", obs: []Observation{ob("bulkDeleteObjects", "blocked"), ob("DELETE", "denied")}, want: "blocked"},
+		{name: "blocked-and-allowed", obs: []Observation{ob("bulkDeleteObjects", "blocked"), ob("DELETE", "allowed")}, want: "fail"},
+		{name: "blocked-and-error", obs: []Observation{ob("bulkDeleteObjects", "blocked"), ob("DELETE", "error")}, want: "fail"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, shared := range []bool{false, true} {
+				n := 0
+				for _, a := range Assess(ObservationSet{RunID: canaryRunID, SharedStateProject: shared, Observations: tc.obs}) {
+					if a.Assertion != "kd1-canary" {
+						continue
+					}
+					n++
+					if a.Outcome != tc.want {
+						t.Errorf("shared_state_project %t: kd1-canary assessed %+v, want outcome %s", shared, a, tc.want)
+					}
+				}
+				if n != 1 {
+					t.Errorf("shared_state_project %t: %d kd1-canary assessments, want 1", shared, n)
+				}
+			}
+		})
+	}
+}
+
 // Trap: every cleanup once; a failure names its cleanup and the others still run.
 func TestObserveTrap(t *testing.T) {
 	t.Parallel()
