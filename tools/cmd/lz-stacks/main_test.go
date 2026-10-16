@@ -254,6 +254,47 @@ func TestStacksCheck(t *testing.T) {
 	}
 }
 
+// stacks:check reports two stages whose dependency locks pin different provider versions or hashes
+// (006 FR-011, T028): a fresh, reconciled and generated tree with disagreeing stage locks fails
+// with a STAGE_LOCK_MISMATCH line naming both stages, writing nothing; agreeing locks pass.
+func TestStacksCheckStageLocks(t *testing.T) {
+	pinned(t)
+	lock := func(version string) []byte {
+		return fmt.Appendf(nil, "provider \"registry.opentofu.org/ovh/ovh\" {\n  version = %q\n  hashes = [\n    \"h1:z26YaKCDJJThNY9i+hCIq7YSiWiTc8vsC0RhX0hRwMc=\",\n  ]\n}\n", version)
+	}
+	for _, c := range []struct {
+		name     string
+		tenant   string // tenant-state's ovh/ovh version; bootstrap pins 2.21.0
+		mismatch bool
+	}{
+		{"stage locks agree", "2.21.0", false},
+		{"stage locks disagree", "2.22.0", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := candidate(t, true)
+			if code, lines := lzStacks(t, root, "reconcile"); code != 0 {
+				t.Fatalf("reconcile: exit %d, %q", code, lines)
+			}
+			terramate(t, root, "generate")
+			writeFile(t, filepath.Join(root, "stages/bootstrap/.terraform.lock.hcl"), lock("2.21.0"))
+			writeFile(t, filepath.Join(root, "stages/tenant-state/.terraform.lock.hcl"), lock(c.tenant))
+			before := snapshot(t, root)
+			code, lines := lzStacks(t, root, "check")
+			unchanged(t, "check", before, root)
+			if !c.mismatch {
+				if code != 0 || len(lines) != 1 || !strings.HasPrefix(lines[0], "STACKS_CHECK_OK ") {
+					t.Errorf("check: exit %d, %q; want 0 and STACKS_CHECK_OK", code, lines)
+				}
+				return
+			}
+			if code != 1 || len(lines) != 1 || !strings.HasPrefix(lines[0], "fail: "+stacks.CodeStageLockMismatch) ||
+				!strings.Contains(lines[0], "bootstrap") || !strings.Contains(lines[0], "tenant-state") {
+				t.Errorf("check: exit %d, %q; want 1 and one fail: %s line naming bootstrap and tenant-state", code, lines, stacks.CodeStageLockMismatch)
+			}
+		})
+	}
+}
+
 // A reconciler refusal is a check failure naming the refused stack, with nothing written.
 func TestStacksCheckRefusal(t *testing.T) {
 	pinned(t)
@@ -346,9 +387,20 @@ func TestStacksGenerate(t *testing.T) {
 	if code, lines := lzStacks(t, root, "reconcile"); code != 0 || len(lines) != 6 {
 		t.Fatalf("reconcile: exit %d, %q", code, lines)
 	}
+	// Generation copies each stack's stage lock into it (006 FR-011), so the lock is a file it
+	// wrote too: the candidate gets the repository's stage locks.
+	stages, err := os.ReadDir(filepath.Join(repoRoot, "stages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range stages {
+		if s.IsDir() {
+			copyFile(t, filepath.Join(repoRoot, "stages", s.Name(), ".terraform.lock.hcl"), filepath.Join(root, "stages", s.Name(), ".terraform.lock.hcl"))
+		}
+	}
 	var want []string
 	for _, p := range sandboxPaths(t) {
-		want = append(want, "generated "+p+"/_lz_main.tf")
+		want = append(want, "generated "+p+"/_lz_main.tf", "generated "+p+"/.terraform.lock.hcl")
 	}
 	slices.Sort(want)
 	code, lines := lzStacks(t, root, "generate")
@@ -356,8 +408,10 @@ func TestStacksGenerate(t *testing.T) {
 		t.Fatalf("generate: exit %d, %q; want 0 and %q", code, lines, want)
 	}
 	for _, p := range sandboxPaths(t) {
-		if _, err := os.Stat(filepath.Join(root, p, "_lz_main.tf")); err != nil {
-			t.Errorf("%s: %v", p, err)
+		for _, name := range []string{"_lz_main.tf", ".terraform.lock.hcl"} {
+			if _, err := os.Stat(filepath.Join(root, p, name)); err != nil {
+				t.Errorf("%s: %v", p, err)
+			}
 		}
 	}
 	if code, lines := lzStacks(t, root, "generate"); code != 0 || len(lines) != 0 {

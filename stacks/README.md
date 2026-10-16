@@ -7,7 +7,9 @@ reusable code; stack = one deployed instance of a stage with its own state.
 **Generated: do not edit stack directories by hand.** Edit only
 [`deployments.yaml`](deployments.yaml), the list of instances (one row per stack). Then, on the
 host, run `task stacks:reconcile` (creates the missing stack directories and their
-`stack.tm.hcl`) and `task stacks:generate` (renders their `_lz_*` files with Terramate), and
+`stack.tm.hcl`) and `task stacks:generate` (renders their `_lz_*` files with Terramate and copies
+the stage's `.terraform.lock.hcl` into each stack without one; it refuses a row not yet
+reconciled, and a stack whose stage has no lock), and
 commit the result. A stack's path is its state key: moving or renaming one is a state migration,
 not a rename.
 

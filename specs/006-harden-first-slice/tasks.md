@@ -270,7 +270,7 @@ Independent test: V003, V004 (T001–T004 above).
   - Verify: `task test:stacks`: the first three cases fail against the stubs.
   - Evidence: `evidence/T027.md`; PR; initial status `not-run`.
 
-- [ ] T028 [US4] Refuse unreconciled rows, copy stage locks and compare them in tools/internal/stacks/generate.go and `lz-stacks check`
+- [x] T028 [US4] Refuse unreconciled rows, copy stage locks and compare them in tools/internal/stacks/generate.go and `lz-stacks check` — closed 2026-10-16, evidence: evidence/T028.md
   - Requirements: FR-011; ADRs: 0007, 0011. Depends on: T027.
   - Verify: `task test:stacks; task stacks:check`: T027's cases green; the real tree passes.
   - Evidence: `evidence/T028.md`; PR; initial status `not-run`.
