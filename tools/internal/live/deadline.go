@@ -46,21 +46,33 @@ func destroyBudgetSpent(dctx context.Context, budget time.Duration) error {
 	return fmt.Errorf("destroy-on-exit: its budget of %v ran out (%w); what it did not destroy or check stays for --cleanup", budget, context.Cause(dctx))
 }
 
+// minRetryReserve is the least reserve a retry budget keeps for the read and the remaining
+// listings (data-model *Retry budget*: floor 30 s).
+const minRetryReserve = 30 * time.Second
+
 // retryBudget is the one retry budget a leftover check shares across every retained instance it
 // reads (spec 006 FR-008, data-model *Retry budget*): it ends at end, and a wait is admitted only
-// while reserve (the read and the remaining listings) is still left after it. Stub of the signature
-// data-model fixes; T024 implements it and has readRetained ask it before every wait.
-type retryBudget struct{}
+// while reserve (the read and the remaining listings) is still left after it. Not safe for
+// concurrent use: the check reads its instances one after the other.
+type retryBudget struct {
+	end     time.Time
+	reserve time.Duration
+}
 
-// newRetryBudget is the budget ending at end that keeps reserve. Stub (T024).
+// newRetryBudget is the budget ending at end that keeps reserve.
 func newRetryBudget(end time.Time, reserve time.Duration) *retryBudget {
-	return &retryBudget{} // not implemented
+	return &retryBudget{end: end, reserve: reserve}
 }
 
 // admit reports whether a wait of wait starting at now leaves at least the reserve before the end:
-// end - now - wait >= reserve. Stub (T024).
+// end - now - wait >= reserve.
 func (b *retryBudget) admit(now time.Time, wait time.Duration) bool {
-	return false // not implemented
+	return b.end.Sub(now)-wait >= b.reserve
+}
+
+// keep raises the reserve to at least d (a slower read or listing seen so far); it never lowers it.
+func (b *retryBudget) keep(d time.Duration) {
+	b.reserve = max(b.reserve, d)
 }
 
 // waitClock is the time the leftover check's state-read retries read and wait on: Now against the

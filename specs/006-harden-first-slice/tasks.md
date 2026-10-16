@@ -234,7 +234,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: T018's cases green; the destroy stays detached from the run's cancellation. Guard G21 mutant is killed.
   - Evidence: `evidence/T023.md`; PR; initial status `not-run`.
 
-- [ ] T024 [US2] Share one `retryBudget` across retained instances in tools/internal/live/chain.go and tools/internal/live/runner.go
+- [x] T024 [US2] Share one `retryBudget` across retained instances in tools/internal/live/chain.go and tools/internal/live/runner.go — closed 2026-10-16, evidence: evidence/T024.md
   - Requirements: FR-008; ADRs: 0008, 0024. Depends on: T019, T023.
   - Verify: `task test:live-lane`: T019's cases green.
   - Evidence: `evidence/T024.md`; PR; initial status `not-run`.

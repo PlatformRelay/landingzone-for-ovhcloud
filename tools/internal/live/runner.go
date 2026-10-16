@@ -806,7 +806,9 @@ func (s *session) undo(ctx context.Context, st Stack) (keep bool, err error) {
 var defaultCompanionBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
 
 // defaultStateReadBackoff are the waits before the second and third attempt of the leftover
-// check's read of a retained instance's state (T110, chain.go readRetained).
+// check's read of a retained instance's state (T110, chain.go readRetained), each admitted only by
+// the check's one retry budget (spec 006 FR-008). The probe's leftover check reads no retained
+// state, so it has no retry budget.
 var defaultStateReadBackoff = []time.Duration{10 * time.Second, 30 * time.Second}
 
 // destroyCompanion destroys the companion (session.destroy: plan, judge, apply that plan), retrying

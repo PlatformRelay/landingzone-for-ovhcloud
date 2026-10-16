@@ -130,6 +130,13 @@ type laneRunner struct {
 	s3HTTP  *http.Client // the state-object check's S3 client (ChainOptions.S3HTTP)
 	// chain only: ChainOptions.childStarted (tests); nil in production.
 	childStarted func(ctx context.Context, args []string)
+	// chain only: the leftover check's retained state reads (readRetained): the waits before their
+	// retries (ChainOptions.stateReadBackoff; nil: defaultStateReadBackoff), the clock they read
+	// and wait on (ChainOptions.stateReadClock; nil: the wall clock), and how long the baseline
+	// listing took, the retry budget's estimate of the final listing (spec 006 FR-008).
+	stateReadBackoff []time.Duration
+	stateReadClock   waitClock
+	listTook         time.Duration
 	// chain only: the L7 assessments (nil: not judged) and why the assertions were not run.
 	assessments []Assessment
 	notRun      string

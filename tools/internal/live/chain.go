@@ -227,6 +227,13 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	o, m := r.o, r.o.Manifest
 	r.s3HTTP = c.S3HTTP
 	r.childStarted = c.childStarted
+	r.stateReadBackoff, r.stateReadClock = c.stateReadBackoff, c.stateReadClock
+	if r.stateReadBackoff == nil {
+		r.stateReadBackoff = defaultStateReadBackoff
+	}
+	if r.stateReadClock == nil {
+		r.stateReadClock = wallClock{}
+	}
 	eph, err := r.ephemeralOf()
 	if err != nil {
 		return err
@@ -354,7 +361,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 		destroyErr = errors.Join(destroyErr, e)
 	}
 
-	rep := r.leftovers(dctx, check, c.stateReadBackoff, c.stateReadClock)
+	rep := r.leftovers(dctx, check)
 	// A call that ignores its context may still answer after the budget ran out: the context's own
 	// state fails the run too.
 	destroyErr = errors.Join(destroyErr, destroyBudgetSpent(dctx, budget))
@@ -457,7 +464,9 @@ func (r *laneRunner) admin(ctx context.Context) (Credential, error) {
 // the run could only fail.
 func (r *laneRunner) baseline(ctx context.Context, check LeftoverCheck) error {
 	o := r.o
+	start := r.stateReadClock.Now()
 	rep := check.Check(ctx, nil)
+	r.listTook = r.stateReadClock.Now().Sub(start)
 	for typ, items := range rep.Listings {
 		raw, err := json.Marshal(items)
 		if err != nil {
@@ -645,20 +654,19 @@ var stateIDAttr = map[string]string{tStorage: "name", tUser: "id", tCred: "acces
 
 // readRetained is retainedIDs retried after a transient failure of its `init` or `show -json`
 // (T110, evidence/T049.md run 3: a read failing once turned the instance's objects into
-// leftovers): at most len(backoff) retries (nil: defaultStateReadBackoff), each after its wait; a
-// wait that would end after ctx's deadline is not started. A 4xx, any other failure and the last
-// attempt's failure are returned (the report's error: fail closed). Each retry prints one line
-// naming the instance with the redacted error, nothing of tofu's output. clk is the time the waits
-// read and take (nil: the wall clock).
-func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into map[string][]string, backoff []time.Duration, clk waitClock) error {
-	if backoff == nil {
-		backoff = defaultStateReadBackoff
-	}
-	if clk == nil {
-		clk = wallClock{}
-	}
+// leftovers): at most len(r.stateReadBackoff) retries, each after its wait. Every wait is first
+// asked of b, the leftover check's one retry budget (spec 006 FR-008), at the run's clock
+// (r.stateReadClock); a wait it refuses is not started and the read returns a *waitRefused
+// (`blocked waiting-for=<instance>`). Each attempt's duration raises b's reserve, which keeps
+// time for a read and the final listing. A 4xx, any other failure and the last attempt's failure
+// are returned (the report's error: fail closed). Each retry prints one line naming the instance
+// with the redacted error, nothing of tofu's output.
+func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into map[string][]string, b *retryBudget) error {
+	backoff, clk := r.stateReadBackoff, r.stateReadClock
 	for attempt := 0; ; attempt++ {
+		start := clk.Now()
 		err := r.retainedIDs(ctx, in, into)
+		b.keep(clk.Now().Sub(start) + r.listTook)
 		if err == nil {
 			return nil
 		}
@@ -670,8 +678,8 @@ func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into 
 			return err
 		}
 		wait := backoff[attempt]
-		if dl, ok := ctx.Deadline(); ok && dl.Sub(clk.Now()) < wait {
-			return fmt.Errorf("%w; no retry: the deadline leaves less than %v", err, wait)
+		if !b.admit(clk.Now(), wait) {
+			return &waitRefused{id: in.ID, wait: wait, err: err}
 		}
 		fmt.Fprintf(r.term, "LZ-LIVE retry state read %s in %v: transient failure (attempt %d of %d): %s\n",
 			in.ID, wait, attempt+2, len(backoff)+1, r.red.Redact(err.Error()))
@@ -682,6 +690,21 @@ func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into 
 		}
 	}
 }
+
+// waitRefused is a retained state read whose retry the leftover check's retry budget refused
+// (spec 006 FR-008): the check cannot tell that instance's objects from leftovers, so it is
+// blocked waiting for it, never a pass.
+type waitRefused struct {
+	id   string
+	wait time.Duration
+	err  error // the attempt's failure
+}
+
+func (e *waitRefused) Error() string {
+	return fmt.Sprintf("%v; blocked waiting-for=%s: a retry after %v would leave less than the time kept for the read and the listings", e.err, e.id, e.wait)
+}
+
+func (e *waitRefused) Unwrap() error { return e.err }
 
 // readTofu is laneRunner.tofu keeping the call's stderr (capped, in memory, unredacted) in the
 // *tofuFailure it returns, so transient can judge it (T110, as session.tofu does for T095).
@@ -754,11 +777,17 @@ func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into m
 // leftovers is the final reconciliation: the retained instances' states, the admin exemption, the
 // inventory and the baseline record read back from the run directory. A state, exemption,
 // inventory or baseline that cannot be read, or a baseline listing that failed, is an error of the
-// report (fail closed). backoff and clk are readRetained's.
-func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff []time.Duration, clk waitClock) Report {
+// report (fail closed). The retained reads share one retry budget ending at ctx's deadline (the
+// destroy context's, spec 006 FR-008; none: no retry admitted); a refused wait makes the report
+// `blocked` when it is the report's only kind of error, whatever was listed: the unread instance's
+// objects cannot be told from leftovers.
+func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck) Report {
 	o, m := r.o, r.o.Manifest
 	check.Retained = map[string][]string{}
+	end, _ := ctx.Deadline()
+	budget := newRetryBudget(end, minRetryReserve)
 	var errs []string
+	refused := 0
 	for _, in := range m.Instances {
 		_, st, err := stageOf(m, in.ID)
 		if err != nil {
@@ -768,7 +797,11 @@ func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff
 		if st.Chain != "retained" {
 			continue
 		}
-		if err := r.readRetained(ctx, in, check.Retained, backoff, clk); err != nil {
+		if err := r.readRetained(ctx, in, check.Retained, budget); err != nil {
+			var w *waitRefused
+			if errors.As(err, &w) {
+				refused++
+			}
 			errs = append(errs, fmt.Sprintf("state of %s: %s", in.ID, r.red.Redact(err.Error())))
 		}
 	}
@@ -792,8 +825,12 @@ func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff
 		rep.Leftovers[i].Before = slices.Contains(b.Listed[l.Type], l.ID)
 	}
 	if len(errs) > 0 {
+		blocked := refused == len(errs) && len(rep.Errors) == 0
 		rep.Errors = append(rep.Errors, errs...)
 		rep.Outcome = "fail"
+		if blocked {
+			rep.Outcome = "blocked"
+		}
 	}
 	return rep
 }
