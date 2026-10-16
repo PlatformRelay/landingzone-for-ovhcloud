@@ -186,7 +186,8 @@ type laneStack struct {
 	// coordinator decision 3b: the locks are released after any of them).
 	Fail string `json:"fail,omitempty"`
 	// Block names the call of the stack that waits for a signal (review r1 of T059: cancellation);
-	// "apply+events" makes the apply print its apply_complete events first (T046: inventory).
+	// "apply+events" makes the apply print its apply_complete events first (T046: inventory);
+	// "destroy" blocks the apply of a `plan -destroy` file (T017), which no other value blocks.
 	Block string `json:"block,omitempty"`
 	// T046 (chain, destroy): DestroyPlan is the `show -json` document of a `plan -destroy` file;
 	// StateDoc the `show -json` document of the stack's state (no plan file argument), "" when it
@@ -412,7 +413,9 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		}
 	}
 	_, destroying := flags["-destroy"]
-	if st.Block != "" && (st.Block == failing || st.Block == "apply+events" && failing == "apply") && !blockPlan.Destroy && !destroying {
+	// "destroy" (T017) is the one block of a destroy: the apply of a `plan -destroy` file.
+	blockDestroy := st.Block == "destroy" && failing == "apply" && blockPlan.Destroy
+	if blockDestroy || st.Block != "" && (st.Block == failing || st.Block == "apply+events" && failing == "apply") && !blockPlan.Destroy && !destroying {
 		call.Cmd = failing
 		if st.Block == "apply+events" {
 			for _, c := range st.Creates {
@@ -816,6 +819,17 @@ type laneHarness struct {
 	afterLock func(name string)
 	// destroys: the runs under test may destroy ephemeral stacks and read retained states (T046).
 	destroys bool
+	// deadline is the run's ApplyOptions.Deadline (T017; 0: DefaultDeadline); holdBlocked leaves a
+	// blocked call to the run's own deadline instead of cancelling the run when it blocks.
+	// onBlocked (holdBlocked only) runs once while the blocked call still hangs; runDir is the run
+	// directory of the run exec is running, applyStart a time before its Apply call (set before the
+	// watcher starts), applyTook the duration of that call alone.
+	deadline    time.Duration
+	holdBlocked bool
+	onBlocked   func()
+	runDir      string
+	applyStart  time.Time
+	applyTook   time.Duration
 	// chainRun: the run under judgement is a chain, which reads account-bootstrap's state for the
 	// leftover check; plan, apply and destroy never do (T046 review r2).
 	chainRun bool
@@ -1310,22 +1324,29 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 	h.runs++
 	runID := fmt.Sprintf("20261008T1200%02dZ-%04x", h.runs, h.runs)
 	runDir := filepath.Join(h.checkout, ".local", "live", runID)
+	h.runDir, h.applyStart = runDir, time.Now() // before the watcher starts: it reads both
 	from := len(h.logCalls())
 	before := laneTree(t, h.checkout, filepath.Join(h.checkout, ".local"))
 	h.term.Reset()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	// A blocked call (laneStack.Block) cancels the run once it announced itself (T059 review r1).
-	stop := make(chan struct{})
-	defer close(stop)
+	// Under holdBlocked it only calls onBlocked (T017), and exec waits for that call to end.
+	stop, watched := make(chan struct{}), make(chan struct{})
+	defer func() { close(stop); <-watched }()
 	go func() {
+		defer close(watched)
 		for {
 			select {
 			case <-stop:
 				return
 			case <-time.After(20 * time.Millisecond):
 				if _, err := os.Stat(h.world.Log + ".blocked"); err == nil {
-					cancel()
+					if !h.holdBlocked {
+						cancel()
+					} else if h.onBlocked != nil {
+						h.onBlocked()
+					}
 					return
 				}
 			}
@@ -1334,9 +1355,11 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 	// The process's own stdout and stderr are captured too (review r1): a child stream or a print
 	// that bypasses Terminal lands there.
 	streams := laneCaptureStd(t)
+	applyStart := time.Now()
 	err := Apply(ctx, ApplyOptions{Verb: verb, Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
-		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI()})
+		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI(), Deadline: h.deadline})
+	h.applyTook = time.Since(applyStart)
 	return laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: streams()}, before
 }
 
@@ -2895,5 +2918,271 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 				t.Errorf("current.tmp still there after the retry was taken as written (err %v)", err)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------- T017: bounded verbs (FR-001)
+
+// T017 (spec 006 FR-001, US2; data-model *Live run record, non-chain verbs*; research R2;
+// contracts/checks.md V002, G23): `plan`, `apply` and `destroy` outside the chain run with a
+// deadline (0: DefaultDeadline) recorded in run.json, `apply` appends every created id to
+// inventory.jsonl as its apply_complete event arrives, and each verb ends with the summary line
+// `LZ_RUN <run_id> <verb> <outcome>` (` inventory=<path>` for `apply`), `apply` and `destroy`
+// with the chain's cost reminder. A deadline or SIGINT (the entry cancels the run's context)
+// during `apply` stops it with outcome `fail` and a non-zero exit, keeps the inventory and
+// destroys nothing. Tests against the chain harness: every stack creates its resources, each
+// ephemeral one has its destroy plan.
+
+// boundedNetwork is the ephemeral instance the apply cases act on: it creates two resources
+// (chainResources: the private network and its subnet).
+const boundedNetwork = "demo-dev-gra11-network"
+
+// boundedHang is the run deadline of the hang cases: long enough to reach the blocked call on a
+// slow machine (init, plan and both shows each re-execute the test binary), and with boundedSlack
+// still inside the fake's 10 s give-up (fakeLaneTofu, Block), so a run that stops later than its
+// deadline fails on time, not only on the missing signal.
+const (
+	boundedHang  = 6 * time.Second
+	boundedSlack = 3 * time.Second
+)
+
+func boundedHarness(t *testing.T) *laneHarness {
+	t.Helper()
+	h := newChainHarness(t)
+	h.steady()
+	return h
+}
+
+func boundedRunID(r laneRun) string { return filepath.Base(r.runDir) }
+
+// boundedReminder is the chain's cost reminder line (chain.go summary).
+func boundedReminder(runID string) string {
+	return "record approximate cost for run " + runID + " in the PR"
+}
+
+// boundedSummary checks the run's terminal: exactly one summary line, `LZ_RUN <run_id> <verb>
+// <outcome>` with ` inventory=<run dir>/inventory.jsonl` for apply, and the cost reminder iff
+// reminder.
+func boundedSummary(t *testing.T, term string, r laneRun, verb, outcome string, reminder bool) {
+	t.Helper()
+	id := boundedRunID(r)
+	want := "LZ_RUN " + id + " " + verb + " " + outcome
+	if verb == VerbApply {
+		want += " inventory=" + filepath.Join(r.runDir, "inventory.jsonl")
+	}
+	var got []string
+	hasReminder := false
+	for _, l := range strings.Split(term, "\n") {
+		if strings.HasPrefix(l, "LZ_RUN ") {
+			got = append(got, l)
+		}
+		hasReminder = hasReminder || l == boundedReminder(id)
+	}
+	if !slices.Equal(got, []string{want}) {
+		t.Errorf("summary lines %q, want exactly %q", got, want) // not the terminal: a redaction regression would print secrets
+	}
+	if hasReminder != reminder {
+		t.Errorf("cost reminder %q printed %t, want %t", boundedReminder(id), hasReminder, reminder)
+	}
+}
+
+// boundedRecord reads the run's run.json (data-model *Live run record, non-chain verbs*).
+func boundedRecord(t *testing.T, r laneRun) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(r.runDir, "run.json"))
+	if err != nil {
+		t.Errorf("run.json: %v", err)
+		return nil
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Errorf("run.json does not decode: %v", err)
+	}
+	return rec
+}
+
+// boundedInventory checks that the run's inventory.jsonl holds each of id's created resources
+// (chainResources) with its stack, address, type and id.
+func boundedInventory(t *testing.T, r laneRun, id string) {
+	t.Helper()
+	inv, err := ReadInventory(r.runDir)
+	if err != nil {
+		t.Errorf("inventory of %s: %v", id, err)
+		return
+	}
+	for _, c := range boundedMissing(inv, id) {
+		t.Errorf("inventory %+v lacks %s %s (id %s)", inv, c.typ, c.addr, c.id)
+	}
+}
+
+// boundedMissing returns id's created resources (chainResources) that inv does not hold.
+func boundedMissing(inv []InventoryEntry, id string) []chainResource {
+	var out []chainResource
+	for _, c := range chainResources()[id] {
+		if !slices.ContainsFunc(inv, func(e InventoryEntry) bool {
+			return e.Stack == id && e.Address == c.addr && e.Type == c.typ && e.ID == c.id
+		}) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// boundedNoDestroy checks that the run destroyed nothing: no `plan -destroy`, no apply of a
+// destroy plan, on any stack.
+func boundedNoDestroy(t *testing.T, r laneRun) {
+	t.Helper()
+	for _, c := range r.tofu() {
+		if c.Destroy {
+			t.Errorf("tofu %s of %s on a destroy plan: the run destroyed after it stopped", c.Cmd, c.Stack)
+		}
+	}
+}
+
+// boundedSignal is the signal the blocked call of id received ("" when it got none: it gave up).
+func boundedSignal(r laneRun, cmd, id string) string {
+	for _, c := range r.tofu() {
+		if c.Cmd == cmd && c.Stack == id && c.Signal != "" {
+			return c.Signal
+		}
+	}
+	return ""
+}
+
+// Case 1: an apply of an ephemeral instance given no deadline runs under DefaultDeadline, as the
+// chain does (the entry hands 0, main.go:173).
+func TestBoundedApplyDefaultDeadline(t *testing.T) {
+	h := boundedHarness(t)
+	r := h.run(VerbApply, boundedNetwork)
+	laneExit(t, r, 0)
+	rec := boundedRecord(t, r)
+	if rec == nil {
+		return
+	}
+	if got, ok := rec["deadline_seconds"].(float64); !ok || got != DefaultDeadline.Seconds() {
+		t.Errorf("run.json deadline_seconds %v, want %v (DefaultDeadline)", rec["deadline_seconds"], DefaultDeadline.Seconds())
+	}
+	if rec["run_id"] != boundedRunID(r) || rec["verb"] != VerbApply || rec["outcome"] != "pass" || rec["reviewed_sha"] != laneRevision {
+		t.Errorf("run.json run_id %v verb %v outcome %v reviewed_sha %v; want %s apply pass %s", rec["run_id"], rec["verb"], rec["outcome"], rec["reviewed_sha"], boundedRunID(r), laneRevision)
+	}
+	if got, _ := rec["instances"].([]any); len(got) != 1 || got[0] != boundedNetwork {
+		t.Errorf("run.json instances %v, want [%s]", rec["instances"], boundedNetwork)
+	}
+}
+
+// Case 2: the apply's two created resources are in inventory.jsonl.
+func TestBoundedApplyInventory(t *testing.T) {
+	if n := len(chainResources()[boundedNetwork]); n != 2 {
+		t.Fatalf("fixture: %s creates %d resources, want 2", boundedNetwork, n)
+	}
+	h := boundedHarness(t)
+	r := h.run(VerbApply, boundedNetwork)
+	laneExit(t, r, 0)
+	boundedInventory(t, r, boundedNetwork)
+}
+
+// Cases 3, 4, 5: the summary line of each verb; the cost reminder for apply and destroy only.
+func TestBoundedVerbSummary(t *testing.T) {
+	for _, c := range []struct {
+		verb, target string
+		reminder     bool
+	}{
+		{VerbApply, boundedNetwork, true},
+		{VerbPlan, boundedNetwork, false},
+		{VerbDestroy, "demo-dev-gra11-runtime", true},
+	} {
+		t.Run(c.verb, func(t *testing.T) {
+			h := boundedHarness(t)
+			r := h.run(c.verb, c.target)
+			laneExit(t, r, 0)
+			boundedSummary(t, h.term.String(), r, c.verb, "pass", c.reminder)
+		})
+	}
+}
+
+// Case 6: a tofu that hangs under plan, apply or destroy is stopped at the run's deadline (the
+// blocked call gets SIGINT from the run, not the fake's own give-up), outcome fail, non-zero exit.
+func TestBoundedVerbHangStops(t *testing.T) {
+	for _, c := range []struct {
+		verb, target, block, call string
+		reminder                  bool
+	}{
+		{VerbPlan, boundedNetwork, "plan", "plan", false},
+		{VerbApply, boundedNetwork, "apply", "apply", true},
+		{VerbDestroy, "demo-dev-gra11-runtime", "destroy", "apply", true},
+	} {
+		t.Run(c.verb, func(t *testing.T) {
+			h := boundedHarness(t)
+			h.setStack(c.target, func(s *laneStack) { s.Block = c.block })
+			h.deadline, h.holdBlocked = boundedHang, true
+			r := h.run(c.verb, c.target)
+			took := h.applyTook // the Apply call alone, not the harness's snapshots and judge
+			if ExitCode(r.err) == 0 {
+				t.Errorf("a hung %s exited 0", c.verb)
+			}
+			if got := boundedSignal(r, c.call, c.target); got != syscall.SIGINT.String() {
+				t.Errorf("the hung tofu %s of %s got signal %q after %v, want %q: the %s deadline (%v) did not stop it", c.call, c.target, got, took.Round(time.Millisecond), syscall.SIGINT.String(), c.verb, boundedHang)
+			}
+			if took < boundedHang || took >= boundedHang+boundedSlack {
+				t.Errorf("the hung %s ended after %v, want at its deadline (%v, within %v)", c.verb, took.Round(time.Millisecond), boundedHang, boundedSlack)
+			}
+			boundedSummary(t, h.term.String(), r, c.verb, "fail", c.reminder)
+			if rec := boundedRecord(t, r); rec != nil && rec["deadline_seconds"] != boundedHang.Seconds() {
+				t.Errorf("run.json deadline_seconds %v, want %v (the given deadline)", rec["deadline_seconds"], boundedHang.Seconds())
+			}
+		})
+	}
+}
+
+// Cases 7 and 8: a deadline or SIGINT during apply, after the apply reported its resources, stops
+// the run with outcome fail and a non-zero exit, keeps the inventory and destroys nothing: neither
+// an ephemeral nor a retained instance (an apply outside the chain may target a retained one).
+// Under the deadline the inventory must hold both ids while the apply still hangs (case 2's
+// "appended as each completes"). The retained row is a pin: destroyStack refuses a retained
+// instance by itself, so only the ephemeral row tells a destroy-on-stop apart.
+func TestBoundedApplyStopKeepsInventory(t *testing.T) {
+	for _, stop := range []string{"deadline", "sigint"} {
+		for _, id := range []string{boundedNetwork, "demo-dev-project"} {
+			t.Run(stop+"/"+id, func(t *testing.T) {
+				h := boundedHarness(t)
+				h.setStack(id, func(s *laneStack) { s.Block = "apply+events" })
+				// While the apply hangs (deadline rows): what the inventory holds, polled for up to
+				// boundedSlack after the fake announced its block (its events precede the
+				// announcement; the run reads them from a pipe).
+				var during []InventoryEntry
+				if stop == "deadline" {
+					h.deadline, h.holdBlocked = boundedHang, true
+					h.onBlocked = func() {
+						runDir := h.runDir
+						// Never past the run's deadline: a read after it could see what a run that
+						// buffers the events wrote once the child had stopped.
+						end := time.Now().Add(boundedSlack)
+						if last := h.applyStart.Add(boundedHang - 200*time.Millisecond); last.Before(end) {
+							end = last
+						}
+						for ; time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+							if during, _ = ReadInventory(runDir); len(boundedMissing(during, id)) == 0 {
+								return
+							}
+						}
+					}
+				} // sigint: exec cancels the run's context once the apply blocks, as the entry does on SIGINT
+				r := h.run(VerbApply, id)
+				if stop == "deadline" {
+					if miss := boundedMissing(during, id); len(miss) > 0 {
+						t.Errorf("while the apply hung, the inventory held %+v, lacking %d created resources: not appended as each apply_complete arrived", during, len(miss))
+					}
+				}
+				if ExitCode(r.err) == 0 {
+					t.Errorf("an apply stopped by %s exited 0", stop)
+				}
+				if got := boundedSignal(r, "apply", id); got != syscall.SIGINT.String() {
+					t.Errorf("the blocked apply of %s got signal %q, want %q", id, got, syscall.SIGINT.String())
+				}
+				boundedInventory(t, r, id)
+				boundedNoDestroy(t, r)
+				boundedSummary(t, h.term.String(), r, VerbApply, "fail", true)
+			})
+		}
 	}
 }
