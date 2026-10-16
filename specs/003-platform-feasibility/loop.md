@@ -56,11 +56,12 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | T035 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fix unreviewed (last round); fixtures composed from OpenTofu 1.13.0 source, live match T028's; test:live-lane registry input added; known red recovery_test.go (11 tests) for the coordinator's table |
 | T037 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 APPROVE/CONCERNS; verified r1 findings fixed, r2 deferred) | decision request for T038: Sweep when the root is kept (Undo or companion), recommended B (sweep in the final `--cleanup`); `--cleanup` of a run without state untested (fake destroy needs a state file); known red sweep_test.go (6 tests) for the coordinator's table |
 | T038 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 APPROVE/CONCERNS; verified findings fixed) | round-2 fix unreviewed (last round); tofu on a missing encrypted state UNVERIFIED (a no-state `--cleanup` that fails its destroy keeps its files); decision request: a root whose Undo passed and destroy failed is swept, recommended A (each probe's Undo tolerates swept resources, T030/T032/T034/T036); clears T037's sweep_test.go red |
+| T030 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fixes unreviewed (last round); the root's `lz-check unit` line waits for T031/T033/T035 (ran via `test:unit`); Swift/S3 listing sharing, seed propagation, API object shapes UNVERIFIED (T025); clears T029's swiftreach_test.go red |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
-| tools/internal/probes/live/storageiam/swiftreach_test.go: TestJudgeReach, TestSwiftObserve, TestSwiftUndo, TestSwiftSweep, TestSwiftValidate, TestSwiftLeak; `test:live-lane` red | US2 swift-reach | T029 | |
+| tools/internal/probes/live/storageiam/swiftreach_test.go: TestJudgeReach, TestSwiftObserve, TestSwiftUndo, TestSwiftSweep, TestSwiftValidate, TestSwiftLeak; `test:live-lane` red | US2 swift-reach | T029 | T030 |
 | tools/internal/probes/live/identity/residual_test.go: TestResidualWindow, TestResidualObserve, TestResidualUndo, TestResidualSweep, TestResidualValidate, TestResidualLeak; `test:live-lane` red | US3 token-residual | T031 | |
 | tools/internal/probes/live/identity/urn_test.go: TestJudgeURN, TestURNObserve, TestURNUndo, TestURNSweep, TestURNValidate, TestURNLeak; `test:live-lane` red | US3 iam-urn | T033 | |
 | tools/internal/probes/live/state/recovery_test.go: TestRecoveryLock, UnlockRefused, Blocked, TofuEnv, ConditionalPut, Restore, NoAnswer, Undo, Sweep, Validate, Leak; `test:live-lane` red | US2 locked-recovery | T035 | |
@@ -69,6 +70,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
 |---|---|---|---|
+| tools/internal/probes/live/storageiam/swiftreach_test.go: swWorld (fake S3 and API) | T029 | T030 | not wrong, extended: the seed write the provider cannot do (tasks.md T030), 404/InvalidAccessKeyId after a Sweep and the API's object listing and bulk delete (coordinator decision 2026-10-16); no assertion changed |
 
 ## Live runs
 | Task | Run id | Reviewed SHA | Observation | Cost | Leftovers |
@@ -81,4 +83,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 - A fake's "acknowledged but not effective" mode covers every route a cleanup may use; blocked or no-target cases still require the controls and reads that should happen; one `t.Run` per variant; an `ALT-` row proves a correct alternative passes. (T033)
 - An "acknowledged but ineffective" fake keeps plausible metadata and needs a matching-metadata, wrong-content variant; diagnostics composed from a tool's source follow its renderer (word wrap); a test that reads outside tools/ declares and pins its registry input in the same task. (T035)
 - A "keep the files until X passes" rule needs a case where the run fails before X runs; a fake's tolerance added for one case is opt-in per stack; a mutant that deletes a condition keeps its variables used. (T038)
+- Server text reaches errors through listings too: validate every listed name (regions, keys) before printing it, check an XML answer's root, and filter fields from a successful answer (role names) against every secret of the run, not only the caller's. A mutant that deletes a condition keeps its variables used. (T030)
 - See spec 006's loop.md *Lessons*; they apply here, especially the entry command shape, whole-checkout scratch copies for live-package mutants, and vacuity checks on harness runs.
