@@ -22,6 +22,15 @@ locals {
   # pcs-curl-commands-memo.mdx:15 and manage-and-operate/iam/
   # authenticate-api-openstack-with-service-account.mdx:87. The check refuses any other.
   auth_url = "https://auth.cloud.ovh.net/v3"
+  # tenant_id below is the Keystone project id, which is the Public Cloud project's service_name:
+  # the OpenStack guides scope a token to OS_TENANT_ID and call GET /cloud/project/{serviceName}
+  # with the same value (docs.ovhcloud.com storage-and-backup/object-storage/
+  # pca-curl-commands-memo.mdx:20, public-cloud/containers-orchestration/managed-kubernetes/
+  # vrack-custom-gateway.mdx:110-119; how-to-use-terraform.mdx:370 "service name / OS_PROJECT_ID").
+  # That guide also labels a project_id variable "Project Tenant ID", but the record's project_id
+  # attribute was empty on the live run 20261016T145959Z-42fd (spec 003 T039). Documentation only,
+  # until T025's Keystone login: the check refuses an empty or malformed tenant_id, and a wrong one
+  # fails at Keystone login.
 }
 
 resource "ovh_cloud_project_storage" "bucket" {
@@ -114,7 +123,7 @@ output "swift_check" {
     run_id           = local.run_id
     auth_url         = local.auth_url
     region           = local.region
-    tenant_id        = local.project.project_id
+    tenant_id        = local.project.service_name
     seed_key         = local.seed_key
     bucket_a         = ovh_cloud_project_storage.bucket["a"].name
     bucket_b         = ovh_cloud_project_storage.bucket["b"].name

@@ -3,8 +3,9 @@ mock_provider "ovh" {
   mock_data "ovh_cloud_projects" {
     defaults = {
       projects = [{
-        service_name  = "0123456789abcdef0123456789abcdef"
-        project_id    = "0123456789abcdef0123456789abcdef"
+        service_name = "0123456789abcdef0123456789abcdef"
+        # Empty, as the real API answers it (spec 003 T039: live run 20261016T145959Z-42fd).
+        project_id    = ""
         project_name  = "sandbox"
         description   = "sandbox"
         status        = "ok"
@@ -134,6 +135,53 @@ run "swift_check_published" {
   assert {
     condition     = length(output.buckets) == 2 && length(regexall("depends_on = \\[ovh_cloud_project_user_s3_policy.tenant, ovh_cloud_project_user_s3_policy.cleanup\\]\n}", file("main.tf"))) == 1
     error_message = "output swift_check depends on every S3 policy"
+  }
+}
+
+# Spec 003 T039: the project record's project_id was empty on the live run 20261016T145959Z-42fd,
+# while every mock supplied one. The tenant (Keystone project) id is the project's service_name,
+# whatever project_id holds: empty (live) or another value.
+run "tenant_id_is_the_service_name" {
+  command = plan
+
+  override_data {
+    target = data.ovh_cloud_projects.all
+    values = {
+      projects = [{
+        service_name  = "0123456789abcdef0123456789abcdef"
+        project_id    = "fedcba9876543210fedcba9876543210"
+        project_name  = "sandbox"
+        description   = "sandbox"
+        status        = "ok"
+        access        = "full"
+        creation_date = "2026-09-01T00:00:00Z"
+        expiration    = ""
+        manual_quota  = false
+        order_id      = 1
+        plan_code     = "project.2018"
+        unleash       = true
+        iam = {
+          id           = "00000000-0000-0000-0000-000000000000"
+          urn          = "urn:v1:eu:resource:publicCloudProject:0123456789abcdef0123456789abcdef"
+          display_name = "sandbox"
+          tags         = {}
+        }
+      }]
+    }
+  }
+
+  assert {
+    condition     = nonsensitive(output.swift_check.tenant_id) == "0123456789abcdef0123456789abcdef"
+    error_message = "swift_check's tenant_id is the project's service_name, not its project_id attribute"
+  }
+}
+
+run "tenant_id_set_when_project_id_empty" {
+  command = plan
+
+  assert {
+    condition     = nonsensitive(output.swift_check.tenant_id) != "" && nonsensitive(output.swift_check.tenant_id) == var.project_id
+    error_message = "swift_check's tenant_id is non-empty and the project id when the record's project_id is empty"
   }
 }
 
