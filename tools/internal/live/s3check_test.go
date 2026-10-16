@@ -483,3 +483,20 @@ func TestJudgeObjectLock(t *testing.T) {
 		})
 	}
 }
+
+// TestJudgeObjectLockMixedPeriod (T026 review r1): a negative period fails even next to a positive
+// one in the other unit (AWS answers one of Days or Years; a positive one does not excuse the other).
+func TestJudgeObjectLockMixedPeriod(t *testing.T) {
+	t.Parallel()
+	for _, l := range []ObjectLock{
+		{Enabled: true, Mode: "GOVERNANCE", Days: -1, Years: 1},
+		{Enabled: true, Mode: "GOVERNANCE", Days: 1, Years: -1},
+	} {
+		if got := judgeObjectLock(l, nil); got != "fail" {
+			t.Errorf("judgeObjectLock(%+v, nil) = %q, want fail", l, got)
+		}
+	}
+	if got := judgeObjectLock(ObjectLock{Enabled: true, Mode: "GOVERNANCE", Days: 1, Years: 1}, nil); got != "pass" {
+		t.Errorf("both periods positive: %q, want pass", got)
+	}
+}

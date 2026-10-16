@@ -963,6 +963,9 @@ func chainPassing() []Observation {
 	out := []Observation{
 		{Assertion: "state-bucket-versioned", Subject: "lz-bkt-state", Observed: "holds"},
 		{Assertion: "state-bucket-versioned", Subject: "lz-demo-bkt-state", Observed: "holds"},
+		// Spec 006 FR-010: each state bucket's Object Lock.
+		{Assertion: "state-bucket-object-lock", Subject: "lz-bkt-state", Observed: "holds"},
+		{Assertion: "state-bucket-object-lock", Subject: "lz-demo-bkt-state", Observed: "holds"},
 	}
 	for _, k := range []string{"lz-bkt-state/account/account-governance/terraform.tfstate", "lz-bkt-state/account/tenant-state/demo/terraform.tfstate",
 		"lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", "lz-demo-bkt-state/tenants/demo/dev/gra11/project-network/terraform.tfstate",
@@ -1247,5 +1250,32 @@ func TestObserveChainObjectLock(t *testing.T) {
 				t.Errorf("summary.json outcome %q, want %q", s.Outcome, map[bool]string{true: tc.outcome, false: "anything but pass"}[tc.outcome != ""])
 			}
 		})
+	}
+}
+
+// TestObserveChainObjectLockBlocked (T026 review r1; FR-010 "a read error is `blocked`, never
+// `pass`"): a state bucket whose lock could not be read, observed `blocked` as the collector
+// observes it, makes the assertion `blocked` in summary.json and fails the run (exit 1), naming
+// the assertion and the bucket.
+func TestObserveChainObjectLockBlocked(t *testing.T) {
+	h := newChainHarness(t)
+	o := &chainObserver{obs: chainWith(func(o Observation) *Observation {
+		if o.Assertion == "state-bucket-object-lock" && o.Subject == "lz-bkt-state" {
+			o.Observed, o.Detail = "blocked", "GetObjectLockConfiguration lz-bkt-state: answered 403 AccessDenied"
+		}
+		return &o
+	})}
+	r := h.chain(chainExec{observer: o})
+	laneExit(t, r.laneRun, 1)
+	for _, s := range []string{"state-bucket-object-lock", "lz-bkt-state"} {
+		if r.err == nil || !strings.Contains(r.err.Error(), s) {
+			t.Errorf("err %v, want one naming %s", r.err, s)
+		}
+	}
+	if a := chainAssertions(t, r.runDir)["state-bucket-object-lock"]; a.Outcome != "blocked" {
+		t.Errorf("state-bucket-object-lock: %+v, want blocked", a)
+	}
+	if s := readChainSummary(t, r.runDir); s.Outcome == "pass" || s.Outcome == "" {
+		t.Errorf("summary.json outcome %q, want anything but pass", s.Outcome)
 	}
 }

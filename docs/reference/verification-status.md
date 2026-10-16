@@ -5,10 +5,10 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: a6f62e8f56021fd72e5578274bc70eee99e003c5
+    blob: 59d718f16c937ba08d69be0f4bf0803c6ce0d58c
   - path: tools/internal/live/observe.go
-    blob: 8ee38320789b0e00a873d926b96c1247ba4fef14
-last_verified: 55e58935652e62bc23359c1942aec276e3d31780
+    blob: 5203e71f8c2a9c3092d3873daab9d9be52fe94c9
+last_verified: 6f87cac32ed3887363ea9354b4e8195a0722c51c
 ---
 
 # Verification status of the first slice
@@ -55,7 +55,9 @@ evidence gaps.
   - the lock object's conditional create (`If-None-Match`);
   - the lock-refusal text;
   - the versioning and tag fields;
-  - the IAM routes the collector reads (T062).
+  - the IAM routes the collector reads (T062);
+  - the Object Lock read (`GetObjectLockConfiguration`, its answer and not-found code) and whether
+    the state buckets' S3 users may send it (spec 006 T026).
 
   T048 and T062 pin the assertions only against fakes.
 - **Leftover listing:** v1 pagination is UNVERIFIED, and so are the kinds that a plan-only run

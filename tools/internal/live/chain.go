@@ -73,7 +73,8 @@ type ChainOptions struct {
 	// Observer collects the L7 observations once every stack is applied (tests); nil: the
 	// collector (observe.go, T062).
 	Observer Observer
-	// S3HTTP is the state-object check's S3 client (T102; nil: the store's default client).
+	// S3HTTP is the S3 client of the state-object check (T102) and of the collector's Object Lock
+	// read (spec 006 FR-010); nil: the store's default client.
 	S3HTTP *http.Client
 	// deadlineAt, once closed, ends the run as its deadline does (tests); nil in production.
 	deadlineAt <-chan struct{}
@@ -908,7 +909,8 @@ func (r *laneRunner) observe(ctx context.Context, c *ChainOptions, trap *Trap) e
 
 // collector is the production L7 collector of this run: the lane's API, the sandbox admin
 // credential, the bound account, each instance's authority's credential (its secrets redacted),
-// the lane's state store and schemas, and a second writer through the lane's tofu.
+// the lane's state store and schemas, a second writer through the lane's tofu, and an S3 checker
+// on the chain's S3 client for the state buckets' Object Lock.
 func (r *laneRunner) collector(ctx context.Context) (*collector, error) {
 	admin, err := r.admin(ctx)
 	if err != nil {
@@ -923,7 +925,10 @@ func (r *laneRunner) collector(ctx context.Context) (*collector, error) {
 			}
 			return creds, err
 		},
-		Store: o.Store, Schemas: o.Schemas, Writer: &laneLockWriter{r: r, ready: map[string]lockRoot{}}}, nil
+		Store: o.Store, Schemas: o.Schemas, Writer: &laneLockWriter{r: r, ready: map[string]lockRoot{}},
+		ObjectLocks: func(keys map[string]string) (objectLockReader, error) {
+			return NewS3Checker(S3Options{Region: o.Manifest.StateRegion, Keys: keys, HTTP: r.s3HTTP})
+		}}, nil
 }
 
 // laneLockWriter is the lock-contention assertion's second writer: the instance's root under its

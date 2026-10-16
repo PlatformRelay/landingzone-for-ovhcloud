@@ -5,9 +5,10 @@ package live
 // 2026-10-08):
 //
 //  1. `chain -- <instance>` does not observe: every assertion is recorded `not-run`, never `pass`.
-//  2. Every one of the ten assertions is collected by the full chain, and an assertion whose
-//     required subjects are not all observed is `fail`: the chain judges the set against the
-//     subjects the manifest requires (L7Subjects), whichever observer collected it.
+//  2. Every one of the eleven assertions (spec 006 FR-010 added `state-bucket-object-lock`) is
+//     collected by the full chain, and an assertion whose required subjects are not all observed
+//     is `fail`: the chain judges the set against the subjects the manifest requires
+//     (L7Subjects), whichever observer collected it.
 //
 // The collector (TestCollect*) runs against the canary fake of observe_test.go (the storage routes
 // of kb/api/v1/cloud.json, each route's IAM action enforced on the fake credentials' policies),
@@ -53,7 +54,8 @@ func sandboxAccount(project string) stacks.BoundAccount {
 	return stacks.BoundAccount{Endpoint: "ovh-eu", ProjectIDs: map[string]string{"STATE": project, "DEMO_DEV": project}}
 }
 
-// TestL7Subjects pins what a complete set of the sandbox manifest names: both state buckets, the
+// TestL7Subjects pins what a complete set of the sandbox manifest names: both state buckets (spec
+// 006 FR-010: also for Object Lock), the
 // five s3 rows' state objects, the project row's state key for contention, the project URN, the
 // demo tenant (IAM write; S3 read of the account bucket), the six rows' artefacts, both deployer
 // classes and both KD-1 calls.
@@ -64,8 +66,9 @@ func TestL7Subjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"state-bucket-versioned": {"lz-bkt-state", "lz-demo-bkt-state"},
-		"bucket-tags":            {"lz-bkt-state", "lz-demo-bkt-state"},
+		"state-bucket-object-lock": {"lz-bkt-state", "lz-demo-bkt-state"},
+		"state-bucket-versioned":   {"lz-bkt-state", "lz-demo-bkt-state"},
+		"bucket-tags":              {"lz-bkt-state", "lz-demo-bkt-state"},
 		"state-object-encrypted": {"lz-bkt-state/account/account-governance/terraform.tfstate", "lz-bkt-state/account/tenant-state/demo/terraform.tfstate",
 			"lz-demo-bkt-state/tenants/demo/dev/gra11/project-network/terraform.tfstate", "lz-demo-bkt-state/tenants/demo/dev/gra11/runtime/terraform.tfstate",
 			"lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate"},
@@ -108,8 +111,8 @@ func completeSet(exp map[string][]string) []Observation {
 func TestAssessExpected(t *testing.T) {
 	t.Parallel()
 	exp, err := L7Subjects(sandboxManifest(t), sandboxAccount(laneProject))
-	if err != nil || len(exp) != 10 {
-		t.Fatalf("L7Subjects: %v, %d assertions, want the ten", err, len(exp))
+	if err != nil || len(exp) != 11 {
+		t.Fatalf("L7Subjects: %v, %d assertions, want the eleven", err, len(exp))
 	}
 	base := ObservationSet{RunID: canaryRunID, SharedStateProject: true, Observations: completeSet(exp), Expected: exp}
 	for _, a := range Assess(base) {
@@ -193,12 +196,12 @@ func chainAssertions(t *testing.T, runDir string) map[string]Assessment {
 		out[a.Assertion] = a
 	}
 	if len(out) != len(l7Names) {
-		t.Errorf("summary.json lists %d assertions, want the ten: %v", len(out), slices.Sorted(mapKeys(out)))
+		t.Errorf("summary.json lists %d assertions, want the eleven: %v", len(out), slices.Sorted(mapKeys(out)))
 	}
 	return out
 }
 
-var l7Names = []string{"bucket-tags", "deployer-binding", "kd1-canary", "outputs-schema", "project-tags", "state-bucket-versioned",
+var l7Names = []string{"bucket-tags", "deployer-binding", "kd1-canary", "outputs-schema", "project-tags", "state-bucket-object-lock", "state-bucket-versioned",
 	"state-lock-contention", "state-object-encrypted", "tenant-iam-write", "tenant-s3-read"}
 
 // Decision 1: `chain -- <instance>` applies and destroys as a chain does but does not observe:
@@ -295,6 +298,7 @@ func TestObserveChainExpectedSubjects(t *testing.T) {
 	cases := []struct{ assertion, subject string }{
 		{"state-bucket-versioned", "lz-demo-bkt-state"},
 		{"bucket-tags", "lz-bkt-state"},
+		{"state-bucket-object-lock", "lz-demo-bkt-state"},
 		{"state-object-encrypted", "lz-demo-bkt-state/tenants/demo/dev/gra11/runtime/terraform.tfstate"},
 		{"outputs-schema", "account-bootstrap"},
 		{"deployer-binding", "platform"},
@@ -320,7 +324,7 @@ func TestObserveChainExpectedSubjects(t *testing.T) {
 				t.Fatalf("observations.json unreadable (%v)", err)
 			}
 			want, _ := L7Subjects(h.m, h.boundAccount())
-			if len(set.Expected) != 10 || !slices.Equal(set.Expected[tc.assertion], want[tc.assertion]) {
+			if len(set.Expected) != 11 || !slices.Equal(set.Expected[tc.assertion], want[tc.assertion]) {
 				t.Errorf("observations.json expected %v, want the manifest's subjects %v", set.Expected, want)
 			}
 			if a := chainAssertions(t, r.runDir)[tc.assertion]; a.Outcome != "fail" {
@@ -349,6 +353,9 @@ type collectWorld struct {
 	log           []string         // store, writer and IAM events in order
 	credErr       map[string]error // instance id -> Creds error
 	admin         Credential       // the collector's bootstrap authority (sandbox.env)
+	// locks is each bucket's Object Lock configuration (spec 006 FR-010); lockErr a read error.
+	locks   map[string]ObjectLock
+	lockErr map[string]error
 }
 
 // fakeLockWriter is the second writer: refused, naming the held lock's id, exactly while
@@ -417,6 +424,18 @@ func (b collectBucket) Get(bucket, key string) ([]byte, error) {
 		return nil, fmt.Errorf("GET %s/%s: %w", bucket, key, fs.ErrNotExist)
 	}
 	return []byte(v), nil
+}
+
+// ObjectLock is the bucket's Object Lock read: refused (403) unless the bucket admits the key.
+func (b collectBucket) ObjectLock(_ context.Context, bucket string) (ObjectLock, error) {
+	b.w.f.mu.Lock()
+	defer b.w.f.mu.Unlock()
+	b.w.log = append(b.w.log, "object-lock "+b.ak+" "+bucket)
+	if !b.admitted(bucket) {
+		return ObjectLock{}, &apiStatus{what: "GET " + bucket + "?object-lock", code: http.StatusForbidden}
+	}
+	// A read error comes with whatever configuration the bucket has: the error decides.
+	return b.w.locks[bucket], b.w.lockErr[bucket]
 }
 
 // PutNew is Put if absent: an existing object answers 412 (If-None-Match: *).
@@ -496,7 +515,9 @@ func newCollectWorld(t *testing.T) *collectWorld {
 	t.Helper()
 	w := &collectWorld{t: t, f: newCanaryAPI(t, nil), m: sandboxManifest(t), account: sandboxAccount(canaryProject),
 		admit:     map[string][]string{"lz-bkt-state": {"AK-bootstrap"}, "lz-demo-bkt-state": {"AK-platform", "AK-tenant"}},
-		resources: map[string]map[string]string{}, policies: map[string]string{}, credErr: map[string]error{}}
+		resources: map[string]map[string]string{}, policies: map[string]string{}, credErr: map[string]error{},
+		locks:   map[string]ObjectLock{"lz-bkt-state": {Enabled: true, Mode: "GOVERNANCE", Days: 7}, "lz-demo-bkt-state": {Enabled: true, Mode: "GOVERNANCE", Days: 7}},
+		lockErr: map[string]error{}}
 	w.writer = &fakeLockWriter{w: w, mode: "tofu"}
 	w.admin = w.f.cred("admin")
 	cred := func(name, ak string) map[string]string {
@@ -632,6 +653,9 @@ func (w *collectWorld) collector() *collector {
 		Store: func(keys map[string]string) (ObjectStore, error) {
 			return collectBucket{w: w, ak: keys["AWS_ACCESS_KEY_ID"]}, nil
 		},
+		ObjectLocks: func(keys map[string]string) (objectLockReader, error) {
+			return collectBucket{w: w, ak: keys["AWS_ACCESS_KEY_ID"]}, nil
+		},
 		Schemas: laneSchemas(), Writer: w.writer, Now: func() time.Time { return time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC) }}
 }
 
@@ -645,7 +669,7 @@ func (w *collectWorld) observe() ([]Observation, error) {
 func collectComplete(t *testing.T, w *collectWorld, obs []Observation) map[string]map[string]Observation {
 	t.Helper()
 	exp, err := L7Subjects(w.m, w.account)
-	if err != nil || len(exp) != 10 {
+	if err != nil || len(exp) != 11 {
 		t.Fatalf("L7Subjects: %v (%d assertions)", err, len(exp))
 	}
 	got := map[string]map[string]Observation{}
@@ -688,24 +712,62 @@ func TestCollect(t *testing.T) {
 		name  string
 		setup func(w *collectWorld)
 		want  want
+		// lockOutcome, when set, is the judged outcome of state-bucket-object-lock (spec 006 FR-010).
+		lockOutcome string
 	}{
 		{name: "complete", want: want{
-			"state-bucket-versioned": {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"},
-			"bucket-tags":            {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"},
-			"state-object-encrypted": {tenantRuntime: "holds", "lz-bkt-state/account/account-governance/terraform.tfstate": "holds"},
-			"state-lock-contention":  {lockSubject: "holds"},
-			"project-tags":           {urn: "holds"},
-			"tenant-iam-write":       {"demo": "denied"},
-			"tenant-s3-read":         {"demo:lz-bkt-state": "denied"},
-			"outputs-schema":         {"account-bootstrap": "holds", "demo-dev-gra11-runtime": "holds"},
-			"deployer-binding":       {"platform": "holds", "tenant:demo": "holds"},
-			"kd1-canary":             {"bulkDeleteObjects": "allowed", "DELETE": "allowed"},
+			"state-bucket-object-lock": {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"},
+			"state-bucket-versioned":   {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"},
+			"bucket-tags":              {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"},
+			"state-object-encrypted":   {tenantRuntime: "holds", "lz-bkt-state/account/account-governance/terraform.tfstate": "holds"},
+			"state-lock-contention":    {lockSubject: "holds"},
+			"project-tags":             {urn: "holds"},
+			"tenant-iam-write":         {"demo": "denied"},
+			"tenant-s3-read":           {"demo:lz-bkt-state": "denied"},
+			"outputs-schema":           {"account-bootstrap": "holds", "demo-dev-gra11-runtime": "holds"},
+			"deployer-binding":         {"platform": "holds", "tenant:demo": "holds"},
+			"kd1-canary":               {"bulkDeleteObjects": "allowed", "DELETE": "allowed"},
 		}},
 		{name: "versioning-suspended", setup: func(w *collectWorld) {
 			w.f.meta["lz-demo-bkt-state"]["versioning"] = map[string]string{"status": "suspended"}
 		}, want: want{"state-bucket-versioned": {"lz-demo-bkt-state": "violated", "lz-bkt-state": "holds"}}},
 		{name: "versioning-absent", setup: func(w *collectWorld) { delete(w.f.meta["lz-bkt-state"], "versioning") },
 			want: want{"state-bucket-versioned": {"lz-bkt-state": "violated", "lz-demo-bkt-state": "holds"}}},
+		// Spec 006 FR-010: each state bucket's Object Lock, read with keys the bucket admits; a
+		// lock that does not pass the judge violates (assertion `fail`); one that cannot be read
+		// is observed `blocked` (assertion `blocked`, FR-010), never violated or holds.
+		{name: "lock-disabled", setup: func(w *collectWorld) { w.locks["lz-bkt-state"] = ObjectLock{Mode: "GOVERNANCE", Days: 7} },
+			want: want{"state-bucket-object-lock": {"lz-bkt-state": "violated", "lz-demo-bkt-state": "holds"}}, lockOutcome: "fail"},
+		{name: "lock-compliance", setup: func(w *collectWorld) {
+			w.locks["lz-demo-bkt-state"] = ObjectLock{Enabled: true, Mode: "COMPLIANCE", Days: 7}
+		},
+			want: want{"state-bucket-object-lock": {"lz-demo-bkt-state": "violated", "lz-bkt-state": "holds"}}, lockOutcome: "fail"},
+		{name: "lock-absent", setup: func(w *collectWorld) { delete(w.locks, "lz-demo-bkt-state") },
+			want: want{"state-bucket-object-lock": {"lz-demo-bkt-state": "violated", "lz-bkt-state": "holds"}}, lockOutcome: "fail"},
+		{name: "lock-no-retention", setup: func(w *collectWorld) { w.locks["lz-bkt-state"] = ObjectLock{Enabled: true, Mode: "GOVERNANCE"} },
+			want: want{"state-bucket-object-lock": {"lz-bkt-state": "violated"}}, lockOutcome: "fail"},
+		{name: "lock-unreadable", setup: func(w *collectWorld) {
+			w.lockErr["lz-demo-bkt-state"] = errors.New("GetObjectLockConfiguration lz-demo-bkt-state: answered 500 InternalError")
+		}, want: want{"state-bucket-object-lock": {"lz-demo-bkt-state": "blocked", "lz-bkt-state": "holds"}}, lockOutcome: "blocked"},
+		{name: "lock-unreadable-with-governance", setup: func(w *collectWorld) {
+			w.lockErr["lz-bkt-state"] = errors.New("GetObjectLockConfiguration lz-bkt-state: request failed")
+		}, want: want{"state-bucket-object-lock": {"lz-bkt-state": "blocked"}}, lockOutcome: "blocked"},
+		{name: "lock-keys-unreadable", setup: func(w *collectWorld) { w.credErr["demo-dev-project"] = errors.New("deployer.env missing") },
+			want: want{"state-bucket-object-lock": {"lz-demo-bkt-state": "blocked", "lz-bkt-state": "holds"}}, lockOutcome: "blocked"},
+		// A blocked read next to a violated lock is a fail: `blocked` only alone.
+		{name: "lock-unreadable-and-violated", setup: func(w *collectWorld) {
+			w.lockErr["lz-bkt-state"] = errors.New("GetObjectLockConfiguration lz-bkt-state: answered 403 AccessDenied")
+			w.locks["lz-demo-bkt-state"] = ObjectLock{Enabled: true, Mode: "COMPLIANCE", Days: 7}
+		}, want: want{"state-bucket-object-lock": {"lz-bkt-state": "blocked", "lz-demo-bkt-state": "violated"}}, lockOutcome: "fail"},
+		// A bucket no s3 row keeps its state in is read with the keys of a row that publishes
+		// there (review r1): here the account bucket, once its s3 rows are made local.
+		{name: "lock-artefact-row-keys", setup: func(w *collectWorld) {
+			for i, in := range w.m.Instances {
+				if in.Backend == "s3" && in.StateBucket == "lz-bkt-state" {
+					w.m.Instances[i].Backend = "local"
+				}
+			}
+		}, want: want{"state-bucket-object-lock": {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"}}, lockOutcome: "pass"},
 		{name: "bucket-tag-missing", setup: func(w *collectWorld) { delete(w.f.meta["lz-demo-bkt-state"]["tags"].(map[string]any), "lz:release") },
 			want: want{"bucket-tags": {"lz-demo-bkt-state": "violated", "lz-bkt-state": "holds"}}},
 		{name: "account-bucket-tenant-tag", setup: func(w *collectWorld) { w.f.meta["lz-bkt-state"]["tags"].(map[string]any)["lz:tenant"] = "demo" },
@@ -772,6 +834,14 @@ func TestCollect(t *testing.T) {
 				for s, v := range subs {
 					if o := got[a][s]; o.Observed != v {
 						t.Errorf("%s %s observed %q (%s), want %q", a, s, o.Observed, o.Detail, v)
+					}
+				}
+			}
+			if tc.lockOutcome != "" {
+				exp, _ := L7Subjects(w.m, w.account)
+				for _, a := range Assess(ObservationSet{RunID: canaryRunID, SharedStateProject: true, Observations: obs, Expected: exp}) {
+					if a.Assertion == "state-bucket-object-lock" && a.Outcome != tc.lockOutcome {
+						t.Errorf("state-bucket-object-lock judged %s (%s), want %s", a.Outcome, a.Detail, tc.lockOutcome)
 					}
 				}
 			}
@@ -969,6 +1039,8 @@ func TestObserveChainProductionCollector(t *testing.T) {
 		"deployer-binding":      {"platform": "holds", "tenant:demo": "holds"},
 		"state-lock-contention": {"lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate": "holds"},
 		"outputs-schema":        {"account-governance": "holds", "demo-state": "holds", "demo-dev-project": "holds", "demo-dev-gra11-network": "holds", "demo-dev-gra11-runtime": "holds"},
+		// Spec 006 FR-010: read through the chain's S3 client (chainS3), with keys each bucket admits.
+		"state-bucket-object-lock": {"lz-bkt-state": "holds", "lz-demo-bkt-state": "holds"},
 	} {
 		for s, v := range subs {
 			if got[a][s] != v {
@@ -984,6 +1056,18 @@ func TestObserveChainProductionCollector(t *testing.T) {
 	})
 	if put < 0 || plan < 0 || plan < put || r.calls[plan].Exit == 0 {
 		t.Errorf("lock object put at %d, second writer plan at %d (exit %d): want the plan after the put, refused; events %v", put, plan, r.calls[max(plan, 0)].Exit, laneEvents(r.calls))
+	}
+	locks := map[string]int{}
+	for _, c := range r.calls {
+		if c.Cmd == "s3lock" {
+			locks[c.Stack]++
+			if _, ok := laneBucketKeys[c.Stack][c.Key]; !ok {
+				t.Errorf("Object Lock of %s read with access key %s, which the bucket does not admit", c.Stack, c.Key)
+			}
+		}
+	}
+	if locks["lz-bkt-state"] != 1 || locks["lz-demo-bkt-state"] != 1 || len(locks) != 2 {
+		t.Errorf("Object Lock reads %v, want one per state bucket", locks)
 	}
 	if put >= 0 && r.calls[put].Key != lanePlatformAK {
 		t.Errorf("lock object written with access key %s, want the project's own (platform) keys", r.calls[put].Key)
