@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
 )
 
 // The runner's sweep (spec 003 T037, T038; data-model.md *Probe checks*): a lost create answer
@@ -56,10 +60,61 @@ func (s *session) reconciled(leftErr error) error {
 // (spec 007 FR-002, data-model *Run record archive*): every entry but inventory.jsonl,
 // baseline.json, observations.json and attempts/ moves into attempts/<n>/ (n = 1 + the highest
 // existing number), observations.json is copied there and stays in place; it returns that
-// directory, or "" when there was nothing to move. Stub (spec 007 T005): not implemented until
-// T007.
+// directory, or "" when there was nothing to move. inventory.jsonl and baseline.json stay because
+// the cleanup reads them again; observations.json because Recorded and every later undo read it.
 func keepRecord(runDir string) (kept string, err error) {
-	return "", fmt.Errorf("keepRecord %s: not implemented", runDir)
+	moves, copies, err := recordEntries(runDir)
+	if err != nil || len(moves) == 0 {
+		return "", err
+	}
+	attempts := filepath.Join(runDir, "attempts")
+	n, err := highestSlot(attempts)
+	if err != nil {
+		return "", fmt.Errorf("keep the record of %s: %w", runDir, err)
+	}
+	slot := filepath.Join(attempts, strconv.Itoa(n+1))
+	if err := archiveRecord(runDir, slot, moves, copies); err != nil {
+		return "", fmt.Errorf("keep the record of %s in %s: %w", runDir, slot, err)
+	}
+	return slot, nil
+}
+
+// recordEntries splits a run directory's entries into those keepRecord moves and those it copies
+// (observations.json, when present).
+func recordEntries(runDir string) (moves, copies []string, err error) {
+	des, err := os.ReadDir(runDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("keep the record of %s: %w", runDir, err)
+	}
+	for _, de := range des {
+		switch n := de.Name(); n {
+		case "inventory.jsonl", baselineFile, "attempts":
+		case "observations.json":
+			copies = append(copies, n)
+		default:
+			moves = append(moves, n)
+		}
+	}
+	return moves, copies, nil
+}
+
+// highestSlot is the highest slot number under attempts (0 when there is none, or no attempts/).
+// Only canonical decimal names count; a slot is never reused, so the next one is always above it.
+func highestSlot(attempts string) (int, error) {
+	des, err := os.ReadDir(attempts)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, de := range des {
+		if k, err := strconv.Atoi(de.Name()); err == nil && k > n && strconv.Itoa(k) == de.Name() {
+			n = k
+		}
+	}
+	return n, nil
 }
 
 // isUnreconciled reports whether a run's error says its Sweep or leftover check did not pass.

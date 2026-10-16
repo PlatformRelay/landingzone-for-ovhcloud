@@ -100,7 +100,7 @@ Independent test: V001. Test tasks T003–T005, then implementation tasks T006�
   - Verify: `task test:live-lane`: T003's cases (record rows included) and T004's cases green; G24 mutants (retry every error; retry 4xx; ignore budget, deadline or cancellation; fresh budget for listings; restart from page 1) each turn a case red.
   - Evidence: `evidence/T006.md`; initial status `not-run`.
 
-- [ ] T007 [US1] Archive earlier records across cleanups in tools/internal/live/sweep.go and tools/internal/live/runner.go
+- [x] T007 [US1] Archive earlier records across cleanups in tools/internal/live/sweep.go and tools/internal/live/runner.go — closed 2026-10-16, evidence: evidence/T007.md
   - Requirements: FR-002; ADRs: 0008, 0024. Depends on: T005, T006.
   - Verify: `task test:live-lane`: T005's cases green; G25 mutants (two files only, slot reuse, baseline, inventory or observations moved, attempts dropped) each turn a case red.
   - Evidence: `evidence/T007.md`; initial status `not-run`.
