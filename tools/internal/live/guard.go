@@ -97,15 +97,22 @@ const originMain = "refs/remotes/origin/main"
 // core.fsmonitor (which the repository's own config, shared by every linked worktree, could point
 // at a program answering status) is disabled, as are the stat shortcuts (core.checkStat=minimal
 // with core.trustctime=false lets a same-size edit with a restored mtime read as clean), so the
-// answers describe dir as committed.
+// answers describe dir as committed. HOME is a private scratch directory, removed after the call,
+// never the caller's (FR-007): git reads $HOME/.config/git/ignore even with GIT_CONFIG_GLOBAL set,
+// so the caller's home could hide an untracked file from status.
 func (h Host) git(dir string, args ...string) (string, error) {
+	home, err := scratchHome()
+	if err != nil {
+		return "", fmt.Errorf("git %s: scratch home: %w", strings.Join(args, " "), err)
+	}
+	defer removeTree(home)
 	argv := append([]string{"--no-optional-locks", "-c", "core.fsmonitor=false",
 		"-c", "core.checkStat=default", "-c", "core.trustctime=true"}, args...)
 	cmd := exec.Command(h.Git, argv...)
 	cmd.Dir = dir
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
+		"HOME=" + home,
 		"LC_ALL=C",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",

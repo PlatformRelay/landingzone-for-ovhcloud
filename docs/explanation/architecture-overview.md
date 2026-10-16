@@ -15,8 +15,8 @@ references:
   - path: tools/cmd/lz-offline/main.go
     blob: aac737fa9f84ec0ec894b47b0161d0e379c193dd
   - path: tools/internal/live/guard.go
-    blob: 68ce6304d38b9a5abd6c2d906c781737562775a3
-last_verified: 29ee6c3806ebef07b6bbe5d0e92fb05f60b59965
+    blob: 06380923b8f393674f1d00adec3533ddac3bebc1
+last_verified: b62728d430c7a4481d21d3cb1c6adc2ecd92fa89
 ---
 
 # Architecture overview
