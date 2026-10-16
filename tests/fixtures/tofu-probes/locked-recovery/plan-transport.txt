@@ -1,0 +1,22 @@
+╷
+│ Error: Error acquiring the state lock
+│
+│ Error message: 2 errors occurred:
+│ 	* operation error S3: PutObject, exceeded maximum number of attempts, 5,
+│ https response error StatusCode: 0, RequestID: , HostID: , request send
+│ failed, Put
+│ "https://s3.gra.io.cloud.ovh.net/@PATH@.tflock?x-id=PutObject": dial tcp:
+│ lookup s3.gra.io.cloud.ovh.net: no such host
+│ 	* operation error S3: GetObject, exceeded maximum number of attempts, 5,
+│ https response error StatusCode: 0, RequestID: , HostID: , request send
+│ failed, Get
+│ "https://s3.gra.io.cloud.ovh.net/@PATH@.tflock?x-id=GetObject": dial tcp:
+│ lookup s3.gra.io.cloud.ovh.net: no such host
+│
+│
+│
+│ OpenTofu acquires a state lock to protect the state from being written
+│ by multiple users at the same time. Please resolve the issue above and try
+│ again. For most commands, you can disable locking with the "-lock=false"
+│ flag, but this is not recommended.
+╵

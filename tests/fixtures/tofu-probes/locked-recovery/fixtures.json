@@ -1,0 +1,31 @@
+{
+  "tool": "opentofu",
+  "version": "1.13.0",
+  "how": "Composed from OpenTofu v1.13.0's source and the SDK modules its go.mod pins (aws-sdk-go-v2 v1.43.5, service/internal/s3shared v1.19.37, smithy-go v1.27.7, hashicorp/go-multierror v1.1.1), not captured from a run: no live S3 backend is reachable offline. Rendered as the human view without colour writes an error diagnostic (internal/command/format/diagnostic.go:63-121: a box of ╷ │ ╵, detail lines not starting with a space wrapped at 75 columns, the summary never wrapped). The wrapping, the request ids and the S3 error messages are believed, not observed; the lock info's Who and Created are placeholders' values. T028 records whether the live diagnostics match; a mismatch is blocked, not a verdict. Placeholders: @LOCK_ID@ (the held lock's id), @PATH@ (<bucket>/<state key>, statemgr LockInfo.Path), @GIVEN_ID@ (the id force-unlock was given).",
+  "fixtures": [
+    {"file": "lock-held.txt", "command": "plan", "exit": 1, "class": "locked",
+     "sources": ["opentofu internal/command/clistate/state.go:26-31 (LockErrorMessage)", "opentofu internal/command/clistate/state.go:130-135 (summary)", "opentofu internal/backend/remote-state/s3/client.go:313-345 (s3Lock: PutObject If-None-Match *, then the held lock's info)", "opentofu internal/backend/remote-state/s3/client.go:264 and :596-598 (Path = <bucket>/<key>)", "opentofu internal/states/statemgr/locker.go:207-221 (LockInfo.String)", "opentofu internal/states/statemgr/locker.go:239-249 (LockError.Error)", "opentofu internal/states/statemgr/locker.go:99-123 (a lock error with info is retried until -lock-timeout)", "aws-sdk-go-v2 service/internal/s3shared/response_error.go:23-27", "smithy-go errors.go:36-38, :59-61"]},
+    {"file": "plan-ok.txt", "command": "plan", "exit": 0, "class": "allowed",
+     "sources": ["opentofu internal/command/jsonformat/plan.go:197-201 (header, word-wrapped)", "opentofu internal/command/jsonformat/plan.go:231", "opentofu internal/command/jsonformat/plan.go:274 (Plan: summary); the resource block is believed"]},
+    {"file": "unlock-ok.txt", "command": "force-unlock", "exit": 0, "class": "allowed",
+     "sources": ["opentofu internal/command/unlock.go:139-145", "opentofu internal/command/views/unlock.go:109-115"]},
+    {"file": "unlock-denied.txt", "command": "force-unlock", "exit": 1, "class": "denied",
+     "sources": ["opentofu internal/command/unlock.go:139-141 (Failed to unlock state: %s, a native error: the summary)", "opentofu internal/backend/remote-state/s3/client.go:524-557 (s3Unlock: DeleteObject's error with the lock info)", "opentofu internal/states/statemgr/locker.go:207-221, :239-249", "aws-sdk-go-v2 service/internal/s3shared/response_error.go:23-27", "smithy-go errors.go:36-38, :59-61"]},
+    {"file": "unlock-denied-read.txt", "command": "force-unlock", "exit": 1, "class": "denied",
+     "sources": ["opentofu internal/command/unlock.go:139-141", "opentofu internal/backend/remote-state/s3/client.go:530-534 (failed to retrieve s3 lock info: %w, no lock info)", "aws-sdk-go-v2 service/internal/s3shared/response_error.go:23-27", "smithy-go errors.go:36-38, :59-61"]},
+    {"file": "unlock-no-lock.txt", "command": "force-unlock", "exit": 1, "class": "blocked",
+     "sources": ["opentofu internal/command/unlock.go:139-141", "opentofu internal/backend/remote-state/s3/client.go:530-534", "aws-sdk-go-v2 service/internal/s3shared/response_error.go:23-27"]},
+    {"file": "unlock-id-mismatch.txt", "command": "force-unlock", "exit": 1, "class": "blocked",
+     "sources": ["opentofu internal/command/unlock.go:139-141", "opentofu internal/backend/remote-state/s3/client.go:535-540 (lock id %q from s3 does not match existing lock)", "opentofu internal/states/statemgr/locker.go:207-221, :239-249"]},
+    {"file": "unlock-5xx.txt", "command": "force-unlock", "exit": 1, "class": "blocked",
+     "sources": ["opentofu internal/command/unlock.go:139-141", "opentofu internal/backend/remote-state/s3/client.go:530-534", "opentofu internal/backend/remote-state/s3/backend.go:746 (max_retries 5)", "aws-sdk-go-v2 aws/retry/errors.go:13", "aws-sdk-go-v2 service/internal/s3shared/response_error.go:23-27"]},
+    {"file": "plan-transport.txt", "command": "plan", "exit": 1, "class": "blocked",
+     "sources": ["opentofu internal/command/clistate/state.go:26-31, :130-135", "opentofu internal/backend/remote-state/s3/client.go:335-345 (PutObject's and GetObject's errors joined, no lock info)", "go-multierror v1.1.1 format.go:14-27", "aws-sdk-go-v2 aws/retry/errors.go:13", "smithy-go transport/http/client.go:147 (request send failed)"]},
+    {"file": "plan-no-bucket.txt", "command": "plan", "exit": 1, "class": "blocked",
+     "sources": ["opentofu internal/command/clistate/state.go:26-31, :130-135", "opentofu internal/backend/remote-state/s3/client.go:335-345, :481-484, :685-692 (errS3NoSuchBucket)", "go-multierror v1.1.1 format.go:14-27", "aws-sdk-go-v2 service/internal/s3shared/response_error.go:23-27"]},
+    {"file": "plan-init-required.txt", "command": "plan", "exit": 1, "class": "blocked",
+     "sources": ["opentofu internal/command/meta_backend.go:652-657", "opentofu internal/command/meta_backend.go:1623-1639 (errBackendInit)"]},
+    {"file": "unmatched.txt", "command": "any", "exit": 1, "class": "blocked",
+     "sources": ["synthetic: a diagnostic no other fixture describes (no OpenTofu source)"]}
+  ]
+}
