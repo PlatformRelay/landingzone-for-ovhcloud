@@ -575,6 +575,22 @@ func (h *laneHarness) chainS3(c chainExec) *http.Client {
 		}
 		return []byte(chainEnvelope), http.StatusOK
 	}
+	// Spec 006 FR-010: a bucket's Object Lock read (GET /<bucket>?object-lock), logged as an
+	// s3lock event, answers governance with 7 days to a key the bucket admits, 403 otherwise.
+	f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodGet || !r.URL.Query().Has("object-lock") {
+			return false
+		}
+		ak, ok := f.verify(r, nil)
+		bucket := strings.TrimPrefix(r.URL.Path, "/")
+		laneAppend(h.world.Log, laneCall{Cmd: "s3lock", Stack: bucket, Key: ak})
+		if _, admitted := laneBucketKeys[bucket][ak]; !ok || !admitted {
+			rw.WriteHeader(http.StatusForbidden)
+			return true
+		}
+		fmt.Fprint(rw, objectLockXML("Enabled", "<DefaultRetention><Mode>GOVERNANCE</Mode><Days>7</Days></DefaultRetention>"))
+		return true
+	}
 	return f.client()
 }
 

@@ -9,9 +9,9 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: a6f62e8f56021fd72e5578274bc70eee99e003c5
+    blob: 59d718f16c937ba08d69be0f4bf0803c6ce0d58c
   - path: tools/internal/live/observe.go
-    blob: 8ee38320789b0e00a873d926b96c1247ba4fef14
+    blob: 5203e71f8c2a9c3092d3873daab9d9be52fe94c9
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: mise.toml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: d7d14f151ffa44c3be077f530489741562f0f697
-last_verified: 55e58935652e62bc23359c1942aec276e3d31780
+last_verified: 6f87cac32ed3887363ea9354b4e8195a0722c51c
 ---
 
 # Run the first slice on an OVHcloud account
@@ -293,9 +293,16 @@ It does this:
    keys and fails the stage when the object is missing, the read is refused, or the state is
    plaintext rather than the OpenTofu encryption envelope; the error names the key and prints
    nothing of the body (T102).
-4. Collects and judges the ten L7 assertions: `bucket-tags`, `deployer-binding`, `kd1-canary`,
-   `outputs-schema`, `project-tags`, `state-bucket-versioned`, `state-lock-contention`,
-   `state-object-encrypted`, `tenant-iam-write`, `tenant-s3-read`.
+4. Collects and judges the eleven L7 assertions: `bucket-tags`, `deployer-binding`, `kd1-canary`,
+   `outputs-schema`, `project-tags`, `state-bucket-object-lock`, `state-bucket-versioned`,
+   `state-lock-contention`, `state-object-encrypted`, `tenant-iam-write`, `tenant-s3-read`.
+   `state-bucket-object-lock` (spec 006 FR-010) reads each state bucket's Object Lock
+   (`GetObjectLockConfiguration`) with the S3 keys of the first row whose state lives there: it
+   holds for an enabled lock in governance mode with a positive default retention; a read that
+   fails makes the assertion `blocked` (never `pass`; `fail` next to a violated bucket). The state
+   buckets' S3 users are not granted `s3:GetBucketObjectLockConfiguration`
+   (`modules/object-storage-user`), so expect the read to be refused and the assertion `blocked`
+   until they are (UNVERIFIED, evidence T026).
 5. Destroys the two ephemeral stacks in reverse order, each through a saved `plan -destroy`.
    The destroy also fires when an apply fails, on SIGINT or SIGTERM, and at the deadline.
 6. Runs the trap (the KD-1 canary bucket, the lock object, a wrongly created policy).

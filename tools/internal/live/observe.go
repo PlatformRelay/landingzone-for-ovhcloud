@@ -8,7 +8,8 @@ package live
 //
 // The judge (Assess): positive assertions observe `holds` or `violated`, negative ones (a request
 // that must be refused) `denied` or `allowed`; `blocked` (the fact could not be set up for a
-// reason that is not the subject's, spec 006 FR-009) makes the assertion `blocked` when nothing
+// reason that is not the subject's, spec 006 FR-009; a state bucket's Object Lock that could not
+// be read, FR-010) makes the assertion `blocked` when nothing
 // worse is observed, never a pass; `error` or any other value is a fail (an error is never a
 // pass). Every observation counts, in any order. An assertion with no observation, a
 // required subject unobserved (deployer-binding: platform and tenant, P26; kd1-canary: both KD-1
@@ -66,7 +67,7 @@ type Assessment struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
-// The L7 assertions (tasks.md T048), sorted.
+// The L7 assertions (tasks.md T048; spec 006 FR-010 adds the Object Lock one), sorted.
 const (
 	aBucketTags       = "bucket-tags"
 	aDeployerBinding  = "deployer-binding"
@@ -74,6 +75,7 @@ const (
 	aOutputsSchema    = "outputs-schema"
 	aProjectTags      = "project-tags"
 	aBucketVersioned  = "state-bucket-versioned"
+	aBucketObjectLock = "state-bucket-object-lock" // spec 006 FR-010
 	aLockContention   = "state-lock-contention"
 	aObjectEncrypted  = "state-object-encrypted"
 	aTenantIAMWrite   = "tenant-iam-write"
@@ -96,7 +98,7 @@ const (
 )
 
 var l7Assertions = []string{aBucketTags, aDeployerBinding, aKD1Canary, aOutputsSchema, aProjectTags,
-	aBucketVersioned, aLockContention, aObjectEncrypted, aTenantIAMWrite, aTenantS3Read}
+	aBucketObjectLock, aBucketVersioned, aLockContention, aObjectEncrypted, aTenantIAMWrite, aTenantS3Read}
 
 // negative assertions observe a request that must be refused.
 var negative = map[string]bool{aTenantIAMWrite: true, aTenantS3Read: true, aKD1Canary: true}
@@ -288,11 +290,11 @@ func deployers(m *stacks.Manifest) (platform string, tenants map[string]string, 
 }
 
 // L7Subjects are, by assertion, the subjects a complete observation set of the manifest names: the
-// state buckets (versioning, tags), every s3 row's state object (encryption) and the lock row's
-// (contention), every project row's URN (tags), every tenant with a deployer (IAM write; S3 reads
-// of the account bucket and of every other tenant's bucket, as `<tenant>:<bucket>`; its deployer's
-// binding, as `tenant:<tenant>`), every row's artefact (outputs schema), the platform deployer's
-// binding and both KD-1 calls. Sorted.
+// state buckets (versioning, tags, Object Lock), every s3 row's state object (encryption) and the
+// lock row's (contention), every project row's URN (tags), every tenant with a deployer (IAM
+// write; S3 reads of the account bucket and of every other tenant's bucket, as
+// `<tenant>:<bucket>`; its deployer's binding, as `tenant:<tenant>`), every row's artefact
+// (outputs schema), the platform deployer's binding and both KD-1 calls. Sorted.
 func L7Subjects(m *stacks.Manifest, a stacks.BoundAccount) (map[string][]string, error) {
 	out := map[string][]string{}
 	add := func(assertion, subject string) {
@@ -305,6 +307,7 @@ func L7Subjects(m *stacks.Manifest, a stacks.BoundAccount) (map[string][]string,
 		return nil, err
 	}
 	for b := range buckets {
+		add(aBucketObjectLock, b)
 		add(aBucketVersioned, b)
 		add(aBucketTags, b)
 	}
@@ -635,10 +638,16 @@ type lockWriter interface {
 	Plan(ctx context.Context, id string) (string, error)
 }
 
+// objectLockReader reads a bucket's Object Lock configuration (S3Checker.ObjectLock).
+type objectLockReader interface {
+	ObjectLock(ctx context.Context, bucket string) (ObjectLock, error)
+}
+
 // collector is the production Observer (ChainOptions.Observer nil): it reads with the bootstrap
 // authority (versioning and tags of the state buckets, tags of the project URNs), each row's own
-// S3 keys (its state object and artefact), and calls as each deployer (binding; the tenant
-// deployer's IAM write, its S3 reads and the KD-1 canary). An unreadable fact is an `error`
+// S3 keys (its state object and artefact; its state bucket's Object Lock, spec 006 FR-010), and
+// calls as each deployer (binding; the tenant deployer's IAM write, its S3 reads and the KD-1
+// canary). An unreadable fact is an `error` (a state bucket's Object Lock read: `blocked`, FR-010)
 // observation, never a missing one; the collector fails only when the manifest cannot be read.
 type collector struct {
 	API     API
@@ -648,10 +657,12 @@ type collector struct {
 	// Creds returns instance id's authority's five variables (credentials.go).
 	Creds func(id string) (map[string]string, error)
 	// Store opens the state buckets with one authority's S3 keys.
-	Store   func(keys map[string]string) (ObjectStore, error)
-	Schemas fs.FS // schemas/outputs
-	Writer  lockWriter
-	Now     func() time.Time // nil: time.Now
+	Store func(keys map[string]string) (ObjectStore, error)
+	// ObjectLocks opens the Object Lock reader with one authority's S3 keys (an S3Checker).
+	ObjectLocks func(keys map[string]string) (objectLockReader, error)
+	Schemas     fs.FS // schemas/outputs
+	Writer      lockWriter
+	Now         func() time.Time // nil: time.Now
 }
 
 func oauthOf(creds map[string]string) Credential {
@@ -681,6 +692,7 @@ func (c *collector) Observe(ctx context.Context, run ObserveRun) ([]Observation,
 	tenantNames := slices.Sorted(maps.Keys(tenants))
 	var obs []Observation
 	obs = append(obs, c.buckets(ctx, state.ProjectID, region, buckets)...)
+	obs = append(obs, c.objectLocks(ctx, m, buckets)...)
 	obs = append(obs, c.stateObjects(m)...)
 	obs = append(obs, c.lockContention(ctx, run, state.ProjectID, region)...)
 	obs = append(obs, c.projectTags(ctx, m)...)
@@ -761,6 +773,75 @@ func (c *collector) buckets(ctx context.Context, project, region string, buckets
 		out = append(out, v, t)
 	}
 	return out
+}
+
+// objectLocks observes each state bucket's Object Lock (spec 006 FR-010) with the S3 keys of the
+// first row in manifest order whose state lives there, else the first that publishes there
+// (keys the bucket admits): judgeObjectLock's `pass` holds, `fail` violates, and `blocked` (the
+// configuration could not be read) is a `blocked` observation with the read error as detail, so
+// the assertion is `blocked` when nothing worse is observed (FR-010: "a read error is `blocked`,
+// never `pass`"), never a missing observation or a pass. The detail is fixed text, the retention
+// period, or the read error (status and S3 code only); nothing else the answer chose.
+func (c *collector) objectLocks(ctx context.Context, m *stacks.Manifest, buckets map[string]string) []Observation {
+	var out []Observation
+	for _, b := range slices.Sorted(maps.Keys(buckets)) {
+		l, err := c.readObjectLock(ctx, m, b)
+		o := Observation{Assertion: aBucketObjectLock, Subject: b}
+		switch judgeObjectLock(l, err) {
+		case "pass":
+			o.Observed, o.Detail = observedHolds, fmt.Sprintf("governance, default retention %d days %d years", l.Days, l.Years)
+		case "fail":
+			o.Observed, o.Detail = observedViolated, objectLockGap(l)
+		case outcomeBlocked:
+			o.Observed, o.Detail = observedBlocked, err.Error()
+		default:
+			o = errorObs(aBucketObjectLock, b, errors.New("Object Lock not judged"))
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// readObjectLock reads bucket b's Object Lock with the keys of the row objectLocks names.
+func (c *collector) readObjectLock(ctx context.Context, m *stacks.Manifest, b string) (ObjectLock, error) {
+	id := ""
+	for _, in := range m.Instances {
+		if in.Backend == "s3" && in.StateBucket == b {
+			id = in.ID
+			break
+		}
+	}
+	for _, in := range m.Instances {
+		if id != "" {
+			break
+		}
+		if ab, err := stacks.ArtifactBucket(m, in.ID); err == nil && ab == b {
+			id = in.ID
+		}
+	}
+	if id == "" {
+		return ObjectLock{}, errors.New("no row of the manifest uses the bucket")
+	}
+	creds, err := c.Creds(id)
+	if err != nil {
+		return ObjectLock{}, err
+	}
+	r, err := c.ObjectLocks(s3Of(creds))
+	if err != nil {
+		return ObjectLock{}, err
+	}
+	return r.ObjectLock(ctx, b)
+}
+
+// objectLockGap says why an Object Lock read fails the assertion, in fixed text.
+func objectLockGap(l ObjectLock) string {
+	switch {
+	case !l.Enabled:
+		return "Object Lock not enabled"
+	case !strings.EqualFold(l.Mode, "GOVERNANCE"):
+		return "default retention mode is not governance"
+	}
+	return "no positive default retention period, or a negative one"
 }
 
 // stateObjects observes each s3 row's state object with the row's own S3 keys: an OpenTofu

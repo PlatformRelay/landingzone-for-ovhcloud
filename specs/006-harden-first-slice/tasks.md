@@ -244,7 +244,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: T020's cases green.
   - Evidence: `evidence/T025.md`; PR; initial status `not-run`.
 
-- [ ] T026 [US2] Read and assert Object Lock in tools/internal/live/s3check.go and tools/internal/live/observe.go
+- [x] T026 [US2] Read and assert Object Lock in tools/internal/live/s3check.go and tools/internal/live/observe.go — closed 2026-10-16, evidence: evidence/T026.md
   - Requirements: FR-010; ADRs: 0008, 0009. Depends on: T021, T025.
   - Verify: `task test:live-lane`: T021's cases green; with T022–T026 closed the target is green.
   - Evidence: `evidence/T026.md`; PR; initial status `not-run`.

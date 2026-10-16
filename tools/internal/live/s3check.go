@@ -14,8 +14,8 @@ package live
 // redirect refusal, size cap and quiet transport errors, and keeps of an answer only the status,
 // the S3 error code when it is well-formed, a well-formed x-amz-version-id, a well-formed
 // x-amz-server-side-encryption (T100) and, for GetObject (T100: the storage-iam check classifies
-// the companion's state object) and the two listings its caller parses, the capped body; no
-// error carries answer text or a key.
+// the companion's state object), the two listings its caller parses and the Object Lock
+// configuration (spec 006 FR-010), the capped body; no error carries answer text or a key.
 
 import (
 	"bytes"
@@ -48,6 +48,8 @@ const (
 	S3PutBucketVersioning S3Op = "PutBucketVersioning"
 	S3GetBucketVersioning S3Op = "GetBucketVersioning"
 	S3CopyObject          S3Op = "CopyObject" // spec 003 T036
+	// S3GetObjectLock reads a bucket's Object Lock configuration (spec 006 FR-010).
+	S3GetObjectLock S3Op = "GetObjectLockConfiguration"
 )
 
 // S3Call is one operation on one bucket.
@@ -95,6 +97,7 @@ var s3Ops = map[S3Op]s3OpSpec{
 	S3PutBucketVersioning: {method: http.MethodPut, sub: "versioning", body: true},
 	S3GetBucketVersioning: {method: http.MethodGet, sub: "versioning", keep: true},
 	S3CopyObject:          {method: http.MethodPut, object: true},
+	S3GetObjectLock:       {method: http.MethodGet, sub: "object-lock", keep: true},
 }
 
 var (
@@ -111,7 +114,7 @@ type S3Answer struct {
 	Status    int
 	Code      string // a non-2xx answer's S3 error code, or "unrecognised"
 	VersionID string // x-amz-version-id, when well-formed
-	Body      []byte // a 2xx answer to GetObject, ListObjectVersions or GetBucketVersioning
+	Body      []byte // a 2xx answer to GetObject, the listings, GetBucketVersioning or the Object Lock read
 	SSE       string // x-amz-server-side-encryption, when shaped like an algorithm name (T100)
 }
 
@@ -274,13 +277,59 @@ type ObjectLock struct {
 	Days, Years int
 }
 
-// ObjectLock reads bucket's Object Lock configuration. Not implemented: T026 (T021 pins it).
+// objectLockNotFound is the S3 error code of a bucket without an Object Lock configuration (AWS's;
+// UNVERIFIED on OVHcloud until the next owner chain run, premise P5).
+const objectLockNotFound = "ObjectLockConfigurationNotFoundError"
+
+// ObjectLock reads bucket's Object Lock configuration (GetObjectLockConfiguration: the
+// `ObjectLockConfiguration` document with `ObjectLockEnabled` and `Rule.DefaultRetention`'s `Mode`,
+// `Days`, `Years`; docs.ovhcloud.com storage-and-backup/object-storage/
+// s3-managing-object-lock.mdx:167-190). Only a 404 answering objectLockNotFound is an absent
+// configuration (the zero ObjectLock, no error); any other non-2xx answer, or a 2xx answer that is
+// not that document, is an error naming the bucket, the status and the S3 code, nothing else.
 func (c *S3Checker) ObjectLock(ctx context.Context, bucket string) (ObjectLock, error) {
-	return ObjectLock{}, errors.New("S3 check: ObjectLock not implemented")
+	a, err := c.Do(ctx, S3Call{Op: S3GetObjectLock, Bucket: bucket})
+	if err != nil {
+		return ObjectLock{}, err
+	}
+	what := string(S3GetObjectLock) + " " + bucket
+	switch {
+	case a.Status == http.StatusNotFound && a.Code == objectLockNotFound:
+		return ObjectLock{}, nil
+	case a.Status < 200 || a.Status > 299:
+		return ObjectLock{}, fmt.Errorf("%s: answered %d %s", what, a.Status, a.Code)
+	}
+	var doc struct {
+		XMLName xml.Name
+		Enabled string `xml:"ObjectLockEnabled"`
+		Rule    *struct {
+			Retention struct {
+				Mode  string `xml:"Mode"`
+				Days  int    `xml:"Days"`
+				Years int    `xml:"Years"`
+			} `xml:"DefaultRetention"`
+		} `xml:"Rule"`
+	}
+	if xml.Unmarshal(a.Body, &doc) != nil || doc.XMLName.Local != "ObjectLockConfiguration" {
+		return ObjectLock{}, errors.New(what + ": the answer is not an Object Lock configuration")
+	}
+	l := ObjectLock{Enabled: doc.Enabled == "Enabled"}
+	if doc.Rule != nil {
+		l.Mode, l.Days, l.Years = doc.Rule.Retention.Mode, doc.Rule.Retention.Days, doc.Rule.Retention.Years
+	}
+	return l, nil
 }
 
-// judgeObjectLock judges a state bucket's Object Lock read for `state-bucket-object-lock`:
-// `pass`, `fail` or `blocked`. Not implemented: T026 (T021 pins it).
+// judgeObjectLock judges a state bucket's Object Lock read for `state-bucket-object-lock`: a read
+// error is `blocked`, whatever came with it; an enabled lock whose default retention is governance
+// mode with a positive period in days or years, and neither negative, is `pass`; anything else
+// (disabled, absent, compliance or no mode, no period) is `fail`.
 func judgeObjectLock(l ObjectLock, err error) string {
-	return ""
+	switch {
+	case err != nil:
+		return outcomeBlocked
+	case l.Enabled && strings.EqualFold(l.Mode, "GOVERNANCE") && l.Days >= 0 && l.Years >= 0 && (l.Days > 0 || l.Years > 0):
+		return "pass"
+	}
+	return "fail"
 }
