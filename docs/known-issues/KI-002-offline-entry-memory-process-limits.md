@@ -7,16 +7,18 @@ likelihood: low
 impact: medium
 severity: low
 verified:
-  at: f35fade
-  on: 2026-10-14
-  how: code read, with the r4-e2 entry change (240 s deadline) on top
+  at: 71c2de8
+  on: 2026-10-16
+  how: code read of the spec 006 T032 source (limits applied); the published r4-e2 entry has none
 issue:
 source: independent review of the T003 offline entry, 2026-10-04
 decision:
 references:
   - path: tools/cmd/lz-offline/main.go
-    blob: aac737fa9f84ec0ec894b47b0161d0e379c193dd
-last_verified: f35fade70aa7102e3e3bfcb2f19ad535745e90a2
+    blob: 1561dacadcec35f3bee515d7cc26363f4509ef4c
+  - path: tools/cmd/lz-offline/limits.go
+    blob: 90ec35fdb1b1fd535e669e29280b92717d1debfb
+last_verified: 71c2de81d7bfd86776df728dc5ae87976e26836b
 ---
 
 ## What is true
@@ -28,9 +30,12 @@ deadline per target and an 8 MiB output cap (`tools/cmd/lz-offline/main.go`, con
 namespace and `--die-with-parent` end every candidate process when the deadline
 kills bwrap.
 
-No memory or process-count limit is applied. tmpfs pages count toward host memory up
-to the tmpfs sizes, and a candidate can allocate memory or fork freely until the
-deadline.
+The published entry applies no memory or process-count limit. tmpfs pages count toward
+host memory up to the tmpfs sizes, and a candidate can allocate memory or fork freely
+until the deadline. The source now runs each child in a transient user scope with
+`MemoryMax`, `MemorySwapMax=0` and `TasksMax` and refuses a host that cannot apply them
+(spec 006 FR-013, `tools/cmd/lz-offline/limits.go`); this issue stays open until an
+entry built from it is published and pinned.
 
 ## Why it matters
 
@@ -47,10 +52,12 @@ candidate code.
 ## How to re-check
 
 ```sh
-git grep -n -e '--size' -e 'childDeadline' -e 'prlimit' -e 'MemoryMax' -- tools/cmd/lz-offline/main.go
+git grep -n -e '--size' -e 'childDeadline' -- tools/cmd/lz-offline/main.go
+git grep -n -e 'MemoryMax' -e 'TasksMax' -- tools/cmd/lz-offline/limits.go
 ```
 
-Expected today: `--size` and `childDeadline` match; no `prlimit` or `MemoryMax`.
+Expected today: all four match in the source. Whether the published entry carries them
+is the pinned entry revision's question, not the source's.
 
 ## Fix sketch
 
