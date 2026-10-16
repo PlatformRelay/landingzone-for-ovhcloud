@@ -613,8 +613,10 @@ func (r *laneRunner) credentialFiles(in stacks.Instance, out []byte) error {
 
 // writeRunSet writes s as its writer's new credential set (FR-005). A retry of the same run that
 // finds its own generation current (a crash after the switch, or a completed write) treats the set
-// as written when that generation holds exactly s's files with s's values; anything else is
-// refused, naming no value: a run's generation is never rewritten, a new run writes a new one.
+// as written when that generation holds exactly s's files with s's values, and removes the flat
+// files the set replaces and a stale current.tmp; anything else is refused, naming no value: a
+// run's generation is never rewritten, a new run writes a new one. A set directory reached through
+// a symlink is refused.
 func writeRunSet(s CredentialSet) error {
 	acct, err := AccountDir(s.Root, s.Account)
 	if err != nil {
@@ -622,6 +624,9 @@ func writeRunSet(s CredentialSet) error {
 	}
 	if !accountID.MatchString(s.Instance) {
 		return fmt.Errorf("credential set: instance %q is not a plain path segment", s.Instance)
+	}
+	if err := noSymlinkBelow(acct, filepath.Join("sets", s.Instance)); err != nil {
+		return err
 	}
 	setDir := filepath.Join(acct, "sets", s.Instance)
 	cur, err := currentGeneration(setDir)
@@ -664,7 +669,8 @@ func writeRunSet(s CredentialSet) error {
 	if err != nil {
 		return fmt.Errorf("credential set %s: this run's generation %s is current and %v; a run's generation is never rewritten, start a new run", s.Instance, cur, err)
 	}
-	return nil
+	// Written: finish what the interrupted write's step 5 may not have done (review round 1).
+	return finishSet(acct, setDir, slices.Sorted(maps.Keys(s.Files)))
 }
 
 // dropOutputs passes a `tofu apply -json` stream through line by line, without the `outputs`

@@ -15,8 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks"
 )
@@ -123,9 +125,13 @@ func (l *setLoad) path(instance, rel string) (string, error) {
 	}
 	g, ok := l.gens[instance]
 	if !ok {
-		// currentGeneration is the writer's own check: a regular file whose whole content (no
-		// trimming) is a gen- name of a sibling directory, CREDENTIAL_POINTER_INVALID otherwise.
-		g.name, g.err = setCurrent(filepath.Join(acct, "sets", instance))
+		// The set is read only from where its writer put it: no symlink on the way to it (the
+		// writer's credentialDir refuses one too). currentGeneration is the writer's own check: a
+		// regular file whose whole content (no trimming) is a gen- name of a sibling directory,
+		// CREDENTIAL_POINTER_INVALID otherwise.
+		if g.err = noSymlinkBelow(acct, filepath.Join("sets", instance)); g.err == nil {
+			g.name, g.err = setCurrent(filepath.Join(acct, "sets", instance))
+		}
 		l.gens[instance] = g
 	}
 	switch {
@@ -134,7 +140,31 @@ func (l *setLoad) path(instance, rel string) (string, error) {
 	case g.name == "":
 		return filepath.Join(acct, rel), nil
 	}
-	return filepath.Join(acct, "sets", instance, g.name, rel), nil
+	gen := filepath.Join(acct, "sets", instance, g.name)
+	if err := noSymlinkBelow(gen, rel); err != nil {
+		return "", err
+	}
+	return filepath.Join(gen, rel), nil
+}
+
+// noSymlinkBelow refuses a symlink at any existing component of rel below base; a missing
+// component ends the check (the read that follows reports it).
+func noSymlinkBelow(base, rel string) error {
+	p := base
+	for _, c := range strings.Split(rel, string(filepath.Separator)) {
+		p = filepath.Join(p, c)
+		fi, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("credential set: %s is a symlink (symlinks are not followed)", p)
+		}
+	}
+	return nil
 }
 
 // CredentialSetPath returns the path of file rel (relative to the account directory, as readers
