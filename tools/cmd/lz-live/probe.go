@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/identity"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/state"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/storageiam"
 )
@@ -22,6 +23,8 @@ import (
 // identity like the companion's (bind), and undoes a write with the sandbox admin's credential.
 // Spec 003 T030: the swift-reach probe observes the tenant users' reach through Keystone and Swift
 // (its client is the S3 one: Keystone, Swift and S3 hosts) and sweeps with the sandbox admin.
+// Spec 003 T032: the token-residual probe creates, deletes and sweeps its OAuth2 client and policy
+// with the sandbox admin and binds nothing (its claim is about exactly one token of that client).
 func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error) *live.ProbeCheck {
 	switch root {
 	case "state-backend":
@@ -30,6 +33,8 @@ func probeCheck(root string, d deps, api live.API, admin live.Credential, bind f
 		return storageiam.Check(storageiam.Options{API: api, Admin: admin, Bind: bind, HTTP: d.S3HTTP})
 	case "swift-reach":
 		return storageiam.SwiftReach(storageiam.SwiftOptions{HTTP: d.S3HTTP, API: api, Admin: admin})
+	case "token-residual":
+		return identity.TokenResidual(identity.Options{API: api, Admin: admin})
 	}
 	return nil
 }

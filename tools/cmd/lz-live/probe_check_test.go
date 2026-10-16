@@ -230,3 +230,15 @@ func TestProbeCheckSwiftReach(t *testing.T) {
 		t.Errorf("probeCheck(swift-reach-x) = %+v, want none", c)
 	}
 }
+
+// TestProbeCheckTokenResidual (spec 003 T032): the token-residual root gets the token-residual
+// check with a Sweep; a root of another name still gets none.
+func TestProbeCheckTokenResidual(t *testing.T) {
+	c := probeCheck("token-residual", deps{}, live.API{}, live.Credential{}, nil)
+	if c == nil || c.Output != "residual_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
+		t.Fatalf("probeCheck(token-residual) = %+v, want the token-residual check with a Sweep", c)
+	}
+	if c := probeCheck("token-residual-x", deps{}, live.API{}, live.Credential{}, nil); c != nil {
+		t.Errorf("probeCheck(token-residual-x) = %+v, want none", c)
+	}
+}

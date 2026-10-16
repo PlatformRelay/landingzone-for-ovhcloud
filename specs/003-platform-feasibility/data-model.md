@@ -105,9 +105,10 @@ type Poll struct {
 }
 type Residual struct {
 	Observed  string        // "refused-before-expiry", "valid-until-expiry", "blocked"
-	Reason    string        // blocked: "expiry", "control", "outages", "deadline"
+	Reason    string        // blocked: "expiry", "control", "outages", "deadline", "flapping" (T032);
+	                        // the record adds "setup" and "delete" (T032)
 	Lower     time.Duration // delete to the last allowed poll ("valid ≥ Lower")
-	Upper     time.Duration // delete to the first refusal; zero when none observed
+	Upper     time.Duration // delete to the first refusal; zero when no refusal bounds the window
 	ExpiresIn time.Duration // the validated expires_in of the token answer
 }
 // ResidualWindow judges only observed polls: an outage bounds nothing, and no validity is
