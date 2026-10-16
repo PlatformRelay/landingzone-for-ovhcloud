@@ -67,6 +67,11 @@ type canaryAPI struct {
 	answer map[string]int
 	// bulkErrorsOnly: the tenant's bulkDeleteObjects answers 200 with every object in errors.
 	bulkErrorsOnly bool
+	// createAfter (spec 006 T020, FR-009): the admin's create makes the bucket, then answers this
+	// status (an error answered after the bucket exists); createDrop: then closes the connection
+	// without an answer (a transport error after the bucket exists).
+	createAfter int
+	createDrop  bool
 	// T062: the server's mux (the collector's tests add routes) and, by bucket, the fields a GET
 	// …/storage/{name} answers beside name, region and objects (versioning, tags).
 	mux  *http.ServeMux
@@ -132,9 +137,9 @@ func (f *canaryAPI) arrive(r *http.Request, op, cred, bucket string) *canaryCall
 		objects = len(b)
 	}
 	var trap []string
-	if cred == "tenant-deployer" {
-		// Only the tenant's calls are judged against the trap; the trap's own cleanup (admin calls)
-		// may hold it while it runs.
+	if cred == "tenant-deployer" || op == "create" {
+		// Only the tenant's calls and the create (spec 006 FR-009: registered before it) are judged
+		// against the trap; the trap's own cleanup (admin calls) may hold it while it runs.
 		trap = f.trap.Names()
 	}
 	f.calls = append(f.calls, canaryCall{Method: r.Method, Path: r.URL.Path, Op: op, Cred: cred, Bucket: bucket, Objects: objects, Trap: trap})
@@ -225,6 +230,19 @@ func (f *canaryAPI) api(w http.ResponseWriter, r *http.Request) {
 		f.buckets[in.Name] = map[string]string{}
 		if c.Name == "admin" && f.canary == "" {
 			f.canary = in.Name
+		}
+		if f.createDrop && c.Name == "admin" {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				f.t.Errorf("fake: hijack the create's connection: %v", err)
+				return
+			}
+			conn.Close()
+			return
+		}
+		if f.createAfter != 0 && c.Name == "admin" {
+			canaryReply(w, call, f.createAfter, map[string]string{"message": "forced by the test after the create"})
+			return
 		}
 		canaryReply(w, call, http.StatusOK, map[string]any{"name": in.Name, "region": canaryRegion})
 	case "list":
@@ -501,7 +519,9 @@ func TestObserveCanaryNotSetUp(t *testing.T) {
 			canaryJudge(t, f, obs)
 			got := kd1(t, obs)
 			for _, subj := range []string{"bulkDeleteObjects", "DELETE"} {
-				if o := got[subj]; o.Observed != "error" {
+				// Spec 006 FR-009: a taken name may be observed `blocked` (TestObserveCanaryNameTaken
+				// judges its outcome); never `denied` or `allowed`.
+				if o := got[subj]; o.Observed != "error" && !(tc.code == http.StatusConflict && o.Observed == "blocked") {
 					t.Errorf("kd1-canary %s observed %q, want error (the canary was not set up)", subj, o.Observed)
 				}
 			}
@@ -514,8 +534,18 @@ func TestObserveCanaryNotSetUp(t *testing.T) {
 			if tc.registered && len(names) != 1 {
 				t.Errorf("trap %v, want the created canary registered", names)
 			}
-			if !tc.registered && len(names) != 0 {
-				t.Errorf("trap %v: a canary this run did not create is never registered for deletion", names)
+			if !tc.registered {
+				// Spec 006 FR-009: the canary is registered before its create call, so the trap may
+				// hold its name; what this run did not create is never removed by it. No bucket
+				// exists in these rows, so this does not prove non-adoption:
+				// TestObserveCanaryNameTaken/not-adopted judges a name that exists.
+				from := len(f.Calls())
+				_ = f.trap.Run(context.Background())
+				for _, c := range f.Calls()[from:] {
+					if c.Method != http.MethodGet {
+						t.Errorf("trap %s %s as %s: a canary this run did not create is never removed", c.Method, c.Path, c.Cred)
+					}
+				}
 			}
 		})
 	}
@@ -574,6 +604,147 @@ func TestObserveCanaryTrap(t *testing.T) {
 		err := f.trap.Run(context.Background())
 		if err == nil || !strings.Contains(err.Error(), f.canary) {
 			t.Errorf("trap error %v, want one naming %s (it still exists)", err, f.canary)
+		}
+	})
+}
+
+// canaryName is the run's canary (research R20: <org>-bkt-canary-<run id, lowercase>).
+var canaryName = strings.ToLower(canaryOrg + "-bkt-canary-" + canaryRunID)
+
+// Spec 006 FR-009 (T020): the canary is registered for removal before its create call (the
+// create arrives with it in the trap), so a create that answers an error after the bucket exists,
+// or drops the connection after it, still ends with the bucket removed by the trap (case 1) or,
+// when the removal fails, reported as a leftover: the trap returns an error under the canary's
+// name, which the chain joins into the run's failure (case 2). A create that answers an error
+// without a bucket leaves the trap content, writing nothing.
+func TestObserveCanaryCreateError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		after   int    // the create makes the bucket, then answers this status
+		drop    bool   // the create makes the bucket, then closes the connection unanswered
+		code    int    // the create answers this status without a bucket
+		fail    string // the trap's admin call forced to 500
+		removed bool   // the canary is gone after the trap
+	}{
+		{name: "500-after-create", after: http.StatusInternalServerError, removed: true},
+		{name: "503-after-create", after: http.StatusServiceUnavailable, removed: true},
+		{name: "dropped-after-create", drop: true, removed: true},
+		{name: "500-after-create-delete-fails", after: http.StatusInternalServerError, fail: "admin DELETE delete"},
+		{name: "500-after-create-read-fails", after: http.StatusInternalServerError, fail: "admin GET get"},
+		{name: "500-without-bucket", code: http.StatusInternalServerError, removed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newCanaryAPI(t, nil)
+			f.createAfter, f.createDrop = tc.after, tc.drop
+			if tc.code != 0 {
+				f.answer["admin POST create"] = tc.code
+			}
+			obs := ObserveCanary(context.Background(), f.options())
+			canaryJudge(t, f, obs)
+			for _, o := range obs {
+				if o.Observed == "denied" || o.Observed == "allowed" {
+					t.Errorf("kd1-canary %s observed %q after the create answered an error: the tenant's calls were never made", o.Subject, o.Observed)
+				}
+			}
+			for _, c := range f.Calls() {
+				if c.Op == "create" && !slices.Contains(c.Trap, canaryName) {
+					t.Errorf("create of %s arrived with trap %v: the canary is registered for removal before its create call", c.Bucket, c.Trap)
+				}
+			}
+			made := tc.after != 0 || tc.drop
+			_, exists := f.buckets[canaryName]
+			if exists != made {
+				t.Fatalf("canary %s exists %t before the trap, want %t (fake)", canaryName, exists, made)
+			}
+			if tc.fail != "" {
+				f.answer[tc.fail] = http.StatusInternalServerError
+			}
+			from := len(f.Calls())
+			err := f.trap.Run(context.Background())
+			_, left := f.buckets[canaryName]
+			if tc.removed {
+				if err != nil {
+					t.Errorf("trap: %v, want nil", err)
+				}
+				if left {
+					t.Errorf("canary %s still exists after the trap: a create that failed after making it leaves an orphan (registered only after success)", canaryName)
+				}
+			} else {
+				if !left {
+					t.Fatalf("canary %s gone although the trap's %s was forced to fail (fake)", canaryName, tc.fail)
+				}
+				if err == nil || !strings.Contains(err.Error(), canaryName) {
+					t.Errorf("trap error %v, want an error under the canary's name %s (it still exists: a silent orphan otherwise)", err, canaryName)
+				}
+			}
+			for _, c := range f.Calls()[from:] {
+				if c.Cred != "admin" {
+					t.Errorf("trap %s %s as %s: the trap deletes with the bootstrap authority", c.Method, c.Path, c.Cred)
+				}
+				if c.Method != http.MethodGet && c.Bucket != canaryName {
+					t.Errorf("trap %s %s: only the canary", c.Method, c.Path)
+				}
+			}
+		})
+	}
+}
+
+// Spec 006 FR-009 (T020, case 3): a canary name that existed before the call (the create answers
+// 409) is never adopted or removed: the trap leaves the bucket and its object, the tenant makes no
+// call, and the kd1-canary assertion is `blocked` (KD-1 was not observed; never `pass`, and not a
+// `fail` of the tenant's rights).
+func TestObserveCanaryNameTaken(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T) (*canaryAPI, []Observation) {
+		f := newCanaryAPI(t, nil)
+		f.buckets[canaryName] = map[string]string{"theirs": "someone else's object"}
+		obs := ObserveCanary(context.Background(), f.options())
+		var create *canaryCall
+		for _, c := range f.Calls() {
+			if c.Op == "create" {
+				c := c
+				create = &c
+			}
+		}
+		if create == nil || create.Status != http.StatusConflict || create.Bucket != canaryName {
+			t.Fatalf("create %+v, want the admin's create of %s answered 409 (fake)", create, canaryName)
+		}
+		return f, obs
+	}
+	t.Run("not-adopted", func(t *testing.T) {
+		t.Parallel()
+		f, obs := setup(t)
+		canaryJudge(t, f, obs)
+		_ = f.trap.Run(context.Background())
+		if objs, ok := f.buckets[canaryName]; !ok || objs["theirs"] == "" {
+			t.Errorf("bucket %s holds %v (exists %t) after the run and its trap: a name taken before the run is never removed", canaryName, objs, ok)
+		}
+		for _, c := range f.Calls() {
+			if c.Cred == "tenant-deployer" {
+				t.Errorf("tenant %s %s on a bucket this run did not create", c.Method, c.Path)
+			}
+			if c.Method != http.MethodGet && c.Op != "create" {
+				t.Errorf("%s %s as %s: a bucket this run did not create is never written", c.Method, c.Path, c.Cred)
+			}
+		}
+	})
+	t.Run("blocked", func(t *testing.T) {
+		t.Parallel()
+		_, obs := setup(t)
+		for _, shared := range []bool{false, true} {
+			var got *Assessment
+			for _, a := range Assess(ObservationSet{RunID: canaryRunID, SharedStateProject: shared, Observations: obs}) {
+				if a.Assertion == "kd1-canary" {
+					a := a
+					got = &a
+				}
+			}
+			if got == nil || got.Outcome != "blocked" {
+				t.Errorf("shared_state_project %t: kd1-canary assessed %+v, want outcome blocked (the canary name was taken before the run; observations %+v)", shared, got, obs)
+			}
 		}
 	})
 }
