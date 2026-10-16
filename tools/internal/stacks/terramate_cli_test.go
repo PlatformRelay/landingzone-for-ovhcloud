@@ -16,7 +16,7 @@ import (
 // opened is shown by strace in evidence/T038.md, not here.
 func TestTerramateLeavesHomeEmpty(t *testing.T) {
 	bin := pinnedTerramate(t)
-	root := generationRoot(t, manifestOf(t, "sandbox"))
+	root := stageLockedRoot(t, manifestOf(t, "sandbox"))
 	home, tmp := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("TMPDIR", tmp)

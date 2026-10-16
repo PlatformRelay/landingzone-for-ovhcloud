@@ -20,7 +20,7 @@ order are drawn in the [architecture overview](../explanation/architecture-overv
 | **stage** | Layer 3, under `stages/`: reusable code for one deployment step (`bootstrap`, `tenant-state`, `account-governance`, `project`, `project-network`, `runtime`). It calls one component and has no backend and no credentials. [ADR-0004](../adr/0004-staged-roots-and-output-contracts.md) |
 | **stack** | One deployed copy of a stage: a generated directory under `stacks/` with its own state, backend key and lock. "Stage = reusable code; stack = one deployed instance of it." |
 | **instance** (deployment instance) | One row of `stacks/deployments.yaml`, with an immutable `id` such as `demo-dev-project`; each instance becomes one stack. |
-| **`deployments.yaml`** (manifest) | `stacks/deployments.yaml`, the list of instances. Edit a row, then `task stacks:reconcile` creates missing stack directories and `task stacks:generate` renders their `_lz_*` files. |
+| **`deployments.yaml`** (manifest) | `stacks/deployments.yaml`, the list of instances. Edit a row, then `task stacks:reconcile` creates missing stack directories and `task stacks:generate` renders their `_lz_*` files and copies the stage's lock into each new stack. |
 | **tenant / environment / region / slot** | The dimensions that identify an instance. A slot (runtime only) tells two runtimes in one region apart. |
 | **envelope / `outputs.json`** | What a stack publishes after an apply, checked against `schemas/outputs/`. The only way stacks share values; no stack reads another's state. |
 | **data edge / authority edge** | Why one stack runs after another: it reads the other's outputs (data), or it runs as a principal or with state credentials the other creates (authority). |

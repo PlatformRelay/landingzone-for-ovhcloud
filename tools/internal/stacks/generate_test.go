@@ -445,7 +445,7 @@ func TestGenerateComparator(t *testing.T) {
 // A missing generated file, a changed expression or an extra file in the sandbox fixture fails;
 // the sandbox's project is referenced (D94), so it gets no import block.
 func TestGenerateSandboxMatchesExpectations(t *testing.T) {
-	root := generationRoot(t, manifestOf(t, "sandbox"))
+	root := stageLockedRoot(t, manifestOf(t, "sandbox"))
 	if err := generateIn(t, root); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -948,6 +948,7 @@ func TestGenerateStackInvariants(t *testing.T) {
 				t.Fatal(err)
 			}
 			root := generationRoot(t, data)
+			fixtureStageLocks(t, root, m) // generation copies a stage lock into each new stack (006 FR-011)
 			if err := generateIn(t, root); err != nil {
 				t.Fatalf("generate: %v", err)
 			}
@@ -960,7 +961,7 @@ func TestGenerateStackInvariants(t *testing.T) {
 // header (the dependency-check fixtures under tests/ do) is neither deleted nor changed. Whole
 // project `terramate generate` removes such files as orphans (observed 2026-10-07, 0.17.3).
 func TestGenerateLeavesFilesOutsideStacks(t *testing.T) {
-	root := generationRoot(t, manifestOf(t, "sandbox"))
+	root := stageLockedRoot(t, manifestOf(t, "sandbox"))
 	outside := map[string]string{
 		"tests/check/fixtures/purity/stacks/account/bootstrap/main.tf": "// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT\n\nmodule \"x\" {\n  source = \"../x\"\n}\n",
 		"docs/examples/versions.tf":                                    "// TERRAMATE: GENERATED AUTOMATICALLY DO NOT EDIT\n\nterraform {\n}\n",
@@ -1024,6 +1025,20 @@ func fixtureStageLocks(t *testing.T, root string, m *Manifest) map[string][]byte
 		locks[in.Stage] = lock
 	}
 	return locks
+}
+
+// stageLockedRoot is generationRoot with a fixture lock for every stage the manifest names
+// (fixtureStageLocks): generation copies a stage's lock into each new stack and refuses a stack
+// whose stage has none (006 FR-011).
+func stageLockedRoot(t *testing.T, manifest []byte) string {
+	t.Helper()
+	m, err := DecodeManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := generationRoot(t, manifest)
+	fixtureStageLocks(t, root, m)
+	return root
 }
 
 // treeFiles returns every file under root with its content, keyed by slash-separated path
@@ -1165,6 +1180,109 @@ func TestGenerateCopiesStageLock(t *testing.T) {
 	})
 }
 
+// Generate never leaves a stack without a lock and never replaces one (006 FR-011, T028): a stack
+// without a lock whose stage has none is refused with NO_STAGE_LOCK before anything is written;
+// a lock a stack already has, or a link at its lock path, is kept as it is while the other
+// stacks get their stage's.
+func TestGenerateStageLockEdges(t *testing.T) {
+	data := manifestOf(t, "sandbox")
+	m, err := DecodeManifest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("stage-lock-missing", func(t *testing.T) {
+		root := generationRoot(t, data)
+		fixtureStageLocks(t, root, m)
+		gone := m.Instances[len(m.Instances)-1]
+		if err := os.Remove(filepath.Join(root, "stages", gone.Stage, ".terraform.lock.hcl")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Reconcile(ReconcileOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		before := treeFiles(t, root)
+		err := Generate(GenerateOptions{Root: root, Terramate: pinnedTerramate(t)})
+		var ge *GenerateError
+		if !errors.As(err, &ge) || ge.Code != CodeNoStageLock || ge.Path != gone.Path {
+			t.Errorf("want refusal %s for %s, got %v", CodeNoStageLock, gone.Path, err)
+		}
+		if after := treeFiles(t, root); !maps.Equal(before, after) {
+			t.Errorf("a refused generation changed the tree: %d files before, %d after", len(before), len(after))
+		}
+	})
+	// A copy whose write fails midway leaves no partial lock that a later run would take as the
+	// stack's own: the retry gives every stack its full stage lock.
+	t.Run("failed-copy-retried", func(t *testing.T) {
+		root := generationRoot(t, data)
+		locks := fixtureStageLocks(t, root, m)
+		if _, err := Reconcile(ReconcileOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		write, calls := writeLockData, 0
+		t.Cleanup(func() { writeLockData = write })
+		writeLockData = func(f *os.File, data []byte) error {
+			if calls++; calls == 2 {
+				_, _ = f.Write(data[:len(data)/2])
+				return errors.New("disk full (test)")
+			}
+			return write(f, data)
+		}
+		err := Generate(GenerateOptions{Root: root, Terramate: pinnedTerramate(t)})
+		writeLockData = write
+		if err == nil {
+			t.Fatal("a failed lock write was not an error")
+		}
+		for path := range treeFiles(t, root) {
+			if strings.Contains(path, ".tmp-") {
+				t.Errorf("a failed copy left %s", path)
+			}
+		}
+		if err := Generate(GenerateOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+			t.Fatalf("retry: %v", err)
+		}
+		for _, in := range m.Instances {
+			got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(in.Path), ".terraform.lock.hcl"))
+			if err != nil || !bytes.Equal(got, locks[in.Stage]) {
+				t.Errorf("%s: after the retry the lock is not stages/%s's (%v)", in.Path, in.Stage, err)
+			}
+		}
+	})
+	t.Run("existing-lock-kept", func(t *testing.T) {
+		root := generationRoot(t, data)
+		locks := fixtureStageLocks(t, root, m)
+		if _, err := Reconcile(ReconcileOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		own, linked := m.Instances[1], m.Instances[3]
+		ownLock := []byte("# the stack's own lock\n")
+		writeFile(t, filepath.Join(root, filepath.FromSlash(own.Path), ".terraform.lock.hcl"), ownLock)
+		target := filepath.Join(t.TempDir(), "elsewhere.hcl")
+		if err := os.Symlink(target, filepath.Join(root, filepath.FromSlash(linked.Path), ".terraform.lock.hcl")); err != nil {
+			t.Fatal(err)
+		}
+		if err := Generate(GenerateOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		for _, in := range m.Instances {
+			path := filepath.Join(root, filepath.FromSlash(in.Path), ".terraform.lock.hcl")
+			switch in.Path {
+			case own.Path:
+				if got := readFile(t, path); !bytes.Equal(got, ownLock) {
+					t.Errorf("%s: its own lock was replaced", in.Path)
+				}
+			case linked.Path:
+				if _, err := os.Stat(target); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("%s: the copy wrote through the link at its lock path (%v)", in.Path, err)
+				}
+			default:
+				if got := readFile(t, path); !bytes.Equal(got, locks[in.Stage]) {
+					t.Errorf("%s/.terraform.lock.hcl is not stages/%s/.terraform.lock.hcl", in.Path, in.Stage)
+				}
+			}
+		}
+	})
+}
+
 // stageLock is a dependency lock file pinning registry.opentofu.org/ovh/ovh at version with
 // hashes, after a comment line.
 func stageLock(comment, version string, hashes ...string) []byte {
@@ -1231,6 +1349,60 @@ func TestCheckStageLocks(t *testing.T) {
 				if !named {
 					t.Errorf("findings %q: none names stages %s and %s", findings, p[0], cmp.Or(p[1], "bootstrap or project"))
 				}
+			}
+		})
+	}
+}
+
+// CheckStageLocks edges (006 FR-011, T028): the order of hashes, a provider only one stage pins
+// and a stage without a lock are no finding; a lock that cannot be parsed is one, naming its
+// stage, so the check never passes on a lock it did not compare.
+func TestCheckStageLocksEdges(t *testing.T) {
+	const (
+		h1 = "h1:z26YaKCDJJThNY9i+hCIq7YSiWiTc8vsC0RhX0hRwMc="
+		zh = "zh:54dc88d0e863d9f87e9a9c63407f9d9e6a73c0f29d16b226f9bafc6fd2507712"
+	)
+	random := []byte("provider \"registry.opentofu.org/hashicorp/random\" {\n  version = \"3.6.0\"\n  hashes = [\"h1:random\"]\n}\n")
+	noHashes := []byte("provider \"registry.opentofu.org/ovh/ovh\" {\n  version = \"2.21.0\"\n}\n")
+	for _, tc := range []struct {
+		name   string
+		stages map[string][]byte
+		want   string // a stage some finding names; empty: no finding
+	}{
+		{name: "hash-order", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": stageLock("b", "2.21.0", zh, h1)}},
+		{name: "provider-in-one-stage", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": append(stageLock("b", "2.21.0", h1, zh), random...)}},
+		{name: "stage-without-lock", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": nil}},
+		{name: "lock-unparsable", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": []byte("provider \"registry.opentofu.org/ovh/ovh\" {\n")}, want: "project"},
+		{name: "hash-repeated", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": stageLock("b", "2.21.0", h1, h1, zh)}},
+		// A misspelt block or a stray attribute: read leniently, the lock would pin nothing and
+		// agree with any other.
+		{name: "lock-misspelt-block", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": []byte(strings.Replace(string(stageLock("b", "2.22.0", h1, zh)), "provider ", "providers ", 1))}, want: "project"},
+		{name: "lock-top-level-attribute", stages: map[string][]byte{"bootstrap": stageLock("a", "2.21.0", h1, zh), "project": append([]byte("version = \"2.22.0\"\n"), stageLock("b", "2.21.0", h1, zh)...)}, want: "project"},
+		// Both without hashes: they would agree if a missing list read as empty.
+		{name: "locks-without-hashes", stages: map[string][]byte{"bootstrap": noHashes, "project": noHashes}, want: "bootstrap"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for stage, lock := range tc.stages {
+				if lock == nil {
+					if err := os.MkdirAll(filepath.Join(root, "stages", stage), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				writeFile(t, filepath.Join(root, "stages", stage, ".terraform.lock.hcl"), lock)
+			}
+			findings := CheckStageLocks(root)
+			if tc.want == "" {
+				if len(findings) != 0 {
+					t.Errorf("findings %q, want none", findings)
+				}
+				return
+			}
+			if len(findings) == 0 || !slices.ContainsFunc(findings, func(f string) bool {
+				return strings.HasPrefix(f, CodeStageLockMismatch) && strings.Contains(f, tc.want)
+			}) {
+				t.Errorf("findings %q: none starts with %s and names %s", findings, CodeStageLockMismatch, tc.want)
 			}
 		})
 	}
@@ -1515,8 +1687,12 @@ func TestPlannedNames(t *testing.T) {
 		}
 	})
 
-	// The generated growth stacks, planned under their generated offline tests.
+	// The generated growth stacks, planned under their generated offline tests. The stages are
+	// in place before generation, which copies their locks into the new stacks (006 FR-011).
 	root := generationRoot(t, data)
+	for _, dir := range []string{"stages", "components", "modules"} {
+		copyTree(t, filepath.Join(repositoryRoot, dir), filepath.Join(root, dir))
+	}
 	if err := generateIn(t, root); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -1524,9 +1700,6 @@ func TestPlannedNames(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(in.Path), "tests", "_lz_offline.tftest.hcl")); err != nil {
 			t.Fatalf("growth: %s has no generated offline test: %v", in.Path, err)
 		}
-	}
-	for _, dir := range []string{"stages", "components", "modules"} {
-		copyTree(t, filepath.Join(repositoryRoot, dir), filepath.Join(root, dir))
 	}
 	tofu := pinnedTofu(t)
 	cache := filepath.Join(t.TempDir(), "plugins")
@@ -1664,6 +1837,7 @@ func authoringFlow(t *testing.T) {
 	base := edit(t, full, `,
       {"id": "demo-dev-gra11-runtime", "stage": "runtime", "tenant": "demo", "environment": "dev", "region": "GRA11"}`, "", 1)
 	main := generationRoot(t, base)
+	fixtureStageLocks(t, main, decoded(t, full)) // committed with the base: generation copies them (006 FR-011)
 	if err := generateIn(t, main); err != nil {
 		t.Fatalf("generate the committed base: %v", err)
 	}

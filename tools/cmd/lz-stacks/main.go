@@ -11,11 +11,15 @@
 // `created <path>` per stack in manifest row order; any other mismatch is refused
 // (UNSUPPORTED_CHANGE) with nothing written. With -check it writes nothing and prints
 // `fail: missing stack <path>` per stack it would create. generate (task stacks:generate) runs
-// the pinned `terramate generate` after the strict manifest decode and prints `generated <path>`
-// per file under stacks/ it created, changed or removed, sorted; a `git` stage source is refused
-// (STAGE_SOURCE_NOT_IMPLEMENTED) with nothing written. check (task stacks:check) copies the root
-// Terramate files and stacks/ to scratch, reconciles there under -check, runs `terramate generate`
-// and prints `fail: …` per missing stack and per stale generated file, or the count line
+// the pinned `terramate generate` after the strict manifest decode, copies the stage's
+// .terraform.lock.hcl into each stack without one, and prints `generated <path>` per file under
+// stacks/ it created, changed or removed, sorted; a `git` stage source
+// (STAGE_SOURCE_NOT_IMPLEMENTED), a row without a reconciled stack (UNRECONCILED_ROW) and a stack
+// without a lock whose stage has none (NO_STAGE_LOCK) are refused with nothing written. check
+// (task stacks:check) copies the root Terramate files and stacks/ to scratch, reconciles there
+// under -check, runs `terramate generate` and prints `fail: …` per missing stack, per stale
+// generated file and per stage whose lock pins a provider at another version or with other
+// hashes than an earlier stage (STAGE_LOCK_MISMATCH, 006 FR-011), or the count line
 // `STACKS_CHECK_OK stacks=<n> files=<m>` (the candidate's stacks and checked files); the
 // candidate is never written. plans (task test:stack-plans) plans every stack offline under its
 // generated mocked test with the fixture envelopes of tests/fixtures/outputs/envelopes, on a scratch copy,
@@ -117,6 +121,7 @@ func run(args []string, out io.Writer) int {
 		if err != nil {
 			return fail(out, err)
 		}
+		report.Findings = append(report.Findings, stacks.CheckStageLocks(abs)...)
 		if len(report.Findings) == 0 {
 			fmt.Fprintf(out, "STACKS_CHECK_OK stacks=%d files=%d\n", report.Stacks, report.Files)
 			return 0
