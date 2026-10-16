@@ -29,7 +29,9 @@ This guide is for the maintainer who runs the first landing-zone slice
 ([spec 005](../../specs/005-first-landing-zone-slice/spec.md)) against a real OVHcloud account:
 bootstrap the account, apply and destroy the stacks, read what a run recorded, and clean up.
 Everything here acts on the account and spends credit. **Only the owner runs it, on the
-maintainer workstation.** Agents and CI never run `task bootstrap:*` or `task live:*`.
+maintainer workstation.** Agents and CI never run `task bootstrap:*` or `task live:*`, except
+for the bounded, expiring exception for the coordinating session in
+[AGENTS.md](../../AGENTS.md) ("Known deviation", "Bounded extension").
 
 **Status (2026-10-14).** Against the current sandbox account, every create→destroy probe has
 passed ([T010](../../specs/005-first-landing-zone-slice/evidence/T010.md)) and the account was

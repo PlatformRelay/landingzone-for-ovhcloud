@@ -201,8 +201,10 @@ tasks:
       - .local/bin/lz-live bootstrap {{.CLI_ARGS}}
 
   # Host target: the owner on the maintainer host only, never inside lz-offline
-  # and never run by an agent (it loads ~/.config/ovh-lz/ credentials and calls
-  # the OVHcloud API). lz-live is built from this checkout and runs from its
+  # and never run by a subagent (it loads ~/.config/ovh-lz/ credentials and calls
+  # the OVHcloud API). The coordinating session may also run it under the bounded,
+  # expiring exception in AGENTS.md ("Known deviation", "Bounded extension";
+  # end date and credit floor there). lz-live is built from this checkout and runs from its
   # root, where the host guard expects it, e.g.
   #   task live:probe -- --reviewed-sha <sha> tests/live/probes/<probe> [--plan-only]
   #   task live:probe -- --reviewed-sha <sha> --cleanup <run-id>
@@ -213,8 +215,11 @@ tasks:
       - .local/bin/lz-live probe {{.CLI_ARGS}}
 
   # Host targets: the owner on the maintainer host only, never inside lz-offline
-  # and never run by an agent (they load ~/.config/ovh-lz/ credentials, call the
-  # OVHcloud API and, for apply, change the account). The selected stacks of
+  # and never run by a subagent (they load ~/.config/ovh-lz/ credentials, call the
+  # OVHcloud API and, for apply, change the account). The coordinating session
+  # may also run plan, and apply only inside live:chain, under the bounded,
+  # expiring exception in AGENTS.md ("Known deviation", "Bounded extension";
+  # end date and credit floor there). The selected stacks of
   # stacks/deployments.yaml in run order, each under its own authority, holding
   # the run locks; every saved plan through the retained-resource guard (005
   # FR-009, FR-010, FR-011, R21), e.g.
@@ -233,8 +238,10 @@ tasks:
       - .local/bin/lz-live apply {{.CLI_ARGS}}
 
   # Host targets: the owner on the maintainer host only, never inside lz-offline
-  # and never run by an agent (they load ~/.config/ovh-lz/ credentials, call the
-  # OVHcloud API and change the account). destroy takes one ephemeral instance
+  # and never run by a subagent (they load ~/.config/ovh-lz/ credentials, call the
+  # OVHcloud API and change the account). The coordinating session may also run
+  # both under the bounded, expiring exception in AGENTS.md ("Known deviation",
+  # "Bounded extension"; end date and credit floor there). destroy takes one ephemeral instance
   # (a retained one, or all, is refused); chain applies the selected stacks, then
   # destroys the ephemeral ones from its destroy-on-exit (also on a failure,
   # SIGINT, SIGTERM or the deadline) and runs the leftover check; every destroy a
