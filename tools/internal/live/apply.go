@@ -20,9 +20,13 @@ package live
 // is bootstrap:account's, never the lane's (decision 1, 2026-10-08). `chain` (chain.go) runs
 // through the same runner.
 //
-// Not here for plan|apply (recorded gaps of T059): a run deadline and the inventory of what an
-// apply created; the chain has both. A cancelled context stops the running child as the run core
-// does (SIGINT, then a kill after DefaultGrace).
+// Bounded verbs (spec 006 FR-001, research R2): plan, apply and destroy run under the run's
+// deadline (ApplyOptions.Deadline, 0: DefaultDeadline) from their first step, `apply` appends every
+// created resource to the run's inventory.jsonl as each apply_complete event arrives (as the chain
+// does), and every way out ends with run.json and the summary line (runSummary, chain.go). The
+// deadline and a cancelled context (SIGINT at the entry) stop the running child as the run core
+// does (SIGINT, then a kill after DefaultGrace); the run then fails, keeps its inventory and
+// destroys nothing: only the chain destroys on exit.
 
 import (
 	"bytes"
@@ -82,8 +86,8 @@ type ApplyOptions struct {
 	Terminal io.Writer
 	// API binds every OAuth2 credential to the account (GET /auth/details) before its first use.
 	API API
-	// Deadline bounds plan, apply and destroy (0: DefaultDeadline; spec 006 FR-001). Not honoured
-	// yet: T022 implements it (T017 tests).
+	// Deadline bounds plan, apply and destroy from their first step (0: DefaultDeadline; spec 006
+	// FR-001). The chain ignores it: ChainOptions.Deadline bounds the chain.
 	Deadline time.Duration
 }
 
@@ -114,9 +118,13 @@ type laneRunner struct {
 	bound   map[Credential]bool // credentials (endpoint, client, secret) bound in this run
 	code    map[string]string
 	passes  int // selections run so far
-	// chain only (chain.go): the inventory, the stacks whose apply started, the signal a stop
-	// forwards to the running child (unset: SIGINT).
-	inv     *Inventory
+	// the inventory of an apply or a chain (nil for plan and destroy); the instances run.json
+	// records (plan, apply, destroy).
+	inv       *Inventory
+	instances []string
+	// chain only (chain.go): the stacks whose apply started, the signal a stop forwards to the
+	// running child (unset: SIGINT).
+	chained bool
 	started []string
 	stop    atomic.Value
 	s3HTTP  *http.Client // the state-object check's S3 client (ChainOptions.S3HTTP)
@@ -157,7 +165,31 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 	}()
 	r := &laneRunner{o: o, red: red, term: term, bound: map[Credential]bool{}, code: map[string]string{}}
 	if ch != nil {
+		r.chained = true
 		defer func() { err = r.summary(err, ch.Deadline) }()
+	} else {
+		// FR-001: the deadline bounds every step below, refusals included, and run.json and the
+		// summary line end every way out, after the run locks are released.
+		deadline := o.Deadline
+		if deadline <= 0 {
+			deadline = DefaultDeadline
+		}
+		if o.Target != TargetAll {
+			r.instances = []string{o.Target}
+		}
+		defer func() { err = r.runSummary(err, deadline) }()
+		var cancel context.CancelFunc
+		ctx, cancel = withDeadline(ctx, deadline, nil)
+		defer cancel()
+		// A run whose context its deadline or a signal ended before it returned fails, naming the
+		// cause, even when the step that was running finished (the store's calls do not take the
+		// context). Unlike the chain, which checks before its destroy-on-exit, this is checked after
+		// the run locks are released, so a signal during that release fails the run too.
+		defer func() {
+			if ctx.Err() != nil {
+				err = errors.Join(context.Cause(ctx), err)
+			}
+		}()
 	}
 	m := o.Manifest
 	if o.Verb == VerbDestroy {
@@ -168,6 +200,7 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 			for _, in := range m.Instances {
 				ids = append(ids, in.ID)
 			}
+			r.instances = ids
 		}
 		for _, id := range ids {
 			_, st, err := stageOf(m, id)
@@ -226,6 +259,7 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 	if ch != nil {
 		return r.chain(ctx, ch, ids)
 	}
+	r.instances = ids
 	if len(ids) == 0 {
 		fmt.Fprintf(term, "LZ-LIVE %s nothing selected\n", o.Verb)
 		return nil
@@ -251,6 +285,11 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 		return err
 	}
 	defer removeTree(r.home)
+	if o.Verb == VerbApply {
+		if r.inv, err = OpenInventory(o.RunDir, red); err != nil {
+			return err
+		}
+	}
 	var held []string
 	for _, id := range ids {
 		if p := blocked[id]; len(p) > 0 {
@@ -469,29 +508,22 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if o.Verb == VerbPlan {
 		return nil
 	}
-	if r.inv != nil {
-		// The chain (R12): from here the stack is destroyed on exit; the inventory is appended as
-		// each apply_complete event arrives. ConsumeApply writes each event's message only, never
-		// the values an `outputs` event carries.
+	if r.chained {
+		// The chain (R12): from here the stack is destroyed on exit.
 		r.started = append(r.started, id)
-		pr, pw := io.Pipe()
-		consumed := make(chan error, 1)
-		go func() { consumed <- ConsumeApply(pr, id, r.inv, r.term) }()
-		err = r.tofu(ctx, child, id, dir, pw, "apply", "-json", "-input=false", plan)
-		pw.Close()
-		if err = errors.Join(err, <-consumed); err != nil {
-			return err
-		}
-	} else {
-		// The apply stream without its `outputs` event: an output value the redactor cannot know
-		// yet (a secret created by this apply, wrongly not sensitive) never reaches the terminal
-		// (review r2).
-		applied := &dropOutputs{w: r.term}
-		err = r.tofu(ctx, child, id, dir, applied, "apply", "-json", "-input=false", plan)
-		applied.flush()
-		if err != nil {
-			return err
-		}
+	}
+	// The inventory (the chain's, and apply's, FR-001) is appended as each apply_complete event
+	// arrives, so a run stopped mid-apply keeps what it created. ConsumeApply writes each event's
+	// message only, never the values an `outputs` event carries: an output value the redactor
+	// cannot know yet (a secret created by this apply, wrongly not sensitive) never reaches the
+	// terminal (review r2).
+	pr, pw := io.Pipe()
+	consumed := make(chan error, 1)
+	go func() { consumed <- ConsumeApply(pr, id, r.inv, r.term) }()
+	err = r.tofu(ctx, child, id, dir, pw, "apply", "-json", "-input=false", plan)
+	pw.Close()
+	if err = errors.Join(err, <-consumed); err != nil {
+		return err
 	}
 	var out bytes.Buffer
 	if err := r.tofu(ctx, child, id, dir, &out, "output", "-json"); err != nil {
@@ -507,7 +539,7 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 		CodeDigest: r.code[id], Consumed: inputs.Consumed, Resolved: inputs.Resolved}); err != nil {
 		return err
 	}
-	if r.inv != nil {
+	if r.chained {
 		// The chain (T102): the applied stack's state object, once its outputs, credential files,
 		// envelope and record are kept, so a failed check loses none of them.
 		return r.stateObject(ctx, in, s3Of(child.vars))

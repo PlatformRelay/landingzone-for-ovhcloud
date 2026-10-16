@@ -730,6 +730,8 @@ type laneStore struct {
 	mu      sync.Mutex
 	log     string
 	objects map[string][]byte
+	// beforePut, when set, runs before each Put (T022: a store call the run's deadline outlasts).
+	beforePut func(bucket, key string)
 }
 
 type laneBucket struct {
@@ -748,6 +750,9 @@ func (s *laneStore) open(keys map[string]string) (ObjectStore, error) {
 }
 
 func (b *laneBucket) Put(bucket, key string, data []byte) error {
+	if b.s.beforePut != nil {
+		b.s.beforePut(bucket, key)
+	}
 	b.s.mu.Lock()
 	defer b.s.mu.Unlock()
 	laneAppend(b.s.log, laneCall{Cmd: "put", Stack: bucket + "/" + key, Key: b.ak})
@@ -850,6 +855,10 @@ type laneHarness struct {
 	runDir      string
 	applyStart  time.Time
 	applyTook   time.Duration
+	// apiSeen, when set, sees every API request of the run (T022: its context); noTimeout runs the
+	// lane without exec's own 2-minute bound, so a request's deadline is the run's own.
+	apiSeen   func(*http.Request)
+	noTimeout bool
 	// chainRun: the run under judgement is a chain, which reads account-bootstrap's state for the
 	// leftover check; plan, apply and destroy never do (T046 review r2).
 	chainRun bool
@@ -1349,6 +1358,9 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 	before := laneTree(t, h.checkout, filepath.Join(h.checkout, ".local"))
 	h.term.Reset()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	if h.noTimeout {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 	defer cancel()
 	// A blocked call (laneStack.Block) cancels the run once it announced itself (T059 review r1).
 	// Under holdBlocked it only calls onBlocked (T017), and exec waits for that call to end.
@@ -2320,9 +2332,13 @@ func (f *fakeAPI) add(c apiCredential) {
 type laneAPITransport struct {
 	inner http.RoundTripper
 	log   string
+	seen  func(*http.Request) // laneHarness.apiSeen
 }
 
 func (l laneAPITransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if l.seen != nil {
+		l.seen(r)
+	}
 	resp, err := l.inner.RoundTrip(r)
 	if r.URL.Path == "/v1/auth/details" {
 		status := 0
@@ -2336,7 +2352,7 @@ func (l laneAPITransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (h *laneHarness) laneAPI() API {
 	a := h.api.API()
-	a.HTTP = &http.Client{Transport: laneAPITransport{inner: h.api.Client().Transport, log: h.world.Log}}
+	a.HTTP = &http.Client{Transport: laneAPITransport{inner: h.api.Client().Transport, log: h.world.Log, seen: h.apiSeen}}
 	return a
 }
 
@@ -3205,4 +3221,78 @@ func TestBoundedApplyStopKeepsInventory(t *testing.T) {
 			})
 		}
 	}
+}
+
+// T022 (FR-001; T017's deferred review point): a Deadline of 0 bounds the run's context by
+// DefaultDeadline, not only the deadline run.json records. The run's API calls carry its context:
+// with no other bound on the run (noTimeout), every one of plan, apply and destroy has a deadline
+// DefaultDeadline after the run started.
+func TestBoundedRunContextDefaultDeadline(t *testing.T) {
+	for _, c := range []struct{ verb, target string }{
+		{VerbPlan, boundedNetwork},
+		{VerbApply, boundedNetwork},
+		{VerbDestroy, "demo-dev-gra11-runtime"},
+	} {
+		t.Run(c.verb, func(t *testing.T) {
+			h := boundedHarness(t)
+			var mu sync.Mutex
+			var deadlines []time.Time
+			unbounded := 0
+			h.noTimeout = true
+			h.apiSeen = func(r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				if d, ok := r.Context().Deadline(); ok {
+					deadlines = append(deadlines, d)
+				} else {
+					unbounded++
+				}
+			}
+			before := time.Now()
+			r := h.run(c.verb, c.target)
+			after := time.Now()
+			laneExit(t, r, 0)
+			mu.Lock()
+			defer mu.Unlock()
+			if len(deadlines) == 0 || unbounded > 0 {
+				t.Fatalf("%s: %d API calls with a deadline, %d without; want every call bounded", c.verb, len(deadlines), unbounded)
+			}
+			for _, d := range deadlines {
+				if d.Before(before.Add(DefaultDeadline)) || d.After(after.Add(DefaultDeadline)) {
+					t.Errorf("%s: an API call's deadline is %v after the run started, want DefaultDeadline (%v)", c.verb, d.Sub(before).Round(time.Second), DefaultDeadline)
+				}
+			}
+		})
+	}
+}
+
+// T022 (review round 1): the store's calls do not take the run's context, so the deadline can pass
+// during one that then succeeds, here the last apply's publish. The run still fails, naming its
+// deadline, records outcome fail and keeps its inventory, as the chain's does.
+func TestBoundedApplyDeadlinePassedInStore(t *testing.T) {
+	h := boundedHarness(t)
+	h.deadline = boundedHang
+	h.store.beforePut = func(bucket, key string) {
+		// Until the run's deadline has surely passed: applyStart is set before exec's own setup,
+		// so the run's deadline is later than applyStart + boundedHang by that setup's time
+		// (review round 2); boundedSlack covers it.
+		time.Sleep(time.Until(h.applyStart.Add(boundedHang + boundedSlack)))
+	}
+	r := h.run(VerbApply, boundedNetwork)
+	if ExitCode(r.err) == 0 || r.err == nil || !strings.Contains(r.err.Error(), errDeadline.Error()) {
+		t.Errorf("an apply whose deadline passed during its publish ended with %v (exit %d), want a failure naming %q", r.err, ExitCode(r.err), errDeadline)
+	}
+	// Only the deadline: no step after the publish failed on the ended context (review round 2),
+	// so this pins the path where the running step succeeded.
+	if r.err != nil && strings.Contains(r.err.Error(), "tofu ") {
+		t.Errorf("the run's error %q names a tofu call: a step after the publish failed, not the deadline alone", r.err)
+	}
+	if puts := r.puts(); len(puts) == 0 {
+		t.Fatalf("fixture: the apply published nothing, so the deadline did not pass during a store call")
+	}
+	boundedSummary(t, h.term.String(), r, VerbApply, "fail", true)
+	if rec := boundedRecord(t, r); rec != nil && rec["outcome"] != "fail" {
+		t.Errorf("run.json outcome %v, want fail", rec["outcome"])
+	}
+	boundedInventory(t, r, boundedNetwork)
 }

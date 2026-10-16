@@ -140,14 +140,22 @@ type applyLine struct {
 			Addr         string `json:"addr"`
 			ResourceType string `json:"resource_type"`
 		} `json:"resource"`
+		Action  string `json:"action"`
 		IDValue string `json:"id_value"`
 	} `json:"hook"`
+	Diagnostic struct {
+		Detail string `json:"detail"`
+	} `json:"diagnostic"`
 }
 
-// ConsumeApply reads a `tofu apply -json` stream of stack, appends every apply_complete to inv
-// before it reads the next event, and writes each event's message (a line that is not JSON as it
-// is) to out. After a failed append it keeps reading, so the child never blocks on a full pipe,
-// and returns the first error at the end.
+// ConsumeApply reads a `tofu apply -json` stream of stack, appends every apply_complete of a
+// created resource to inv before it reads the next event, and writes each event's message (a
+// diagnostic's detail after it; a line that is not JSON as it is) to out. An apply_complete whose
+// action is update, delete or another non-create action is not a created resource (spec 006
+// FR-001: an apply outside the chain often re-applies an existing stack; a replace is a delete and
+// a create); one without an action is kept, so a stream that omits it loses no id. After a failed
+// append it keeps reading, so the child never blocks on a full pipe, and returns the first error
+// at the end.
 func ConsumeApply(r io.Reader, stack string, inv *Inventory, out io.Writer) error {
 	br := bufio.NewReader(r)
 	var first error
@@ -158,7 +166,7 @@ func ConsumeApply(r io.Reader, stack string, inv *Inventory, out io.Writer) erro
 			if json.Unmarshal([]byte(t), &e) != nil {
 				fmt.Fprintln(out, t)
 			} else {
-				if e.Type == "apply_complete" {
+				if e.Type == "apply_complete" && (e.Hook.Action == "create" || e.Hook.Action == "") {
 					typ := e.Hook.Resource.ResourceType
 					if typ == "" {
 						typ = typeOf(e.Hook.Resource.Addr)
@@ -168,6 +176,9 @@ func ConsumeApply(r io.Reader, stack string, inv *Inventory, out io.Writer) erro
 					}
 				}
 				fmt.Fprintln(out, e.Message)
+				if d := strings.TrimSpace(e.Diagnostic.Detail); e.Type == "diagnostic" && d != "" {
+					fmt.Fprintln(out, d)
+				}
 			}
 		}
 		if err == io.EOF {

@@ -224,7 +224,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: every case fails against the stub. The live observation (premise P5) is out of scope.
   - Evidence: `evidence/T021.md`; PR; initial status `not-run`.
 
-- [ ] T022 [US2] Bound and inventory plan, apply and destroy in tools/internal/live/apply.go, tools/internal/live/chain.go, tools/cmd/lz-live/lane.go and tools/cmd/lz-live/main.go
+- [x] T022 [US2] Bound and inventory plan, apply and destroy in tools/internal/live/apply.go, tools/internal/live/chain.go, tools/cmd/lz-live/lane.go and tools/cmd/lz-live/main.go — closed 2026-10-16, evidence: evidence/T022.md
   - Requirements: FR-001, SC-001; ADRs: 0008, 0024. Depends on: T017.
   - Verify: `task test:live-lane`: T017's cases green; the chain's summary and inventory rows unchanged. Guard G23 mutants are killed.
   - Evidence: `evidence/T022.md`; PR; initial status `not-run`.
