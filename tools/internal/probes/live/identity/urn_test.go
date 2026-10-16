@@ -153,9 +153,12 @@ type uuWorld struct {
 	policies  []uuPolicy
 	created   map[string]time.Time // policy name → createdAt (kept after a delete)
 	resources []uuRes
-	n         int
-	tokens    map[string]string // probe token → client id
-	secrets   []string
+	// buckets (T034): the project's buckets in GRA, as the S3 bucket API lists them (the probe
+	// bucket's create answer may have been lost); none unless a case adds them.
+	buckets []string
+	n       int
+	tokens  map[string]string // probe token → client id
+	secrets []string
 
 	control    map[string][]int // identity → control statuses once granted, in turn (0: hang up); then 200
 	answer     map[string]uuAns // "project read", "account write", …; missing: 200
@@ -659,6 +662,28 @@ func (w *uuWorld) admin(rw http.ResponseWriter, r *http.Request, body []byte) {
 				delete(w.resources[i].tags, key)
 			}
 			fmt.Fprint(rw, `null`)
+		default:
+			rw.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	case strings.HasPrefix(p, "/v1/cloud/project/"+uuProject+"/region/GRA/storage"):
+		// T034: the bucket listing and delete a Sweep needs (kb api/v1/cloud.json; the T030
+		// operations ListBuckets and DeleteBucket).
+		name := strings.TrimPrefix(strings.TrimPrefix(p, "/v1/cloud/project/"+uuProject+"/region/GRA/storage"), "/")
+		i := slices.Index(w.buckets, name)
+		switch {
+		case r.Method == http.MethodGet && name == "":
+			out := []map[string]string{}
+			for _, b := range w.buckets {
+				out = append(out, map[string]string{"name": b})
+			}
+			json.NewEncoder(rw).Encode(out)
+		case r.Method == http.MethodDelete && i >= 0:
+			if !w.keep {
+				w.buckets = slices.Delete(w.buckets, i, i+1)
+			}
+			fmt.Fprint(rw, `null`)
+		case r.Method == http.MethodDelete:
+			notFound()
 		default:
 			rw.WriteHeader(http.StatusMethodNotAllowed)
 		}

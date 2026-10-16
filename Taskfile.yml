@@ -162,7 +162,7 @@ tasks:
   # and, under the `live` tag, the L7 judge over recorded observations (T062);
   # the state-backend probe's Deny check against a fake S3 endpoint (T096); the storage-iam probe's
   # check against a fake API and S3 endpoint (T100); spec 003's swift-reach root's plan
-  # controls (T030) and token-residual root's (T032).
+  # controls (T030), token-residual root's (T032) and iam-urn root's (T034).
   # The Go controls run as two concurrent shards, -run and -skip of one pattern over
   # the same packages: the serial chain and observe tests of ./internal/live (they
   # set the process environment) run in a second process, which keeps the target
@@ -182,6 +182,7 @@ tasks:
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/storage-iam/companion
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/swift-reach
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/token-residual
+      - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/iam-urn
 
   # The account bootstrap's offline controls (T043; T057, T089 extend): the phases
   # guard, identify, passphrase, admin and revoke against a fake OVHcloud API and

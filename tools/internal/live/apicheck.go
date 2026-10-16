@@ -13,11 +13,15 @@ package live
 // list by name and delete an OAuth2 client (kb api/v1/me.json oauth2.clientRequest, oauth2.client,
 // oauth2.clientSecret), and the one read its policy grants, GET /cloud/project/{project}
 // (publicCloudProject:apiovh:get, kb api/v1/cloud.json); a created client's secret is the one
-// secret an answer keeps, for the caller's token request only. It never follows a redirect, caps every answer
+// secret an answer keeps, for the caller's token request only. Spec 003 T034 adds the four the
+// iam-urn check needs (kb api/v2/iam.json): read a policy (its probed read,
+// account:apiovh:iam/policy/get), list IAM resources by name, replace a resource's tags (its
+// probed write, account:apiovh:iam/resource/edit) and delete one tag key (its cleanup); a listed
+// resource keeps its URN and tags, each of iam.resource.AddTag's shape. It never follows a redirect, caps every answer
 // at maxBody, and keeps of an answer only the status, the IAM actions a refusal names (action-
 // shaped tokens of `details.unauthorizedActionsByIAM` and of the message "missing IAM
 // permissions: …"; kb manage-and-operate/iam/troubleshooting.mdx:21-31, T010 rows 10 and 14), a
-// created policy's uuid and the ids of the listed policies of the asked name or of an id asked to
+// created policy's uuid and createdAt (T034), the ids of the listed policies of the asked name or of an id asked to
 // be kept (T101), with their createdAt (T113). No error carries answer text, a token or a secret.
 
 import (
@@ -27,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -62,6 +67,12 @@ const (
 	APIListClients  APIOp = "ListClients"  // GET /me/api/oauth2/client, then each client: those of one name
 	APIDeleteClient APIOp = "DeleteClient" // DELETE /me/api/oauth2/client/{id} (v1)
 	APIGetProject   APIOp = "GetProject"   // GET /cloud/project/{project} (v1)
+
+	// The iam-urn check (spec 003 T034), all v2.
+	APIGetPolicy         APIOp = "GetPolicy"         // GET /iam/policy/{id}
+	APIListResources     APIOp = "ListResources"     // GET /iam/resource?resourceName={name}, every page: the resources of that name
+	APIPutResourceTags   APIOp = "PutResourceTags"   // PUT /iam/resource/{urn} with {"tags": …}
+	APIDeleteResourceTag APIOp = "DeleteResourceTag" // DELETE /iam/resource/{urn}/tag/{key}
 )
 
 // APICall is one operation; each takes only its own parts.
@@ -78,6 +89,18 @@ type APICall struct {
 	Keep []string
 	// Objects (BulkDeleteObjects): the objects to delete, 1 to maxBulk (cloud.StorageObjectDelete).
 	Objects []APIObject
+	URN     string            // PutResourceTags, DeleteResourceTag: an IAM resource URN
+	Tags    map[string]string // PutResourceTags: every tag the resource is to carry
+	Key     string            // DeleteResourceTag: the tag key
+}
+
+// APIResource is one IAM resource of a listing (iam.resource.Resource): its URN, name and tags.
+type APIResource struct {
+	URN, Name string
+	Tags      map[string]string // the listed tags whose key is of iam.resource.AddTag's shape (a value of another shape: "")
+	// Partial: the listing also showed tags of another shape, dropped here (their text never
+	// leaves the checker); a write of Tags back would remove them (T034 review r1).
+	Partial bool
 }
 
 // APIPolicy is one entry of a policy listing.
@@ -110,7 +133,7 @@ type APIAnswer struct {
 	Actions  []string    // a non-2xx answer's IAM actions, sorted, when it names any
 	ID       string      // a 2xx CreatePolicy answer's policy id, when a uuid
 	Policies []APIPolicy // a 2xx ListPolicies answer: the policies of the asked name, every page
-	// CreatedAt (a 2xx ListPolicies answer): by id, the createdAt of each policy in Policies that has
+	// CreatedAt (a 2xx ListPolicies answer, or a 2xx CreatePolicy answer for its id, T034): by id, the createdAt of each policy in Policies that has
 	// a readable one (iam.json iam.policy.Response.createdAt, RFC 3339; T113).
 	CreatedAt map[string]time.Time
 	// Names (a 2xx ListRegions or ListBuckets answer): the region or bucket names, as listed.
@@ -126,6 +149,8 @@ type APIAnswer struct {
 	// Secret (a 2xx CreateClient answer): the created client's secret. It goes to the token
 	// endpoint and nowhere else; no error or record carries it.
 	Secret string
+	// Resources (a 2xx ListResources answer): the listed resources of the asked name, every page.
+	Resources []APIResource
 }
 
 // maxPolicyBody bounds a CreatePolicy body: a probe's policy is a few hundred bytes.
@@ -151,6 +176,13 @@ var (
 	// apiIdentity is an OAuth2 client's IAM identity URN
 	// (urn:v1:eu:identity:credential:<account>/oauth2-<client id>, world.json).
 	apiIdentity = regexp.MustCompile(`^urn:v1:[a-z]{2,8}:identity:credential:[A-Za-z0-9._-]{1,64}/oauth2-[A-Za-z0-9._-]{1,128}$`)
+	// apiResourceURN is an IAM resource URN, urn:v1:<region>:resource:<type>:<id> (provider docs
+	// resources/iam_resource_tags.md); ValidResourceURN adds: no dot segment.
+	apiResourceURN = regexp.MustCompile(`^urn:v1:[a-z]{2,8}:resource:[A-Za-z][A-Za-z0-9]*:[A-Za-z0-9._:/@-]{1,512}$`)
+	// apiTagKey and apiTagValue are a resource tag's key and value (kb api/v2/iam.json,
+	// iam.resource.AddTag: '^[a-zA-Z0-9_.:/=+@-]{1,128}' and '{0,256}').
+	apiTagKey   = regexp.MustCompile(`^[a-zA-Z0-9_.:/=+@-]{1,128}$`)
+	apiTagValue = regexp.MustCompile(`^[a-zA-Z0-9_.:/=+@-]{0,256}$`)
 	// iamAction is an IAM action as OVHcloud names them (vps:apiovh:reboot,
 	// publicCloudProject:apiovh:region/storage/get).
 	iamAction = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*:apiovh:[A-Za-z0-9/_.*-]{1,200}$`)
@@ -192,6 +224,12 @@ func NewAPICheckerExpiry(ctx context.Context, a API, c Credential) (*APIChecker,
 	return &APIChecker{b: b, secret: c.ClientSecret}, exp, nil
 }
 
+// Carries reports whether s holds the identity's token or secret (spec 003 T034: a check that
+// holds several identities filters each answer against all of them).
+func (c *APIChecker) Carries(s string) bool {
+	return c.b.tok != "" && strings.Contains(s, c.b.tok) || c.secret != "" && strings.Contains(s, c.secret)
+}
+
 // Do sends one call. Only a refused call or a missing or unusable answer is an error; any status
 // is an answer.
 func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
@@ -215,6 +253,15 @@ func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
 		a, _, err = c.send(ctx, http.MethodGet, "/cloud/project/"+call.Project, nil, "", nil)
 	case APICreateClient, APIGetClient, APIListClients, APIDeleteClient:
 		a, err = c.clientOp(ctx, call)
+	case APIGetPolicy:
+		a, _, err = c.send(ctx, http.MethodGet, "/iam/policy/"+call.ID, nil, "", nil)
+	case APIListResources:
+		a, err = c.resources(ctx, call.Name)
+	case APIPutResourceTags:
+		body, _ := json.Marshal(map[string]map[string]string{"tags": call.Tags})
+		a, err = c.status(ctx, http.MethodPut, "/iam/resource/"+url.PathEscape(call.URN), body, "PUT /iam/resource/{urn}")
+	case APIDeleteResourceTag:
+		a, err = c.status(ctx, http.MethodDelete, "/iam/resource/"+url.PathEscape(call.URN)+"/tag/"+url.PathEscape(call.Key), nil, "DELETE /iam/resource/{urn}/tag/{key}")
 	default:
 		a, err = c.sweepOp(ctx, call)
 	}
@@ -461,10 +508,112 @@ func validObject(o APIObject) error {
 	return nil
 }
 
-// apiGate refuses an operation outside the named seventeen, a part it does not take, or a part of the wrong
+// ValidResourceURN reports whether u is an IAM resource URN a check may name in a path: of
+// apiResourceURN's shape (no wildcard, query or space) with no "." or ".." segment.
+func ValidResourceURN(u string) bool {
+	if !apiResourceURN.MatchString(u) {
+		return false
+	}
+	for _, seg := range strings.FieldsFunc(u, func(r rune) bool { return r == '/' || r == ':' }) {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// validTags: at most maxTags tags, each key and value of iam.resource.AddTag's shape.
+func validTags(tags map[string]string) bool {
+	if len(tags) > maxTags {
+		return false
+	}
+	for k, v := range tags {
+		if !apiTagKey.MatchString(k) || !apiTagValue.MatchString(v) {
+			return false
+		}
+	}
+	return true
+}
+
+// maxTags bounds the tags of one resource the checker reads or writes.
+const maxTags = 1000
+
+// status sends one request whose answer is its status (and, refused, the actions it names).
+func (c *APIChecker) status(ctx context.Context, method, path string, body []byte, what string) (APIAnswer, error) {
+	st, _, raw, err := c.exchange(ctx, method, path, body, "")
+	if err != nil {
+		return APIAnswer{}, fmt.Errorf("%s: no answer", what)
+	}
+	a := APIAnswer{Status: st}
+	if st < 200 || st > 299 {
+		a.Actions = refusedActions(raw, c.b.tok, c.secret)
+	}
+	return a, nil
+}
+
+// resources reads every page of GET /iam/resource?resourceName=<name> (v2 pagination, as list)
+// and keeps the resources of exactly that name: their URN and tags, each of its shape, or the
+// listing is an error. Resources of other names are skipped whatever their shape. A refused page
+// is the answer.
+func (c *APIChecker) resources(ctx context.Context, name string) (APIAnswer, error) {
+	const what = "GET /iam/resource"
+	path := "/iam/resource?resourceName=" + url.QueryEscape(name)
+	out := APIAnswer{Resources: []APIResource{}}
+	cursor := ""
+	for range maxPages {
+		st, next, raw, err := c.exchange(ctx, http.MethodGet, path, nil, cursor)
+		if err != nil {
+			return APIAnswer{}, fmt.Errorf("%s: no answer", what)
+		}
+		if st < 200 || st > 299 {
+			return APIAnswer{Status: st, Actions: refusedActions(raw, c.b.tok, c.secret)}, nil
+		}
+		var entries []*struct {
+			URN  string            `json:"urn"`
+			Name string            `json:"name"`
+			Tags map[string]string `json:"tags"`
+		}
+		if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal(trimmed, &entries) != nil {
+			return APIAnswer{}, fmt.Errorf("%s: the answer is not a resource listing", what)
+		}
+		for _, e := range entries {
+			switch {
+			case e == nil:
+				return APIAnswer{}, fmt.Errorf("%s: a listed entry is not a resource", what)
+			case e.Name != name:
+				continue
+			case !ValidResourceURN(e.URN):
+				return APIAnswer{}, fmt.Errorf("%s: a listed resource of the asked name has no usable urn", what)
+			case len(e.Tags) > maxTags:
+				return APIAnswer{}, fmt.Errorf("%s: a listed resource of the asked name has more than %d tags", what, maxTags)
+			}
+			res := APIResource{URN: e.URN, Name: e.Name, Tags: map[string]string{}}
+			for k, v := range e.Tags {
+				switch {
+				case apiTagKey.MatchString(k) && apiTagValue.MatchString(v):
+					res.Tags[k] = v
+				case apiTagKey.MatchString(k):
+					// The key is kept with an empty value, so a cleanup still sees and removes it
+					// (review r2); the value's text stays here.
+					res.Tags[k], res.Partial = "", true
+				default:
+					res.Partial = true
+				}
+			}
+			out.Resources = append(out.Resources, res)
+		}
+		out.Status = st
+		if cursor = next; cursor == "" {
+			return out, nil
+		}
+	}
+	return APIAnswer{}, fmt.Errorf("%s: more than %d pages", what, maxPages)
+}
+
+// apiGate refuses an operation outside the named twenty-one, a part it does not take, or a part of the wrong
 // shape, before any request. A refusal names the operation and the part, never a value.
 func apiGate(call APICall) error {
-	type parts struct{ project, region, name, id, body, objects bool }
+	type parts struct{ project, region, name, id, body, objects, urn, tags, key bool }
 	var want parts
 	switch call.Op {
 	case APIGetStorage, APIListObjects, APIDeleteBucket:
@@ -488,12 +637,18 @@ func apiGate(call APICall) error {
 		want = parts{project: true}
 	case APICreateClient, APIListClients:
 		want = parts{name: true}
-	case APIGetClient, APIDeleteClient:
+	case APIGetClient, APIDeleteClient, APIGetPolicy:
 		want = parts{id: true}
+	case APIListResources:
+		want = parts{name: true}
+	case APIPutResourceTags:
+		want = parts{urn: true, tags: true}
+	case APIDeleteResourceTag:
+		want = parts{urn: true, key: true}
 	default:
 		return fmt.Errorf("API check: operation %q refused", call.Op)
 	}
-	got := parts{call.Project != "", call.Region != "", call.Name != "", call.ID != "", call.Body != nil, call.Objects != nil}
+	got := parts{call.Project != "", call.Region != "", call.Name != "", call.ID != "", call.Body != nil, call.Objects != nil, call.URN != "", call.Tags != nil, call.Key != ""}
 	if got != want || call.Keep != nil && call.Op != APIListPolicies {
 		return fmt.Errorf("API check: %s with the wrong parts", call.Op)
 	}
@@ -537,6 +692,12 @@ func apiGate(call APICall) error {
 		return fmt.Errorf("API check: %s: the id is not a %s", call.Op, idKind)
 	case want.body && (len(call.Body) > maxPolicyBody || !json.Valid(call.Body)):
 		return fmt.Errorf("API check: %s: the body is not JSON of at most %d bytes", call.Op, maxPolicyBody)
+	case want.urn && !ValidResourceURN(call.URN):
+		return fmt.Errorf("API check: %s: the urn is not a resource urn", call.Op)
+	case want.key && (!apiTagKey.MatchString(call.Key) || strings.Contains(call.Key, "/") || strings.Trim(call.Key, ".") == ""):
+		return fmt.Errorf("API check: %s: the key is not a tag key usable in a path", call.Op)
+	case want.tags && !validTags(call.Tags):
+		return fmt.Errorf("API check: %s: a tag key or value is not of iam.resource.AddTag's shape", call.Op)
 	}
 	return nil
 }
@@ -566,10 +727,16 @@ func (c *APIChecker) send(ctx context.Context, method, path string, body []byte,
 	switch {
 	case method == http.MethodPost:
 		var created struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			CreatedAt string `json:"createdAt"`
 		}
 		if json.Unmarshal(raw, &created) == nil && apiUUID.MatchString(created.ID) {
 			a.ID = created.ID
+			// The created policy's createdAt (iam.policy.Response); spec 003 T034 times its
+			// calls from it.
+			if at, err := time.Parse(time.RFC3339Nano, created.CreatedAt); err == nil {
+				a.CreatedAt = map[string]time.Time{created.ID: at}
+			}
 		}
 	case page != nil:
 		// An array of policy objects (review r1: `null` would read as an empty listing). Policies

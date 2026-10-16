@@ -325,7 +325,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: `task test:live-lane`: each case fails on the stub for its stated reason.
   - Evidence: `specs/003-platform-feasibility/evidence/T033.md`; initial status `not-run`.
 
-- [ ] T034 [US3] Implement the iam-urn check in tools/internal/probes/live/identity/urn.go and the probe root tests/live/probes/iam-urn/
+- [x] T034 [US3] Implement the iam-urn check in tools/internal/probes/live/identity/urn.go and the probe root tests/live/probes/iam-urn/ — closed 2026-10-16, evidence: evidence/T034.md
   - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T033, T032 (the package's registry inputs), T038.
   - Scope: the check as data-model.md *Probe checks* fixes it, probing a read action (the exact `account:apiovh:iam/*` action and its API call taken from the IAM action reference on docs.ovhcloud.com and cited, UNVERIFIED until then) and the floor's write `account:apiovh:iam/resource/edit`, which only adds the tag key `lzprobe-iam-urn:run-id` to the probe bucket the root creates, never to the retained project; the check, not the root, creates the two OAuth2 clients and two policies `lzprobe-iam-urn-<run id>-project|account`, each with the probed and the control actions; the root creates only the probe bucket `lzprobe-iam-urn-<lower(run id)>` and the sensitive output `urn_check`; the `iam-urn` case in `probeCheck`; the root's `lz-check unit` line; its run-sheet row.
   - Verify: `task test:live-lane`: T033's cases green; `task test:traceability` green; `task docs:check` green.
