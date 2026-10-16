@@ -298,7 +298,7 @@ func TestVerifyArchive(t *testing.T) {
 		"empty-digest":     func(_ *testing.T, path, _ string) (string, string) { return path, "" },
 		"missing-file":     func(_ *testing.T, path, sum string) (string, string) { return path + ".absent", sum },
 		// A link is refused even to the right bytes: what was verified could
-		// be swapped behind it before use (prepare.py digest()).
+		// be swapped behind it before use (a single-link regular file).
 		"symlinked-path": func(t *testing.T, path, sum string) (string, string) {
 			if err := os.Symlink(path, path+".link"); err != nil {
 				t.Fatal(err)
@@ -364,25 +364,28 @@ type prepareFixture struct {
 // useFixturePins points the checks pin tables at the fixtures' digests for the
 // test's duration, so Prepare and Admit read the same single table. It,
 // setFixturePin and dropFixturePin are the only code that knows the tables'
-// shape.
+// shape. Packages keeps its rows (kind, version, source) with each digest
+// replaced, so the fixtures stand in for the pinned artefacts of each kind.
 func useFixturePins(t *testing.T, archives map[string]string) {
 	t.Helper()
 	artifacts, packages := checks.Artifacts, checks.Packages
 	t.Cleanup(func() { checks.Artifacts, checks.Packages = artifacts, packages })
-	checks.Artifacts, checks.Packages = map[string]string{}, map[string]string{}
+	checks.Artifacts, checks.Packages = map[string]string{}, maps.Clone(packages)
 	for name, path := range archives {
 		setFixturePin(name, Hash(readTestFile(t, path)))
 	}
 }
 
 // setFixturePin pins name to sum: a tool's release archive in Artifacts,
-// anything else in Packages.
+// anything else as the digest of its row in Packages.
 func setFixturePin(name, sum string) {
 	if _, tool := checks.Versions[name]; tool {
 		checks.Artifacts[name] = sum
 		return
 	}
-	checks.Packages[name] = sum
+	row := checks.Packages[name]
+	row.SHA256 = sum
+	checks.Packages[name] = row
 }
 
 func dropFixturePin(name string) {

@@ -313,7 +313,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
   - Verify: `task test:runtime-image` and, on the workstation, `go -C tools test -tags hostlimits -run TestHostLimits ./cmd/lz-offline`: T029's cases green. Host step (premise P4): each CI target is run through the installed entry inside a measuring `systemd-run --user --scope`, its `memory.peak` and `pids.peak` are recorded, the constants are twice the largest peak (research R5), and every CI target passes through a locally built entry under them. Guard G22 mutants are killed. If P2 is refuted, the fallback of research R5 is implemented and FR-013 revised first. Publication and the CI pin are out of scope.
   - Evidence: `evidence/T032.md`; PR; initial status `not-run`.
 
-- [ ] T033 [US3] Port runtime preparation to tools/internal/bundle/prepare.go with a `prepare` subcommand in tools/cmd/lz-pack/main.go, move the pins `prepare.py` holds alone into `checks.Packages` in tools/internal/checks, and remove tools/cmd/lz-offline/prepare.py
+- [x] T033 [US3] Port runtime preparation to tools/internal/bundle/prepare.go with a `prepare` subcommand in tools/cmd/lz-pack/main.go, move the pins `prepare.py` holds alone into `checks.Packages` in tools/internal/checks, and remove tools/cmd/lz-offline/prepare.py — closed 2026-10-18, evidence: evidence/T033.md
   - Requirements: FR-014; ADRs: 0002, 0021. Depends on: T030, T032.
   - Verify: `task test:runtime-image`: T030's cases green; `checks.Packages` is the one pin table; `prepare.py` gone and referenced only in history; the existing lz-pack and lz-offline rows unchanged.
   - Evidence: `evidence/T033.md`; PR; initial status `not-run`.

@@ -102,22 +102,9 @@ func walk(root string, visit func(relative string, value Identity) error) error 
 			value.Kind = "file"
 			value.Value = Hash(bytes)
 		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(path)
+			target, err := admittedLink(root, path, relative)
 			if err != nil {
 				return err
-			}
-			// Prepared rootfs links are allowed only inside its root; candidate
-			// and helper links are never admitted.
-			imageRoot := filepath.Join(root, "resources/rootfs")
-			if !strings.HasPrefix(path, imageRoot+"/") {
-				return fmt.Errorf("RESOURCE_LINK: %s", relative)
-			}
-			resolved := filepath.Clean(filepath.Join(filepath.Dir(path), target))
-			if filepath.IsAbs(target) {
-				resolved = filepath.Join(imageRoot, target)
-			}
-			if resolved != imageRoot && !strings.HasPrefix(resolved, imageRoot+"/") {
-				return fmt.Errorf("RESOURCE_LINK: escaping link")
 			}
 			value.Kind = "symlink"
 			value.Value = target
@@ -126,6 +113,24 @@ func walk(root string, visit func(relative string, value Identity) error) error 
 		}
 		return visit(relative, value)
 	})
+}
+
+// admittedLink returns the target of the link at path. Prepared rootfs links
+// are allowed only inside its root and must resolve inside it; candidate and
+// helper links are never admitted.
+func admittedLink(root, path, relative string) (string, error) {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	imageRoot := filepath.Join(root, "resources/rootfs")
+	if !strings.HasPrefix(path, imageRoot+"/") {
+		return "", fmt.Errorf("RESOURCE_LINK: %s", relative)
+	}
+	if !linkInside(imageRoot, path, target) {
+		return "", fmt.Errorf("RESOURCE_LINK: escaping link")
+	}
+	return target, nil
 }
 
 // Inventory returns the identity of every entry under root/resources, keyed

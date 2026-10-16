@@ -8,6 +8,9 @@
 // writing, the layer is extracted again and what it holds must pass the same
 // admission, and its entry must have that digest compiled in, so a layout is
 // kept only if the entry it carries admits the bundle it carries.
+//
+// `lz-pack prepare` writes that bundle first, from the fetched artefacts
+// the pin tables pin (internal/bundle Prepare).
 package main
 
 import (
@@ -505,6 +508,9 @@ func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "prepare" {
+		os.Exit(prepareMain(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	dir := flag.String("bundle", "", "prepared runtime bundle directory (absolute)")
 	manifestSHA := flag.String("manifest-sha", "", "resources.json digest the bundle's entry was built with")
 	launcher := flag.String("bwrap", "/usr/bin/bwrap", "launcher the bundle manifest pins (absolute)")
