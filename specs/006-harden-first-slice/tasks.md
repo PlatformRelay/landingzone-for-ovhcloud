@@ -308,7 +308,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
   - Verify: `task test:runtime-image`: every case fails against the stub.
   - Evidence: `evidence/T031.md`; PR; initial status `not-run`.
 
-- [ ] T032 [US3] Apply memory and task limits in tools/cmd/lz-offline/limits.go and tools/cmd/lz-offline/main.go, with limits set from measured peaks
+- [x] T032 [US3] Apply memory and task limits in tools/cmd/lz-offline/limits.go and tools/cmd/lz-offline/main.go, with limits set from measured peaks — closed 2026-10-16, evidence: evidence/T032.md
   - Requirements: FR-013, SC-001, SC-003; ADRs: 0008, 0021. Depends on: T029.
   - Verify: `task test:runtime-image` and, on the workstation, `go -C tools test -tags hostlimits -run TestHostLimits ./cmd/lz-offline`: T029's cases green. Host step (premise P4): each CI target is run through the installed entry inside a measuring `systemd-run --user --scope`, its `memory.peak` and `pids.peak` are recorded, the constants are twice the largest peak (research R5), and every CI target passes through a locally built entry under them. Guard G22 mutants are killed. If P2 is refuted, the fallback of research R5 is implemented and FR-013 revised first. Publication and the CI pin are out of scope.
   - Evidence: `evidence/T032.md`; PR; initial status `not-run`.

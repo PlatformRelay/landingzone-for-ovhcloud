@@ -564,12 +564,13 @@ func run() (result error) {
 	args = append(args, "--remount-ro", "/tcb", "--remount-ro", "/tools", "--chdir", "/candidate", "/tcb/lz-offline", "--inside", target)
 	args = append(args, extra...)
 	stdout, stderr := newChildOutput(cancel)
-	command := exec.CommandContext(ctx, r.Bwrap, args...)
-	command.Env = []string{}
-	command.Dir = "/"
-	command.WaitDelay = 5 * time.Second
-	command.Stdout, command.Stderr = stdout, stderr
-	childErr := command.Run()
+	// The child runs in a transient scope with the entry's memory and task limits (FR-013); a host
+	// that cannot apply them is refused before the child starts.
+	outcome, err := runLimited(ctx, systemScopeHost(executable), limits{memoryMax: entryMemoryMax, tasksMax: entryTasksMax},
+		scopeUnit(), r.Bwrap, args, stdout, stderr)
+	if err != nil {
+		return err
+	}
 	if err := os.RemoveAll(scratch); err != nil {
 		return fmt.Errorf("CLEANUP_FAILED: %w", err)
 	}
@@ -584,8 +585,8 @@ func run() (result error) {
 	if _, err := os.Stdout.Write(stdout.buffer.Bytes()); err != nil {
 		return err
 	}
-	if childErr != nil {
-		return fmt.Errorf("CHILD_FAILED: %w", childErr)
+	if err := childResult(target, outcome); err != nil {
+		return err
 	}
 	switch target {
 	case "verify:toolchain":
@@ -597,6 +598,9 @@ func run() (result error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == scopeHoldMode {
+		os.Exit(scopeHolder(os.Args[2:]))
+	}
 	if (len(os.Args) == 3 || len(os.Args) == 4) && os.Args[1] == "--inside" {
 		if err := inside(os.Args[2], os.Args[3:]); err != nil {
 			fail(err)
