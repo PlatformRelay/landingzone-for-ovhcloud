@@ -90,7 +90,7 @@ Holistic run at B: not run yet.
 | tools/internal/live/files_test.go:TestFilesCredentialSetWriter (fresh-write, crash-after-first-file, crash-after-files, crash-after-dir-sync, crash-after-pointer-tmp, crash-after-switch, keeps-current-and-previous); `test:live-lane` red | US1 | T007 | T013 |
 | tools/internal/live/credentials_test.go:TestCredentialSetPathResolves (3), TestCredentialSetPathPointerInvalid (8), TestCredentialsFromSets (generation-after-switch, each-writer-its-own-pointer) — cleared by T014; TestCredentialSetWriteKeepsBinding — cleared by T013; `test:live-lane` red | US1 | T008 | T013, T014 |
 | tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | T015 |
-| tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | |
+| tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | T016 |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
