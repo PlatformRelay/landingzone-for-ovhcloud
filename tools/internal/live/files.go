@@ -597,7 +597,12 @@ func scratchHome() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return d, os.Chmod(d, 0o700)
+	// A failed chmod returns no home, so the caller has nothing to remove: remove it here.
+	if err := os.Chmod(d, 0o700); err != nil {
+		removeTree(d)
+		return "", err
+	}
+	return d, nil
 }
 
 // CondScratch names the refusal of a TMPDIR inside the checkout: the children's scratch HOME and
