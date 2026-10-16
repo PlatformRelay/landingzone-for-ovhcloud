@@ -2,7 +2,7 @@
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `lane-007` (worktree `003-probes`) · Base: `origin/main` · Started: 2026-10-16 · Reviewers: two-model (review leg 1 and, on triggers, the strong review leg); spec-loop-duo under D117
 Scope: D119. The live slice runs in this order: leftover-listing retry, A17, a disposable budget-alert run, the retained-resource list, then the final chain by 2026-10-22. 2026-10-23 is for verification and cleanup only. The narrowed locks (A24), the second project, KD-3, B1–B3 and AgentEx are out of scope.
-Next: L — T001 (settles A17)
+Next: L — US2 (T008 alias tests, then T009)
 Budget (Claude review legs, D117 cap 120 across the goal): about 79 used before this loop; per task, 1 strong leg per triggered round (most of 007 is live lane), times about 2 rounds; stage B reserve 3. Spend: voucher ceiling about 5 €; 0 € card; no new live start below 20 € of credit or after 2026-10-23 23:00 (Europe/Berlin).
 
 ## Stages
@@ -26,6 +26,10 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | R2 | A run interrupted before its baseline blocked every later probe | critical | both | fix | start-up phases; pre-create runs retire | no |
 | R2 | A readable baseline was not enough authority to delete | critical | leg 1 | fix | strict validation; delete only plan-matching alerts; owner path for a lost baseline | no |
 | R2 | Scalar alert output could not reach Observe; archiving broke storage-iam recovery; T006/T007 gate | major | both | fix | 56036a2 | no |
+| L T003 | Backoff fixture values equal; no nil-Backoff (production default) case; no 428/430/600 rows; transportError.Error() drops the inner error | minor | strong | fix in T006 | T006 adds a {1ms,2ms} case, a nil case (5 s wait) and an empty non-nil case, the extra status rows, and pins the Error() choice | no |
+| L T004 | Probe case lacks a retry-line assertion; the shared budget is indistinguishable from a copy made at check start | minor | strong | fix in T006 | T006 adds the assertion with a mutant dropping Term, and G24 mutants for the budget copy | no |
+| L T006 | The chain's baseline listing before the first apply still retries nothing; a transient error stops the run before any create | — | task | decide no (for now) | Coordinator minor decision: fail-safe (nothing created, rerun); a follow-up for a later spec if transient pre-apply failures recur | no |
+| L T006 | The element-decode row takes the last page's attempt number | minor | review | defer | stage B (record only) | no |
 
 ## Tasks
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
