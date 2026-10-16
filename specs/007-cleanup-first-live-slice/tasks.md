@@ -75,7 +75,7 @@ Independent test: V001. Test tasks T003–T005, then implementation tasks T006�
   - Verify: `task test:live-lane`: every case except the *pin* fails against the stub `transientListing` and the unchanged lister, for its stated reason.
   - Evidence: `evidence/T003.md`; initial status `not-run`.
 
-- [ ] T004 [US1] Write the shared-budget wiring tests in tools/internal/live/chain_retry_budget_test.go
+- [x] T004 [US1] Write the shared-budget wiring tests in tools/internal/live/chain_retry_budget_test.go — closed 2026-10-16, evidence: evidence/T004.md
   - Requirements: FR-001, SC-001; ADRs: 0008, 0024. Depends on: T002.
   - Cases (given / when / then → defect exposed), the chain through `ChainOptions` with fake children, fake API and a fake `waitClock`:
     - given a destroy deadline whose budget the retained-state reads spend on their retries (spec 006's case) / when the next listing answers 500 once / then it is not retried (`reason: budget`) and the report is not `pass` → exposes the listing check built with a fresh or nil-as-unbounded budget.
