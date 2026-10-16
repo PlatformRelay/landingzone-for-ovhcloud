@@ -96,6 +96,10 @@ Feature artefacts: research.md, data-model.md, contracts/checks.md, quickstart.m
 
 ## Verification strategy
 V001–V008 have offline positive/negative controls before protected live targets exist.
+The probe checks' offline controls (T029–T036) run in spec 005's `task test:live-lane` through the
+offline entry, which admits only a Task target; their signatures are in data-model.md
+*Probe checks*. Their live runs (T025–T028) are the coordinator's under D117, from a clean clone
+at the reviewed `main` SHA, and record observation, cost and a clean leftover check.
 Every live observation records exact source/config digest, tool pin, principal route,
 project/resource id, method, expected denial/success, actual status/reason and cleanup.
 An outage, 404 or expired token does not prove authorisation: run a same-route positive

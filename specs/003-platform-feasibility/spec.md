@@ -203,7 +203,9 @@ unknown federation account; duplicate issuer; expired token mid-apply; denial ca
 ## Implementation surface
 Probe roots live in `tests/live/probes/<root>/` and run through `task live:probe` (spec 005's
 runner); their Go checks and helpers live in `tools/internal/probes/live/` packages such as
-`state`, `storageiam` and `identity` (D113). Root
+`state`, `storageiam` and `identity` (D113), each check a `live.ProbeCheck` that
+`tools/cmd/lz-live/probe.go` maps to its root, as spec 005's `state-backend` and `storage-iam`
+checks are (data-model.md *Probe checks*). Root
 `tests/fixtures/` holds captured outputs. Decisions go to `docs/adr/`; observations to
 `docs/reference/verification-status.md`.
 
@@ -225,6 +227,7 @@ availability and independent recovery remain unverified. No second human is requ
 that limited scope, and maintainer-loss/production two-person recovery is not qualified.
 If required recovery/account scope is absent, the affected probe
 remains blocked; a project's existence does not authorize account-wide changes.
-Every live run goes through spec 005's runner (`lz-live probe`) as an owner session;
+Every live run goes through spec 005's runner (`lz-live probe`) as an owner session, except the
+probe runs T025–T028, which the coordinator runs under the owner's standing grant (D117);
 numerical lag/credential windows are required where a check names them. No automatic orders,
 production floor binding or ordinary-account singleton changes are authorized.
