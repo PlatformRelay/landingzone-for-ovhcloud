@@ -84,7 +84,7 @@ Independent test: V001. Test tasks T003–T005, then implementation tasks T006�
   - Verify: `task test:live-lane`: the three cases fail on today's code.
   - Evidence: `evidence/T004.md`; initial status `not-run`.
 
-- [ ] T005 [US1] Write record-keeping tests in tools/internal/live/sweep_record_test.go and tools/cmd/lz-live/probe_cleanup_record_test.go
+- [x] T005 [US1] Write record-keeping tests in tools/internal/live/sweep_record_test.go and tools/cmd/lz-live/probe_cleanup_record_test.go — closed 2026-10-16, evidence: evidence/T005.md
   - Requirements: FR-002; ADRs: 0008, 0024. Depends on: T002.
   - Cases (given / when / then → defect exposed):
     - given a probe run directory with `summary.json`, `leftovers.json`, `errors.txt`, `listings/network.json`, `inventory.jsonl` and `baseline.json` / when `--cleanup <run-id>` runs against fakes / then every file but `inventory.jsonl`, `baseline.json` and `observations.json` is under `attempts/1/` unchanged, a copy of `observations.json` is there too, those three stay in place, and new records are written beside → exposes the overwrite that lost T027/T028's error text, including `errors.txt` and the listings.

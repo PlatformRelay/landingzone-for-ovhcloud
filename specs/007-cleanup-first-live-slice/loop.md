@@ -34,6 +34,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T002 | CLOSED: trace already held (TRACE_OK 001, 005, 006, 007; ci-source and inputs name 007) | leg 1, round 1; no strong leg (evidence-only) | none |
 | T003 | CLOSED: 16 tests (14 task cases, a bounds case, the classifier table) red on the stubs for their stated reasons; 3 pins pass | leg 1 and strong leg, rounds 1 and 2 | deferred to T006: distinct backoff values, nil/empty `Backoff`, 428/430/600 rows, `transportError` text |
 | T004 | CLOSED: 3 tests (chain budget spent, chain budget left, probe at the destroy deadline: admitted/refused) red on today's code for their stated reasons | leg 1 and strong leg, round 1 | deferred to T006: probe retry-line assertion with a `Term` mutant; shared-versus-copied budget mutant |
+| T005 | CLOSED: 5 tests (keepRecord: whole record, next slot, nothing to move; entry: cleanup keeps the record, second cleanup's undo still reads observations.json) red on the stub for their stated reasons; 1 entry pin (cleanup without a record) passes | leg 1 and strong leg, round 1 | deferred to T007: `TestKeepRecordNextSlot` move check via G25 "slot reuse"; spec.md "next free number" vs data-model "1 + highest": coordinator to align spec.md wording |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -57,6 +58,11 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | chain_retry_budget_test.go:TestChainListingRetryBudgetSpent | US1 | T004 | |
 | chain_retry_budget_test.go:TestChainListingRetryBudgetLeft | US1 | T004 | |
 | chain_retry_budget_test.go:TestProbeListingRetryBudget (admitted, refused) | US1 | T004 | |
+| sweep_record_test.go:TestKeepRecordArchivesWholeRecord | US1 | T005 | |
+| sweep_record_test.go:TestKeepRecordNextSlot (second-cleanup, after-a-gap) | US1 | T005 | |
+| sweep_record_test.go:TestKeepRecordNothingToMove | US1 | T005 | |
+| probe_cleanup_record_test.go:TestProbeCleanupKeepsRecord | US1 | T005 | |
+| probe_cleanup_record_test.go:TestProbeCleanupKeepsObservationsForUndo | US1 | T005 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -71,3 +77,6 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - An exemption keyed on a name (the state ref under KD-1) needs a case where that name is also used in the role the rule protects (a tenant environment owning `STATE`). (T001)
 - A retry case counts requests per page, not per path (a multi-page fixture makes a correct retry send more than "attempts" requests); a backoff fixture needs distinct values, or the second wait is untested. (T003)
 - A "same budget" wiring case needs state the fresh budget lacks (a reserve raised by a slow read after the spending wait); an edge against a code-computed deadline anchors the fake clock at a child's real deadline (`childStarted`) and asserts the anchor. (T004)
+- A stub for a case whose answer is the empty value ("" when there is nothing to move) must return an error, or that case is a pin against the stub. (T005)
+- When a test task's case only bites once a later task wires the code (observations.json hidden by the archive), add an assertion only the wiring satisfies (the archive copy) for the red, and prove the other half on a scratch implementation plus its mutant. (T005)
+- `TestFilesOnlyWriter` confines file writers (`os.Rename`, `os.Mkdir*`, `os.WriteFile`) to `files.go`: T007's `keepRecord` writes through `files.go`. (T005)
