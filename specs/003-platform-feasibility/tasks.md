@@ -218,7 +218,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
 ### The runner's sweep (before every probe's implementation)
 
-- [ ] T037 [US1] Write the runner's sweep tests in tools/internal/live/sweep_test.go with the stub of tools/internal/live/sweep.go
+- [x] T037 [US1] Write the runner's sweep tests in tools/internal/live/sweep_test.go with the stub of tools/internal/live/sweep.go — closed 2026-10-16, evidence: evidence/T037.md
   - Requirements: FR-002, FR-003; ADRs: 0008, 0021. Depends on: 005/T047 (live lane with trap destroy and leftover check), 005/T113 (`Recorded` on `--cleanup`). The runner skips Undo when the root published nothing (tools/internal/live/runner.go:743-745) and, when no state file was ever written, removes the passphrase and the probe record (runner.go:1241-1246), so a `--cleanup` cannot find the run again. Whether tofu writes root outputs after a partial apply failure is UNVERIFIED.
   - Cases (given / when / then → defect exposed), against the runner's fake children, fake API and fake terminal (as `test:live-lane`'s runner tests do):
     - given a probe check with a Sweep and an apply that fails after creating one resource (its answer lost, no state entry, no output) / when the run ends / then Sweep runs with the run id and the project from probe.env, after destroy and before the leftover check, and Undo is not run → exposes an orphan nobody deletes.

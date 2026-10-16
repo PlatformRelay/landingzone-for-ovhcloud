@@ -1143,6 +1143,10 @@ type ProbeCheck struct {
 	// unreadable file, or an error from Recorded, fails the undo step without Undo, so the root is
 	// kept (T113, T101 gap 2). A run hands Undo what its own Observe saw and never calls Recorded.
 	Recorded func(record []byte, term io.Writer) error
+	// Sweep (optional) deletes, by listing exact run-derived names, every resource the root
+	// or the check may have created, whether or not an output or a state entry exists; it
+	// never reads a published output. nil: none (spec 005's roots). The runner's call: sweep.go.
+	Sweep func(ctx context.Context, runID, projectID string, term io.Writer) error
 }
 
 // RunIDPattern is the shape of a run id: YYYYMMDDThhmmssZ-<4 hex>.
