@@ -260,7 +260,7 @@ T016 (shared `test:live-lane`).
 ## Phase 4: User Story 4 — Checks re-run when what they read changes (P2)
 Independent test: V003, V004 (T001–T004 above).
 
-- [ ] T027 [US4] Write unreconciled-row and stage-lock tests in tools/internal/stacks/generate_test.go
+- [x] T027 [US4] Write unreconciled-row and stage-lock tests in tools/internal/stacks/generate_test.go — closed 2026-10-16, evidence: evidence/T027.md
   - Requirements: FR-011; ADRs: 0007, 0011. Depends on: none.
   - Cases (given / when / then → defect exposed):
     - given a manifest row without a reconciled stack / when `Generate` runs / then `*GenerateError{Code: "UNRECONCILED_ROW"}` and nothing written → exposes half-generated trees.
