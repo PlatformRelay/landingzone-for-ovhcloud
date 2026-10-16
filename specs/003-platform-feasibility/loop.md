@@ -38,6 +38,8 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | L T029 | Sweep may delete a bucket still holding objects (fake allows it) | minor | review | defer | T030 decides, T025 observes (UNVERIFIED) | no |
 | L T029 | Foreign-host `auth_url` row | minor | review | defer | T030 | no |
 | L T029 | `ProbeCheck.Sweep` lands in T038; the stub has a `sweep` method with its signature | — | task | accept | whichever of T030/T038 lands second wires `Sweep: o.sweep` | no |
+| L T031 | Read allowed again after a refusal; an allowed poll exactly at expiry | minor | review | defer | T032 decides, T026 observes | no |
+| L T031 | data-model.md `Upper` comment says "zero when none observed" | minor | review | defer | T032 aligns data-model with the stub | no |
 | R2 | The lost-create-response gap also exists in spec 005's probes and chains | — | coordinator | defer | hand-off: what no sensor covers; the leftover check and the stop rule are the guard | no |
 
 ## Tasks
@@ -50,6 +52,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
 | tools/internal/probes/live/storageiam/swiftreach_test.go: TestJudgeReach, TestSwiftObserve, TestSwiftUndo, TestSwiftSweep, TestSwiftValidate, TestSwiftLeak; `test:live-lane` red | US2 swift-reach | T029 | |
+| tools/internal/probes/live/identity/residual_test.go: TestResidualWindow, TestResidualObserve, TestResidualUndo, TestResidualSweep, TestResidualValidate, TestResidualLeak; `test:live-lane` red | US3 token-residual | T031 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -62,4 +65,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 ## Lessons
 - `test:live-lane` stops at its first red Go line: in a red window, later lines do not run; each task's final run must say which lines ran. (T029)
 - A fake's hangup on a GET is undone by net/http's silent re-send: disable keep-alive and assert the request count. "Both directions" is scripted per direction; a Sweep case needs a resource outside the default region and a partial set. (T029)
+- A case that ends in a stop asserts the stop was reached (Settle used up, deadline or expiry reached), not only an upper bound; compare the record with every fake answer one to one; with a fake clock, script one refused control so issue time and delete time differ. (T031)
 - See spec 006's loop.md *Lessons*; they apply here, especially the entry command shape, whole-checkout scratch copies for live-package mutants, and vacuity checks on harness runs.
