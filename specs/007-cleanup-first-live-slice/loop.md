@@ -32,10 +32,27 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 |---|---|---|---|
 | T001 | CLOSED: A17 refuses; B5 offline, A24 out | leg 1, round 1; no strong leg (docs-only) | T008 lacks the row "second tenant owns `STATE`" (R2 *Consequence*): coordinator to add |
 | T002 | CLOSED: trace already held (TRACE_OK 001, 005, 006, 007; ci-source and inputs name 007) | leg 1, round 1; no strong leg (evidence-only) | none |
+| T003 | CLOSED: 16 tests (14 task cases, a bounds case, the classifier table) red on the stubs for their stated reasons; 3 pins pass | leg 1 and strong leg, rounds 1 and 2 | deferred to T006: distinct backoff values, nil/empty `Backoff`, 428/430/600 rows, `transportError` text |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
 |---|---|---|---|
+| leftovers_retry_test.go:TestListingRetryTransient500 | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryClasses | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryBodyReadReset | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryToken (503-once, 401) | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryResumesPage | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryObjectRead | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryExhausted | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryStillReconciles | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryPermanent/*/record | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryRepeatingCursor/record | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryRecordedInLeftoversJSON | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryDeadline | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryBudget (refuses, nil) | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryCancelled | US1 | T003 | |
+| leftovers_retry_test.go:TestListingRetryRedacted | US1 | T003 | |
+| leftovers_retry_test.go:TestTransientListing | US1 | T003 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -48,3 +65,4 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 ## Lessons
 - See spec 006's and spec 003's loop.md *Lessons*; they apply here. Key ones: the entry command shape; whole-checkout scratch copies for live-package mutants; fakes must mock attributes the live API leaves empty (spec 003 T039); a create whose id is returned but whose wait fails leaves the resource outside state (2026-10-16 chain incident).
 - An exemption keyed on a name (the state ref under KD-1) needs a case where that name is also used in the role the rule protects (a tenant environment owning `STATE`). (T001)
+- A retry case counts requests per page, not per path (a multi-page fixture makes a correct retry send more than "attempts" requests); a backoff fixture needs distinct values, or the second wait is untested. (T003)

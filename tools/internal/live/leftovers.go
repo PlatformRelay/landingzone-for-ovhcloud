@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Leftover check G9 (FR-011, research R12 *Leftover kind matrix*): after destroy, independent
@@ -83,6 +84,48 @@ type LeftoverCheck struct {
 	// Red is the run's redactor (FR-004): when non-nil, the bearer token the check obtains is
 	// added to it before the first listing.
 	Red *Redactor
+	// Backoff is the wait before each retry of a transient listing failure (spec 007 FR-001): nil
+	// is defaultListingBackoff, an empty non-nil slice retries nothing.
+	Backoff []time.Duration
+	// Budget is the run's shared retry budget (spec 006 FR-008); nil admits no wait.
+	Budget *retryBudget
+	// Clock is the time a retry reads and waits on; nil is wallClock{}.
+	Clock waitClock
+	// Term receives one line per retry; nil discards them.
+	Term io.Writer
+}
+
+// defaultListingBackoff is the leftover check's retry waits (spec 007 FR-001): three attempts per
+// request.
+var defaultListingBackoff = []time.Duration{5 * time.Second, 15 * time.Second}
+
+// transientListing classifies a listing failure (spec 007 FR-001, data-model *Listing attempt*).
+// Stub (spec 007 T003): not implemented until T006.
+func transientListing(err error) (class string, retry bool) {
+	return "", false
+}
+
+// transportError is a request that failed in transport: while sending, while reading the
+// answer's body, or the token request's transport (spec 007 FR-001). Stub (T003): not yet
+// returned by apiLister.request until T006.
+type transportError struct {
+	path string
+	err  error
+}
+
+func (e *transportError) Error() string { return fmt.Sprintf("GET %s: transport failure", e.path) }
+
+func (e *transportError) Unwrap() error { return e.err }
+
+// ListingAttempt is one failed request of the leftover check (spec 007 FR-002), kept in
+// leftovers.json under attempts.
+type ListingAttempt struct {
+	Path    string `json:"path"`
+	Attempt int    `json:"attempt"`
+	Status  int    `json:"status,omitempty"`
+	Class   string `json:"class"`
+	Retried bool   `json:"retried"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // Leftover is a listed resource that should not exist.
@@ -103,6 +146,8 @@ type Report struct {
 	Listings  map[string][]json.RawMessage `json:"-"`
 	// Listed is provider type -> the id of every resource listed (the chain's baseline record).
 	Listed map[string][]string `json:"-"`
+	// Attempts is every failed request of the check (spec 007 FR-002).
+	Attempts []ListingAttempt `json:"attempts"`
 }
 
 const (
