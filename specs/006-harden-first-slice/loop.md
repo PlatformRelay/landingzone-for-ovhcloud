@@ -52,6 +52,8 @@ Holistic run at B: not run yet.
 | L T011 | A timeout while reading a 200 body is reported as "does not decode" | minor | review leg 1 | defer | stage B (no leak) | no |
 | L T011 | The leftover lister reports a hostile 3xx as "request failed" | minor | review leg 1 | defer | stage B (outside FR-003) | no |
 | L T011 | Account-mismatch refusal no longer shows the answered account id (a hostile answer could carry secret text) | — | task | decided | owner 2026-10-16: keep it omitted | done |
+| L T013 | A retry with the same run id after a crash past the switch is refused | minor | strong | defer | T014: the caller treats it as already written | no |
+| L T013 | T013's added tests were written after the code (not test-first) | minor | task | accept | red shown by 17 mutants and the pre-fix runs; recorded in evidence | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
@@ -79,7 +81,7 @@ Holistic run at B: not run yet.
 | tools/cmd/lz-check/main_test.go:TestRegistryInputsCoverGoDeps (go_deps_covered: 57 rows; traceability_reads_the_registry); `test:traceability` red | Setup | T003 | T004 |
 | tools/internal/live/hardening_test.go:TestBindingErrorsQuiet (token-redirect, auth-details-redirect, token-undecodable, auth-details-undecodable); tools/cmd/lz-live/probe_test.go:TestProbeBindingErrorQuiet (token, auth-details); `test:live-lane` red | US1 | T005 | T011 |
 | tools/internal/live/chain_test.go:TestChainLeftoverTokenRedacted (token-as-id, token-inside-longer-id, token-split-across-writes, registered-before-first-listing); `test:live-lane` red | US1 | T006 | T012 |
-| tools/internal/live/files_test.go:TestFilesCredentialSetWriter (fresh-write, crash-after-first-file, crash-after-files, crash-after-dir-sync, crash-after-pointer-tmp, crash-after-switch, keeps-current-and-previous); `test:live-lane` red | US1 | T007 | |
+| tools/internal/live/files_test.go:TestFilesCredentialSetWriter (fresh-write, crash-after-first-file, crash-after-files, crash-after-dir-sync, crash-after-pointer-tmp, crash-after-switch, keeps-current-and-previous); `test:live-lane` red | US1 | T007 | T013 |
 | tools/internal/live/credentials_test.go:TestCredentialSetPathResolves (3), TestCredentialSetPathPointerInvalid (8), TestCredentialsFromSets (generation-after-switch, each-writer-its-own-pointer) — cleared by T014; TestCredentialSetWriteKeepsBinding — cleared by T013; `test:live-lane` red | US1 | T008 | |
 | tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | |
 | tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | |
@@ -106,6 +108,7 @@ Holistic run at B: not run yet.
 - An allow-list test needs, per reserved name, a row with the exact prefix and the rest in another case; refusal rows run through the same closures as existing refused rows and check the error names the refused name. (T010)
 - A field the answer chose is a body quote too: stop echoing it instead of bounding it. Before changing an error's type, grep for `errors.As` checks and text matches on it. (T011)
 - A requirement naming "the run's redactor" covers every caller of the guarded type: grep the production callers before calling it done; the owner of a redactor sets it on what it calls, a caller's redactor never wins. (T012)
+- A writer that deletes old copies needs a per-kind allow-list of what it may write; validate map keys as given, never look values up by a cleaned key; an fsync/rename seam makes durability ordering testable (check the first sync after the switch). Mutant loops must always end. (T013)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
