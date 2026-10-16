@@ -55,7 +55,7 @@ SHA, outcome, retries seen, approximate cost and the credit left.
 Independent test: V001. Test tasks T003–T005, then implementation tasks T006–T007. Spec 006's T022–T026
 (PR #123) are on `main` (`15bc579`); the signatures of data-model.md are those of `main`.
 
-- [ ] T003 [US1] Write listing-retry tests in tools/internal/live/leftovers_retry_test.go
+- [x] T003 [US1] Write listing-retry tests in tools/internal/live/leftovers_retry_test.go — closed 2026-10-16, evidence: evidence/T003.md
   - Requirements: FR-001, SC-001; ADRs: 0008, 0024. Depends on: T002.
   - Cases (given / when / then → defect exposed), fake `Lister` or fake HTTP server scripted per path and attempt, `Backoff` of 1 ms, a fake `waitClock`, a generous `retryBudget`:
     - given `/cloud/project/<p>/network/private` answering 500 then 200 / when `Check` runs / then `pass`, one line `LZ-LIVE retry listing … 500 (attempt 2 of 3)` on `Term`, and one `ListingAttempt{Status: 500, Retried: true}` → exposes today's single attempt (T027's `fail`).
