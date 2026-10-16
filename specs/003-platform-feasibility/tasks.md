@@ -293,7 +293,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: `task test:live-lane` with the package added to both Go lines of the target: each case fails on the stub for its stated reason; the other packages stay green.
   - Evidence: `specs/003-platform-feasibility/evidence/T031.md`; initial status `not-run`.
 
-- [ ] T032 [US3] Implement the token-residual check in tools/internal/probes/live/identity/residual.go and the probe root tests/live/probes/token-residual/
+- [x] T032 [US3] Implement the token-residual check in tools/internal/probes/live/identity/residual.go and the probe root tests/live/probes/token-residual/ — closed 2026-10-16, evidence: evidence/T032.md
   - Requirements: FR-007 (C007.5, C007.6); ADRs: 0009, 0018. Depends on: T031, T038.
   - Scope: the check as data-model.md *Probe checks* fixes it, and the API operations it needs in tools/internal/live/apicheck.go (create, list and delete an OAuth2 client; one granted read); the root with the sensitive output `residual_check` (data-model.md); the `token-residual` case in tools/cmd/lz-live/probe.go `probeCheck`; `tools/internal/probes/live/identity` in the inputs of every registered check whose Go packages now import it (today `test:bootstrap`, `live:probe`, `bootstrap:account` in tools/harness/checks.yaml); the root's `lz-check unit` line in `test:live-lane`; its run-sheet row. The check, not the root, creates the client and policy (the window needs a delete inside the run), so its Sweep finds them by exact name; the root creates nothing; both kinds are already in the leftover matrix.
   - Verify: `task test:live-lane`: T031's cases green; `task test:traceability` green; `task docs:check` green.

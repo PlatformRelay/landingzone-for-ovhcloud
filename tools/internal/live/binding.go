@@ -100,6 +100,13 @@ func (a API) do(req *http.Request, what string, v any) error {
 // token runs the OAuth2 client-credentials grant (OVHcloud guide "Authenticate to the API with
 // a service account"): secret in the POST form, never in the URL.
 func (a API) token(ctx context.Context, c Credential) (string, error) {
+	tok, _, err := a.tokenAnswer(ctx, c)
+	return tok, err
+}
+
+// tokenAnswer is token with the answer's raw expires_in (absent: nil); spec 003 T032 judges a
+// token's residual window against it.
+func (a API) tokenAnswer(ctx context.Context, c Credential) (string, json.RawMessage, error) {
 	form := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {c.ClientID},
@@ -108,19 +115,20 @@ func (a API) token(ctx context.Context, c Credential) (string, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", &callError{"token endpoint: the request cannot be built from the configured URL"}
+		return "", nil, &callError{"token endpoint: the request cannot be built from the configured URL"}
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var t struct {
-		AccessToken string `json:"access_token"`
+		AccessToken string          `json:"access_token"`
+		ExpiresIn   json.RawMessage `json:"expires_in"`
 	}
 	if err := a.do(req, "token endpoint", &t); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if t.AccessToken == "" {
-		return "", &callError{"token endpoint answered 200 without an access token"}
+		return "", nil, &callError{"token endpoint answered 200 without an access token"}
 	}
-	return t.AccessToken, nil
+	return t.AccessToken, t.ExpiresIn, nil
 }
 
 // Account returns the account the credential authenticates as, from GET /auth/details, which

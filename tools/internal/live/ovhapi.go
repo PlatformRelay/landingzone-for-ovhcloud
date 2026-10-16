@@ -84,16 +84,22 @@ type bearerClient struct {
 var errRejected = errors.New("credential rejected by the token endpoint")
 
 func newBearer(ctx context.Context, a API, c Credential) (bearerClient, error) {
-	tok, err := a.token(ctx, c)
+	b, _, err := newBearerExpiry(ctx, a, c)
+	return b, err
+}
+
+// newBearerExpiry is newBearer with the token answer's raw expires_in.
+func newBearerExpiry(ctx context.Context, a API, c Credential) (bearerClient, json.RawMessage, error) {
+	tok, exp, err := a.tokenAnswer(ctx, c)
 	if err != nil {
 		err = quietToken(err)
 		var code int
 		if n, _ := fmt.Sscanf(err.Error(), "token endpoint answered %d", &code); n == 1 && (code == http.StatusBadRequest || code == http.StatusUnauthorized) {
-			return bearerClient{}, fmt.Errorf("%w (%d)", errRejected, code)
+			return bearerClient{}, nil, fmt.Errorf("%w (%d)", errRejected, code)
 		}
-		return bearerClient{}, err
+		return bearerClient{}, nil, err
 	}
-	return bearerClient{api: a, tok: tok}, nil
+	return bearerClient{api: a, tok: tok}, exp, nil
 }
 
 func (b bearerClient) get(ctx context.Context, path string, out any) error {
