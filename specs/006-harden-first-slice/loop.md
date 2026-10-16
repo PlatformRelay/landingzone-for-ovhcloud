@@ -57,6 +57,7 @@ Holistic run at B: not run yet.
 | L T014 | Symlink refusal is a plain error, not a `CondFileMode` refusal; refused-retry cases do not check this account's flat files survive; the retry path skips `privateDir` on set and generation dirs | minor | both | defer | stage B | no |
 | L T014 | Round-2 fix (symlinked `accounts/` ancestors) went unreviewed | — | task | accept | two-round limit; stage B reads it | no |
 | L T015 | `tofu version` probe runs with a shared HOME=os.TempDir() (stacks/plan.go:67) | minor | strong | defer | stage B: private home for pinnedTofu's version probe | no |
+| L T017 | Case 1 and the entry test check the deadline run.json records, not the run's context | minor | both | defer | T022's review: a `Deadline` of 0 resolves into the run's context | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
@@ -92,6 +93,7 @@ Holistic run at B: not run yet.
 | tools/internal/live/credentials_test.go:TestCredentialSetPathResolves (3), TestCredentialSetPathPointerInvalid (8), TestCredentialsFromSets (generation-after-switch, each-writer-its-own-pointer) — cleared by T014; TestCredentialSetWriteKeepsBinding — cleared by T013; `test:live-lane` red | US1 | T008 | T013, T014 |
 | tools/internal/live/env_test.go:TestEnvCommandTakesHome; `test:live-lane` red | US1 | T009 | T015 |
 | tools/internal/live/probe_identity_test.go:TestAdmitCompanionName; TestProbeIdentityReservedNames (unlisted/* ×17, cleanup/refused-unlisted); TestCompanionPairs (refused/s3-access-alone, refused/s3-secret-alone); `test:live-lane` red | US1 | T010 | T016 |
+| tools/internal/live/apply_test.go: TestBoundedApplyDefaultDeadline, TestBoundedApplyInventory, TestBoundedVerbSummary (3), TestBoundedVerbHangStops (3), TestBoundedApplyStopKeepsInventory (4); tools/cmd/lz-live/lane_test.go: TestLaneEntryBounded (3); `test:live-lane` red | US2 | T017 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -120,6 +122,7 @@ Holistic run at B: not run yet.
 - A writer that deletes old copies needs a per-kind allow-list of what it may write; validate map keys as given, never look values up by a cleaned key; an fsync/rename seam makes durability ordering testable (check the first sync after the switch). Mutant loops must always end. (T013)
 - A reader that must agree with a writer runs the writer's path checks from the same base directory; a retry that treats an interrupted write as done owes its unfinished cleanup; symlink tests cover every ancestor from the root. (T014)
 - "No child process on any path" covers every exec.Command in the binary: grep exec.Command and "HOME=" across its packages first. git reads $HOME/.config/git/ignore even with GIT_CONFIG_GLOBAL=/dev/null. A helper that creates a resource and can then fail cleans it up itself. (T015)
+- To show "appended as each event arrives", read it while the child runs and stop before the deadline; a deadline test checks when the run stopped, timing the run call alone; a recorded deadline is not proof it is enforced. (T017)
 - Known red rows in this file are the coordinator's; report them, do not edit this table. (T001)
 - Any change to checks.yaml, specs or targets makes `pipelines/github/foundation-runs.json` stale; that is the coordinator's refresh, not the task's. (005)
 
