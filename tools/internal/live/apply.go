@@ -63,6 +63,7 @@ const (
 	CondLocked           = "locked"            // another run holds one of the run's locks
 	CondProducerSelected = "producer-selected" // `-- <instance>` while a producer it consumes is selected and not applied
 	CondBootstrapOwned   = "bootstrap-owned"   // account-bootstrap is bootstrap:account's, never the lane's
+	CondProjectAlias     = "project-alias"     // two project refs the manifest uses resolve to one project id (007 FR-003)
 )
 
 // ApplyOptions configures one `lz-live plan|apply|destroy` run.
