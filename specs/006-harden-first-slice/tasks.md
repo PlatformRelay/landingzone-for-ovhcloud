@@ -289,7 +289,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
   - Verify: `task test:runtime-image` through the entry and, on the workstation, `go -C tools test -tags hostlimits -run TestHostLimits ./cmd/lz-offline`: every case fails against the stubs and a stub entry that starts the child without limits.
   - Evidence: `evidence/T029.md`; PR; initial status `not-run`.
 
-- [ ] T030 [US3] Write runtime-preparation tests in tools/internal/bundle/prepare_test.go with fixture archives in tools/internal/bundle/testdata/prepare/
+- [x] T030 [US3] Write runtime-preparation tests in tools/internal/bundle/prepare_test.go with fixture archives in tools/internal/bundle/testdata/prepare/ — closed 2026-10-16, evidence: evidence/T030.md
   - Requirements: FR-014; ADRs: 0002, 0021. Depends on: none.
   - Cases (given / when / then → defect exposed):
     - given an archive with a symlink escaping the root, and one with a hard link escaping it / when `Project` extracts / then it refuses → exposes a link escape.
