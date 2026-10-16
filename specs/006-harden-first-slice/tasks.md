@@ -299,7 +299,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
   - Verify: `task test:runtime-image`: every case fails against the stubs.
   - Evidence: `evidence/T030.md`; PR; initial status `not-run`.
 
-- [ ] T031 [US3] Write provenance-statement tests in tools/cmd/lz-pack/provenance_test.go
+- [x] T031 [US3] Write provenance-statement tests in tools/cmd/lz-pack/provenance_test.go — closed 2026-10-16, evidence: evidence/T031.md
   - Requirements: FR-017; ADRs: 0010, 0021. Depends on: none.
   - Cases (given / when / then → defect exposed):
     - given a `provenanceInput` / when `provenance` renders twice / then the bytes are identical, keys sorted, no timestamp → exposes non-reproducible statements.
