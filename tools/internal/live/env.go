@@ -23,11 +23,11 @@ const (
 // caller reads them from are written only by files.go.
 // a names the authority creds belong to; refusing an authority/credential mismatch (FR-010) is the
 // credential selection's job (T058), which builds creds from that authority's files only.
-// home is the child's HOME (FR-007, data-model *Fixed signatures*). Not implemented yet: the
-// child still gets the caller's HOME until T015.
+// home is the child's HOME, as given (FR-007, data-model *Fixed signatures*): the caller's HOME
+// is never read, so a caller passes a per-run scratch home (scratchHome).
 func Command(a Authority, creds map[string]string, home, name string, arg ...string) *exec.Cmd {
 	cmd := exec.Command(name, arg...)
-	cmd.Env = childEnviron(os.Getenv("HOME"), creds)
+	cmd.Env = childEnviron(home, creds)
 	return cmd
 }
 
