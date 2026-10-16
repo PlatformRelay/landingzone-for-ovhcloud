@@ -99,23 +99,96 @@ type LeftoverCheck struct {
 // request.
 var defaultListingBackoff = []time.Duration{5 * time.Second, 15 * time.Second}
 
-// transientListing classifies a listing failure (spec 007 FR-001, data-model *Listing attempt*).
-// Stub (spec 007 T003): not implemented until T006.
+// transientListing classifies a listing failure (spec 007 FR-001, data-model *Listing attempt*):
+// a status of 429 or 500-599 and a transport failure are retried; any other status, and anything
+// else (an answer that does not decode), are not. The token endpoint's 429 is a 4xx and, as every
+// 4xx from it, never retried (FR-001).
 func transientListing(err error) (class string, retry bool) {
-	return "", false
+	var se *statusError
+	if errors.As(err, &se) {
+		tooMany := se.code == http.StatusTooManyRequests && se.path != tokenPath
+		return "status", tooMany || se.code >= 500 && se.code <= 599
+	}
+	var te *transportError
+	if errors.As(err, &te) {
+		return "transport", true
+	}
+	return "decode", false
 }
 
 // transportError is a request that failed in transport: while sending, while reading the
-// answer's body, or the token request's transport (spec 007 FR-001). Stub (T003): not yet
-// returned by apiLister.request until T006.
+// answer's body, or the token request's transport (spec 007 FR-001). Its text names the kind of
+// failure from err's type only and never quotes err, whose text may carry what the answer chose
+// (a Location header) or the request (spec 007 T006: pinned by TestTransportErrorText).
 type transportError struct {
 	path string
 	err  error
 }
 
-func (e *transportError) Error() string { return fmt.Sprintf("GET %s: transport failure", e.path) }
+func (e *transportError) Error() string {
+	return fmt.Sprintf("%s: transport failure (%s)", requestName(e.path), transportKind(e.err))
+}
 
 func (e *transportError) Unwrap() error { return e.err }
+
+// transportKind is a transport failure's kind, by type: a failed Do is a *url.Error, a failed
+// body read is not.
+func transportKind(err error) string {
+	var ue *url.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ue) && ue.Timeout():
+		return "timed out"
+	case errors.As(err, &ue):
+		return "request failed"
+	}
+	return "reading the answer failed"
+}
+
+// tokenPath is the path a failed token request is recorded under (data-model *Listing attempt*).
+const tokenPath = "token"
+
+// requestName names a request in an error: "token endpoint" for the token request (the text
+// binding.go gives it), else "GET <path>".
+func requestName(path string) string {
+	if path == tokenPath {
+		return "token endpoint"
+	}
+	return "GET " + path
+}
+
+// tokenRefused is the cached refusal of the token request, returned to a later listing without a
+// request: no attempt of that listing.
+type tokenRefused struct{ err error }
+
+func (e *tokenRefused) Error() string { return e.err.Error() }
+
+func (e *tokenRefused) Unwrap() error { return e.err }
+
+// tokenFailure is a failed token request as the leftover check classifies it: a non-200 answer is
+// a *statusError and a failed send a *transportError, both with path "token" (data-model *Fixed
+// signatures*); anything else keeps quietToken's text.
+func tokenFailure(err error) error {
+	var ce *callError
+	switch {
+	case !errors.As(err, &ce):
+		return &tokenAnswer{quietToken(err)}
+	case ce.code != 0:
+		return &statusError{path: tokenPath, code: ce.code}
+	case ce.sent != nil:
+		return &transportError{path: tokenPath, err: ce.sent}
+	}
+	return &tokenAnswer{err}
+}
+
+// tokenAnswer is a token answer the check cannot use (no access token, or a body that does not
+// decode): not retried, recorded under "token".
+type tokenAnswer struct{ err error }
+
+func (e *tokenAnswer) Error() string { return e.err.Error() }
+
+func (e *tokenAnswer) Unwrap() error { return e.err }
 
 // ListingAttempt is one failed request of the leftover check (spec 007 FR-002), kept in
 // leftovers.json under attempts.
@@ -200,8 +273,8 @@ type apiLister struct {
 
 // quiet is a failed request's error without what Go quotes from the answer (an unparseable
 // Location header, which a hostile endpoint can fill with the token or the secret): only the
-// kind of failure remains. An error that is not a transport error passes unchanged (a listing's
-// Do fails only with one; the token request goes through quietToken).
+// kind of failure remains. An error that is not a transport error passes unchanged (Do fails only
+// with one). A listing's failed request is a *transportError, whose text is as quiet.
 func quiet(what string, err error) error {
 	var ue *url.Error
 	switch {
@@ -245,13 +318,17 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 		return nil, "", errors.New("read-only API client: no API endpoint")
 	}
 	if l.tokErr != nil {
-		return nil, "", l.tokErr
+		return nil, "", &tokenRefused{l.tokErr}
 	}
 	if l.tok == "" {
 		tok, err := l.api.token(ctx, l.cred)
 		if err != nil {
-			l.tokErr = quietToken(err)
-			return nil, "", l.tokErr
+			// A transient failure is asked again by the next attempt; any other stays cached.
+			err = tokenFailure(err)
+			if _, retry := transientListing(err); !retry {
+				l.tokErr = err
+			}
+			return nil, "", err
 		}
 		if l.red != nil {
 			l.red.Add(tok)
@@ -271,17 +348,34 @@ func (l *apiLister) request(ctx context.Context, method, path, cursor string) ([
 	if cursor != "" {
 		req.Header.Set("X-Pagination-Cursor", cursor)
 	}
-	resp, err := l.api.client().Do(req)
-	if err != nil {
-		return nil, "", quiet("GET "+path, err)
+	return l.send(req, path)
+}
+
+// send sends req and reads its answer. The status decides first (FR-001: only 429 and 5xx are
+// retried): a non-2xx answer is a *statusError whatever happens to its body, and so is a 3xx whose
+// Location Go cannot parse (Do fails on it before CheckRedirect, see statusRecorder); any other
+// failure of Do or of the body read is a *transportError.
+func (l *apiLister) send(req *http.Request, path string) ([]byte, string, error) {
+	c := l.api.client()
+	rec := &statusRecorder{next: c.Transport}
+	if rec.next == nil {
+		rec.next = http.DefaultTransport
+	}
+	c.Transport = rec
+	resp, err := c.Do(req)
+	switch {
+	case err != nil && rec.code/100 == 3:
+		return nil, "", &statusError{path: path, code: rec.code}
+	case err != nil:
+		return nil, "", &transportError{path: path, err: err}
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListing+1))
-	if err != nil {
-		return nil, "", fmt.Errorf("GET %s: reading the answer failed", path)
-	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, "", &statusError{path: path, code: resp.StatusCode}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxListing+1))
+	if err != nil {
+		return nil, "", &transportError{path: path, err: err}
 	}
 	if len(body) > maxListing {
 		return nil, "", fmt.Errorf("GET %s: answer longer than %d bytes", path, maxListing)
@@ -295,7 +389,15 @@ type statusError struct {
 	code int
 }
 
-func (e *statusError) Error() string { return fmt.Sprintf("GET %s answered %d", e.path, e.code) }
+func (e *statusError) Error() string {
+	return fmt.Sprintf("%s answered %d", requestName(e.path), e.code)
+}
+
+// notFound reports a 404 answer.
+func notFound(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.code == http.StatusNotFound
+}
 
 // maxListingPages bounds the pages of one listing: a cursor that never ends is an error.
 const maxListingPages = 1000
@@ -305,9 +407,217 @@ type lister struct {
 	l    Lister
 	errs *[]string
 	rec  map[string][]json.RawMessage
+	try  *listRetry
 }
 
 func (l lister) fail(format string, a ...any) { *l.errs = append(*l.errs, fmt.Sprintf(format, a...)) }
+
+// listRetry is the leftover check's retry of a failed request (spec 007 FR-001) and its record of
+// every failed attempt (FR-002). Not safe for concurrent use: the check lists one request at a
+// time.
+type listRetry struct {
+	backoff  []time.Duration
+	budget   *retryBudget
+	clock    waitClock
+	term     io.Writer
+	red      *Redactor
+	attempts []ListingAttempt
+	// tokenAttempts counts the token request's failed attempts across the check: it is one
+	// request, whichever listing needs it, so its attempts never spend a listing's (FR-001).
+	tokenAttempts int
+	// tokenErr is the token request's failure once no retry follows it; every later request gets
+	// it without being sent.
+	tokenErr error
+	// last is the number of the attempt that answered each path last, for a failure found in the
+	// answer's elements.
+	last map[string]int
+}
+
+// retry is the check's listRetry, with the defaults of data-model *Fixed signatures*.
+func (c LeftoverCheck) retry() *listRetry {
+	t := &listRetry{backoff: c.Backoff, budget: c.Budget, clock: c.Clock, term: c.Term, red: c.Red, last: map[string]int{}}
+	if t.backoff == nil {
+		t.backoff = defaultListingBackoff
+	}
+	if t.clock == nil {
+		t.clock = wallClock{}
+	}
+	if t.term == nil {
+		t.term = io.Discard
+	}
+	return t
+}
+
+// get is one request of the check, asked again after each transient failure the retry admits;
+// it returns the last attempt's number. A first page's 404 that absentOK admits, and the cached
+// token refusal (no request was sent), are returned unrecorded.
+func (l lister) get(path, cursor string, absentOK bool) ([]byte, string, int, error) {
+	t := l.try
+	attempt := 1
+	for {
+		body, next, err := t.ask(l.ctx, l.l, path, cursor)
+		if err == nil {
+			t.last[path] = attempt
+		}
+		var cached *tokenRefused
+		if err == nil || absentOK && notFound(err) || errors.As(err, &cached) {
+			return body, next, attempt, err
+		}
+		token, err := t.failed(l.ctx, path, attempt, err)
+		if err != nil {
+			return nil, "", attempt, err
+		}
+		if !token {
+			attempt++
+		}
+	}
+}
+
+// ask sends one request, unless the token request has failed for good, and keeps its duration in
+// the shared budget: the slowest request so far is time kept for the next one (spec 006
+// data-model *Retry budget*).
+func (t *listRetry) ask(ctx context.Context, l Lister, path, cursor string) ([]byte, string, error) {
+	if t.tokenErr != nil {
+		return nil, "", &tokenRefused{t.tokenErr}
+	}
+	start := t.clock.Now()
+	body, next, err := l.Get(ctx, path, cursor)
+	if t.budget != nil {
+		t.budget.keep(t.clock.Now().Sub(start))
+	}
+	return body, next, err
+}
+
+// failed records a failed attempt and, when the retry admits it, waits for the next one (err
+// nil); otherwise it returns the error to report. token reports a failure of the token request,
+// which counts its own attempts.
+func (t *listRetry) failed(ctx context.Context, path string, attempt int, err error) (token bool, _ error) {
+	a, retry := t.row(path, attempt, err)
+	a.Reason = t.refusal(ctx, a.Attempt, retry)
+	if a.Reason == "" {
+		a.Reason = t.wait(ctx, a)
+	}
+	a.Retried = a.Reason == ""
+	t.attempts = append(t.attempts, a)
+	err = t.reported(ctx, err, a)
+	token = a.Path == tokenPath
+	if token && err != nil {
+		t.tokenErr = err
+	}
+	return token, err
+}
+
+// row is the record of a failed attempt and whether its failure is transient; a failure of the
+// token request is recorded under "token" with the token request's own attempt number.
+func (t *listRetry) row(path string, attempt int, err error) (ListingAttempt, bool) {
+	class, retry := transientListing(err)
+	a := ListingAttempt{Path: path, Attempt: attempt, Class: class}
+	var se *statusError
+	var te *transportError
+	var ta *tokenAnswer
+	switch {
+	case errors.As(err, &se):
+		a.Status = se.code
+		a.Path = tokenOr(se.path, path)
+	case errors.As(err, &te):
+		a.Path = tokenOr(te.path, path)
+	case errors.As(err, &ta):
+		a.Path = tokenPath
+	}
+	if a.Path == tokenPath {
+		t.tokenAttempts++
+		a.Attempt = t.tokenAttempts
+	}
+	return a, retry
+}
+
+// reported is the error a failed attempt that no retry follows reports (nil when one follows).
+func (t *listRetry) reported(ctx context.Context, err error, a ListingAttempt) error {
+	of := len(t.backoff) + 1
+	switch a.Reason {
+	case "":
+		return nil
+	case "permanent":
+		return err
+	case "cancelled":
+		return fmt.Errorf("%w; the retry ended: %v", err, context.Cause(ctx))
+	case "attempts":
+		if a.Attempt > 1 {
+			return fmt.Errorf("%w (attempt %d of %d)", err, a.Attempt, of)
+		}
+		return err
+	}
+	return fmt.Errorf("%w (attempt %d of %d, not retried: %s)", err, a.Attempt, of, a.Reason)
+}
+
+// ended is why ctx ended: "deadline" when its cause is the deadline (a timeout, or the destroy
+// context's at), else "cancelled".
+func ended(ctx context.Context) string {
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		return "deadline"
+	}
+	return "cancelled"
+}
+
+// tokenOr is "token" for a failed token request, else the listing's path.
+func tokenOr(errPath, path string) string {
+	if errPath == tokenPath {
+		return tokenPath
+	}
+	return path
+}
+
+// refusal is why no retry follows attempt ("" when one may): a failure that is not transient, no
+// attempt left, a cancelled context, a wait reaching the context's deadline, or a wait the shared
+// budget refuses (a nil budget admits none).
+func (t *listRetry) refusal(ctx context.Context, attempt int, retry bool) string {
+	switch {
+	case !retry:
+		return "permanent"
+	case attempt > len(t.backoff):
+		return "attempts"
+	case ctx.Err() != nil:
+		return ended(ctx)
+	}
+	wait, now := t.backoff[attempt-1], t.clock.Now()
+	if end, ok := ctx.Deadline(); ok && !end.After(now.Add(wait)) {
+		return "deadline"
+	}
+	if t.budget == nil || !t.budget.admit(now, wait) {
+		return "budget"
+	}
+	return ""
+}
+
+// wait prints the retry line and waits before the attempt after a; the context's end ends the
+// wait, also when it ends as the wait fires (no further attempt then).
+func (t *listRetry) wait(ctx context.Context, a ListingAttempt) string {
+	wait := t.backoff[a.Attempt-1]
+	what := a.Class
+	if a.Status != 0 {
+		what = fmt.Sprint(a.Status)
+	}
+	path := a.Path
+	if t.red != nil {
+		path = t.red.Redact(path)
+	}
+	fmt.Fprintf(t.term, "LZ-LIVE retry listing %s in %v: %s (attempt %d of %d)\n", path, wait, what, a.Attempt+1, len(t.backoff)+1)
+	select {
+	case <-t.clock.After(wait):
+		if ctx.Err() != nil {
+			return ended(ctx)
+		}
+		return ""
+	case <-ctx.Done():
+		return ended(ctx)
+	}
+}
+
+// refused records a failure found in an answer (one that does not decode, or a page bound): never
+// retried.
+func (t *listRetry) refused(path string, attempt int, class string) {
+	t.attempts = append(t.attempts, ListingAttempt{Path: path, Attempt: attempt, Class: class, Reason: "permanent"})
+}
 
 // all reads every page of an array listing; a cursor that repeats or more than maxListingPages
 // pages is an error.
@@ -317,40 +627,51 @@ func (l lister) all(path string) ([]json.RawMessage, bool) {
 }
 
 // pages is all; with absentOK, a 404 to the first page is reported as absent (no error recorded).
+// A failed page is asked again at its own cursor (FR-001).
 func (l lister) pages(path string, absentOK bool) ([]json.RawMessage, bool, bool) {
 	var out []json.RawMessage
 	cursor := ""
 	seen := map[string]bool{}
 	for pages := 1; ; pages++ {
-		if pages > maxListingPages {
-			l.fail("listing %s: more than %d pages", path, maxListingPages)
-			return nil, false, false
-		}
-		body, next, err := l.l.Get(l.ctx, path, cursor)
-		var se *statusError
-		if err != nil && absentOK && pages == 1 && errors.As(err, &se) && se.code == http.StatusNotFound {
-			return nil, false, true
-		}
-		if err != nil {
-			l.fail("listing %s: %v", path, err)
-			return nil, false, false
-		}
-		var page []json.RawMessage
-		if err := json.Unmarshal(body, &page); err != nil {
-			l.fail("listing %s: not a JSON array", path)
-			return nil, false, false
+		page, next, attempt, ok, absent := l.page(path, cursor, absentOK && pages == 1)
+		if !ok {
+			return nil, false, absent
 		}
 		out = append(out, page...)
-		if next == "" {
+		switch {
+		case next == "":
 			return out, true, false
-		}
-		if seen[next] {
+		case seen[next]:
+			l.try.refused(path, attempt, "bounds")
 			l.fail("listing %s: the next-page cursor repeats", path)
+			return nil, false, false
+		case pages >= maxListingPages:
+			l.try.refused(path, attempt, "bounds")
+			l.fail("listing %s: more than %d pages", path, maxListingPages)
 			return nil, false, false
 		}
 		seen[next] = true
 		cursor = next
 	}
+}
+
+// page is one page of an array listing and the number of the attempt that answered it; ok is
+// false on an error (recorded) or an admitted absence (absent).
+func (l lister) page(path, cursor string, absentOK bool) (page []json.RawMessage, next string, attempt int, ok, absent bool) {
+	body, next, attempt, err := l.get(path, cursor, absentOK)
+	if err != nil && absentOK && notFound(err) {
+		return nil, "", attempt, false, true
+	}
+	if err != nil {
+		l.fail("listing %s: %v", path, err)
+		return nil, "", attempt, false, false
+	}
+	if json.Unmarshal(body, &page) != nil {
+		l.try.refused(path, attempt, "decode")
+		l.fail("listing %s: not a JSON array", path)
+		return nil, "", attempt, false, false
+	}
+	return page, next, attempt, true, false
 }
 
 // under is parent/<id> with id escaped as one path segment, so a listed id cannot re-route the
@@ -370,12 +691,13 @@ func (l lister) object(path string, v any) bool {
 
 // objectRaw is object returning the answer as well.
 func (l lister) objectRaw(path string, v any) (json.RawMessage, bool) {
-	body, _, err := l.l.Get(l.ctx, path, "")
+	body, _, attempt, err := l.get(path, "", false)
 	if err != nil {
 		l.fail("listing %s: %v", path, err)
 		return nil, false
 	}
 	if len(bytes.TrimSpace(body)) == 0 || bytes.TrimSpace(body)[0] != '{' || json.Unmarshal(body, v) != nil {
+		l.try.refused(path, attempt, "decode")
 		l.fail("listing %s: not a JSON object", path)
 		return nil, false
 	}
@@ -424,6 +746,7 @@ func (l lister) strings(path string) ([]string, bool) {
 	for _, r := range raw {
 		var s string
 		if json.Unmarshal(r, &s) != nil || s == "" {
+			l.try.refused(path, l.try.last[path], "decode")
 			l.fail("listing %s: not a list of ids", path)
 			return nil, false
 		}
@@ -438,6 +761,7 @@ func decode[T any](l lister, path string, raw []json.RawMessage, id func(T) stri
 	for _, r := range raw {
 		var v T
 		if json.Unmarshal(r, &v) != nil || id(v) == "" {
+			l.try.refused(path, l.try.last[path], "decode")
 			l.fail("listing %s: unparseable element", path)
 			return nil, false
 		}
@@ -485,8 +809,9 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	}
 	var items []*item
 	if src != nil {
-		l := lister{ctx: ctx, l: src, errs: &errs, rec: rep.Listings}
+		l := lister{ctx: ctx, l: src, errs: &errs, rec: rep.Listings, try: c.retry()}
 		items = c.list(l)
+		rep.Attempts = l.try.attempts
 	}
 	rep.Listed = map[string][]string{}
 	for _, it := range items {

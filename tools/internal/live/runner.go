@@ -1033,9 +1033,13 @@ func (r Runner) Execute(ctx context.Context) error {
 		invErr = nil
 	}
 	// The token the check obtains goes to this run's redactor before its first listing (FR-004):
-	// the one every record below and the terminal go through, whatever Red the caller set.
+	// the one every record below and the terminal go through, whatever Red the caller set. Its
+	// listing retries wait in a budget ending at the destroy context's deadline and print to the
+	// run's terminal (spec 007 FR-001).
 	check := r.Leftovers
-	check.Red = red
+	check.Red, check.Term = red, term
+	end, _ := dctx.Deadline()
+	check.Budget = newRetryBudget(end, minRetryReserve)
 	rep := check.Check(dctx, entries)
 	// A call that ignores its context may still answer after the budget ran out: the context's own
 	// state fails the run too.
