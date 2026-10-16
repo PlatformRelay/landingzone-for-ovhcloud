@@ -1,7 +1,7 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: L — T048 (grant the state users s3:GetBucketObjectLockConfiguration), then US4 (T027/T028)
+Next: L — US3 (T029–T034, entry limits and runtime preparation in Go), then US5, US6, exit
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
@@ -74,6 +74,9 @@ Holistic run at B: not run yet.
 | L T024 | The reserve keeps time for one read and the final listing, not for the retained reads still to come | minor | strong | defer | stage B (matches FR-008's text; fails closed) | no |
 | L T025 | Create answers 5xx on a name read as absent: remove (T020's 500-after-create) or report? | — | task | decide remove | Coordinator minor decision 2026-10-16: the canary name carries the run id, so another creator in the read→create gap is not credible; keep T020's fixed test | no |
 | L T025 | Trap mode's zero value means "delete"; reportCanary's failure paths untested; ReadPresent does not check both KD-1 subjects; OVHcloud 404 for an absent bucket UNVERIFIED | minor | review | defer | stage B; the 404 is observed on the next live chain | no |
+| L T028 | stacks:check does not compare stack locks with stage locks | minor | review | defer | stage B (FR-011 asks stage-to-stage; TestRepositoryStackLocksMatchStages covers this repository) | no |
+| L T028 | Planner fallback copying a missing lock in scratch (plan.go:277-286) may now be unreachable; os.Link needs hard-link support | minor | review | defer | stage B | no |
+| L T028 | A missing stage lock is refused, not skipped | — | task | accept | coordinator agrees: skipping leaves a lockless stack, the defect V003 names | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
