@@ -129,7 +129,7 @@ func (l *setLoad) path(instance, rel string) (string, error) {
 		// writer's credentialDir refuses one too). currentGeneration is the writer's own check: a
 		// regular file whose whole content (no trimming) is a gen- name of a sibling directory,
 		// CREDENTIAL_POINTER_INVALID otherwise.
-		if g.err = noSymlinkBelow(acct, filepath.Join("sets", instance)); g.err == nil {
+		if g.err = noSymlinkBelow(l.root, filepath.Join("accounts", l.account, "sets", instance)); g.err == nil {
 			g.name, g.err = setCurrent(filepath.Join(acct, "sets", instance))
 		}
 		l.gens[instance] = g

@@ -5,7 +5,7 @@ references:
   - path: tools/internal/checks/dependencies.go
     blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
   - path: tools/internal/live/credentials.go
-    blob: 227af07f4ec2942a2514d716d0b3fb662d5d9fe0
+    blob: aa7dae28c6bf99f8ac61902b4888161f16e24e2f
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: stacks/_lz/backend.tm.hcl
@@ -16,7 +16,7 @@ references:
     blob: aac737fa9f84ec0ec894b47b0161d0e379c193dd
   - path: tools/internal/live/guard.go
     blob: 68ce6304d38b9a5abd6c2d906c781737562775a3
-last_verified: 307b7eac2eb183fd15bd358ddd2223135aa22745
+last_verified: 29ee6c3806ebef07b6bbe5d0e92fb05f60b59965
 ---
 
 # Architecture overview

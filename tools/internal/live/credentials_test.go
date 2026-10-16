@@ -861,6 +861,43 @@ func TestCredentialSetNoSymlinks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
+		// Review round 2: the account directory, or accounts/, is a symlink to another account's
+		// tree holding a valid set (the writer's credentialDir refuses both).
+		{"account-directory", func(t *testing.T, root string) {
+			lay := filepath.Join("accounts", credOtherAccount, "sets", csetGov, csetCur)
+			for r, v := range csetGovFiles("foreign") {
+				if err := WriteCredentialFile(root, filepath.Join(lay, r), v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			csPoint(t, other(root), csetCur)
+			acct := filepath.Join(root, "accounts", credAccount)
+			if err := os.RemoveAll(acct); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(root, "accounts", credOtherAccount), acct); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"accounts-directory", func(t *testing.T, root string) {
+			elsewhere := filepath.Join(root, "elsewhere")
+			lay := filepath.Join("elsewhere", credAccount, "sets", csetGov, csetCur)
+			if err := os.Mkdir(elsewhere, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for r, v := range csetGovFiles("foreign") {
+				if err := WriteCredentialFile(root, filepath.Join(lay, r), v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			csPoint(t, filepath.Join(elsewhere, credAccount, "sets", csetGov), csetCur)
+			if err := os.RemoveAll(filepath.Join(root, "accounts")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(elsewhere, filepath.Join(root, "accounts")); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"directory-in-generation", func(t *testing.T, root string) {
 			csetLay(t, root, csetGov, csetCur, map[string]map[string]string{"platform-deployer.env": oauthValues("cur-platform")})
 			csPoint(t, csetDir(root, csetGov), csetCur)
@@ -886,14 +923,14 @@ func TestCredentialSetNoSymlinks(t *testing.T) {
 			t.Parallel()
 			root := credRoot(t)
 			c.lay(t, root)
-			if got, err := CredentialSetPath(root, credAccount, csetGov, rel); err == nil {
-				t.Errorf("CredentialSetPath(%s) = %q, nil; want a refusal of the symlink", rel, got)
+			if got, err := CredentialSetPath(root, credAccount, csetGov, rel); err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Errorf("CredentialSetPath(%s) = %q, %v; want a refusal of the symlink", rel, got, err)
 			}
 			m := credManifest(t, true)
 			_, got, err := LoadCredentials(root, credAccount, m, "demo-dev-gra11-runtime")
 			credNoValue(t, err)
-			if err == nil {
-				t.Errorf("LoadCredentials(demo-dev-gra11-runtime) loaded client %q through a symlink; want a refusal", got["OVH_CLIENT_ID"])
+			if err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Errorf("LoadCredentials(demo-dev-gra11-runtime) = client %q, %v through a symlink; want a refusal of the symlink", got["OVH_CLIENT_ID"], err)
 			}
 		})
 	}

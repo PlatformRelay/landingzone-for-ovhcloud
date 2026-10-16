@@ -5,7 +5,7 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 34e5596e6bfacffe7be9c1e71a640d3e45077182
   - path: tools/internal/live/apply.go
-    blob: 0446d4fbf7d42fbc119c6ae825552b2b1c4202ff
+    blob: 4512b2684152c2caef9e9cdc25d94d6b4c313ef1
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
-last_verified: 307b7eac2eb183fd15bd358ddd2223135aa22745
+last_verified: 29ee6c3806ebef07b6bbe5d0e92fb05f60b59965
 ---
 
 # Run the first slice on an OVHcloud account

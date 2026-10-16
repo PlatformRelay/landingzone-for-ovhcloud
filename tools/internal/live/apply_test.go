@@ -2798,32 +2798,44 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 		crash        SetStep // the first write stops after it; 0 completes
 		first, retry map[string]map[string]string
 		written      bool
-		symlinked    bool // the first write went to the other account; this account's set directory links to it
+		symlinked    string // "set" or "account": the first write went to the other account, and this account's set or account directory links to it
 	}{
-		{"crash-after-switch-same-files", SetStepSwitch, full, full, true, false},
-		{"completed-same-files", 0, full, full, true, false},
-		{"crash-after-switch-other-values", SetStepSwitch, full, other, false, false},
-		{"completed-fewer-files", 0, full, fewer, false, false},
-		{"completed-more-files", 0, fewer, full, false, false},
-		{"symlinked-set-directory", 0, full, full, false, true},
+		{"crash-after-switch-same-files", SetStepSwitch, full, full, true, ""},
+		{"completed-same-files", 0, full, full, true, ""},
+		{"crash-after-switch-other-values", SetStepSwitch, full, other, false, ""},
+		{"completed-fewer-files", 0, full, fewer, false, ""},
+		{"completed-more-files", 0, fewer, full, false, ""},
+		{"symlinked-set-directory", 0, full, full, false, "set"},
+		// Review round 2: the account directory links to the other account; the other account's
+		// flat files (kept by a crash after its switch) must survive the refused retry.
+		{"symlinked-account-directory", SetStepSwitch, full, full, false, "account"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			root := credRoot(t)
 			account := credAccount
-			if c.symlinked {
+			if c.symlinked != "" {
 				account = credOtherAccount
 			}
 			if err := WriteCredentialSet(CredentialSet{Root: root, Account: account, Instance: csetGov, RunID: run, Files: c.first}, c.crash); err != nil && !errors.Is(err, ErrInjectedCrash) {
 				t.Fatal(err)
 			}
 			setDir := csetDir(root, csetGov)
-			if c.symlinked {
+			switch c.symlinked {
+			case "set":
 				if err := os.MkdirAll(filepath.Dir(setDir), 0o700); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(filepath.Join(root, "accounts", credOtherAccount, "sets", csetGov), setDir); err != nil {
+					t.Fatal(err)
+				}
+			case "account":
+				acct := filepath.Join(root, "accounts", credAccount)
+				if err := os.RemoveAll(acct); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(root, "accounts", credOtherAccount), acct); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -2854,7 +2866,12 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 			if after := laneTree(t, gen, ""); !maps.Equal(after, before) {
 				t.Error("the retry changed the run's generation")
 			}
-			if c.symlinked {
+			if c.symlinked != "" {
+				for rel := range c.first {
+					if _, err := os.Lstat(filepath.Join(root, "accounts", credOtherAccount, rel)); c.crash == SetStepSwitch && err != nil {
+						t.Errorf("the other account's flat %s is gone after a refused retry: %v", rel, err)
+					}
+				}
 				return
 			}
 			for rel, values := range c.first {
