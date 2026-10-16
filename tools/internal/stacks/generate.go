@@ -153,17 +153,16 @@ func missingLocks(root string, m *Manifest) (map[string][]byte, error) {
 // The data goes to a temporary file in the same directory first, which is then linked to path
 // (link(2) refuses an existing path) and removed: a write that fails leaves no partial lock at
 // path for a later run to take as the stack's own.
+//
+// The lock keeps the temporary file's owner-only mode (0600). Git records no permission but the
+// executable bit, so a wider mode would change nothing in the repository.
 func writeNew(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	err = errors.Join(writeLockData(tmp, data), tmp.Close())
-	if err == nil {
-		err = os.Chmod(tmp.Name(), 0o644)
-	}
-	if err != nil {
+	if err := errors.Join(writeLockData(tmp, data), tmp.Close()); err != nil {
 		return err
 	}
 	return os.Link(tmp.Name(), path)
@@ -192,41 +191,57 @@ func CheckStageLocks(root string) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("%s stages: %v", CodeStageLockMismatch, err)}
 	}
-	type pin struct {
-		stage string
-		providerPin
-	}
-	first := map[string]pin{}
+	first := map[string]stagePin{}
 	var findings []string
 	for _, e := range entries {
 		stage := e.Name()
-		if info, err := os.Stat(filepath.Join(dir, stage)); err != nil || !info.IsDir() {
-			continue
-		}
-		path := filepath.Join(dir, stage, lockFile)
-		data, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		var providers map[string]providerPin
-		if err == nil {
-			providers, err = readLock(path, data)
-		}
+		providers, err := readStageLock(dir, stage)
 		if err != nil {
 			findings = append(findings, fmt.Sprintf("%s stages/%s: lock not compared: %v", CodeStageLockMismatch, stage, err))
 			continue
 		}
-		for _, addr := range slices.Sorted(maps.Keys(providers)) {
-			p := providers[addr]
-			ref, seen := first[addr]
-			if !seen {
-				first[addr] = pin{stage, p}
-				continue
-			}
-			if ref.version != p.version || !slices.Equal(ref.hashes, p.hashes) {
-				findings = append(findings, fmt.Sprintf("%s stages/%s and stages/%s: %s %s (%d hashes) and %s (%d hashes)",
-					CodeStageLockMismatch, ref.stage, stage, addr, ref.version, len(ref.hashes), p.version, len(p.hashes)))
-			}
+		findings = append(findings, comparePins(first, stage, providers)...)
+	}
+	return findings
+}
+
+// stagePin is a provider's pin with the stage whose lock first pinned it.
+type stagePin struct {
+	stage string
+	providerPin
+}
+
+// readStageLock reads the pins of dir/<stage>/.terraform.lock.hcl. An entry that is not a
+// directory, or a stage without a lock, pins nothing and is no error.
+func readStageLock(dir, stage string) (map[string]providerPin, error) {
+	if info, err := os.Stat(filepath.Join(dir, stage)); err != nil || !info.IsDir() {
+		return nil, nil
+	}
+	path := filepath.Join(dir, stage, lockFile)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return readLock(path, data)
+}
+
+// comparePins returns a finding per provider of stage's pins that differs from its first pin,
+// in provider order, and records in first each provider stage is the first to pin.
+func comparePins(first map[string]stagePin, stage string, providers map[string]providerPin) []string {
+	var findings []string
+	for _, addr := range slices.Sorted(maps.Keys(providers)) {
+		p := providers[addr]
+		ref, seen := first[addr]
+		if !seen {
+			first[addr] = stagePin{stage, p}
+			continue
+		}
+		if ref.version != p.version || !slices.Equal(ref.hashes, p.hashes) {
+			findings = append(findings, fmt.Sprintf("%s stages/%s and stages/%s: %s %s (%d hashes) and %s (%d hashes)",
+				CodeStageLockMismatch, ref.stage, stage, addr, ref.version, len(ref.hashes), p.version, len(p.hashes)))
 		}
 	}
 	return findings
@@ -252,42 +267,66 @@ func readLock(path string, data []byte) (map[string]providerPin, error) {
 	}
 	pins := map[string]providerPin{}
 	for _, b := range body.Blocks {
-		if b.Type != "provider" {
-			return nil, fmt.Errorf("a %s block: a lock holds provider blocks only", b.Type)
+		addr, err := providerAddr(b)
+		if err != nil {
+			return nil, err
 		}
-		if len(b.Labels) != 1 {
-			return nil, fmt.Errorf("a provider block with %d labels", len(b.Labels))
-		}
-		addr := b.Labels[0]
 		if _, dup := pins[addr]; dup {
 			return nil, fmt.Errorf("provider %s pinned twice", addr)
 		}
-		var p providerPin
-		for _, name := range []string{"version", "hashes"} {
-			attr, ok := b.Body.Attributes[name]
-			if !ok {
-				return nil, fmt.Errorf("provider %s has no %s", addr, name)
-			}
-			v, diags := attr.Expr.Value(nil)
-			if diags.HasErrors() {
-				return nil, diags
-			}
-			if name == "version" {
-				if v.IsNull() || !v.IsKnown() || v.Type() != cty.String {
-					return nil, fmt.Errorf("provider %s: version is not a string", addr)
-				}
-				p.version = v.AsString()
-				continue
-			}
-			hashes, err := stringList(v)
-			if err != nil {
-				return nil, fmt.Errorf("provider %s hashes: %v", addr, err)
-			}
-			p.hashes = slices.Compact(slices.Sorted(slices.Values(hashes)))
+		p, err := readPin(addr, b.Body)
+		if err != nil {
+			return nil, err
 		}
 		pins[addr] = p
 	}
 	return pins, nil
+}
+
+// providerAddr returns the address a lock's block pins, refusing any block but a provider block
+// with one label.
+func providerAddr(b *hclsyntax.Block) (string, error) {
+	if b.Type != "provider" {
+		return "", fmt.Errorf("a %s block: a lock holds provider blocks only", b.Type)
+	}
+	if len(b.Labels) != 1 {
+		return "", fmt.Errorf("a provider block with %d labels", len(b.Labels))
+	}
+	return b.Labels[0], nil
+}
+
+// readPin reads a provider block's version, which must be a string, and its hashes, sorted and
+// without repeats.
+func readPin(addr string, body *hclsyntax.Body) (providerPin, error) {
+	version, err := pinAttr(addr, body, "version")
+	if err != nil {
+		return providerPin{}, err
+	}
+	if version.IsNull() || !version.IsKnown() || version.Type() != cty.String {
+		return providerPin{}, fmt.Errorf("provider %s: version is not a string", addr)
+	}
+	v, err := pinAttr(addr, body, "hashes")
+	if err != nil {
+		return providerPin{}, err
+	}
+	hashes, err := stringList(v)
+	if err != nil {
+		return providerPin{}, fmt.Errorf("provider %s hashes: %v", addr, err)
+	}
+	return providerPin{version: version.AsString(), hashes: slices.Compact(slices.Sorted(slices.Values(hashes)))}, nil
+}
+
+// pinAttr evaluates a provider block's attribute name, refusing a block without it.
+func pinAttr(addr string, body *hclsyntax.Body, name string) (cty.Value, error) {
+	attr, ok := body.Attributes[name]
+	if !ok {
+		return cty.NilVal, fmt.Errorf("provider %s has no %s", addr, name)
+	}
+	v, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() {
+		return cty.NilVal, diags
+	}
+	return v, nil
 }
 
 // PlannedBucketNames returns the bucket names (ovh_cloud_project_storage `name`) a plan creates
