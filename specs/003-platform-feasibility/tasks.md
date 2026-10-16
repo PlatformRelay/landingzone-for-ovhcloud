@@ -3,7 +3,7 @@ Status: planned, re-scoped 2026-10-14 to one project (D113) · Input: spec.md, p
 
 **Re-scope (D113).** See spec.md *Re-scope to one project*. T002–T008 are closed as SUPERSEDED by
 spec 005's run core. T009–T010 stay postponed with OKMS and escrow (D85). T011–T024 and the probes
-T025–T036 are open; every live part runs as a probe root under `tests/live/probes/<root>` through
+T025–T038 are open; every live part runs as a probe root under `tests/live/probes/<root>` through
 `task live:probe` (`lz-live probe`), as an owner session, except the probe runs T025–T028, which
 the coordinator runs under the owner's standing grant (D117). The probe root names are planned.
 EUR amounts are estimates, not gates. Real tenant isolation waits for a second project.
@@ -164,7 +164,8 @@ Independent test: V008.
 Four probes, each as three tasks in this order: a test task (cases against fakes, closed on a
 verified red with the stub data-model.md *Probe checks* fixes), its implementation task (the
 check, the probe root under `tests/live/probes/`, the root's registration in lz-live), and a
-live run. The live runs keep the ids T025–T028, which T012, T013, T015, T019 and T023 cite for
+live run, after one runner change every probe needs (T037, T038: a sweep that cleans up without
+the root's outputs). The live runs keep the ids T025–T028, which T012, T013, T015, T019 and T023 cite for
 the observation.
 
 Offline: every Verify below runs through the offline entry,
@@ -186,11 +187,18 @@ Rules every test task's cases follow:
 - **Leak guard shown separately.** One test runs the case's redaction assertion against a
   leaking mutant (a test double that writes the published secret into the record and the
   terminal) and shows the assertion fails; only then is the assertion trusted on the check.
-- **Fresh-process cleanup.** Undo is tested in a new check value built only from the published
-  variables, with no prior Observe, after every partial creation the check makes, including a
-  create whose response was lost (the fake creates the object, then drops the answer). Undo
-  finds what to delete by exact names derived from the published `run_id`, lists again, and
-  fails on anything left.
+- **One owner per resource.** Every probe resource is created either by the root (tofu) or by the
+  check, never both; IAM clients and policies belong to the check. The root's resources are
+  destroyed by tofu, the check's by its Undo.
+- **Cleanup independent of outputs.** A lost create answer can leave no root output (then the
+  runner skips Undo, tools/internal/live/runner.go:743-745) and no state entry (then destroy
+  does not know the resource). So every check also has a Sweep (T037, T038) that the runner
+  calls with only the run id and the project it recorded in probe.env, on every way out and on
+  `--cleanup <run-id>`: it lists every kind the root and the check create, by the exact names
+  `lzprobe-<root>-<lower(run id)>…` (IAM names `lzprobe-<root>-<run id>…`), deletes them, lists
+  again and fails on anything left. It never reads a published output. Each test task has a
+  fresh-process Sweep case, with no prior Observe and no output, after every partial creation,
+  including a create whose answer was lost (the fake creates the object, then drops the answer).
 - **Names.** Validate checks `run_id` against `live.RunIDPattern` and compares every published
   name exactly with the one derived from it (as storageiam's `validate`,
   tools/internal/probes/live/storageiam/storageiam.go:259-264). Bucket names use
@@ -208,35 +216,59 @@ evidence records the run id, the observation, the cost (Control Panel or `ovhclo
 UNVERIFIED when it cannot be read) and the leftover check's `outcome: pass`. No live run starts
 below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
+### The runner's sweep (before every probe's implementation)
+
+- [ ] T037 [US1] Write the runner's sweep tests in tools/internal/live/sweep_test.go with the stub of tools/internal/live/sweep.go
+  - Requirements: FR-002, FR-003; ADRs: 0008, 0021. Depends on: 005/T047 (live lane with trap destroy and leftover check), 005/T113 (`Recorded` on `--cleanup`). The runner skips Undo when the root published nothing (tools/internal/live/runner.go:743-745) and, when no state file was ever written, removes the passphrase and the probe record (runner.go:1241-1246), so a `--cleanup` cannot find the run again. Whether tofu writes root outputs after a partial apply failure is UNVERIFIED.
+  - Cases (given / when / then → defect exposed), against the runner's fake children, fake API and fake terminal (as `test:live-lane`'s runner tests do):
+    - given a probe check with a Sweep and an apply that fails after creating one resource (its answer lost, no state entry, no output) / when the run ends / then Sweep runs with the run id and the project from probe.env, after destroy and before the leftover check, and Undo is not run → exposes an orphan nobody deletes.
+    - given the same apply crashes the process (the fake child is killed) / when `--cleanup <run-id>` runs in a new process / then Sweep runs from probe.env alone → exposes cleanup that needs the dead process's memory or the root's outputs.
+    - given no state file was written and Sweep fails, or the leftover check fails / then probe.env, the passphrase and the root record are kept, the run ends `fail` naming `--cleanup <run-id>` → exposes run metadata deleted before reconciliation passed.
+    - given Sweep and the leftover check pass with no state file / then the run's files are removed as today → exposes metadata kept forever.
+    - given a full apply with outputs / then Undo runs before destroy and Sweep after it, each once → exposes a sweep that replaces Undo, or runs twice.
+    - given a check without a Sweep (state-backend, storage-iam) / then the run behaves as today → exposes a regression of spec 005's roots.
+    - given Sweep's terminal output / then it passes through the run's redactor → exposes a sweep printing unredacted names or ids beyond the run's.
+  - Verify: `task test:live-lane`: each case fails on the stub (Sweep never called, files removed) for its stated reason; spec 005's runner tests stay green.
+  - Evidence: `specs/003-platform-feasibility/evidence/T037.md`; initial status `not-run`.
+
+- [ ] T038 [US1] Implement the runner's sweep in tools/internal/live/sweep.go and tools/internal/live/runner.go
+  - Requirements: FR-002, FR-003; ADRs: 0008, 0021. Depends on: T037.
+  - Scope: the `Sweep` field of `ProbeCheck` (data-model.md *Probe checks*) and its comment; the runner calls it as T037 fixes, keeps probe.env, the passphrase and the root record until Sweep and the leftover check pass, and passes the run's redacted terminal; `--cleanup` reads run id and project from probe.env (`ProbeProject`) only.
+  - Verify: `task test:live-lane`: T037's cases green; `task test:traceability` green.
+  - Evidence: `specs/003-platform-feasibility/evidence/T038.md`; initial status `not-run`.
+
 ### Probe 1: the tenant S3 user's reach through Keystone/Swift
 
 - [ ] T029 [US2] Write the swift-reach check's tests in tools/internal/probes/live/storageiam/swiftreach_test.go with the stub of tools/internal/probes/live/storageiam/swiftreach.go
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: 005/T049 (tenant S3 user pattern), 005/T100 (storageiam check shape). The S3 user belongs to a cloud-project (OpenStack) user; whether that user's Keystone token reaches another bucket through Swift, bypassing the S3 bucket-ARN policy (005 G6), is not observed anywhere (UNVERIFIED). Whether Swift serves S3-API buckets at all is UNVERIFIED too.
   - Cases (given / when / then → defect exposed), against a fake Keystone, a fake Swift and a fake S3 endpoint (httptest) through `SwiftOptions.HTTP`; every case runs both directions, user a against bucket b and user b against bucket a:
     - given each user's own bucket lists 200 and the other bucket lists, reads or accepts a write 2xx / when Observe runs / then each step of that direction is `reach`, the record carries a finding per step and Observe returns an error naming them → exposes a check that does not try the other bucket, or counts any 2xx as expected.
-    - given the own bucket's same-route control succeeds and the other bucket answers 401 or 403 / then the step is `denied`, as expected → exposes a judge that never records a denial.
+    - given the root's seed object in each bucket (`lzprobe-swift-reach/seed`, published as `seed_key`) / when the own-bucket control runs / then it reads its own seed, and the other-bucket read step reads the other bucket's seed → exposes a read step that has nothing to read and so always reads `blocked`.
+    - given the own bucket's same-route control succeeds, the other bucket answers 401 or 403, and the control repeated with the same token succeeds again / then the step is `denied`, as expected → exposes a judge that never records a denial.
+    - given control 200, then the other bucket 401, then the repeated control 401 with the same token / then the step is `blocked` (token lost), never `denied` → exposes a token expiry or revocation counted as isolation.
     - given the own bucket's control is refused, 404 or 5xx, and the other bucket answers 403 / then the step is `blocked`, never `denied` → exposes a 403 counted as isolation without a positive control.
     - given the other bucket answers 404, a 5xx or a transport error / then the step is `blocked` → exposes an outage or a missing container counted as a denial.
     - given direction a→b is observed and user b's Keystone login fails / then a→b keeps its result and every b→a step is `blocked` with the reason → exposes one direction reported as C005.1 in full.
     - given Keystone refuses the token request for both users / then every Swift step is `not-run`, the record says why and Observe fails → exposes a refused login reported as isolation.
-    - given the tenant's Swift access is denied everywhere / when Undo runs in a fresh process / then it lists and deletes the probe prefix `lzprobe-swift-reach/` in both buckets with each bucket's own cleanup credential over S3, lists again and passes on an empty prefix → exposes cleanup that depends on the identity under test.
+    - given the tenant's Swift access is denied everywhere / when Undo runs / then it lists and deletes the objects the check wrote under `lzprobe-swift-reach/` (never the seeds, which the root owns) in both buckets with each bucket's own cleanup credential over S3, lists again and passes → exposes cleanup that depends on the identity under test.
     - given the tenant's Swift write to the other bucket succeeded and its Swift delete is refused / when Undo runs / then the cleanup credential of that bucket deletes the object and the second listing is empty → exposes an object left behind because the tenant cannot delete what it wrote, so the bucket's destroy fails.
-    - given the write's answer was lost after the fake stored the object / when a fresh-process Undo runs / then the object is found by the prefix and deleted → exposes cleanup by a remembered object name only.
+    - given the write's answer was lost after the fake stored the object / when Undo runs / then the object is found by the prefix and deleted → exposes cleanup by a remembered object name only.
+    - given a bucket or user whose create answer was lost (no output, no state entry) / when Sweep runs with only the run id and project / then it finds `lzprobe-swift-reach-<lower(run id)>-a|b` and the users of that description by listing, deletes them with the sandbox admin, lists again → exposes an orphan bucket or user.
     - given an object is still listed after the delete / then Undo fails and lz-live keeps the root → exposes a silent leftover.
-    - given published variables missing a key, a `run_id` that is not a run id, or a bucket other than `lzprobe-swift-reach-<lower(run id)>-a|b` / then Validate refuses before any request → exposes a check that writes to a bucket the run does not own.
+    - given published variables missing a key, a `run_id` that is not a run id, or a bucket other than `lzprobe-swift-reach-<lower(run id)>-a|b`, or a `seed_key` other than `lzprobe-swift-reach/seed` / then Validate refuses before any request → exposes a check that writes to a bucket the run does not own.
     - given a fake Keystone whose error body echoes the password / then neither the record nor the terminal holds it (leak guard shown first on a leaking mutant) → exposes a credential leak through the server's text.
   - Verify: `task test:live-lane`: each case fails on the stub for its stated reason (the stub's Observe and Undo return "not implemented" and make no request); the leaking mutant fails the leak guard; the package's existing tests stay green.
   - Evidence: `specs/003-platform-feasibility/evidence/T029.md`; initial status `not-run`.
 
 - [ ] T030 [US2] Implement the swift-reach check in tools/internal/probes/live/storageiam/swiftreach.go and the probe root tests/live/probes/swift-reach/
-  - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T029.
-  - Scope: the check as data-model.md *Probe checks* fixes it; the root (`main.tf`, `probe.tf`, `probe.tftest.hcl`, the committed `.terraform.lock.hcl` of the other roots) with two buckets `lzprobe-swift-reach-<lower(run id)>-a|b`; per bucket a tenant user (OpenStack user with an S3 credential and a policy scoped to its own bucket, as `state-backend` does) and a cleanup user whose S3 policy allows list and delete on that bucket only, independent of the tenant users; the sensitive output `swift_check` (data-model.md); the `swift-reach` case in tools/cmd/lz-live/probe.go `probeCheck`; the root's `lz-check unit` line in `test:live-lane` (Taskfile.yml); its row in the tests/live/probes/README.md run sheet. Every kind the root creates is already in the leftover matrix (bucket, cloud project user, S3 credential, S3 policy). The Keystone URL comes from the provider's user resource or docs.ovhcloud.com's OpenStack guide, cited in the root.
+  - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T029, T038.
+  - Scope: the check as data-model.md *Probe checks* fixes it; the root (`main.tf`, `probe.tf`, `probe.tftest.hcl`, the committed `.terraform.lock.hcl` of the other roots) with two buckets `lzprobe-swift-reach-<lower(run id)>-a|b`, each seeded with one object `lzprobe-swift-reach/seed` (through the provider's object resource if it has one, UNVERIFIED; otherwise the root does not own the seed and the check's first step writes it with the bucket's cleanup credential, and Undo deletes it); per bucket a tenant user (OpenStack user with an S3 credential and a policy scoped to its own bucket, as `state-backend` does) and a cleanup user whose S3 policy allows list and delete on that bucket only, independent of the tenant users; the sensitive output `swift_check` (data-model.md); the `swift-reach` case in tools/cmd/lz-live/probe.go `probeCheck`; the root's `lz-check unit` line in `test:live-lane` (Taskfile.yml); its row in the tests/live/probes/README.md run sheet. Every kind the root creates is already in the leftover matrix (bucket, cloud project user, S3 credential, S3 policy). The Keystone URL comes from the provider's user resource or docs.ovhcloud.com's OpenStack guide, cited in the root.
   - Verify: `task test:live-lane`: T029's cases green, the root's offline plan tests pass; `task test:traceability` green (the registry still covers every Go package `test:live-lane` and `live:probe` read); `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T030.md`; initial status `not-run`.
 
 - [ ] T025 [US2] Live run: the swift-reach probe on spec 005's runner with tests/live/probes/swift-reach/
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T030 on `main` at a reviewed SHA.
-  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone at that SHA: records each Swift call's status and reason in both directions (own-bucket control, other-bucket list, read, write). Observed reach refutes the S3-plane isolation claim and stops T012's claim; a `blocked` control (for example Swift not serving S3-API buckets) is recorded as the observation, with its reason. The run destroys in finally and sweeps its run-id leftovers with the bucket-scoped cleanup credentials; the leftover check is clean.
+  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone at that SHA: records each Swift call's status and reason in both directions (own-bucket control and its repeat, other-bucket list, read of the seed, write), and each tenant user's role names (for example `objectstore_operator`, `tests/live/probes/state-backend/main.tf`), since a project-wide Swift role explains reach. Observed reach refutes the S3-plane isolation claim and stops T012's claim; a `blocked` control (for example Swift not serving S3-API buckets) is recorded as the observation, with its reason. The run destroys in finally and sweeps its run-id leftovers with the bucket-scoped cleanup credentials; the leftover check is clean.
   - Evidence: `specs/003-platform-feasibility/evidence/T025.md`: run id, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
 
 ### Probe 2: an access token after its OAuth2 client is deleted
@@ -254,15 +286,16 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
     - given the run's context deadline passes while the token is still allowed / then Observe stops and records `blocked (deadline)` with the lower bound "valid ≥ N min" → exposes polling past the deadline, or a deadline stop read as a result.
     - given polling continues / then no poll is made later than the expiry plus one interval → exposes unbounded polling.
     - given the fake counts token requests / then exactly one token is issued, before the delete, and every poll uses it → exposes a stub that tests a fresh login instead of the issued token.
-    - given the granted read is refused before the delete (the same-route control) / then the observation is `blocked`, not a window → exposes a policy not yet in effect read as revocation (IAM propagation delay UNVERIFIED).
+    - given the granted read is refused before the delete (the same-route control) twice and then allowed within `Options.Settle` / then the client is deleted only after the control succeeded, and the record keeps each attempt → exposes a run wasted on a policy still propagating.
+    - given the control is still refused at the end of `Options.Settle` / then the observation is `blocked (control)`, no client is deleted for the window → exposes a policy not yet in effect read as revocation (IAM propagation delay UNVERIFIED).
     - given the client delete is refused or fails / then Observe fails with no window and Undo still runs → exposes a window measured without a delete.
-    - given a fresh-process Undo after each partial creation (client created and policy not; policy created and client not; the client's create answer lost after the fake created it; the client already deleted by Observe) / then it lists clients and policies by the exact name `lzprobe-token-residual-<run id>` derived from the published `run_id`, deletes each, lists again and fails on anything left → exposes a client or policy surviving a crash.
+    - given a fresh-process Sweep with only the run id and project after each partial creation (client created and policy not; policy created and client not; the client's create answer lost after the fake created it; the client already deleted by Observe) / then it lists clients and policies by the exact name `lzprobe-token-residual-<run id>`, deletes each, lists again and fails on anything left → exposes a client or policy surviving a crash.
   - Verify: `task test:live-lane` with the package added to both Go lines of the target: each case fails on the stub for its stated reason; the other packages stay green.
   - Evidence: `specs/003-platform-feasibility/evidence/T031.md`; initial status `not-run`.
 
 - [ ] T032 [US3] Implement the token-residual check in tools/internal/probes/live/identity/residual.go and the probe root tests/live/probes/token-residual/
-  - Requirements: FR-007 (C007.5, C007.6); ADRs: 0009, 0018. Depends on: T031.
-  - Scope: the check as data-model.md *Probe checks* fixes it, and the API operations it needs in tools/internal/live/apicheck.go (create, list and delete an OAuth2 client; one granted read); the root with the sensitive output `residual_check` (data-model.md); the `token-residual` case in tools/cmd/lz-live/probe.go `probeCheck`; `tools/internal/probes/live/identity` in the inputs of every registered check whose Go packages now import it (today `test:bootstrap`, `live:probe`, `bootstrap:account` in tools/harness/checks.yaml); the root's `lz-check unit` line in `test:live-lane`; its run-sheet row. The check, not the root, creates the client and policy (the window needs a delete inside the run), so Undo finds them by exact name; both kinds are already in the leftover matrix.
+  - Requirements: FR-007 (C007.5, C007.6); ADRs: 0009, 0018. Depends on: T031, T038.
+  - Scope: the check as data-model.md *Probe checks* fixes it, and the API operations it needs in tools/internal/live/apicheck.go (create, list and delete an OAuth2 client; one granted read); the root with the sensitive output `residual_check` (data-model.md); the `token-residual` case in tools/cmd/lz-live/probe.go `probeCheck`; `tools/internal/probes/live/identity` in the inputs of every registered check whose Go packages now import it (today `test:bootstrap`, `live:probe`, `bootstrap:account` in tools/harness/checks.yaml); the root's `lz-check unit` line in `test:live-lane`; its run-sheet row. The check, not the root, creates the client and policy (the window needs a delete inside the run), so its Sweep finds them by exact name; the root creates nothing; both kinds are already in the leftover matrix.
   - Verify: `task test:live-lane`: T031's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T032.md`; initial status `not-run`.
 
@@ -285,31 +318,36 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
     - given both probed calls refused after successful controls, or a 5xx or transport error on either / then `blocked` → exposes an outage read as a URN.
     - given a 403 that names another action / then that call is not an attributable denial and the observation is `blocked` → exposes an unrelated refusal counted for the probed action.
     - given each control and probed call / then the record carries the seconds since that identity's policy was created (as storageiam's `policy_age_seconds`) → exposes a result whose propagation context is lost.
-    - given a write action whose target is not a resource the run created (a tag key not starting `lzprobe-`, or a policy not named for the run) / then Validate refuses before any call → exposes a probe writing to the retained project or the admin's policy.
-    - given a fresh-process Undo after each partial creation (one identity's client created and its policy not; a policy create whose answer was lost; a tag key added and its policy deleted) / then it lists both identities' clients and policies by the exact names `lzprobe-iam-urn-<run id>-project|account` and the tag key `lzprobe-iam-urn:run-id`, deletes each, lists again and fails on anything left → exposes leftovers after a crash.
+    - given the probed actions, a read and the floor's write `account:apiovh:iam/resource/edit` / then each gets its own result, recorded with the action it holds for → exposes one action's URN applied to another.
+    - given the write's target is not the probe bucket `lzprobe-iam-urn-<lower(run id)>` the root creates (for example the retained project's URN, or a policy not named for the run) / then Validate refuses before any call → exposes a probe writing to the retained project or the admin's policy.
+    - given the probe bucket is not listed as an IAM resource (UNVERIFIED) / then the write is `blocked (no owned target)` and is not attempted on anything else → exposes a fallback to the retained project.
+    - given a fresh-process Sweep with only the run id and project after each partial creation (one identity's client created and its policy not; a policy create whose answer was lost; a tag key added to the probe bucket and its policy deleted) / then it lists both identities' clients and policies by the exact names `lzprobe-iam-urn-<run id>-project|account` and the probe bucket's tag key `lzprobe-iam-urn:run-id`, deletes each, lists again and fails on anything left → exposes leftovers after a crash.
   - Verify: `task test:live-lane`: each case fails on the stub for its stated reason.
   - Evidence: `specs/003-platform-feasibility/evidence/T033.md`; initial status `not-run`.
 
 - [ ] T034 [US3] Implement the iam-urn check in tools/internal/probes/live/identity/urn.go and the probe root tests/live/probes/iam-urn/
-  - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T033, T032 (the package's registry inputs).
-  - Scope: the check as data-model.md *Probe checks* fixes it, preferring a read action (the exact `account:apiovh:iam/*` action and its API call taken from the IAM action reference on docs.ovhcloud.com and cited, UNVERIFIED until then); a write, if any, only adds the tag key `lzprobe-iam-urn:run-id`, which Undo and the matrix's tag listing cover; the root (two OAuth2 clients and two policies `lzprobe-iam-urn-<run id>-project|account`, each with the probed and the control action, the sensitive output `urn_check`); the `iam-urn` case in `probeCheck`; the root's `lz-check unit` line; its run-sheet row.
+  - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T033, T032 (the package's registry inputs), T038.
+  - Scope: the check as data-model.md *Probe checks* fixes it, probing a read action (the exact `account:apiovh:iam/*` action and its API call taken from the IAM action reference on docs.ovhcloud.com and cited, UNVERIFIED until then) and the floor's write `account:apiovh:iam/resource/edit`, which only adds the tag key `lzprobe-iam-urn:run-id` to the probe bucket the root creates, never to the retained project; the check, not the root, creates the two OAuth2 clients and two policies `lzprobe-iam-urn-<run id>-project|account`, each with the probed and the control actions; the root creates only the probe bucket `lzprobe-iam-urn-<lower(run id)>` and the sensitive output `urn_check`; the `iam-urn` case in `probeCheck`; the root's `lz-check unit` line; its run-sheet row.
   - Verify: `task test:live-lane`: T033's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T034.md`; initial status `not-run`.
 
 - [ ] T027 [US3] Live run: the iam-urn probe on spec 005's runner with tests/live/probes/iam-urn/
   - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T034 on `main` at a reviewed SHA.
-  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/iam-urn` from the clean live clone at that SHA: records each identity's control attempts and probed call, status and the actions a refusal names, and the URN the action is checked against (or `either`, or `blocked` with the reason, `propagation` included). The run destroys in finally and sweeps its run-id leftovers; the policies, clients and any probe tag key are removed on exit and the leftover check is clean. T015 binds the floor's IAM denials to the observed URN only when the result is a URN.
+  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/iam-urn` from the clean live clone at that SHA: records each identity's control attempts and probed call, status and the actions a refusal names, and, per probed action, the URN it is checked against (or `either`, or `blocked` with the reason, `propagation` and `no owned target` included), each result recorded with its action. The run destroys in finally and sweeps its run-id leftovers; the policies, clients and the probe bucket's tag key are removed on exit and the leftover check is clean. T015 binds a floor denial only for an action whose result is a URN, and only to that URN.
   - Evidence: `specs/003-platform-feasibility/evidence/T027.md`: run id, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
 
 ### Probe 4: `force-unlock` and a version restore on an Object-Locked bucket
 
 - [ ] T035 [US2] Write the locked-recovery check's tests in tools/internal/probes/live/state/recovery_test.go with the stub of tools/internal/probes/live/state/recovery.go
-  - Requirements: FR-004 (C004.1), FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: 005/T099 and 005/T010 row 7b (probe bucket with Object Lock, governance, one day: versioned delete refused to the state credential, the janitor empties it with the bypass). The unlock is the pinned `tofu force-unlock` (OpenTofu 1.13.0) run against a disposable backend root `tests/live/probes/locked-recovery/backend/` whose S3 backend (`use_lockfile = true`, https://opentofu.org/docs/language/settings/backends/s3/) points at the locked probe bucket with the state credential; lz-live hands the check a seam that runs that pinned tofu (data-model.md). Whether OVHcloud honours a conditional PutObject (`If-None-Match: *`) is UNVERIFIED (research.md). The version restore has no tofu command and stays an S3 copy.
+  - Requirements: FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: 005/T099 and 005/T010 row 7b (probe bucket with Object Lock, governance, one day: versioned delete refused to the state credential, the janitor empties it with the bypass). The unlock is the pinned `tofu force-unlock` (OpenTofu 1.13.0) run against a disposable backend root `tests/live/probes/locked-recovery/backend/` whose S3 backend (`use_lockfile = true`, https://opentofu.org/docs/language/settings/backends/s3/) points at the locked probe bucket with the state credential; lz-live hands the check a seam that runs that pinned tofu (data-model.md). Whether OVHcloud honours a conditional PutObject (`If-None-Match: *`) is UNVERIFIED (research.md). The version restore has no tofu command and stays an S3 copy. What keeps A holding the lock: the lock object `<key>.tflock` A wrote stays in the bucket after A dies, since only A's own unlock removes it (the S3 lockfile has no expiry, OpenTofu docs above; UNVERIFIED for 1.13.0); A runs `apply` without `-auto-approve` and waits at the approval prompt, which it reaches holding the lock, and is killed with SIGKILL (an interrupt makes tofu release the lock). The backend root's state is not encrypted: this probe claims nothing about C004.1. The tofu diagnostics the cases classify are fixtures taken from OpenTofu 1.13.0's source, each citing its file and line in tests/fixtures/tofu-probes/locked-recovery/; T028 records whether the live diagnostics match, and a mismatch is `blocked`, not a verdict.
   - Cases (given / when / then → defect exposed). Primary, against a fake tofu runner (`RecoveryOptions.Tofu`) that records each invocation's arguments and environment:
-    - given writer A's `tofu apply` started on the backend root and killed after it reported holding the lock / when writer B runs `tofu plan -lock-timeout=0s` / then B's refusal is recorded `refused (locked)` with the lock id read from B's output → exposes a check that never establishes a held lock.
+    - given writer A's `tofu apply` waiting at its prompt, SIGKILLed, and the seam reporting that A exited on that signal / when writer B runs `tofu plan -lock-timeout=0s` / then B's refusal is recorded `refused (locked)` with the lock id read from B's output → exposes a check that never establishes a held lock.
+    - given the seam does not report that A exited after the SIGKILL (the kill failed, or A is still running) / then force-unlock and B's second plan are `not-run` and the observation is `blocked (owner alive)` → exposes a lock broken while its writer may still hold it (V005's owner-death proof).
+    - given B's first plan is allowed / then the observation is `blocked (lock not established)`, never a refutation, and no force-unlock runs → exposes an A that released or never took the lock read as a backend fault.
     - given B's refusal / when the check runs `tofu force-unlock -force <lock id>` with the state credential and then B's plan again / then the unlock is `allowed` and B's second plan `allowed`, both recorded → exposes an unlock not followed by a real acquisition.
-    - given force-unlock exits non-zero / then it is recorded `refused` with its sanitised reason, not retried, and B's second plan is `not-run` → exposes a retry loop or a refusal reported as success.
-    - given every tofu invocation / then it runs the pinned binary on the backend root with the state credential only, never the admin's or the janitor's → exposes an unlock that works only with broader rights.
+    - given force-unlock exits non-zero with the fixture of an authorisation or retention denial (403 `AccessDenied`) / then it is recorded `refused` with that reason, not retried, and B's second plan is `not-run` → exposes a retry loop or a refusal reported as success.
+    - given force-unlock or a plan fails with a transport error, a 404, a 5xx, a configuration error or a diagnostic matching no fixture / then the step is `blocked` with the reason, never `refused` → exposes an outage or a broken backend root counted as a denial.
+    - given every tofu invocation / then the seam's child environment holds the state key pair only (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` of the state user): no `OVH_*` variable, no janitor key, no admin credential → exposes an unlock that works only with broader rights, or a credential leaked into a child.
   - Supporting controls, against a fake S3 endpoint (httptest) through `RecoveryOptions.HTTP`:
     - given a held lock object / when a conditional PUT (`If-None-Match: *`) of it answers 412 / then `refused`, as expected → exposes a condition never sent.
     - given a held lock object / when the conditional PUT answers 2xx / then the step is `condition-ignored`, recorded as a refutation of C005.3/C005.4 in the record's findings, and Observe does not fail on it → exposes a check that treats a lost lock guarantee as a test failure instead of an observation.
@@ -319,18 +357,19 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Cleanup:
     - given a fresh-process Undo after each partial step (lock object left by the killed writer; a version written whose PUT answer was lost; a restore copy made) / then it empties the bucket with the janitor's governance bypass, delete markers included, lists again and fails on anything left (state's existing undo) → exposes locked versions left to their retention unrecorded.
     - given published variables with a `run_id` that is not a run id, or a bucket other than `lzprobe-locked-recovery-<lower(run id)>` / then Validate refuses before any request → exposes an Undo emptying a bucket the run does not own.
+    - given the bucket or a user whose create answer was lost (no output, no state entry) / when Sweep runs with only the run id and project / then it finds them by exact name, deletes them with the sandbox admin (an empty bucket: the check writes only after the outputs exist), lists again → exposes an orphan locked bucket.
   - Verify: `task test:live-lane`: each case fails on the stub for its stated reason; the state-backend check's tests stay green.
   - Evidence: `specs/003-platform-feasibility/evidence/T035.md`; initial status `not-run`.
 
 - [ ] T036 [US2] Implement the locked-recovery check in tools/internal/probes/live/state/recovery.go and the probe root tests/live/probes/locked-recovery/
-  - Requirements: FR-004 (C004.1), FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: T035.
-  - Scope: the check as data-model.md *Probe checks* fixes it; the tofu seam in lz-live (the pinned OpenTofu of `mise.live.toml`, the run's scratch HOME and its own `TF_DATA_DIR`, the state credential as the only credential in the child's environment, the redactor on its output); the S3 operations the supporting controls need in tools/internal/live/s3check.go (CopyObject with a source version id; a conditional PutObject); the root, a copy of `state-backend`'s bucket (Object Lock, governance, `P1D`), state user and janitor, with the sensitive output `recovery_check`, and the disposable backend root `backend/` (no provider resources beyond `terraform_data`); the `locked-recovery` case in `probeCheck`; the root's and the backend root's `lz-check unit` lines; its run-sheet row.
+  - Requirements: FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: T035, T038.
+  - Scope: the check as data-model.md *Probe checks* fixes it; the tofu seam in lz-live (the pinned OpenTofu of `mise.live.toml`, the run's scratch HOME and its own `TF_DATA_DIR`, the state key pair as the only credential in the child's environment, SIGKILL and the exit report, the redactor on its output), and the `ProbeCheck` contract comment in tools/internal/live/runner.go amended to say this seam is the one child that receives a published credential (the state key pair, nothing else); the S3 operations the supporting controls need in tools/internal/live/s3check.go (CopyObject with a source version id; a conditional PutObject); the root, a copy of `state-backend`'s bucket (Object Lock, governance, `P1D`), state user and janitor, with the sensitive output `recovery_check`, and the disposable backend root `backend/` (no provider resources beyond `terraform_data`); the `locked-recovery` case in `probeCheck`; the root's and the backend root's `lz-check unit` lines; its run-sheet row.
   - Verify: `task test:live-lane`: T035's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T036.md`; initial status `not-run`.
 
 - [ ] T028 [US2] Live run: the locked-recovery probe on spec 005's runner with tests/live/probes/locked-recovery/
-  - Requirements: FR-004 (C004.1), FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: T036 on `main` at a reviewed SHA.
-  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/locked-recovery` from the clean live clone at that SHA, on a one-day governance-locked probe bucket: records whether the pinned `tofu force-unlock` and the version restore succeed with the state credential, whether the second writer then acquires the lock, and whether the conditional PUT is honoured (`condition-ignored` is a refutation); the janitor's bypass empties the bucket before the destroy. The run destroys in finally and sweeps its run-id leftovers; the leftover check is clean; the cost records any version left to its retention.
+  - Requirements: FR-005 (C005.4, C005.8); ADRs: 0009, 0022. Depends on: T036 on `main` at a reviewed SHA.
+  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/locked-recovery` from the clean live clone at that SHA, on a one-day governance-locked probe bucket: records that A exited on SIGKILL, whether the pinned `tofu force-unlock` and the version restore succeed with the state credential, whether the second writer then acquires the lock, whether the live diagnostics matched the fixtures, and whether the conditional PUT is honoured (`condition-ignored` is a refutation); the janitor's bypass empties the bucket before the destroy. The run destroys in finally and sweeps its run-id leftovers; the leftover check is clean; the cost records any version left to its retention.
   - Evidence: `specs/003-platform-feasibility/evidence/T028.md`: run id, observation, cost (or UNVERIFIED), leftover check; initial status `not-run`.
 
 ## Planned command creators
@@ -341,7 +380,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
 Live probes add no target: each task above that writes a probe root under `tests/live/probes/`
 (T009, T011, T013, T015, T018, T030, T032, T034, T036) runs it with spec 005's `task live:probe`
-(D113). The probe checks T029–T036 add no target either: they extend spec 005's `test:live-lane`
+(D113). The probe checks T029–T038 add no target either: they extend spec 005's `test:live-lane`
 (T031 adds the identity package, each implementation task its root's `lz-check unit` line).
 
 ## Dependencies & execution order
@@ -363,8 +402,8 @@ qualification or close missing live tasks. Missing live authorization does not b
 
 Within 003, state T011–T014 and the probes T029/T030/T025 and T035/T036/T028, and identity
 T015–T019 and the probes T031/T032/T026 and T033/T034/T027, branch after 005/T047 with distinct
-fixtures and no overlapping live writers. The four probes' offline tasks can run in parallel
-worktrees except T033 after T031 (the identity package) and T034 after T032 (its registry
+fixtures and no overlapping live writers. T037/T038 come first; then the four probes' offline
+tasks can run in parallel worktrees except T033 after T031 (the identity package) and T034 after T032 (its registry
 inputs); their live runs go one at a time.
 The offline oracle T021–T022 needs only its listed local prerequisites. No parallel
 flag bypasses ownership or cleanup gates.

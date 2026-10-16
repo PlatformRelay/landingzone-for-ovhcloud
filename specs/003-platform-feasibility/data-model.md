@@ -36,27 +36,50 @@ every way out and on `--cleanup`, where it gets only the published variables. So
 publishes `run_id` (Public); Validate checks it against `live.RunIDPattern` and compares every
 published name exactly with the one derived from it (storageiam's `validate`). Buckets use
 `lower(run id)`, IAM names the run id as is. tools/cmd/lz-live/probe.go `probeCheck` maps the
-root's directory name to the constructor. These are the signatures the test tasks write
+root's directory name to the constructor.
+
+Every probe resource has one owner: the root (destroyed by tofu) or the check (deleted by its
+Undo); the checks own IAM clients and policies. Because a lost create answer can leave neither
+an output nor a state entry, `ProbeCheck` gains a field (T037, T038), which the runner calls with
+only what probe.env records, after destroy and before the leftover check, on every way out and
+on `--cleanup`, and keeps probe.env, the passphrase and the root record until it and the
+leftover check pass:
+
+```go
+// tools/internal/live/runner.go, ProbeCheck
+	// Sweep (optional) deletes, by listing exact run-derived names, every resource the root
+	// or the check may have created, whether or not an output or a state entry exists; it
+	// never reads a published output. nil: none (spec 005's roots).
+	Sweep func(ctx context.Context, runID, projectID string, term io.Writer) error
+```
+
+These are the signatures the test tasks write
 against; a test task's stub has them with bodies that return `errors.New("not implemented")`
 (Observe, Undo) or `nil` (Validate), and make no request. Observed values extend each package's
 own set; a value outside it is a test failure.
 
 ```go
 // tools/internal/probes/live/storageiam/swiftreach.go (T029, T030); root swift-reach,
-// output swift_check: run_id, auth_url, region, tenant_id,
+// output swift_check: run_id, auth_url, region, tenant_id, seed_key = lzprobe-swift-reach/seed,
 // bucket_a = lzprobe-swift-reach-<lower(run id)>-a, bucket_b = …-b,
 // user_a_name, user_a_password, user_b_name, user_b_password (the tenant users under test),
 // cleanup_a_key_id, cleanup_a_secret, cleanup_b_key_id, cleanup_b_secret (S3 list and delete on
 // that bucket only; Undo's credentials, independent of the tenant users).
-// Public: run_id, auth_url, region, tenant_id, bucket_a, bucket_b, user_a_name, user_b_name.
+// Public: run_id, auth_url, region, tenant_id, seed_key, bucket_a, bucket_b, user_a_name,
+// user_b_name. Owners: the root owns buckets, users, S3 credentials and policies (and the seeds
+// if the provider can write an object, UNVERIFIED); the check owns what it writes.
+// SwiftReach's Sweep lists buckets and users by the run's exact names with the sandbox admin.
 type SwiftOptions struct {
-	HTTP *http.Client     // Keystone, Swift and S3; nil: a default client
-	Now  func() time.Time // nil: time.Now
+	HTTP  *http.Client     // Keystone, Swift and S3; nil: a default client
+	Now   func() time.Time // nil: time.Now
+	API   live.API         // Sweep's listings and deletes
+	Admin live.Credential  // Sweep: the sandbox admin
 }
 func SwiftReach(o SwiftOptions) *live.ProbeCheck
 // JudgeReach: the other bucket's answer next to the own bucket's same-route control.
-// "reach" (other 2xx), "denied" (control 2xx, other 401/403), "blocked" (anything else).
-func JudgeReach(control, other SwiftAnswer) string
+// "reach" (other 2xx), "denied" (control 2xx, other 401/403, the repeated control with the
+// same token 2xx again), "blocked" (anything else, including a repeated control that fails).
+func JudgeReach(control, other, repeat SwiftAnswer) string
 type SwiftAnswer struct {
 	Status int   // 0: no answer
 	Err    error // transport error
@@ -72,7 +95,7 @@ type Options struct {
 	Now      func() time.Time
 	Sleep    func(context.Context, time.Duration) error // nil: a timer that honours ctx
 	Interval time.Duration // between polls and control retries; zero: 30 s
-	Settle   time.Duration // iam-urn: the bound on control retries; zero: 5 min
+	Settle   time.Duration // the bound on control retries (both checks); zero: 5 min
 }
 func TokenResidual(o Options) *live.ProbeCheck
 type Poll struct {
@@ -92,17 +115,19 @@ type Residual struct {
 func ResidualWindow(issued, deleted time.Time, expiresIn time.Duration, control Poll, polls []Poll, deadlineHit bool) Residual
 
 // tools/internal/probes/live/identity/urn.go (T033, T034); root iam-urn,
-// output urn_check: run_id, project_urn, account_urn, action, call, control_project,
-// control_account (Public: these), and each identity's client id and secret
-// (lzprobe-iam-urn-<run id>-project|account).
+// output urn_check: run_id, project_urn, account_urn, bucket = lzprobe-iam-urn-<lower(run id)>
+// (the only resource the root owns, the write's target), bucket_urn (Public: all). The check
+// creates and owns the identities and policies lzprobe-iam-urn-<run id>-project|account, each
+// granting the probed actions (a read and account:apiovh:iam/resource/edit) and the control.
 func IamURN(o Options) *live.ProbeCheck
 type URNAnswer struct {
 	Status  int
 	Actions []string // the IAM actions a refusal named (live.APIChecker)
 	Err     error
 }
-// JudgeURN: "project", "account", "either" (both allowed) or "blocked"; a control that never
-// succeeded within the stabilisation bound makes it "blocked" whatever the probed calls answered.
+// JudgeURN, once per probed action: "project", "account", "either" (both allowed) or
+// "blocked"; a control that never succeeded within Settle makes it "blocked" whatever the probed
+// calls answered. The record keeps each result with its action.
 func JudgeURN(action string, projectControl, project, accountControl, account URNAnswer) string
 
 // tools/internal/probes/live/state/recovery.go (T035, T036); root locked-recovery,
@@ -111,10 +136,18 @@ func JudgeURN(action string, projectControl, project, accountControl, account UR
 type RecoveryOptions struct {
 	HTTP *http.Client     // supporting S3 controls; nil: the S3 client's default
 	Now  func() time.Time // nil: time.Now
-	// Tofu runs the pinned OpenTofu on the disposable backend root with env as the only
-	// credentials; lz-live supplies it (scratch HOME, own TF_DATA_DIR, redacted output).
-	// kill: start the command and kill it once its output shows the lock is held.
-	Tofu func(ctx context.Context, env map[string]string, kill bool, args ...string) (exit int, output []byte, err error)
+	// Tofu runs the pinned OpenTofu on the disposable backend root; env holds the state key
+	// pair only (no OVH_*, no janitor key). lz-live supplies it (scratch HOME, own TF_DATA_DIR,
+	// redacted output). kill: start the command, wait until it waits at its approval prompt
+	// (holding the lock), SIGKILL it and report how it exited.
+	Tofu func(ctx context.Context, env map[string]string, kill bool, args ...string) (TofuRun, error)
+	API   live.API        // Sweep's listings and deletes
+	Admin live.Credential // Sweep: the sandbox admin
+}
+type TofuRun struct {
+	Exit     int
+	Signaled bool   // exited on the SIGKILL the seam sent: the owner-death proof
+	Output   []byte // redacted; classified against the fixtures of OpenTofu 1.13.0's diagnostics
 }
 func LockedRecovery(o RecoveryOptions) *live.ProbeCheck
 ```
