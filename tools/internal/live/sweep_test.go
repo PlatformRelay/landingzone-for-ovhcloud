@@ -609,3 +609,169 @@ func TestSweepRedacted(t *testing.T) {
 		t.Errorf("%v hold a secret Sweep printed", left)
 	}
 }
+
+// TestSweepKeptRoot (T038, coordinator decision 2026-10-16): a run that keeps its root (its Undo
+// failed, or its companion was not destroyed) does not sweep: Sweep deletes by name what the kept
+// root's Undo may still need (a credential the check uses). The run fails naming `--cleanup
+// <run-id>`; that cleanup, once its Undo passes and the root is destroyed, sweeps once before the
+// leftover check and removes the run's files. A cleanup whose root fails `init` never reaches its
+// Undo, so it keeps the root and does not sweep either (cleanup-init-fails). Exposes a sweep that
+// runs beside a kept root.
+func TestSweepKeptRoot(t *testing.T) {
+	for _, name := range []string{"undo-fails", "companion-not-destroyed", "cleanup-init-fails"} {
+		t.Run(name, func(t *testing.T) {
+			var p Probe
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			h := &swHooks{}
+			if name != "companion-not-destroyed" {
+				h.undoErrs = []error{errors.New("policy still listed")}
+				p = w.swProbe(t, root, tofuStack{Outputs: checkOutputs(t, w, "deny_check", checkEnvWant())}, h.check(w))
+			} else {
+				withUmask(t)
+				p = w.companionCheckProbe(t, root, tofuStack{DestroyExit: 1}, &h.checkHooks)
+				p.Check = h.check(w)
+				p.Run.Leftovers.Lister = swLister{inner: p.Run.Leftovers.Lister, bin: w.bin}
+			}
+			err := p.Start(context.Background())
+			if err == nil {
+				t.Fatal("a run that kept its root passed")
+			}
+			if !strings.Contains(err.Error(), "--cleanup "+swRunID) {
+				t.Errorf("the run's error does not name --cleanup %s: %v", swRunID, err)
+			}
+			if n := len(h.calls()); n != 0 {
+				t.Errorf("Sweep ran %d times beside a kept root, want none", n)
+			}
+			if _, state, pass := probeFiles(t, root); !exists(state) || !exists(pass) {
+				t.Fatalf("state kept %v, passphrase kept %v; want both for --cleanup", exists(state), exists(pass))
+			}
+
+			if name == "companion-not-destroyed" {
+				st := w.scenario.Stacks["companion"]
+				st.DestroyExit = 0
+				w.scenario.Stacks["companion"] = st
+				w.save(t)
+			}
+			if name == "cleanup-init-fails" {
+				st := w.scenario.Stacks["p"]
+				st.InitExit = 1
+				w.scenario.Stacks["p"] = st
+				w.save(t)
+				err := p.Cleanup(context.Background())
+				if err == nil || !strings.Contains(err.Error(), "--cleanup "+swRunID) {
+					t.Errorf("a cleanup whose init failed: %v, want a failure naming --cleanup %s", err, swRunID)
+				}
+				if n := len(h.calls()); n != 0 {
+					t.Errorf("a cleanup whose init failed swept %d times, want none", n)
+				}
+				st.InitExit = 0
+				w.scenario.Stacks["p"] = st
+				w.save(t)
+			}
+			before := len(w.calls(t, "tofu.log"))
+			if err := p.Cleanup(context.Background()); err != nil {
+				t.Fatalf("cleanup: %v\n%s", err, w.term)
+			}
+			order := swOrder(w.calls(t, "tofu.log")[before:])
+			swAfterDestroyBeforeList(t, order, true)
+			if u, s := slices.Index(order, "undo"), slices.Index(order, "sweep"); u < 0 || u > s {
+				t.Errorf("the cleanup's Undo did not run before its Sweep: %v", order)
+			}
+			if got := h.calls(); len(got) != 1 || got[0].runID != swRunID || got[0].project != probeProject {
+				t.Errorf("Sweep got %+v, want once in the cleanup with run id %s and project %s", got, swRunID, probeProject)
+			}
+			if dir, _, _ := probeFiles(t, root); exists(dir) {
+				left, _ := os.ReadDir(dir)
+				t.Errorf("after a passing cleanup the probe kept %v", left)
+			}
+		})
+	}
+}
+
+// TestSweepPlanOnly (T038): a plan-only run applies nothing, so it neither sweeps nor keeps its
+// files, also when its leftover check fails (review round 2). Exposes a sweep that deletes by name
+// in a run that may not write, or a later `--cleanup` that does.
+func TestSweepPlanOnly(t *testing.T) {
+	t.Parallel()
+	for _, seed := range []string{"", "network"} {
+		t.Run("leftovers="+seed, func(t *testing.T) {
+			t.Parallel()
+			root := tempPrivate(t)
+			w := newRunWorld(t)
+			h := &swHooks{}
+			p := w.swProbe(t, root, tofuStack{Outputs: checkOutputs(t, w, "deny_check", checkEnvWant())}, h.check(w))
+			p.Run.PlanOnly = true
+			if seed != "" {
+				c, _ := cleanCheck(t, seed)
+				p.Run.Leftovers = c
+			}
+			if err := p.Start(context.Background()); (err != nil) != (seed != "") {
+				t.Fatalf("Start: %v, want an error only from the leftover check\n%s", err, w.term)
+			}
+			if n := len(h.calls()); n != 0 {
+				t.Errorf("a plan-only run swept %d times", n)
+			}
+			if dir, _, _ := probeFiles(t, root); exists(dir) {
+				left, _ := os.ReadDir(dir)
+				t.Errorf("a plan-only run kept %v", left)
+			}
+		})
+	}
+}
+
+// TestSweepCleanupNoState (T038, T037's deferred gap): a run that wrote no state (its plan failed)
+// and whose Sweep failed keeps its files and names `--cleanup <run-id>`; that cleanup, in which
+// the root has no state to destroy (a missing local state reads as empty), sweeps once after the
+// destroy and before the leftover check, passes and removes the run's files. Exposes a cleanup
+// that a run without state can never finish.
+func TestSweepCleanupNoState(t *testing.T) {
+	t.Parallel()
+	root := tempPrivate(t)
+	w := newRunWorld(t)
+	h := &swHooks{sweepErr: errors.New("sweep: lzprobe-user still listed")}
+	outputs := swNoCheckOutput(t, w)
+	p := w.swProbe(t, root, tofuStack{PlanExit: 1, Outputs: outputs}, h.check(w))
+	if err := p.Start(context.Background()); ExitCode(err) == 0 {
+		t.Fatal("a probe whose plan failed exited 0")
+	}
+	if record, pass, state := swFiles(t, root); !record || !pass || state {
+		t.Fatalf("after the failed run: probe.env %v, passphrase %v, state %v; want the first two kept and no state", record, pass, state)
+	}
+
+	// Review r1: a cleanup that fails before its Sweep and leftover check ran (here the run's
+	// inventory is unreadable) keeps the files too.
+	inv := filepath.Join(w.runDir, "inventory.jsonl")
+	if err := os.WriteFile(inv, []byte("{truncated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Cleanup(context.Background()); err == nil {
+		t.Fatal("a cleanup with an unreadable inventory passed")
+	}
+	if record, pass, _ := swFiles(t, root); !record || !pass {
+		t.Fatalf("after a cleanup that failed before its sweep: probe.env kept %v, passphrase kept %v; want both", record, pass)
+	}
+	if err := os.Remove(inv); err != nil {
+		t.Fatal(err)
+	}
+
+	w.scenario.Stacks["p"] = tofuStack{Outputs: outputs, MissingStateEmpty: true}
+	w.save(t)
+	h.sweepErr = nil
+	before := len(w.calls(t, "tofu.log"))
+	if err := p.Cleanup(context.Background()); err != nil {
+		t.Fatalf("cleanup of a run without state: %v\n%s", err, w.term)
+	}
+	order := swOrder(w.calls(t, "tofu.log")[before:])
+	swAfterDestroyBeforeList(t, order, true)
+	if n := swCount(order, "undo") + swCount(order, "observe"); n != 0 {
+		t.Errorf("the cleanup ran observe or undo for a root that published nothing: %v", order)
+	}
+	if got := h.calls(); len(got) != 2 || got[1].runID != swRunID || got[1].project != probeProject {
+		t.Errorf("Sweep got %+v, want the run's and then the cleanup's, with run id %s and project %s", got, swRunID, probeProject)
+	}
+	if dir, _, _ := probeFiles(t, root); exists(dir) {
+		left, _ := os.ReadDir(dir)
+		t.Errorf("after a passing cleanup the probe kept %v", left)
+	}
+}

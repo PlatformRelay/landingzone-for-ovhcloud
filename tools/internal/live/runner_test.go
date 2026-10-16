@@ -43,6 +43,7 @@ type tofuStack struct {
 	Changes         []planChange `json:"changes"` // resource_changes of `show -json`
 	PlanExit        int          `json:"plan_exit"`
 	DestroyExit     int          `json:"destroy_exit"`
+	InitExit        int          `json:"init_exit"` // T038: init fails with this exit
 	StateList       []string     `json:"state_list"`
 	// Outputs: file holding what `tofu output -json` prints (T075; captured format, see
 	// testdata/tofu/output-companion.json); `output -json <name>` prints that output's value.
@@ -59,6 +60,8 @@ type tofuStack struct {
 	// prints the n-th entry on stderr and fails (exit 1); later calls behave as configured otherwise.
 	DestroyPlanErrors []string `json:"destroy_plan_errors"`
 	DestroyErrors     []string `json:"destroy_errors"`
+	// MissingStateEmpty (T038): destroy reads a missing state file as an empty state.
+	MissingStateEmpty bool `json:"missing_state_empty"`
 }
 
 // planChange is one resource change the fake plan holds.
@@ -330,6 +333,10 @@ func fakeTofu(args []string) int {
 	case sub == "init":
 		call.Cmd = "init"
 		logCall(bin, "tofu.log", call)
+		if st.InitExit != 0 {
+			fmt.Fprintln(os.Stderr, "Error: fake init failure")
+			return st.InitExit
+		}
 		return fakeInit(call.DataDir, statePath, has("-reconfigure"))
 	case sub == "plan":
 		call.Cmd = "plan"
@@ -405,7 +412,11 @@ func fakeTofu(args []string) int {
 			if statePath != "" {
 				var s fakeState
 				raw, err := os.ReadFile(statePath)
-				ok := err == nil && json.Unmarshal(raw, &s) == nil && s.PassSHA == passSHA(os.Getenv("TF_VAR_state_passphrase"))
+				// MissingStateEmpty: a missing local state reads as empty, nothing to decrypt
+				// (T038: the `--cleanup` of a run that wrote no state; believed, UNVERIFIED for
+				// OpenTofu 1.13 with state encryption). Otherwise a missing state fails as before.
+				ok := st.MissingStateEmpty && errors.Is(err, os.ErrNotExist) ||
+					err == nil && json.Unmarshal(raw, &s) == nil && s.PassSHA == passSHA(os.Getenv("TF_VAR_state_passphrase"))
 				call.PassOK = &ok
 				if !ok {
 					logCall(bin, "tofu.log", call)
