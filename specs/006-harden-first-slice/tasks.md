@@ -205,7 +205,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: every case fails against the stub.
   - Evidence: `evidence/T019.md`; PR; initial status `not-run`.
 
-- [ ] T020 [US2] Write KD-1 canary removal tests in tools/internal/live/observe_test.go
+- [x] T020 [US2] Write KD-1 canary removal tests in tools/internal/live/observe_test.go — closed 2026-10-16, evidence: evidence/T020.md
   - Requirements: FR-009; ADRs: 0008, 0024. Depends on: T016.
   - Cases (given / when / then → defect exposed):
     - given a fake create that answers 500 after creating the canary / when the collector runs / then the canary is removed → exposes the trap registered only after success (`observe.go:455-458`).
