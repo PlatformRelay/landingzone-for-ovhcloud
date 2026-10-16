@@ -23,6 +23,7 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -263,4 +264,23 @@ func s3Code(raw []byte, keys ...string) string {
 		return "unrecognised"
 	}
 	return e.Code
+}
+
+// ObjectLock is a bucket's Object Lock configuration as GetObjectLockConfiguration answers it
+// (spec 006 FR-010): whether it is enabled, and the default retention's mode and period.
+type ObjectLock struct {
+	Enabled     bool
+	Mode        string
+	Days, Years int
+}
+
+// ObjectLock reads bucket's Object Lock configuration. Not implemented: T026 (T021 pins it).
+func (c *S3Checker) ObjectLock(ctx context.Context, bucket string) (ObjectLock, error) {
+	return ObjectLock{}, errors.New("S3 check: ObjectLock not implemented")
+}
+
+// judgeObjectLock judges a state bucket's Object Lock read for `state-bucket-object-lock`:
+// `pass`, `fail` or `blocked`. Not implemented: T026 (T021 pins it).
+func judgeObjectLock(l ObjectLock, err error) string {
+	return ""
 }

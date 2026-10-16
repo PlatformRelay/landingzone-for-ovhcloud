@@ -1040,3 +1040,68 @@ func TestObserveChainNotAfterFailure(t *testing.T) {
 	}
 	chainSummaryLine(t, h, r.runID, "fail", "none")
 }
+
+// Spec 006 T021 case 4 (FR-010): the chain's L7 assertions include `state-bucket-object-lock`,
+// required once for each of the sandbox manifest's two state buckets. The chain writes the subjects
+// it requires to observations.json (`expected`) and judges the observer's set against them: both
+// buckets observed holding passes; a bucket not observed, or observed violated, fails the run naming
+// the assertion and the bucket; a set without the assertion fails too. An unreadable lock fails the
+// run naming the bucket and is never `pass`; whether the chain reports it `fail` or `blocked` is
+// left to T026 (FR-010 fixes the judge's `blocked`, review r1).
+func TestObserveChainObjectLock(t *testing.T) {
+	buckets := []string{"lz-bkt-state", "lz-demo-bkt-state"}
+	lock := func(subject, observed string) Observation {
+		return Observation{Assertion: "state-bucket-object-lock", Subject: subject, Observed: observed}
+	}
+	// base is the passing set without any Object Lock observation, whatever chainPassing holds.
+	base := func(extra ...Observation) []Observation {
+		return append(chainWith(func(o Observation) *Observation {
+			if o.Assertion == "state-bucket-object-lock" {
+				return nil
+			}
+			return &o
+		}), extra...)
+	}
+	cases := []struct {
+		name    string
+		obs     []Observation
+		exit    int
+		outcome string   // "": any outcome but pass
+		reason  []string // each in the error
+	}{
+		{name: "both-locked", obs: base(lock(buckets[0], "holds"), lock(buckets[1], "holds")), outcome: "pass"},
+		{name: "not-observed", obs: base(), exit: 1, outcome: "fail", reason: []string{"state-bucket-object-lock", buckets[0], buckets[1]}},
+		{name: "one-bucket-unobserved", obs: base(lock(buckets[0], "holds")), exit: 1, outcome: "fail", reason: []string{"state-bucket-object-lock", buckets[1]}},
+		{name: "one-bucket-violated", obs: base(lock(buckets[0], "holds"), lock(buckets[1], "violated")), exit: 1, outcome: "fail", reason: []string{"state-bucket-object-lock", buckets[1]}},
+		{name: "one-bucket-unreadable", obs: base(lock(buckets[0], "error"), lock(buckets[1], "holds")), exit: -1, reason: []string{"state-bucket-object-lock", buckets[0]}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newChainHarness(t)
+			o := &chainObserver{obs: tc.obs}
+			r := h.chain(chainExec{observer: o})
+			if tc.exit >= 0 {
+				laneExit(t, r.laneRun, tc.exit)
+			} else if ExitCode(r.err) == 0 {
+				t.Errorf("exit 0 (%v), want a failed run", r.err)
+			}
+			for _, s := range tc.reason {
+				if r.err == nil || !strings.Contains(r.err.Error(), s) {
+					t.Errorf("err %v, want one naming %s", r.err, s)
+				}
+			}
+			var set ObservationSet
+			raw, err := os.ReadFile(filepath.Join(r.runDir, "observations.json"))
+			if err != nil || json.Unmarshal(raw, &set) != nil {
+				t.Fatalf("observations.json unreadable (%v)", err)
+			}
+			if got := set.Expected["state-bucket-object-lock"]; !slices.Equal(got, buckets) {
+				t.Errorf("expected state-bucket-object-lock subjects %v, want each state bucket once: %v", got, buckets)
+			}
+			s := readChainSummary(t, r.runDir)
+			if tc.outcome != "" && s.Outcome != tc.outcome || tc.outcome == "" && (s.Outcome == "pass" || s.Outcome == "") {
+				t.Errorf("summary.json outcome %q, want %q", s.Outcome, map[bool]string{true: tc.outcome, false: "anything but pass"}[tc.outcome != ""])
+			}
+		})
+	}
+}

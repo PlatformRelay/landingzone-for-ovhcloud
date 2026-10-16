@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -343,5 +345,141 @@ func TestS3CheckerNoSecret(t *testing.T) {
 	}
 	if _, err := NewS3Checker(S3Options{Region: "gra11", Keys: s3TestKeys()}); err == nil {
 		t.Error("checker for a region with no Object Storage endpoint: no refusal")
+	}
+}
+
+// Spec 006 T021 (FR-010; data-model *Fixed signatures*; premise P5): the state bucket's Object
+// Lock read and its judge. The answers take the AWS GetObjectLockConfiguration shape (the
+// configuration OVHcloud documents for `get-object-lock-configuration`, docs.ovhcloud.com
+// storage-and-backup/object-storage/s3-managing-object-lock.mdx:167-190; the wire XML and the
+// not-found code are AWS's, UNVERIFIED on OVHcloud until the next owner chain run). Governance
+// mode with a default retention passes; disabled, absent, compliance mode or no retention fails; a
+// read error is `blocked`, never `pass`.
+
+// objectLockXML is a GetObjectLockConfiguration answer: ObjectLockEnabled ("" leaves the element
+// out) and the rule's inner XML ("" leaves the rule out).
+func objectLockXML(enabled, rule string) string {
+	s := `<?xml version="1.0" encoding="UTF-8"?><ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`
+	if enabled != "" {
+		s += "<ObjectLockEnabled>" + enabled + "</ObjectLockEnabled>"
+	}
+	if rule != "" {
+		s += "<Rule>" + rule + "</Rule>"
+	}
+	return s + "</ObjectLockConfiguration>"
+}
+
+// TestS3CheckerObjectLock: S3Checker.ObjectLock against a fake S3 answer, then judgeObjectLock.
+// Every row sends one signed GET of the bucket's `object-lock` sub-resource and nothing else; no
+// error carries answer text.
+func TestS3CheckerObjectLock(t *testing.T) {
+	t.Parallel()
+	echo := "SERVERTEXT " + s3TestSK
+	errorBody := func(code string) string {
+		return "<?xml version=\"1.0\"?><Error><Code>" + code + "</Code><Message>" + echo + "</Message></Error>"
+	}
+	gov60 := "<DefaultRetention><Mode>GOVERNANCE</Mode><Days>60</Days></DefaultRetention>"
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		drop    bool       // close the connection unanswered
+		outcome string     // judgeObjectLock's
+		parsed  ObjectLock // checked on pass rows
+	}{
+		// Case 1: governance mode with a default retention, in days or in years.
+		{name: "governance-days", status: 200, body: objectLockXML("Enabled", gov60), outcome: "pass", parsed: ObjectLock{Enabled: true, Mode: "GOVERNANCE", Days: 60}},
+		{name: "governance-years", status: 200, body: objectLockXML("Enabled", "<DefaultRetention><Mode>GOVERNANCE</Mode><Years>1</Years></DefaultRetention>"), outcome: "pass", parsed: ObjectLock{Enabled: true, Mode: "GOVERNANCE", Years: 1}},
+		// Case 2: disabled, absent, compliance mode, no retention.
+		{name: "disabled", status: 200, body: objectLockXML("Disabled", gov60), outcome: "fail"},
+		{name: "enabled-element-absent", status: 200, body: objectLockXML("", gov60), outcome: "fail"},
+		{name: "absent", status: 404, body: errorBody("ObjectLockConfigurationNotFoundError"), outcome: "fail"},
+		{name: "compliance", status: 200, body: objectLockXML("Enabled", "<DefaultRetention><Mode>COMPLIANCE</Mode><Days>60</Days></DefaultRetention>"), outcome: "fail"},
+		{name: "no-rule", status: 200, body: objectLockXML("Enabled", ""), outcome: "fail"},
+		{name: "rule-without-period", status: 200, body: objectLockXML("Enabled", "<DefaultRetention><Mode>GOVERNANCE</Mode></DefaultRetention>"), outcome: "fail"},
+		{name: "rule-without-mode", status: 200, body: objectLockXML("Enabled", "<DefaultRetention><Days>60</Days></DefaultRetention>"), outcome: "fail"},
+		// Case 3: a read error.
+		{name: "denied", status: 403, body: errorBody("AccessDenied"), outcome: "blocked"},
+		{name: "server-error", status: 500, body: errorBody("InternalError"), outcome: "blocked"},
+		// Only ObjectLockConfigurationNotFoundError says the configuration is absent; any other
+		// 404 is a read error, not a missing lock (review r1).
+		{name: "no-such-bucket", status: 404, body: errorBody("NoSuchBucket"), outcome: "blocked"},
+		{name: "404-unrecognised", status: 404, body: "<html>not found " + echo + "</html>", outcome: "blocked"},
+		{name: "undecodable", status: 200, body: "<html>gateway " + echo + "</html>", outcome: "blocked"},
+		{name: "dropped", drop: true, outcome: "blocked"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeS3(t)
+			if tc.drop {
+				f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
+					if conn, _, err := rw.(http.Hijacker).Hijack(); err == nil {
+						conn.Close()
+					}
+					return true
+				}
+			} else {
+				answerWith(f, tc.status, "", tc.body)
+			}
+			c := newTestS3Checker(t, f)
+			l, err := c.ObjectLock(context.Background(), s3TestBucket)
+			reqs := f.requests()
+			if len(reqs) == 0 {
+				t.Errorf("no request sent (err %v): the lock is read from the bucket", err)
+			}
+			for _, r := range reqs {
+				path, query, _ := strings.Cut(r.RawPath, "?")
+				q, qerr := url.ParseQuery(query)
+				if r.Method != http.MethodGet || path != "/"+s3TestBucket || qerr != nil || len(q) != 1 || !q.Has("object-lock") || q.Get("object-lock") != "" || !r.SignedOK || len(r.Body) > 0 {
+					t.Errorf("sent %s %s (signature ok %v, %d body bytes), want one signed GET /%s?object-lock", r.Method, r.RawPath, r.SignedOK, len(r.Body), s3TestBucket)
+				}
+			}
+			// A dropped GET may be retried once by the transport; every other row sends one.
+			if want := map[bool]int{false: 1, true: 2}[tc.drop]; len(reqs) > want {
+				t.Errorf("%d requests, want at most %d", len(reqs), want)
+			}
+			if got := judgeObjectLock(l, err); got != tc.outcome {
+				t.Errorf("judgeObjectLock(%+v, %v) = %q, want %q", l, err, got, tc.outcome)
+			}
+			if tc.outcome == "pass" && (err != nil || !l.Enabled || !strings.EqualFold(l.Mode, tc.parsed.Mode) || l.Days != tc.parsed.Days || l.Years != tc.parsed.Years) {
+				t.Errorf("ObjectLock = %+v, %v; want %+v, no error (the AWS shape read as answered)", l, err, tc.parsed)
+			}
+			if err != nil && (strings.Contains(err.Error(), "SERVERTEXT") || strings.Contains(err.Error(), s3TestSK)) {
+				t.Errorf("error %q carries answer text", err)
+			}
+		})
+	}
+}
+
+// TestJudgeObjectLock: the judge alone. Only an enabled lock in governance mode with a default
+// retention period passes; a read error is `blocked` whatever configuration came with it.
+func TestJudgeObjectLock(t *testing.T) {
+	t.Parallel()
+	readErr := errors.New("GetObjectLockConfiguration lz-bkt-state: request failed")
+	cases := []struct {
+		name string
+		l    ObjectLock
+		err  error
+		want string
+	}{
+		{"governance-days", ObjectLock{Enabled: true, Mode: "GOVERNANCE", Days: 1}, nil, "pass"},
+		{"governance-years", ObjectLock{Enabled: true, Mode: "GOVERNANCE", Years: 1}, nil, "pass"},
+		{"disabled", ObjectLock{Mode: "GOVERNANCE", Days: 1}, nil, "fail"},
+		{"absent", ObjectLock{}, nil, "fail"},
+		{"compliance", ObjectLock{Enabled: true, Mode: "COMPLIANCE", Days: 1}, nil, "fail"},
+		{"no-mode", ObjectLock{Enabled: true, Days: 1}, nil, "fail"},
+		{"no-retention", ObjectLock{Enabled: true, Mode: "GOVERNANCE"}, nil, "fail"},
+		{"negative-retention", ObjectLock{Enabled: true, Mode: "GOVERNANCE", Days: -1}, nil, "fail"},
+		{"negative-retention-years", ObjectLock{Enabled: true, Mode: "GOVERNANCE", Years: -1}, nil, "fail"},
+		{"read-error", ObjectLock{}, readErr, "blocked"},
+		{"read-error-with-governance", ObjectLock{Enabled: true, Mode: "GOVERNANCE", Days: 1}, readErr, "blocked"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := judgeObjectLock(tc.l, tc.err); got != tc.want {
+				t.Errorf("judgeObjectLock(%+v, %v) = %q, want %q", tc.l, tc.err, got, tc.want)
+			}
+		})
 	}
 }
