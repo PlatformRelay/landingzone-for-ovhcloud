@@ -46,7 +46,7 @@ SHA, outcome, retries seen, approximate cost and the credit left.
   - Verify: `task check:specs -- specs/007-cleanup-first-live-slice`: `TRACE_OK`; R2 has an outcome with cited lines.
   - Evidence: `evidence/T001.md`; initial status `not-run`.
 
-- [ ] T002 Verify the trace of spec 007 in Taskfile.yml and tools/harness/checks.yaml (written in the spec-set commit)
+- [x] T002 Verify the trace of spec 007 in Taskfile.yml and tools/harness/checks.yaml (written in the spec-set commit) — closed 2026-10-16, evidence: evidence/T002.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: none.
   - Verify: `task test:traceability; task test:foundation-ci; task check:specs`: `TestTaskfileTracesEverySpec` green; `task check:specs` with no argument prints `TRACE_OK` for 001, 005, 006 and 007; `ci-source` reads spec 007; `test:foundation-ci`'s inputs name `specs/007-cleanup-first-live-slice/tasks.md`.
   - Evidence: `evidence/T002.md`; initial status `not-run`.
