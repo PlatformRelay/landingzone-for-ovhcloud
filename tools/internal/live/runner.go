@@ -101,6 +101,9 @@ type Runner struct {
 	// destroyAt, once closed, ends the destroy-on-exit as its budget running out does (tests: once
 	// a destroy hangs); nil in production.
 	destroyAt <-chan struct{}
+	// childStarted, when set, sees the context and arguments of every child the run starts (tests:
+	// the destroy's own context, spec 006 FR-002); nil in production.
+	childStarted func(ctx context.Context, args []string)
 }
 
 // companionStage is a probe root's second stage (T075/T076): after the root's apply, the
@@ -125,6 +128,9 @@ type childEnv struct {
 	vars  map[string]string
 	grace time.Duration
 	stop  atomic.Value // os.Signal; unset: SIGINT
+	// started, when set, sees each child's context and arguments as it is made (tests only:
+	// Runner.childStarted, ChainOptions.childStarted); nil in production.
+	started func(ctx context.Context, args []string)
 }
 
 func (c *childEnv) stopSignal() os.Signal {
@@ -137,6 +143,9 @@ func (c *childEnv) stopSignal() os.Signal {
 // command returns a child that, when ctx ends, receives the stop signal, then a kill after the
 // grace period.
 func (c *childEnv) command(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	if c.started != nil {
+		c.started(ctx, arg)
+	}
 	cmd := exec.CommandContext(ctx, name, arg...)
 	cmd.Env = childEnviron(c.home, c.vars)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -893,7 +902,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	}
 	maps.Copy(vars, r.Creds)
 	delete(vars, "TF_DATA_DIR") // set per stack by tofuCmd; a caller cannot move it
-	s := &session{r: r, red: red, term: term, child: &childEnv{home: home, vars: vars, grace: grace}, stackVars: map[string]map[string]string{}}
+	s := &session{r: r, red: red, term: term, child: &childEnv{home: home, vars: vars, grace: grace, started: r.childStarted}, stackVars: map[string]map[string]string{}}
 	if s.inv, err = OpenInventory(r.Dir, red); err != nil {
 		return err
 	}
@@ -948,8 +957,10 @@ func (r Runner) Execute(ctx context.Context) error {
 		runErr = errors.Join(context.Cause(runCtx), runErr)
 	}
 
-	// Destroy-on-exit, with its own time: the run's context may have expired.
-	dctx, dcancel := destroyContext(ctx, deadline, r.destroyAt)
+	// Destroy-on-exit, with its own time: the run's context may have expired. One context serves the
+	// destroys and the leftover check, with at least DefaultDeadline (FR-002).
+	budget := destroyBudget(deadline)
+	dctx, dcancel := destroyContext(ctx, budget, r.destroyAt)
 	defer dcancel()
 	var destroyErr error
 	// keepStage: the companion was not destroyed, so its stage — the identities it runs under, the
@@ -1024,6 +1035,9 @@ func (r Runner) Execute(ctx context.Context) error {
 	check := r.Leftovers
 	check.Red = red
 	rep := check.Check(dctx, entries)
+	// A call that ignores its context may still answer after the budget ran out: the context's own
+	// state fails the run too.
+	destroyErr = errors.Join(destroyErr, destroyBudgetSpent(dctx, budget))
 	var recErr error
 	for typ, items := range rep.Listings {
 		raw, e := json.Marshal(items)

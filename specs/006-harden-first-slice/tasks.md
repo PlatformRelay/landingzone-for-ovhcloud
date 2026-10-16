@@ -229,7 +229,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: T017's cases green; the chain's summary and inventory rows unchanged. Guard G23 mutants are killed.
   - Evidence: `evidence/T022.md`; PR; initial status `not-run`.
 
-- [ ] T023 [US2] Give destroy-on-exit `destroyBudget` in tools/internal/live/chain.go and tools/internal/live/runner.go
+- [x] T023 [US2] Give destroy-on-exit `destroyBudget` in tools/internal/live/chain.go and tools/internal/live/runner.go — closed 2026-10-16, evidence: evidence/T023.md
   - Requirements: FR-002, SC-001; ADRs: 0008, 0024. Depends on: T018, T022.
   - Verify: `task test:live-lane`: T018's cases green; the destroy stays detached from the run's cancellation. Guard G21 mutant is killed.
   - Evidence: `evidence/T023.md`; PR; initial status `not-run`.

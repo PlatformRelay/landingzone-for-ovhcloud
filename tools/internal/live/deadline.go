@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -30,10 +31,19 @@ func withDeadline(ctx context.Context, d time.Duration, at <-chan struct{}) (con
 }
 
 // destroyBudget is the destroy-on-exit's budget for a run given deadline run (spec 006 FR-002):
-// max(DefaultDeadline, run), DefaultDeadline when run <= 0. Stub of the signature data-model
-// fixes; T023 implements it and gives the chain's and the probe core's destroy-on-exit this budget.
+// max(DefaultDeadline, run), DefaultDeadline when run <= 0. A run deadline shorter than
+// DefaultDeadline never shortens the destroy; a longer one is kept.
 func destroyBudget(run time.Duration) time.Duration {
-	return 0 // not implemented
+	return max(DefaultDeadline, run)
+}
+
+// destroyBudgetSpent is the error a destroy-on-exit reports when its context ended while it ran,
+// whether or not a call returned an error for it: what it did not reach stays for --cleanup.
+func destroyBudgetSpent(dctx context.Context, budget time.Duration) error {
+	if dctx.Err() == nil {
+		return nil
+	}
+	return fmt.Errorf("destroy-on-exit: its budget of %v ran out (%w); what it did not destroy or check stays for --cleanup", budget, context.Cause(dctx))
 }
 
 // retryBudget is the one retry budget a leftover check shares across every retained instance it

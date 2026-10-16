@@ -505,6 +505,12 @@ type chainExec struct {
 	destroyAtBlock bool
 	// clock is the retained state reads' waitClock (T019; nil: the wall clock).
 	clock waitClock
+	// children sees every child the chain starts with its context's deadline (T023).
+	children *childDeadlines
+	// wrapLister wraps the run's Lister seam last (T023); it needs production false.
+	wrapLister func(Lister) Lister
+	// destroyAt, when set, is the chain's destroyAt (T023; not with destroyAtBlock).
+	destroyAt chan struct{}
 }
 
 // chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114):
@@ -626,6 +632,16 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	if c.destroyAtBlock {
 		destroyAtOpt = destroyAt
 	}
+	if c.destroyAt != nil {
+		if c.destroyAtBlock {
+			t.Fatal("chainExec.destroyAt and destroyAtBlock both set the destroy's budget seam")
+		}
+		destroyAtOpt = c.destroyAt
+	}
+	var childStarted func(context.Context, []string)
+	if c.children != nil {
+		childStarted = c.children.started
+	}
 	if c.budget != nil && c.production {
 		t.Fatal("chainExec.budget wraps the Lister seam, which the production path does not use")
 	}
@@ -698,6 +714,12 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	if c.budget != nil {
 		c.budget.inner, lister = cl, c.budget
 	}
+	if c.wrapLister != nil {
+		if c.production {
+			t.Fatal("chainExec.wrapLister wraps the Lister seam, which the production path does not use")
+		}
+		lister = c.wrapLister(lister)
+	}
 	var bearers *chainBearers
 	if c.production {
 		lister = nil
@@ -724,7 +746,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
 		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt), destroyAt: destroyAtOpt,
-		stateReadBackoff: c.stateReadBackoff(), stateReadClock: c.clock})
+		childStarted: childStarted, stateReadBackoff: c.stateReadBackoff(), stateReadClock: c.clock})
 	process := streams()
 	close(stop)
 	<-watched
@@ -2023,15 +2045,18 @@ type budgetLister struct {
 	inner Lister
 	mu    sync.Mutex
 	left  []time.Duration
+	at    []time.Time // each listing's deadline (zero: none), for T023's one-context check
 }
 
 func (b *budgetLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
 	left := time.Duration(-1)
-	if dl, ok := ctx.Deadline(); ok {
+	dl, ok := ctx.Deadline()
+	if ok {
 		left = time.Until(dl)
 	}
 	b.mu.Lock()
 	b.left = append(b.left, left)
+	b.at = append(b.at, dl)
 	b.mu.Unlock()
 	return b.inner.Get(ctx, path, cursor)
 }
@@ -2161,6 +2186,125 @@ func TestChainDestroyBudgetExceeded(t *testing.T) {
 		if len(h.record(id)) == 0 {
 			t.Errorf("record of %s removed although its destroy did not complete", id)
 		}
+	}
+}
+
+// ---------------------------------------------------------------- T023 (spec 006 FR-002)
+
+// childDeadlines records each child process a run starts (Runner.childStarted,
+// ChainOptions.childStarted): its arguments and its context's deadline. It reads the destroy's own
+// context at its calls, where T018's judge reads it only through the leftover check's listings.
+type childDeadlines struct {
+	mu    sync.Mutex
+	calls []childDeadline
+}
+
+type childDeadline struct {
+	args []string
+	at   time.Time // zero: no deadline
+}
+
+func (c *childDeadlines) started(ctx context.Context, args []string) {
+	at, _ := ctx.Deadline()
+	c.mu.Lock()
+	c.calls = append(c.calls, childDeadline{args: slices.Clone(args), at: at})
+	c.mu.Unlock()
+}
+
+// destroyPhase is every call from the first `plan -destroy` on (nil: no destroy started).
+func (c *childDeadlines) destroyPhase() []childDeadline {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, k := range c.calls {
+		if slices.Contains(k.args, "plan") && slices.Contains(k.args, "-destroy") {
+			return slices.Clone(c.calls[i:])
+		}
+	}
+	return nil
+}
+
+// oneDestroyContext checks that every call of the destroy-on-exit (each child from the first
+// `plan -destroy` on) ran under the deadline of the leftover check's last listing: one destroy
+// context serves the destroys and the check (FR-002), so a destroy under a longer, shorter or no
+// deadline than the listings fails here. Then T018's judge checks that the deadline is the budget.
+func oneDestroyContext(t *testing.T, c *childDeadlines, b *budgetLister, run, spent time.Duration) {
+	t.Helper()
+	phase := c.destroyPhase()
+	if len(phase) == 0 {
+		t.Fatal("no destroy call started")
+	}
+	b.mu.Lock()
+	at := slices.Clone(b.at)
+	b.mu.Unlock()
+	if len(at) == 0 {
+		t.Fatal("no listing ran: the leftover check after the destroys was never reached")
+	}
+	want := at[len(at)-1]
+	if want.IsZero() {
+		t.Fatal("the leftover check after the destroys listed with no deadline")
+	}
+	for _, k := range phase {
+		if !k.at.Equal(want) {
+			t.Errorf("destroy call %v ran under deadline %v (zero: none), the leftover check under %v: "+
+				"one destroy-on-exit context serves both (FR-002)", k.args, k.at, want)
+		}
+	}
+	destroyBudgetJudge(t, b, run, spent)
+}
+
+// endingLister ends the destroy's budget (end) on its first listing after a destroy started, then
+// lists as if the budget were still there (context.WithoutCancel): the listings still answer, so
+// only the context's own state shows that the budget ran out.
+type endingLister struct {
+	inner    Lister
+	children *childDeadlines
+	end      chan struct{}
+	once     *sync.Once
+}
+
+func (e endingLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
+	if e.children.destroyPhase() != nil {
+		e.once.Do(func() { close(e.end) })
+		select { // the seam ends the context from its own goroutine
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return e.inner.Get(context.WithoutCancel(ctx), path, cursor)
+}
+
+// TestChainDestroyContext (FR-002, T018's deferred check): a chain whose runtime apply fails. Every
+// destroy call runs under the destroy-on-exit's one context, the one the leftover check lists
+// under, and that context has the budget (DefaultDeadline from the destroy's start).
+func TestChainDestroyContext(t *testing.T) {
+	h := newChainHarness(t)
+	h.setApplyExit("demo-dev-gra11-runtime", 1)
+	b, children := &budgetLister{}, &childDeadlines{}
+	r := h.chain(chainExec{budget: b, children: children})
+	laneExit(t, r.laneRun, 1)
+	chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+	oneDestroyContext(t, children, b, (chainExec{}).chainDeadline(), 0)
+}
+
+// TestChainDestroyBudgetEndsInCheck (FR-002, constitution V): a complete chain whose destroys
+// complete, and whose destroy budget runs out during the leftover check while the listings still
+// answer. The run fails on the context's state, not only on an error a call returned.
+func TestChainDestroyBudgetEndsInCheck(t *testing.T) {
+	h := newChainHarness(t)
+	children, end := &childDeadlines{}, make(chan struct{})
+	wrap := func(inner Lister) Lister {
+		return endingLister{inner: inner, children: children, end: end, once: &sync.Once{}}
+	}
+	r := h.chain(chainExec{children: children, wrapLister: wrap, destroyAt: end})
+	if got := r.applies(true); !slices.Equal(got, chainDestroyOrder) {
+		t.Fatalf("destroy applies %v, want %v (the destroys complete before the budget ends)", got, chainDestroyOrder)
+	}
+	if ExitCode(r.err) == 0 {
+		t.Error("a destroy-on-exit whose budget ran out during the leftover check exited 0")
+	}
+	lines := strings.Split(strings.TrimSpace(h.term.String()), "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "LZ-LIVE summary "+r.runID+" fail ") {
+		t.Errorf("terminal does not end with a fail summary:\n%s", strings.Join(lines[max(0, len(lines)-3):], "\n"))
 	}
 }
 
