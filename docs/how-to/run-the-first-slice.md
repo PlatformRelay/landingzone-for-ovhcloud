@@ -5,7 +5,7 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 34e5596e6bfacffe7be9c1e71a640d3e45077182
   - path: tools/internal/live/apply.go
-    blob: 6f50f0a05333e7dbbb29a045721569f8aa5c7aa5
+    blob: 4a361c9301e758f825c8de8a6a0575d33f5924b5
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: 0345cbbe0bc084771267337eeebd3707ee10c7a0
-last_verified: f39dbf533e4060143d227791fd8a14557fd8cbfa
+last_verified: 1259f33c168d433905b52a6bba4715038b0367e2
 ---
 
 # Run the first slice on an OVHcloud account
@@ -134,9 +134,10 @@ The rest sits under `accounts/<account>/`, where `<account>` is the account that
 | `state-passphrase.env` | `TF_VAR_state_passphrase` | bootstrap `passphrase`, once, never overwritten |
 | `state.env` | the platform S3 keys for the account state bucket | bootstrap `state` |
 | `state/<id>.tfstate` | the encrypted local state of `account-bootstrap` | bootstrap `state` |
-| `platform-deployer.env` | the platform OAuth2 client | the live lane, after `account-governance` |
-| `tenants/<t>/deployer.env` | the tenant OAuth2 client | the live lane, after `account-governance` |
-| `tenants/<t>/state.env`, `tenants/<t>/platform-state.env` | the tenant and platform S3 keys for the tenant bucket | the live lane, after `tenant-state` |
+| `sets/account-governance/gen-<run-id>/platform-deployer.env` | the platform OAuth2 client | the live lane, after `account-governance` |
+| `sets/account-governance/gen-<run-id>/tenants/<t>/deployer.env` | the tenant OAuth2 client | the live lane, after `account-governance` |
+| `sets/<tenant-state id>/gen-<run-id>/tenants/<t>/state.env`, `…/tenants/<t>/platform-state.env` | the tenant and platform S3 keys for the tenant bucket | the live lane, after the tenant's `tenant-state` instance |
+| `sets/<instance>/current` | the name of the instance's current generation, `gen-<run-id>` | the live lane, with each set |
 | `state/probes/<run-id>/` | a probe's encrypted state and per-run passphrase, until its cleanup passes | `lz-live probe` |
 | `locks/` | the run locks (`flock`, local to this workstation) | `lz-live` |
 | `sandbox.env` | a previous account's admin credential, moved here on migration | bootstrap `identify --fresh-account` |
@@ -144,6 +145,13 @@ The rest sits under `accounts/<account>/`, where `<account>` is the account that
 `<REF>` is a project `ref` from the manifest. In the one-project sandbox, `STATE` and `DEMO_DEV`
 hold the same project id. The manifest allows that only with
 `spec.sandbox.shared_state_project: true` (KD-1).
+
+The lane writes each instance's credential files as a set: a new `gen-<run-id>/` directory, made
+current by one rename of `current`. Readers use the generation `current` names, so a crash leaves
+them on the previous set or the new one, never a mix. The writer keeps the previous generation for
+a manual rollback and removes older ones. Files of the earlier flat layout (`platform-deployer.env`,
+`tenants/<t>/…` directly under `accounts/<account>/`) are read until the instance's first set
+replaces them.
 
 Never copy a value from these files into a commit, a PR, an issue or a chat.
 

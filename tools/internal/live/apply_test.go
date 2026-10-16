@@ -119,6 +119,23 @@ var laneDeployerFiles = map[string]struct {
 	"tenants/demo/platform-state.env": {"demo-state", map[string]string{"AWS_ACCESS_KEY_ID": lanePlatformAK, "AWS_SECRET_ACCESS_KEY": lanePlatformSK}},
 }
 
+// laneSetRel is the flat path (005) of a file that rel holds in its writer's credential set
+// (FR-005: accounts/<account>/sets/<writer>/gen-<run>/<file>), or rel itself.
+func laneSetRel(rel string) string {
+	rest, ok := strings.CutPrefix(rel, "accounts/"+laneAccount+"/sets/")
+	if !ok {
+		return rel
+	}
+	parts := strings.SplitN(rest, "/", 3)
+	if len(parts) != 3 || !strings.HasPrefix(parts[1], "gen-") {
+		return rel
+	}
+	if f, ok := laneDeployerFiles[parts[2]]; !ok || f.after != parts[0] {
+		return rel
+	}
+	return "accounts/" + laneAccount + "/" + parts[2]
+}
+
 // laneSecrets maps every seeded secret to the one file below the config root that may hold it
 // ("" for the ambient ones, which no file may hold).
 var laneSecrets = map[string]string{
@@ -1415,7 +1432,7 @@ func (h *laneHarness) judge(r laneRun, checkoutBefore map[string]string) {
 	never := func(string, string) bool { return false }
 	scan(h.checkout, never)
 	scan(h.tmp, never)
-	scan(h.root, func(rel, s string) bool { return laneSecrets[s] == rel })
+	scan(h.root, func(rel, s string) bool { return laneSecrets[s] == laneSetRel(rel) })
 	for k, v := range h.store.snapshot() {
 		for s := range laneSecrets {
 			if strings.Contains(v, s) {
@@ -1652,8 +1669,19 @@ func TestApplyFirstRunAllInOrder(t *testing.T) {
 	if got := r.events("lock"); !slices.Equal(got, []string{"account", "tenant-demo"}) {
 		t.Errorf("locks taken %v, want [account tenant-demo] (stacks.HoldRun over the acted stacks)", got)
 	}
+	// FR-005: each file sits in its writer's credential set, in the generation `current` names,
+	// and the flat file the steady state seeded is gone.
 	for rel, f := range laneDeployerFiles {
-		p := filepath.Join(h.acctDir, filepath.FromSlash(rel))
+		setDir := filepath.Join(h.acctDir, "sets", f.after)
+		cur, err := os.ReadFile(filepath.Join(setDir, "current"))
+		if err != nil {
+			t.Errorf("%s: no credential set of %s after it applied: %v", rel, f.after, err)
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(h.acctDir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Errorf("flat %s still there after %s's set was written (err %v)", rel, f.after, err)
+		}
+		p := filepath.Join(setDir, string(cur), filepath.FromSlash(rel))
 		fi, err := os.Stat(p)
 		if err != nil {
 			t.Errorf("%s not written after %s: %v", rel, f.after, err)
@@ -2749,5 +2777,69 @@ func TestApplyDropOutputs(t *testing.T) {
 	want := `{"type":"apply_start"}` + "\n" + `{"type":"change_summary"}` + "\n" + "tail"
 	if out.String() != want {
 		t.Errorf("terminal got %q, want %q", out.String(), want)
+	}
+}
+
+// T014 (FR-005; T013's deferred retry): a retry of the same run that finds its own generation
+// current, after a crash past the switch or a completed write, treats the set as written when the
+// generation holds exactly the retry's files; a retry with other values, fewer files or more files
+// is refused (a run's generation is never rewritten), naming no value, and the generation and what
+// a reader loads stay as the first write left them.
+func TestApplyCredentialSetSameRunRetry(t *testing.T) {
+	t.Parallel()
+	const run = "20261016T090000Z-0c0c"
+	full, other := csetGovFiles("first"), csetGovFiles("other")
+	fewer := csetGovFiles("first")
+	delete(fewer, filepath.Join("tenants", "ops", "deployer.env"))
+	cases := []struct {
+		name         string
+		crash        SetStep // the first write stops after it; 0 completes
+		first, retry map[string]map[string]string
+		written      bool
+	}{
+		{"crash-after-switch-same-files", SetStepSwitch, full, full, true},
+		{"completed-same-files", 0, full, full, true},
+		{"crash-after-switch-other-values", SetStepSwitch, full, other, false},
+		{"completed-fewer-files", 0, full, fewer, false},
+		{"completed-more-files", 0, fewer, full, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			root := credRoot(t)
+			if err := WriteCredentialSet(CredentialSet{Root: root, Account: credAccount, Instance: csetGov, RunID: run, Files: c.first}, c.crash); err != nil && !errors.Is(err, ErrInjectedCrash) {
+				t.Fatal(err)
+			}
+			gen := filepath.Join(csetDir(root, csetGov), "gen-"+run)
+			before := laneTree(t, gen, "")
+			retry := CredentialSet{Root: root, Account: credAccount, Instance: csetGov, RunID: run, Files: c.retry}
+			err := writeRunSet(retry)
+			switch {
+			case c.written && err != nil:
+				t.Errorf("writeRunSet on the same run's current generation holding its files: %v, want nil", err)
+			case !c.written && err == nil:
+				t.Error("writeRunSet on the same run's current generation holding other files or values: nil, want a refusal")
+			case !c.written:
+				for _, values := range retry.Files {
+					for _, v := range values {
+						if strings.Contains(err.Error(), v) && v != "ovh-eu" {
+							t.Errorf("the refusal carries a value: %v", err)
+						}
+					}
+				}
+			}
+			if after := laneTree(t, gen, ""); !maps.Equal(after, before) {
+				t.Error("the retry changed the run's generation")
+			}
+			for rel, values := range c.first {
+				p, err := CredentialSetPath(root, credAccount, csetGov, rel)
+				if err != nil {
+					t.Fatalf("CredentialSetPath(%s): %v", rel, err)
+				}
+				if got, err := ReadCredentialFile(p); err != nil || !maps.Equal(got, values) {
+					t.Errorf("%s after the retry: %v (err %v), want the first write's values", rel, slices.Sorted(maps.Keys(got)), err)
+				}
+			}
+		})
 	}
 }
