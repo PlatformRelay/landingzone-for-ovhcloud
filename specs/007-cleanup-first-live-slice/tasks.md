@@ -108,7 +108,7 @@ Independent test: V001. Test tasks T003–T005, then implementation tasks T006�
 ## Phase 3: User Story 2 — Two refs on one project are refused before anything runs (P1)
 Independent test: V002. Test task T008, then implementation task T009.
 
-- [ ] T008 [US2] Write project-alias tests in tools/internal/stacks/alias_test.go, tools/internal/live/alias_lane_test.go and tools/internal/live/bootstrap_alias_test.go
+- [x] T008 [US2] Write project-alias tests in tools/internal/stacks/alias_test.go, tools/internal/live/alias_lane_test.go and tools/internal/live/bootstrap_alias_test.go — closed 2026-10-16, evidence: evidence/T008.md
   - Requirements: FR-003, SC-004; ADRs: 0009, 0021. Depends on: T007.
   - Scope: a lane test that reads a manifest fixture adds that fixture to `test:live-lane`'s registry inputs in tools/harness/checks.yaml.
   - Cases (given / when / then → defect exposed), ids built in the test, never read from disk:

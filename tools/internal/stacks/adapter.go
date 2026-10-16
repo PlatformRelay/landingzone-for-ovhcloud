@@ -30,6 +30,17 @@ var ErrBlocked = errors.New("blocked: the producer has published no outputs.json
 // coordinator decision 2026-10-07; data-model *Resolved-reference input*).
 const ReasonTenantEnvironments = "tenant-environments"
 
+// ReasonProjectAlias refuses a bound account in which two project refs the manifest uses resolve
+// to one project id (007 FR-003, A17). The one alias admitted is the state ref on a tenant
+// environment's id under spec.sandbox.shared_state_project (KD-1).
+const ReasonProjectAlias = "project-alias"
+
+// CheckProjectAliases is nil, or a *RefusalError{Reason: ReasonProjectAlias} whose Detail names
+// both refs and never the id (007 FR-003; data-model *Project alias refusal*).
+func CheckProjectAliases(m *Manifest, a BoundAccount) error {
+	return errors.New("CheckProjectAliases: not implemented")
+}
+
 // ResolvedFile is the name of the resolved-reference input in a consumer's input directory.
 const ResolvedFile = "resolved.tfvars.json"
 

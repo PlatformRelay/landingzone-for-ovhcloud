@@ -669,7 +669,9 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 		"test:stacks": {"stacks", "stages", "schemas/deployments.schema.json", "specs/005-first-landing-zone-slice/data-model.md",
 			"tests/fixtures/manifests", "tests/fixtures/terramate", "tests/fixtures/outputs/captures", "tests/fixtures/tofu-probes/protect",
 			"tests/live/probes/storage-iam/main.tf", "components", "modules", "mise.toml", "terramate.tm.hcl"},
-		"test:live-lane": {"tests/fixtures/ovhcloud", "tests/fixtures/tofu-probes/locked-recovery"},
+		"test:live-lane": {"tests/fixtures/ovhcloud", "tests/fixtures/tofu-probes/locked-recovery", "stacks/deployments.yaml"},
+		// 007 T008: the project-alias tests add a tenant to the checkout's sandbox manifest text.
+		"test:bootstrap": {"stacks/deployments.yaml"},
 	}
 	for id, paths := range want {
 		entries, ok := reads[id]
