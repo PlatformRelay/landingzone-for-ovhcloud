@@ -1,0 +1,26 @@
+╷
+│ Error: Error acquiring the state lock
+│
+│ Error message: 2 errors occurred:
+│ 	* operation error S3: PutObject, https response error StatusCode: 404,
+│ RequestID: tx00000a7d1c4e9b2f6a51b-00671f9e47-1c2d3e-gra, HostID:
+│ 1c2d3e-gra, api error NoSuchBucket: The specified bucket does not exist
+│ 	* S3 bucket does not exist.
+│
+│ The referenced S3 bucket must have been previously created. If the S3
+│ bucket
+│ was created within the last minute, please wait for a minute or two and try
+│ again.
+│
+│ Error: operation error S3: GetObject, https response error StatusCode: 404,
+│ RequestID: tx00000b8e2d5f0c3a7b62c-00671f9e47-1c2d3e-gra, HostID:
+│ 1c2d3e-gra, api error NoSuchBucket: The specified bucket does not exist
+│
+│
+│
+│
+│ OpenTofu acquires a state lock to protect the state from being written
+│ by multiple users at the same time. Please resolve the issue above and try
+│ again. For most commands, you can disable locking with the "-lock=false"
+│ flag, but this is not recommended.
+╵
