@@ -128,6 +128,21 @@ type swWorld struct {
 	buckets map[string][]string // region → bucket names (the API)
 	users   []swAPIUser
 	apiKeep bool
+
+	// T030 knobs: seedRefuse refuses the cleanup keys' seed write; s3Refuse refuses every S3
+	// request AccessDenied; goneKeys are cleanup keys whose user was deleted (403
+	// InvalidAccessKeyId); bulkKeep acknowledges the API's bulk object deletes without removing.
+	// A bucket the API deleted answers S3 404 NoSuchBucket.
+	seedRefuse bool
+	s3Refuse   bool
+	goneKeys   map[string]bool
+	bulkKeep   bool
+	// catalogGRA, when set, is the URL the Keystone catalog gives for GRA's object store.
+	catalogGRA string
+	// roleEcho makes Keystone list the issued token and the password as role names; listWrong
+	// answers an S3 listing 200 with an <Error> body (review r1).
+	roleEcho  bool
+	listWrong bool
 }
 
 type swAPIUser struct {
@@ -142,7 +157,7 @@ func newSwWorld(t *testing.T) *swWorld {
 		objects: map[string]map[string]bool{swBucketA: {swSeed: true}, swBucketB: {swSeed: true}},
 		tokens:  map[string]string{}, dead: map[string]bool{},
 		loginRefuse: map[string]bool{}, replies: map[string][]swReply{}, killAfter: map[string]bool{}, cross: map[string][]string{},
-		buckets: map[string][]string{"GRA": {}, "SBG": {}},
+		buckets: map[string][]string{"GRA": {}, "SBG": {}}, goneKeys: map[string]bool{},
 	}
 	w.srv = httptest.NewTLSServer(http.HandlerFunc(w.serve))
 	t.Cleanup(w.srv.Close)
@@ -253,12 +268,23 @@ func (w *swWorld) keystone(rw http.ResponseWriter, r *http.Request, body []byte)
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusCreated)
 	ep := func(region, host string) map[string]any {
-		return map[string]any{"interface": "public", "region": region, "region_id": region, "url": "https://" + host + "/v1/AUTH_" + swTenant}
+		u := "https://" + host + "/v1/AUTH_" + swTenant
+		if region == "GRA" && w.catalogGRA != "" {
+			u = w.catalogGRA
+		}
+		return map[string]any{"interface": "public", "region": region, "region_id": region, "url": u}
+	}
+	roles := []map[string]string{{"name": "objectstore_operator"}}
+	if w.roleEcho {
+		roles = append(roles, map[string]string{"name": u.Password}, map[string]string{"name": swCleanASK})
+		for t := range w.tokens { // this login's token and any issued before it (the other user's)
+			roles = append(roles, map[string]string{"name": t})
+		}
 	}
 	json.NewEncoder(rw).Encode(map[string]any{"token": map[string]any{
 		"expires_at": swNow.Add(24 * time.Hour).Format(time.RFC3339),
 		"project":    map[string]any{"id": swTenant},
-		"roles":      []map[string]string{{"name": "objectstore_operator"}},
+		"roles":      roles,
 		"catalog": []map[string]any{
 			{"type": "identity", "name": "keystone", "endpoints": []map[string]any{{"interface": "public", "region": "GRA", "url": swAuthURL}}},
 			{"type": "object-store", "name": "swift", "endpoints": []map[string]any{ep("SBG", swSwiftSBG), ep("GRA", swSwift)}},
@@ -377,12 +403,30 @@ func (w *swWorld) s3(rw http.ResponseWriter, r *http.Request) {
 	w.reqs = append(w.reqs, swReq{who, r.Host, r.Method, r.URL.Path, r.URL.RawQuery, ""})
 	bucket, key, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	mine := map[string]string{"cleanup-a": swBucketA, "cleanup-b": swBucketB}[who]
-	if bucket == "" || bucket != mine {
+	for ak, name := range map[string]string{swCleanA: "cleanup-a", swCleanB: "cleanup-b"} {
+		if name == who && w.goneKeys[ak] {
+			rw.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(rw, "<Error><Code>InvalidAccessKeyId</Code></Error>")
+			return
+		}
+	}
+	if bucket == "" || bucket != mine || w.s3Refuse {
 		rw.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(rw, "<Error><Code>AccessDenied</Code></Error>")
 		return
 	}
+	if w.objects[bucket] == nil {
+		rw.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(rw, "<Error><Code>NoSuchBucket</Code></Error>")
+		return
+	}
 	switch {
+	case r.Method == http.MethodPut && key == swSeed && !w.seedRefuse:
+		// The cleanup policy's one write: the seed (tests/live/probes/swift-reach/main.tf).
+		w.objects[bucket][key] = true
+		rw.WriteHeader(http.StatusOK)
+	case r.Method == http.MethodGet && key == "" && w.listWrong:
+		fmt.Fprint(rw, "<Error><Code>InternalError</Code></Error>")
 	case r.Method == http.MethodGet && key == "":
 		prefix := r.URL.Query().Get("prefix")
 		var keys []string
@@ -470,8 +514,39 @@ func (w *swWorld) serveAPI(rw http.ResponseWriter, r *http.Request) {
 		}
 		if !w.apiKeep {
 			w.buckets[parts[1]] = slices.DeleteFunc(w.buckets[parts[1]], func(b string) bool { return b == parts[3] })
+			delete(w.objects, parts[3])
 		}
 		fmt.Fprint(rw, `null`)
+	case len(parts) == 5 && parts[0] == "region" && parts[2] == "storage" && !slices.Contains(w.buckets[parts[1]], parts[3]):
+		rw.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(rw, `{"message":"not found"}`)
+	case r.Method == http.MethodGet && len(parts) == 5 && parts[0] == "region" && parts[2] == "storage" && parts[4] == "object":
+		// T030: cloud.StorageObjectList[] (kb/api/v1/cloud.json), one entry per key.
+		out := []map[string]any{}
+		for _, k := range slices.Sorted(maps.Keys(w.objects[parts[3]])) {
+			out = append(out, map[string]any{"key": k, "versionId": "null", "isLatest": true})
+		}
+		json.NewEncoder(rw).Encode(out)
+	case r.Method == http.MethodPost && len(parts) == 5 && parts[0] == "region" && parts[2] == "storage" && parts[4] == "bulkDeleteObjects":
+		// T030: cloud.StorageObjectDeleteBulk in, cloud.StorageObjectDeleteBulkResponse out.
+		var in struct {
+			Objects []struct {
+				Key string `json:"key"`
+			} `json:"objects"`
+		}
+		if json.Unmarshal(body, &in) != nil || len(in.Objects) == 0 {
+			rw.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(rw, `{"message":"bad body"}`)
+			return
+		}
+		deleted := []map[string]string{}
+		for _, o := range in.Objects {
+			if !w.bulkKeep {
+				delete(w.objects[parts[3]], o.Key)
+			}
+			deleted = append(deleted, map[string]string{"key": o.Key})
+		}
+		json.NewEncoder(rw).Encode(map[string]any{"deleted": deleted, "errors": []any{}})
 	case r.Method == http.MethodGet && rest == "/user":
 		json.NewEncoder(rw).Encode(append([]swAPIUser{}, w.users...))
 	case r.Method == http.MethodDelete && len(parts) == 2 && parts[0] == "user":
@@ -482,6 +557,13 @@ func (w *swWorld) serveAPI(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !w.apiKeep {
+			// A deleted cleanup user's S3 key stops working (T030: Undo after a Sweep).
+			switch w.users[i].Description {
+			case swUsers(swRunLower)[2]:
+				w.goneKeys[swCleanA] = true
+			case swUsers(swRunLower)[3]:
+				w.goneKeys[swCleanB] = true
+			}
 			w.users = slices.Delete(w.users, i, i+1)
 		}
 		fmt.Fprint(rw, `null`)
@@ -1348,6 +1430,294 @@ func TestSwiftFakes(t *testing.T) {
 	} {
 		if st, b := api(c.method, c.path); st != 200 || !strings.Contains(b, c.want) {
 			t.Errorf("%s %s = %d %s, want 200 with %s", c.method, c.path, st, b, c.want)
+		}
+	}
+}
+
+// T030: the cases the implementation adds beyond T029's, from the task's scope and the
+// coordinator's decisions of 2026-10-16 (idempotent Undo, Sweep wired, a bucket emptied before
+// its delete, a foreign-host auth_url refused).
+
+// TestSwiftSeed: the provider has no object resource (provider docs, resources/: no object
+// upload), so the check's first step writes each bucket's seed with that bucket's cleanup key,
+// before any Swift request; a refused seed write leaves the read steps without a control.
+func TestSwiftSeed(t *testing.T) {
+	t.Run("written-first", func(t *testing.T) {
+		// Exposes a read step with nothing to read when the root could not seed.
+		w := newSwWorld(t)
+		delete(w.objects[swBucketA], swSeed)
+		delete(w.objects[swBucketB], swSeed)
+		raw, _, err := swObserve(t, w, SwiftReach(w.options()))
+		reqs := w.seen()
+		first := slices.IndexFunc(reqs, func(r swReq) bool { return r.host == swSwift || r.host == swSwiftSBG })
+		for b, who := range map[string]string{swBucketA: "cleanup-a", swBucketB: "cleanup-b"} {
+			put := slices.IndexFunc(reqs, func(r swReq) bool {
+				return r.host == swS3 && r.who == who && r.method == http.MethodPut && r.path == "/"+b+"/"+swSeed
+			})
+			if put < 0 || first >= 0 && put > first {
+				t.Errorf("no seed write to %s with %s before the first Swift request: %v", b, who, reqs)
+			}
+		}
+		if !w.has(swBucketA, swSeed) || !w.has(swBucketB, swSeed) {
+			t.Errorf("seeds not written")
+		}
+		m := byStep(t, swParse(t, raw, err))
+		wantObs(t, m["a-read-b"], "denied", 403, 200, 200)
+		wantObs(t, m["b-read-a"], "denied", 403, 200, 200)
+		if err != nil {
+			t.Errorf("Observe = %v, want nil when every step is denied", err)
+		}
+	})
+
+	t.Run("write-refused", func(t *testing.T) {
+		// Exposes a missing seed read as a denial: the own read answers 404, so the read steps
+		// are blocked, the other routes still observed, and Observe fails (C005.1 not shown).
+		w := newSwWorld(t)
+		w.seedRefuse = true
+		delete(w.objects[swBucketA], swSeed)
+		delete(w.objects[swBucketB], swSeed)
+		raw, term, err := swObserve(t, w, SwiftReach(w.options()))
+		m := byStep(t, swParse(t, raw, err))
+		wantObs(t, m["a-read-b"], "blocked", 403, 404, 404)
+		wantObs(t, m["b-read-a"], "blocked", 403, 404, 404)
+		wantObs(t, m["a-list-b"], "denied", 403, 200, 200)
+		wantObs(t, m["b-write-a"], "denied", 403, 201, 201)
+		if err == nil || !strings.Contains(err.Error(), "a-read-b") {
+			t.Errorf("Observe = %v, want an error naming the blocked steps", err)
+		}
+		if !strings.Contains(term, "seed") {
+			t.Errorf("terminal does not say the seed write failed:\n%s", term)
+		}
+	})
+}
+
+// TestSwiftUndoIdempotent (coordinator decision 2026-10-16): Undo converges. A second Undo after a
+// successful one passes; so does an Undo after a Sweep removed the bucket or the cleanup user (404
+// NoSuchBucket, 403 InvalidAccessKeyId); any other refusal still fails it.
+func TestSwiftUndoIdempotent(t *testing.T) {
+	t.Run("second-undo", func(t *testing.T) {
+		w := newSwWorld(t)
+		w.replies["a write "+swBucketB] = []swReply{{status: 201, store: true}}
+		c := SwiftReach(w.options())
+		_, _ = c.Observe(context.Background(), swEnv(), io.Discard)
+		if err := c.Undo(context.Background(), swEnv(), io.Discard); err != nil {
+			t.Fatalf("first Undo = %v", err)
+		}
+		before := len(w.seen())
+		if err := c.Undo(context.Background(), swEnv(), io.Discard); err != nil {
+			t.Errorf("second Undo = %v, want nil", err)
+		}
+		if d := undoReqs(t, w.seen()[before:]); len(d) != 0 {
+			t.Errorf("second Undo deleted %v, want nothing", d)
+		}
+	})
+
+	t.Run("after-sweep", func(t *testing.T) {
+		// A fresh process: Sweep deleted both buckets and all four users, then --cleanup reruns Undo.
+		w := newSwWorld(t)
+		w.buckets["GRA"] = []string{swBucketA, swBucketB}
+		for i, d := range swUsers(swRunLower) {
+			w.users = append(w.users, swAPIUser{ID: 201 + i, Description: d})
+		}
+		c := SwiftReach(w.options())
+		if err := c.Sweep(context.Background(), swRun, swTenant, io.Discard); err != nil {
+			t.Fatalf("Sweep = %v", err)
+		}
+		var term bytes.Buffer
+		if err := c.Undo(context.Background(), swEnv(), &term); err != nil {
+			t.Errorf("Undo after a Sweep = %v, want nil (already removed is undone)", err)
+		}
+		if !strings.Contains(term.String(), "already") {
+			t.Errorf("terminal does not say what was already removed:\n%s", term.String())
+		}
+	})
+
+	for _, c := range []struct {
+		name  string
+		setup func(w *swWorld)
+		ok    bool
+	}{
+		{"bucket-gone", func(w *swWorld) { delete(w.objects, swBucketA); delete(w.objects, swBucketB) }, true},
+		{"credential-gone", func(w *swWorld) { w.goneKeys[swCleanA], w.goneKeys[swCleanB] = true, true }, true},
+		{"access-denied", func(w *swWorld) { w.s3Refuse = true }, false},
+		// Review r1: a 200 whose body is not a ListVersionsResult is no empty listing.
+		{"wrong-listing", func(w *swWorld) { w.listWrong = true }, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// Exposes a non-convergent Undo, or (access-denied) one that tolerates any refusal.
+			w := newSwWorld(t)
+			c.setup(w)
+			err := SwiftReach(w.options()).Undo(context.Background(), swEnv(), io.Discard)
+			if (err == nil) != c.ok {
+				t.Errorf("Undo = %v, want passing %v", err, c.ok)
+			}
+			if err != nil && !strings.Contains(err.Error(), swBucketA) {
+				t.Errorf("Undo error %v does not name the bucket", err)
+			}
+		})
+	}
+}
+
+// TestSwiftSweepEmpties (coordinator decision 2026-10-16): Sweep empties a bucket before its
+// delete; a bucket it cannot empty is not deleted and fails the sweep naming it, while the other
+// resources are still swept. Through the check's Sweep field (Sweep: o.sweep).
+func TestSwiftSweepEmpties(t *testing.T) {
+	foreign := "lzprobe-swift-reach-" + swOtherRun + "-a"
+	setup := func(t *testing.T) *swWorld {
+		w := newSwWorld(t)
+		w.buckets["GRA"] = []string{swBucketA, foreign}
+		w.buckets["SBG"] = []string{swBucketB}
+		w.objects[swBucketA][swPrefix+"write-a-control"] = true
+		w.objects[swBucketB][swPrefix+"write-a-other"] = true
+		w.objects[foreign] = map[string]bool{"keep": true}
+		for i, d := range swUsers(swRunLower) {
+			w.users = append(w.users, swAPIUser{ID: 301 + i, Description: d})
+		}
+		return w
+	}
+	region := map[string]string{swBucketA: "GRA", swBucketB: "SBG"}
+
+	t.Run("emptied", func(t *testing.T) {
+		// Exposes a sweep that deletes a bucket still holding objects.
+		w := setup(t)
+		c := SwiftReach(w.options())
+		if c.Sweep == nil {
+			t.Fatal("the check has no Sweep")
+		}
+		err := c.Sweep(context.Background(), swRun, swTenant, io.Discard)
+		reqs := w.seen()
+		for _, b := range []string{swBucketA, swBucketB} {
+			base := "/v1/cloud/project/" + swTenant + "/region/" + region[b] + "/storage/" + b
+			bulk := slices.IndexFunc(reqs, func(r swReq) bool { return r.method == http.MethodPost && r.path == base+"/bulkDeleteObjects" })
+			del := slices.IndexFunc(reqs, func(r swReq) bool { return r.method == http.MethodDelete && r.path == base })
+			list := slices.IndexFunc(reqs, func(r swReq) bool { return r.method == http.MethodGet && r.path == base+"/object" })
+			if list < 0 || bulk < list || del < bulk {
+				t.Errorf("bucket %s: want its objects listed, then deleted, then the bucket (list %d, bulk %d, delete %d)", b, list, bulk, del)
+			}
+		}
+		if slices.ContainsFunc(reqs, func(r swReq) bool { return strings.Contains(r.path, foreign) }) || !w.has(foreign, "keep") {
+			t.Errorf("sweep touched the other run's bucket: %v", reqs)
+		}
+		if err != nil {
+			t.Errorf("Sweep = %v, want nil", err)
+		}
+	})
+
+	t.Run("not-emptied", func(t *testing.T) {
+		// Exposes a sweep that deletes a bucket whose objects stay, or gives up on the users.
+		w := setup(t)
+		w.bulkKeep = true
+		err := SwiftReach(w.options()).Sweep(context.Background(), swRun, swTenant, io.Discard)
+		reqs := w.seen()
+		for _, b := range []string{swBucketA, swBucketB} {
+			if slices.ContainsFunc(reqs, func(r swReq) bool { return r.method == http.MethodDelete && strings.HasSuffix(r.path, "/storage/"+b) }) {
+				t.Errorf("sweep deleted %s while it still held objects", b)
+			}
+			if err == nil || !strings.Contains(err.Error(), b) {
+				t.Errorf("Sweep = %v, want an error naming %s", err, b)
+			}
+		}
+		w.mu.Lock()
+		left := len(w.users)
+		w.mu.Unlock()
+		if left != 0 {
+			t.Errorf("%d users left: the sweep gave up on the users after a bucket", left)
+		}
+	})
+}
+
+// TestSwiftCatalog: the token goes only to the project's Swift account on an OVHcloud storage
+// host (storage.<region>.cloud.ovh.net/v1/AUTH_<tenant>, pcs-curl-commands-memo.mdx:16); a
+// catalog naming another endpoint for the region leaves the user without a session.
+func TestSwiftCatalog(t *testing.T) {
+	for _, u := range []string{
+		"https://storage.gra.example.net/v1/AUTH_" + swTenant,
+		"http://" + swSwift + "/v1/AUTH_" + swTenant,
+		"https://" + swSwift + "/v1/AUTH_" + strings.Repeat("0", 32),
+		"https://" + swSwift + ":8443/v1/AUTH_" + swTenant,
+	} {
+		w := newSwWorld(t)
+		w.catalogGRA = u
+		raw, _, err := swObserve(t, w, SwiftReach(w.options()))
+		if reqs := w.seen(); slices.ContainsFunc(reqs, func(r swReq) bool { return r.token != "" || r.who == "?" }) {
+			t.Errorf("%s: a request went to an endpoint the catalog should not be trusted for: %v", u, reqs)
+		}
+		m := byStep(t, swParse(t, raw, err))
+		for _, s := range swSteps {
+			if m[s].Observed != "not-run" || !strings.Contains(m[s].Reason, "catalog") {
+				t.Errorf("%s: %+v, want not-run naming the catalog", u, m[s])
+			}
+		}
+	}
+}
+
+// TestSwiftUndoKeyNames (review r2): Undo's error names a leftover key only when it is shaped like
+// the check's own keys and holds no secret; a listed key carrying a password is not echoed.
+func TestSwiftUndoKeyNames(t *testing.T) {
+	w := newSwWorld(t)
+	w.s3Keep = true
+	for _, k := range []string{swPrefix + "own-a-1", swPrefix + swPassA, swPrefix + strings.ToLower(swPassB)} {
+		w.objects[swBucketA][k] = true
+	}
+	err := SwiftReach(w.options()).Undo(context.Background(), swEnv(), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), swPrefix+"own-a-1") || !strings.Contains(err.Error(), "another shape") {
+		t.Errorf("Undo = %v, want an error naming %s and the others by a placeholder", err, swPrefix+"own-a-1")
+	}
+	if leaks := w.swLeaks(fmt.Sprint(err), strings.ToLower(fmt.Sprint(err))); len(leaks) > 0 {
+		t.Errorf("Undo's error carries %q", leaks)
+	}
+	if err != nil && strings.Contains(err.Error(), strings.ToLower(swPassB)) {
+		t.Errorf("Undo's error carries the lower-cased password")
+	}
+}
+
+// TestSwiftRoleEcho (review r1): a successful Keystone answer listing the token or the password
+// as a role name puts neither in the record or the terminal (the token is not in the run's
+// redactor); the honest role is still recorded.
+func TestSwiftRoleEcho(t *testing.T) {
+	w := newSwWorld(t)
+	w.roleEcho = true
+	// swObserve fails the test when the record, terminal or error carries a token or a secret.
+	raw, term, err := swObserve(t, w, SwiftReach(w.options()))
+	var rec struct {
+		Roles map[string][]string `json:"roles"`
+	}
+	_ = json.Unmarshal(raw, &rec)
+	for _, u := range []string{"user-a", "user-b"} {
+		if !slices.Equal(rec.Roles[u], []string{"objectstore_operator"}) {
+			t.Errorf("roles of %s = %q, want only objectstore_operator (the echoed token, password and key dropped)", u, rec.Roles[u])
+		}
+	}
+	if !strings.Contains(term, "objectstore_operator") {
+		t.Errorf("the role objectstore_operator is not printed:\n%s", term)
+	}
+	if err != nil {
+		t.Errorf("Observe = %v, want nil (every step denied)", err)
+	}
+}
+
+// TestSwiftValidateAuthURL (deferred from T029 to T030): Validate refuses an auth_url other than
+// OVHcloud's Keystone (docs.ovhcloud.com storage-and-backup/object-storage/
+// pcs-curl-commands-memo.mdx:15), before any request: the passwords go to it.
+func TestSwiftValidateAuthURL(t *testing.T) {
+	for _, u := range []string{
+		"https://auth.example.net/v3",
+		"http://auth.cloud.ovh.net/v3",
+		"https://auth.cloud.ovh.net.example.net/v3",
+		"https://user@auth.cloud.ovh.net/v3",
+		"https://auth.cloud.ovh.net:8443/v3",
+		"https://auth.cloud.ovh.net/v2.0",
+		"https://auth.cloud.ovh.net/v3?x=1",
+	} {
+		w := newSwWorld(t)
+		env := swEnv()
+		env["auth_url"] = u
+		c := SwiftReach(w.options())
+		if err := c.Validate(env); err == nil {
+			t.Errorf("%s: Validate accepted it", u)
+		}
+		if _, err := c.Observe(context.Background(), env, io.Discard); err == nil || len(w.seen()) != 0 {
+			t.Errorf("%s: Observe = %v after %v, want a refusal before any request", u, err, w.seen())
 		}
 	}
 }

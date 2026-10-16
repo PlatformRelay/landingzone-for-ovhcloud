@@ -420,3 +420,176 @@ func TestAPICheckerToken(t *testing.T) {
 		t.Errorf("%d token requests, want one per checker (2)", f.tokens)
 	}
 }
+
+// TestAPICheckerSweepOps (spec 003 T030): the seven operations a probe's Sweep sends, each with its
+// method and v1 path (kb/api/v1/cloud.json), a body only for BulkDeleteObjects
+// (cloud.StorageObjectDeleteBulk); the gate refuses wrong parts before any request; a listing keeps
+// only names, object keys and version ids, or user ids and descriptions, and refuses another shape;
+// a ListBuckets 404 is read against the region's services.
+func TestAPICheckerSweepOps(t *testing.T) {
+	t.Parallel()
+	const bucket = "lzprobe-swift-reach-20261016t101500z-1a2b-a"
+	base := "/v1/cloud/project/" + apiTestProject
+	objs := []APIObject{{Key: "lzprobe-swift-reach/seed", VersionID: "null"}, {Key: "lzprobe-swift-reach/write-a-other"}}
+	t.Run("operations", func(t *testing.T) {
+		for _, tc := range []struct {
+			call                APICall
+			method, path, query string
+			answer              string
+		}{
+			{APICall{Op: APIListRegions, Project: apiTestProject}, "GET", base + "/region", "", `["GRA","RBX-ARCHIVE"]`},
+			{APICall{Op: APIListBuckets, Project: apiTestProject, Region: "RBX-ARCHIVE"}, "GET", base + "/region/RBX-ARCHIVE/storage", "", `[{"name":"b-1","region":"RBX-ARCHIVE"}]`},
+			{APICall{Op: APIListObjects, Project: apiTestProject, Region: "GRA", Name: bucket}, "GET", base + "/region/GRA/storage/" + bucket + "/object", "withVersions=true", `[{"key":"k","versionId":"v1","isLatest":true}]`},
+			{APICall{Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: objs}, "POST", base + "/region/GRA/storage/" + bucket + "/bulkDeleteObjects", "", `{"deleted":[],"errors":[]}`},
+			{APICall{Op: APIDeleteBucket, Project: apiTestProject, Region: "GRA", Name: bucket}, "DELETE", base + "/region/GRA/storage/" + bucket, "", `null`},
+			{APICall{Op: APIListUsers, Project: apiTestProject}, "GET", base + "/user", "", `[{"id":101,"description":"lzprobe-x","username":"user-1"}]`},
+			{APICall{Op: APIDeleteUser, Project: apiTestProject, ID: "101"}, "DELETE", base + "/user/101", "", `null`},
+		} {
+			t.Run(string(tc.call.Op), func(t *testing.T) {
+				f := newFakeCheckAPI(t)
+				f.answer = func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, tc.answer) }
+				got, err := newTestAPIChecker(t, f).Do(context.Background(), tc.call)
+				if err != nil || got.Status != http.StatusOK {
+					t.Fatalf("Do = %+v, %v", got, err)
+				}
+				reqs := f.requests()
+				if len(reqs) != 1 {
+					t.Fatalf("%d requests, want 1", len(reqs))
+				}
+				r := reqs[0]
+				if r.Method != tc.method || r.Path != tc.path || r.Query != tc.query || r.Auth != "Bearer "+apiTestToken {
+					t.Errorf("sent %s %s?%s (auth %q), want %s %s?%s with the bearer token", r.Method, r.Path, r.Query, r.Auth, tc.method, tc.path, tc.query)
+				}
+				switch tc.call.Op {
+				case APIBulkDeleteObjects:
+					if string(r.Body) != `{"objects":[{"key":"lzprobe-swift-reach/seed","versionId":"null"},{"key":"lzprobe-swift-reach/write-a-other"}]}` || r.ContentType != "application/json" {
+						t.Errorf("body %s (%s), want the objects as cloud.StorageObjectDeleteBulk", r.Body, r.ContentType)
+					}
+				default:
+					if len(r.Body) != 0 {
+						t.Errorf("body %q on %s", r.Body, tc.call.Op)
+					}
+				}
+				want := map[APIOp]string{
+					APIListRegions: "[GRA RBX-ARCHIVE]", APIListBuckets: "[b-1]", APIListObjects: "[{k v1}]", APIListUsers: "[{101 lzprobe-x}]",
+				}[tc.call.Op]
+				var kept string
+				switch {
+				case got.Names != nil:
+					kept = fmt.Sprint(got.Names)
+				case got.Objects != nil:
+					kept = fmt.Sprint(got.Objects)
+				case got.Users != nil:
+					kept = fmt.Sprint(got.Users)
+				}
+				if kept != want {
+					t.Errorf("kept %q, want %q", kept, want)
+				}
+			})
+		}
+	})
+
+	t.Run("gate", func(t *testing.T) {
+		long := make([]APIObject, maxBulk+1)
+		for i := range long {
+			long[i] = APIObject{Key: fmt.Sprintf("k%d", i)}
+		}
+		for name, call := range map[string]APICall{
+			"regions without project":   {Op: APIListRegions},
+			"regions with region":       {Op: APIListRegions, Project: apiTestProject, Region: "GRA"},
+			"buckets lower region":      {Op: APIListBuckets, Project: apiTestProject, Region: "gra"},
+			"buckets region path":       {Op: APIListBuckets, Project: apiTestProject, Region: "GRA/../x"},
+			"buckets with name":         {Op: APIListBuckets, Project: apiTestProject, Region: "GRA", Name: bucket},
+			"objects bad bucket":        {Op: APIListObjects, Project: apiTestProject, Region: "GRA", Name: "A/../me"},
+			"objects without region":    {Op: APIListObjects, Project: apiTestProject, Name: bucket},
+			"bulk without objects":      {Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket},
+			"bulk empty objects":        {Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: []APIObject{}},
+			"bulk too many":             {Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: long},
+			"bulk empty key":            {Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: []APIObject{{Key: ""}}},
+			"bulk control key":          {Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: []APIObject{{Key: "a\nb"}}},
+			"bulk spaced version":       {Op: APIBulkDeleteObjects, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: []APIObject{{Key: "k", VersionID: "a b"}}},
+			"delete bucket with id":     {Op: APIDeleteBucket, Project: apiTestProject, Region: "GRA", Name: bucket, ID: "1"},
+			"delete bucket objects":     {Op: APIDeleteBucket, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: objs},
+			"users with name":           {Op: APIListUsers, Project: apiTestProject, Name: bucket},
+			"delete user uuid":          {Op: APIDeleteUser, Project: apiTestProject, ID: apiTestPolicy},
+			"delete user path":          {Op: APIDeleteUser, Project: apiTestProject, ID: "1/../2"},
+			"delete user no project":    {Op: APIDeleteUser, ID: "101"},
+			"objects on a storage read": {Op: APIGetStorage, Project: apiTestProject, Region: "GRA", Name: bucket, Objects: objs},
+			"storage dashed region":     {Op: APIGetStorage, Project: apiTestProject, Region: "EU-WEST-PAR", Name: bucket},
+		} {
+			t.Run(name, func(t *testing.T) {
+				f := newFakeCheckAPI(t)
+				if _, err := newTestAPIChecker(t, f).Do(context.Background(), call); err == nil {
+					t.Error("no refusal")
+				}
+				if n := len(f.requests()); n != 0 {
+					t.Errorf("%d requests before the refusal, want 0", n)
+				}
+			})
+		}
+	})
+
+	t.Run("bad-listings", func(t *testing.T) {
+		echo := "SERVERTEXT " + apiTestToken + " " + apiTestSecret
+		for _, tc := range []struct {
+			call APICall
+			body string
+		}{
+			{APICall{Op: APIListRegions, Project: apiTestProject}, `{"message":"` + echo + `"}`},
+			{APICall{Op: APIListRegions, Project: apiTestProject}, `["GRA",""]`},
+			{APICall{Op: APIListRegions, Project: apiTestProject}, `["GRA","` + echo + `"]`},
+			{APICall{Op: APIListRegions, Project: apiTestProject}, `["gra"]`},
+			{APICall{Op: APIListRegions, Project: apiTestProject}, `null`},
+			{APICall{Op: APIListBuckets, Project: apiTestProject, Region: "GRA"}, `[{"name":""}]`},
+			{APICall{Op: APIListBuckets, Project: apiTestProject, Region: "GRA"}, `[null]`},
+			{APICall{Op: APIListObjects, Project: apiTestProject, Region: "GRA", Name: bucket}, `[{"versionId":"v"}]`},
+			{APICall{Op: APIListObjects, Project: apiTestProject, Region: "GRA", Name: bucket}, `[{"key":"a` + "\\u0000" + `b"}]`},
+			{APICall{Op: APIListUsers, Project: apiTestProject}, `[{"id":"../1","description":"x"}]`},
+			{APICall{Op: APIListUsers, Project: apiTestProject}, `[{"description":"x"}]`},
+			{APICall{Op: APIListUsers, Project: apiTestProject}, echo},
+		} {
+			f := newFakeCheckAPI(t)
+			f.answer = func(rw http.ResponseWriter, r *http.Request) { fmt.Fprint(rw, tc.body) }
+			got, err := newTestAPIChecker(t, f).Do(context.Background(), tc.call)
+			if err == nil {
+				t.Errorf("%s %s: accepted as %+v", tc.call.Op, tc.body, got)
+			}
+			apiNoLeak(t, fmt.Sprint(err))
+		}
+	})
+
+	t.Run("buckets-404", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, detail string
+			detailStatus int
+			none, err    bool
+		}{
+			{"cold-archive", `{"name":"RBX-ARCHIVE","services":[{"name":"storage-s3-coldarchive","status":"UP"}]}`, 200, true, false},
+			{"compute-only", `{"name":"GRA11","services":[{"name":"instance","status":"UP"}]}`, 200, true, false},
+			{"bucket-service", `{"name":"GRA","services":[{"name":"storage-s3-standard","status":"UP"}]}`, 200, false, false},
+			{"no-services", `{"name":"GRA"}`, 200, false, true},
+			{"detail-refused", `{"message":"SERVERTEXT"}`, 403, false, true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newFakeCheckAPI(t)
+				f.answer = func(rw http.ResponseWriter, r *http.Request) {
+					if strings.HasSuffix(r.URL.Path, "/storage") {
+						rw.WriteHeader(http.StatusNotFound)
+						fmt.Fprint(rw, `{"message":"SERVERTEXT"}`)
+						return
+					}
+					rw.WriteHeader(tc.detailStatus)
+					fmt.Fprint(rw, tc.detail)
+				}
+				got, err := newTestAPIChecker(t, f).Do(context.Background(), APICall{Op: APIListBuckets, Project: apiTestProject, Region: "GRA"})
+				if (err != nil) != tc.err || err == nil && (got.Status != 404 || got.NoBucketService != tc.none || got.Names != nil) {
+					t.Errorf("Do = %+v, %v; want status 404, no bucket service %v, error %v", got, err, tc.none, tc.err)
+				}
+				apiNoLeak(t, fmt.Sprint(err))
+				if reqs := f.requests(); len(reqs) != 2 || reqs[1].Path != base+"/region/GRA" {
+					t.Errorf("requests %v, want the listing then the region's detail", reqs)
+				}
+			})
+		}
+	})
+}

@@ -20,12 +20,16 @@ import (
 // statement and undoes its writes. T100: the storage-iam probe observes what its probe identities
 // may do (P25 reads, P26 GET /me, P9 IAM write) and the companion's state object (P3), binding each
 // identity like the companion's (bind), and undoes a write with the sandbox admin's credential.
+// Spec 003 T030: the swift-reach probe observes the tenant users' reach through Keystone and Swift
+// (its client is the S3 one: Keystone, Swift and S3 hosts) and sweeps with the sandbox admin.
 func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error) *live.ProbeCheck {
 	switch root {
 	case "state-backend":
 		return state.Check(state.Options{HTTP: d.S3HTTP})
 	case "storage-iam":
 		return storageiam.Check(storageiam.Options{API: api, Admin: admin, Bind: bind, HTTP: d.S3HTTP})
+	case "swift-reach":
+		return storageiam.SwiftReach(storageiam.SwiftOptions{HTTP: d.S3HTTP, API: api, Admin: admin})
 	}
 	return nil
 }

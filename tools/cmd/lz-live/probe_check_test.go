@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 )
 
 // T096 through the entry: `lz-live probe` runs the state-backend probe's check (package
@@ -213,4 +215,18 @@ func TestProbeEntryCheck(t *testing.T) {
 			t.Error("observations.json for a root without a check")
 		}
 	})
+}
+
+// TestProbeCheckSwiftReach (spec 003 T030): the swift-reach root gets the swift-reach check with a
+// Sweep; a root of another name still gets none. (That the check is handed the entry's S3 client
+// is read from probe.go, not asserted: the options are inside the check's closures.)
+func TestProbeCheckSwiftReach(t *testing.T) {
+	s3 := &http.Client{}
+	c := probeCheck("swift-reach", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil)
+	if c == nil || c.Output != "swift_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
+		t.Fatalf("probeCheck(swift-reach) = %+v, want the swift-reach check with a Sweep", c)
+	}
+	if c := probeCheck("swift-reach-x", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil); c != nil {
+		t.Errorf("probeCheck(swift-reach-x) = %+v, want none", c)
+	}
 }
