@@ -194,3 +194,37 @@ func TestKeepRecordNothingToMove(t *testing.T) {
 		t.Error("attempts/ created with nothing to move")
 	}
 }
+
+// TestRecordDirArchivesOnCleanupOnly (T007): given a run directory holding a record / when the
+// runner prepares it for a run that is not a cleanup / then nothing moves → exposes an archive on
+// every run (a chain or a fresh probe moving what its own run reads, such as the baseline).
+func TestRecordDirArchivesOnCleanupOnly(t *testing.T) {
+	dir := t.TempDir()
+	given := fullRunRecord()
+	writeRunRecord(t, dir, given)
+	before := recordTree(t, dir)
+	if err := (Runner{Dir: dir}).recordDir(); err != nil {
+		t.Fatalf("recordDir: %v", err)
+	}
+	if got := recordTree(t, dir); !maps.Equal(got, before) {
+		t.Errorf("run directory changed by a run that is not a cleanup: %v, want %v", got, before)
+	}
+}
+
+// TestRecordDirRefusesWhenArchiveFails (T007): given a record whose archive cannot be made
+// (attempts is a file, not a directory) / when a cleanup prepares the run directory / then it
+// fails and the record stays where it was → exposes a cleanup that goes on and writes its own
+// summary.json, leftovers.json and errors.txt over the record it could not keep (constitution V).
+func TestRecordDirRefusesWhenArchiveFails(t *testing.T) {
+	dir := t.TempDir()
+	given := fullRunRecord()
+	given["attempts"] = "not a directory\n"
+	writeRunRecord(t, dir, given)
+	before := recordTree(t, dir)
+	if err := (Runner{Dir: dir, cleanupOnly: true}).recordDir(); err == nil {
+		t.Error("recordDir of a cleanup whose archive failed = nil; want the failure")
+	}
+	if got := recordTree(t, dir); !maps.Equal(got, before) {
+		t.Errorf("run directory after a failed archive: %v, want it unchanged", got)
+	}
+}

@@ -586,6 +586,50 @@ func writeRecord(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
+// archiveRecord creates slot (0700; its parent too) for keepRecord, copies each of copies from
+// runDir into it (0600) and then moves each of moves there. The slot must not exist: an archive
+// slot is never reused, so an existing one is an error, never a merge.
+func archiveRecord(runDir, slot string, moves, copies []string) error {
+	if err := ensureDir(filepath.Dir(slot)); err != nil {
+		return err
+	}
+	if err := os.Mkdir(slot, 0o700); err != nil {
+		return err
+	}
+	// Mkdir applies the umask, which can only remove bits; Chmod pins the mode.
+	if err := os.Chmod(slot, 0o700); err != nil {
+		return err
+	}
+	for _, n := range copies {
+		if err := copyPrivate(filepath.Join(runDir, n), filepath.Join(slot, n)); err != nil {
+			return err
+		}
+	}
+	for _, n := range moves {
+		if err := os.Rename(filepath.Join(runDir, n), filepath.Join(slot, n)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyPrivate copies the file from to the new file to (0600; an existing one is an error).
+func copyPrivate(from, to string) error {
+	raw, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // scratchHome creates a private per-run HOME for the children, under the resolved TMPDIR (the
 // path ScratchOutside checked, never a relative one).
 func scratchHome() (string, error) {

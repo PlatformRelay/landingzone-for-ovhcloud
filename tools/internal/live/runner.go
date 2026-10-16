@@ -866,6 +866,20 @@ func (s *session) destroy(ctx context.Context, st Stack) (err error) {
 
 var errDeadline = errors.New("deadline exceeded")
 
+// recordDir creates the run's record directory; on `--cleanup` it first archives the record an
+// earlier run or cleanup left there (keepRecord, spec 007 FR-002), before this cleanup writes
+// anything of its own.
+func (r Runner) recordDir() error {
+	if err := ensureDir(r.Dir); err != nil {
+		return err
+	}
+	if !r.cleanupOnly {
+		return nil
+	}
+	_, err := keepRecord(r.Dir)
+	return err
+}
+
 // Execute runs r; the error maps to the exit code through ExitCode.
 func (r Runner) Execute(ctx context.Context) error {
 	deadline := r.Deadline
@@ -890,7 +904,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	if err := r.scratchOutside(); err != nil {
 		return err
 	}
-	if err := ensureDir(r.Dir); err != nil {
+	if err := r.recordDir(); err != nil {
 		return err
 	}
 	home, err := scratchHome()

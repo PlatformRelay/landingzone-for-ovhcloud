@@ -36,6 +36,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T004 | CLOSED: 3 tests (chain budget spent, chain budget left, probe at the destroy deadline: admitted/refused) red on today's code for their stated reasons | leg 1 and strong leg, round 1 | deferred to T006: probe retry-line assertion with a `Term` mutant; shared-versus-copied budget mutant |
 | T005 | CLOSED: 5 tests (keepRecord: whole record, next slot, nothing to move; entry: cleanup keeps the record, second cleanup's undo still reads observations.json) red on the stub for their stated reasons; 1 entry pin (cleanup without a record) passes | leg 1 and strong leg, round 1 | deferred to T007: `TestKeepRecordNextSlot` move check via G25 "slot reuse"; spec.md "next free number" vs data-model "1 + highest": coordinator to align spec.md wording |
 | T006 | CLOSED: retry and attempt records in leftovers.go, budget/clock/terminal from chain.go and runner.go; T003's 16 and T004's 3 known-red rows green; 8 cases for the T003/T004 deferrals and 9 for review findings added; 36 G24 mutants, 35 killed, 1 equivalent (chain-level copy where the check starts) | leg 1 and strong leg, rounds 1 and 2; round-2 behaviour fixes unreviewed by rule | deferred: an element-decode row takes the last page's attempt number; `attempts` checked before the context's end (record only); the chain's baseline listing retries nothing (nil budget, data-model wires only the final check) |
+| T007 | CLOSED: `keepRecord` (sweep.go) with its writes in files.go, wired through `Runner.recordDir` on `--cleanup` only; T005's 5 known-red rows green; 2 tests added (archive on cleanup only; a failed archive fails the cleanup, record unchanged); 18 G25 mutants in 32 runs, each killed in its unit or entry scope (T005's slot-reuse deferral: copy-instead-of-move killed by the suite, not by `TestKeepRecordNextSlot` alone); every CI target green | leg 1 and strong leg, round 1 | rejected: leg 1's run-lock, symlink and mode findings (no new exposure; reasons in evidence). Nits accepted: a partial archive splits one attempt across two slots; an `observations.json`-only directory archives nothing |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -59,11 +60,11 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | chain_retry_budget_test.go:TestChainListingRetryBudgetSpent | US1 | T004 | T006 |
 | chain_retry_budget_test.go:TestChainListingRetryBudgetLeft | US1 | T004 | T006 |
 | chain_retry_budget_test.go:TestProbeListingRetryBudget (admitted, refused) | US1 | T004 | T006 |
-| sweep_record_test.go:TestKeepRecordArchivesWholeRecord | US1 | T005 | |
-| sweep_record_test.go:TestKeepRecordNextSlot (second-cleanup, after-a-gap) | US1 | T005 | |
-| sweep_record_test.go:TestKeepRecordNothingToMove | US1 | T005 | |
-| probe_cleanup_record_test.go:TestProbeCleanupKeepsRecord | US1 | T005 | |
-| probe_cleanup_record_test.go:TestProbeCleanupKeepsObservationsForUndo | US1 | T005 | |
+| sweep_record_test.go:TestKeepRecordArchivesWholeRecord | US1 | T005 | T007 |
+| sweep_record_test.go:TestKeepRecordNextSlot (second-cleanup, after-a-gap) | US1 | T005 | T007 |
+| sweep_record_test.go:TestKeepRecordNothingToMove | US1 | T005 | T007 |
+| probe_cleanup_record_test.go:TestProbeCleanupKeepsRecord | US1 | T005 | T007 |
+| probe_cleanup_record_test.go:TestProbeCleanupKeepsObservationsForUndo | US1 | T005 | T007 |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -87,3 +88,6 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - Judge an HTTP answer by its status before its body or headers: a 4xx with a broken body, or a 3xx whose Location Go cannot parse, is still that status, not a transport failure. (T006)
 - A `select` on a timer and `ctx.Done()` may pick the timer when both are ready: re-check the context before the next attempt, and test with a clock that cancels as it fires. (T006)
 - SonarCloud's complexity gate can be checked before the PR: host `~/go/bin/golangci-lint-v2.13.1 run` with a config enabling only `gocognit` (`min-complexity: 15`) over the package. (T006)
+- A new branch in a function already over the complexity limit (`Execute`, 71) goes into a small helper that replaces an existing call (`recordDir` for `ensureDir`), so the old function's score does not move. (T007)
+- A mutant's `old` text must be unique in its file or name its occurrence: a mode mutant on `os.O_EXCL, 0o600)` hit `writeSynced` first and "survived". (T007)
+- A wiring mutant that no entry test reaches (an ignored error, a gate on the wrong flag) needs a unit case on the wiring function itself. (T007)
