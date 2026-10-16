@@ -2782,9 +2782,11 @@ func TestApplyDropOutputs(t *testing.T) {
 
 // T014 (FR-005; T013's deferred retry): a retry of the same run that finds its own generation
 // current, after a crash past the switch or a completed write, treats the set as written when the
-// generation holds exactly the retry's files; a retry with other values, fewer files or more files
-// is refused (a run's generation is never rewritten), naming no value, and the generation and what
-// a reader loads stay as the first write left them.
+// generation holds exactly the retry's files, and finishes the write's cleanup (the flat files the
+// set replaces and a stale `current.tmp` are removed: review round 1); a retry with other values,
+// fewer files or more files is refused (a run's generation is never rewritten), naming no value,
+// and the generation and what a reader loads stay as the first write left them. A set directory
+// that is a symlink to a matching generation elsewhere is refused, never taken as written.
 func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 	t.Parallel()
 	const run = "20261016T090000Z-0c0c"
@@ -2796,21 +2798,42 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 		crash        SetStep // the first write stops after it; 0 completes
 		first, retry map[string]map[string]string
 		written      bool
+		symlinked    bool // the first write went to the other account; this account's set directory links to it
 	}{
-		{"crash-after-switch-same-files", SetStepSwitch, full, full, true},
-		{"completed-same-files", 0, full, full, true},
-		{"crash-after-switch-other-values", SetStepSwitch, full, other, false},
-		{"completed-fewer-files", 0, full, fewer, false},
-		{"completed-more-files", 0, fewer, full, false},
+		{"crash-after-switch-same-files", SetStepSwitch, full, full, true, false},
+		{"completed-same-files", 0, full, full, true, false},
+		{"crash-after-switch-other-values", SetStepSwitch, full, other, false, false},
+		{"completed-fewer-files", 0, full, fewer, false, false},
+		{"completed-more-files", 0, fewer, full, false, false},
+		{"symlinked-set-directory", 0, full, full, false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			root := credRoot(t)
-			if err := WriteCredentialSet(CredentialSet{Root: root, Account: credAccount, Instance: csetGov, RunID: run, Files: c.first}, c.crash); err != nil && !errors.Is(err, ErrInjectedCrash) {
+			account := credAccount
+			if c.symlinked {
+				account = credOtherAccount
+			}
+			if err := WriteCredentialSet(CredentialSet{Root: root, Account: account, Instance: csetGov, RunID: run, Files: c.first}, c.crash); err != nil && !errors.Is(err, ErrInjectedCrash) {
 				t.Fatal(err)
 			}
-			gen := filepath.Join(csetDir(root, csetGov), "gen-"+run)
+			setDir := csetDir(root, csetGov)
+			if c.symlinked {
+				if err := os.MkdirAll(filepath.Dir(setDir), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(root, "accounts", credOtherAccount, "sets", csetGov), setDir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.crash == SetStepSwitch {
+				// A stale pointer file a crash can leave beside the switched pointer.
+				if err := os.WriteFile(filepath.Join(setDir, "current.tmp"), []byte("gen-"+run), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			gen := filepath.Join(setDir, "gen-"+run)
 			before := laneTree(t, gen, "")
 			retry := CredentialSet{Root: root, Account: credAccount, Instance: csetGov, RunID: run, Files: c.retry}
 			err := writeRunSet(retry)
@@ -2818,7 +2841,7 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 			case c.written && err != nil:
 				t.Errorf("writeRunSet on the same run's current generation holding its files: %v, want nil", err)
 			case !c.written && err == nil:
-				t.Error("writeRunSet on the same run's current generation holding other files or values: nil, want a refusal")
+				t.Error("writeRunSet on the same run's current generation holding other files or values, or reached through a symlink: nil, want a refusal")
 			case !c.written:
 				for _, values := range retry.Files {
 					for _, v := range values {
@@ -2831,6 +2854,9 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 			if after := laneTree(t, gen, ""); !maps.Equal(after, before) {
 				t.Error("the retry changed the run's generation")
 			}
+			if c.symlinked {
+				return
+			}
 			for rel, values := range c.first {
 				p, err := CredentialSetPath(root, credAccount, csetGov, rel)
 				if err != nil {
@@ -2839,6 +2865,17 @@ func TestApplyCredentialSetSameRunRetry(t *testing.T) {
 				if got, err := ReadCredentialFile(p); err != nil || !maps.Equal(got, values) {
 					t.Errorf("%s after the retry: %v (err %v), want the first write's values", rel, slices.Sorted(maps.Keys(got)), err)
 				}
+			}
+			if !c.written {
+				return
+			}
+			for rel := range c.retry {
+				if _, err := os.Lstat(filepath.Join(root, "accounts", credAccount, rel)); !os.IsNotExist(err) {
+					t.Errorf("flat %s still there after the retry was taken as written (err %v)", rel, err)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(setDir, "current.tmp")); !os.IsNotExist(err) {
+				t.Errorf("current.tmp still there after the retry was taken as written (err %v)", err)
 			}
 		})
 	}

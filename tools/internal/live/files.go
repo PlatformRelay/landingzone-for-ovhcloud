@@ -433,6 +433,26 @@ func WriteCredentialSet(s CredentialSet, failAfter SetStep) error {
 	return nil
 }
 
+// finishSet is the part of step 5 a same-run retry still owes once its generation is current
+// (writeRunSet): the set directory synced (the switch durable before anything is removed), a stale
+// current.tmp and the flat files of rels (relative to acct) removed, the set directory synced
+// again. Older generations stay until the writer's next set: which of them was the previous one is
+// no longer known.
+func finishSet(acct, setDir string, rels []string) error {
+	if err := syncDir(setDir); err != nil {
+		return err
+	}
+	if err := removeFiles(filepath.Join(setDir, "current.tmp")); err != nil {
+		return err
+	}
+	for _, rel := range rels {
+		if err := removeFlat(acct, rel); err != nil {
+			return err
+		}
+	}
+	return syncDir(setDir)
+}
+
 // currentGeneration is the generation `current` names in setDir, "" while `current` does not
 // exist. A pointer that is not a regular file whose whole content names a sibling gen- directory
 // is refused: the writer could not tell which generation is the previous one to keep.
