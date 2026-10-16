@@ -1,5 +1,5 @@
 # Feature Specification: Cleanup-first live slice
-Feature: `007-cleanup-first-live-slice` · Created: 2026-10-16 · Revised: 2026-10-16 (spec-set review round 1) · Status: draft
+Feature: `007-cleanup-first-live-slice` · Created: 2026-10-16 · Revised: 2026-10-16 (spec-set review rounds 1 and 2) · Status: draft
 ADRs: 0004, 0005, 0006, 0008, 0009, 0019, 0021, 0024
 Input: decision D119 (spec 007 scope, 2026-10-16) with its brainstorm and three judges' notes; D117
 and D118 (live runs by the coordinating session until the credit expires); the unspecified-work
@@ -50,8 +50,8 @@ guard live (P11) and AgentEx. See *Out of scope / postponed (with trigger)*.
 ## Clarifications
 
 ### Session 2026-10-16
-Answered from D119, the judges' notes, the code at `df8bb3e`, spec 006's US2 branch
-(`origin/spec-006-us2`, `cf5db72`) and the evidence files. Open items are listed last, each with the
+Answered from D119, the judges' notes, the code at `df8bb3e` and, for spec 006's retry budget, `main`
+at `15bc579` (spec 006 US2, PR #123, merged), and the evidence files. Open items are listed last, each with the
 default this spec applies; the coordinator confirmed all four defaults after review round 1.
 - Q: Is P10 already observed? → A: For the raw resource, yes: the `alerting` probe created and
   destroyed one `ovh_cloud_project_alerting` on the trial project (spec 005 T010 run 4,
@@ -73,8 +73,8 @@ default this spec applies; the coordinator confirmed all four defaults after rev
   a second ref with the same id, which this rule refuses. T001 confirms this from the code and
   records it; B5 stays offline either way in this spec.
 - Q: Do the listing retries share spec 006's retry budget? → A: Yes. Spec 006 FR-008's
-  `retryBudget` (`newRetryBudget(end, reserve)`, `admit(now, wait)`, `keep(d)`; `origin/spec-006-us2`
-  `tools/internal/live/deadline.go`) is built once per leftover reconciliation; the chain passes the
+  `retryBudget` (`newRetryBudget(end, reserve)`, `admit(now, wait)`, `keep(d)`;
+  `tools/internal/live/deadline.go:53-76` on `main`) is built once per leftover reconciliation; the chain passes the
   same budget its retained-state reads used, and the probe core builds one from its destroy
   context's deadline. The clock the waits read is defined in this spec's data model (`waitClock`,
   matching the landed code), since spec 006's data model does not fix one.
@@ -178,9 +178,11 @@ record). Two refs with one id where one is the state ref without the flag; three
 an `LZ_PROJECT_ID_X` the manifest never uses (not judged). A baseline listing that fails after its
 retries (no create); an earlier probe run left under `state/probes/` (the next probe is refused); a
 cleanup without the run's baseline (refused, files kept); an alert created by someone else during
-the run (deleted by the sweep as the run's: the sandbox has one maintainer, and the evidence names
-it); an alert whose read-back differs from the plan (the observation fails, the destroy and sweep
-still run).
+the run, or by the owner before a late cleanup (deleted only if it matches the root's plan;
+otherwise reported and the sweep fails); a baseline of another run or project, without the alert
+kind, incomplete or with errors (invalid: refused); a kill between start-up writes (pre-create,
+retired by `--cleanup`); both baseline copies lost after a create (owner recovery); an alert whose
+read-back differs from the plan (the observation fails, the destroy and sweep still run).
 
 ## Premises
 
@@ -210,9 +212,12 @@ still run).
   real leftover is still `fail`. [D119 item 1]
 - **FR-002 Run record kept** — `leftovers.json` carries every failed attempt (path, attempt number,
   status or failure class, whether a retry followed, why not), redacted. A probe `--cleanup` (`lz-live
-  probe --cleanup <run-id>`) first moves the run directory's whole record, except `inventory.jsonl`
-  and `baseline.json`, into `attempts/<n>/` (`n` the next free number), then writes its own; a run
-  directory without a record is cleaned up as today. [D119 item 1; T027/T028 learnings]
+  probe --cleanup <run-id>`) first moves the run directory's whole record, except `inventory.jsonl`,
+  `baseline.json` and `observations.json`, into `attempts/<n>/` (`n` the next free number), copies
+  `observations.json` there too, then writes its own; `observations.json` stays in place unchanged,
+  so `Recorded` and the undo step of every later cleanup still read what the run observed
+  (`tools/internal/live/runner.go:786-794`). A run directory without a record is cleaned up as
+  today. [D119 item 1; T027/T028 learnings]
 - **FR-003 Project aliasing refused** — before any child process, the lane's setup (plan, apply,
   destroy, chain) and the bootstrap's setup, before its `state` phase, refuse a bound account in
   which two project refs the manifest uses resolve to one project id: condition `project-alias`,
@@ -232,23 +237,53 @@ still run).
   `project` stack and nothing is retained. The plan creates no `ovh_cloud_project`. The run records
   the alert id, the read-back of FR-008, that destroy and sweep removed it, and the run's cost. A run
   of anything but the module path does not qualify FR-005. [P10, B4 alert part]
-- **FR-006 Baseline of nameless kinds; no hidden orphans** — before its first create, a probe run
-  lists the project's alerts and writes their ids, redacted, to `baseline.json` in its run
-  directory; a failed baseline listing (after FR-001's retries) ends the run before any create. The
-  baseline applies to nameless kinds only (today: `ovh_cloud_project_alerting`); for every other
-  kind it decides nothing. A probe start is refused (`unreconciled-run`, naming the run id) while any
-  earlier probe run directory remains under `accounts/<account>/state/probes/`, so an earlier run's
-  orphan can never enter a later run's baseline unseen. [D119 "findable from the run id"]
+- **FR-006 Baseline of nameless kinds; start-up phases; no hidden orphans** — a probe start runs
+  durable phases in order, each written and synced before the next: (1) `probe.env` and (2) the
+  passphrase under `accounts/<account>/state/probes/<run-id>/`; (3) the alert listing of the
+  recorded project, written as `baseline.json` in the run's record directory `.local/live/<run-id>/`
+  (never under `state/probes/`, whose directory the success path removes) and as a recovery copy
+  `accounts/<account>/state/baselines/<run-id>.json`, both before the first `tofu apply`. A baseline
+  is valid only with the run's own `run_id`, the digest of the project id `probe.env` records, an
+  explicit `ovh_cloud_project_alerting` list (empty allowed, absent not), `complete: true` and no
+  errors; a baseline is never rebuilt from a listing taken after a create could have happened. A
+  baseline listing that fails on every attempt is written with its errors, and the run ends there
+  before any create. The baseline applies to nameless kinds only; for every other kind, and for any
+  kind when `Before` is nil or has no entry for it (the chain), today's inventory and run-id
+  matching stands.
+  A run is **pre-create** when it has no state, no inventory entry and either no baseline in
+  either place or a baseline whose listing failed (errors recorded); nothing can have been created.
+  A run is **unreconciled** while its directory exists under `state/probes/`. A probe start is
+  refused (`unreconciled-run`, naming the run id and `--cleanup <run-id>`) while any other run is
+  unreconciled, pre-create ones included (a run still in progress looks the same). A pre-create run
+  is retired by its own end (the failed-baseline case) or by `--cleanup <run-id>`, which then needs
+  no passphrase, runs no `tofu`, passes the sweep with nothing to delete and removes the run's files
+  and its recovery copy. A missing state alone never proves that nothing was created. [D119
+  "findable from the run id"]
 - **FR-007 Budget-alert sweep and recovery** — the `budget-alert` root has a probe check, registered
-  in `tools/cmd/lz-live/probe.go`, whose `Sweep` lists the project's alerts, deletes each id absent
-  from the run's `baseline.json` through a `DeleteAlert` API operation, lists again and fails unless
-  every such id is gone; it never deletes a baseline id, and without a readable baseline it refuses
-  and deletes nothing. The run's recovery files (`probe.env`, the passphrase, the root record) are
-  kept, with or without state, until the sweep and the leftover check have both passed; so a run
-  whose create succeeded remotely while its answer was lost, with no state and no inventory, can be
-  finished by a fresh `--cleanup <run-id>`.
-- **FR-008 Alert read-back** — the probe check's observer reads the alert the root published
-  (`alert_id`) before the destroy and records its id, threshold, delay and project; a missing alert,
+  in `tools/cmd/lz-live/probe.go`, whose `Sweep` loads the run's baseline (the record copy, else the
+  recovery copy) and validates it (FR-006). With a valid baseline it lists the project's alerts and,
+  for each id absent from the baseline, reads the alert: it deletes it through a `DeleteAlert` API
+  operation only if threshold, delay and recipient match the root's plan (1, 3600, the account's own
+  address from `GET /me`); any other non-baseline alert (one the owner added later, say) is reported
+  and makes the sweep fail without deleting it. It then lists again and fails unless every deleted id
+  is gone; it never deletes a baseline id. A pre-create run passes the sweep with nothing to delete.
+  A baseline that exists but is unreadable or invalid, or a missing baseline beside state or an
+  inventory entry, makes the sweep refuse and delete nothing. The run's recovery files (`probe.env`,
+  the passphrase, the root record, the recovery copy of the baseline) are kept, with or without
+  state, until the sweep and the leftover check have both passed; so a run whose create succeeded
+  remotely while its answer was lost, with no state and no inventory, is finished by a fresh
+  `--cleanup <run-id>`.
+  **Owner recovery when no trustworthy baseline survives**: the coordinator stops; the owner lists
+  the project's alerts in the Control Panel, removes by hand only alerts matching the root's plan
+  that were created at or after the run's start (the run id's timestamp), and then runs
+  `lz-live probe --cleanup <run-id> --accept-lost-baseline`, which deletes nothing, asks on the
+  terminal for the run id to be typed back (refused without a terminal, so no automated session can
+  run it), runs the leftover check and retires the files only if it passes.
+- **FR-008 Alert read-back** — the root publishes the scalar public output `alert_id` and the
+  check output `budget_alert_check = { alert_id = module.project.budget_alert_id }`, a map of
+  strings, which `ProbeCheck.Output` selects (the runner decodes the selected output as a map of
+  strings, `tools/internal/live/runner.go:721-741`). The probe check's observer reads that alert
+  before the destroy and records its id, threshold, delay and project; a missing alert,
   or any value that differs from the plan's, makes the observation `fail`, and the destroy, the sweep
   and the leftover check still run.
 - **FR-009 Second tenant offline** — a two-tenant sandbox fixture (`demo` and `lab`, each with one
@@ -297,10 +332,13 @@ retained-infrastructure list. See `data-model.md`.
   lists as approved retained infrastructure (V005).
 - **SC-004**: An aliased pair of tenant refs is refused with zero child processes on plan, apply,
   destroy, chain and the bootstrap, and the sandbox's KD-1 binding is admitted (V002).
-- **SC-005**: Through `lz-live`'s probe entry, a run whose fake create succeeds remotely and loses
-  its answer, leaving no state and no inventory, followed by the process's exit and a fresh
-  `--cleanup <run-id>`, ends with only the new alert deleted, its absence verified and every
-  baseline alert untouched (V003).
+- **SC-005**: Through `lz-live`'s probe entry, in fresh processes: a run whose fake create succeeds
+  remotely and loses its answer, leaving no state and no inventory, followed by the process's exit
+  and a fresh `--cleanup <run-id>`, ends with only the new alert deleted, its absence verified and
+  every baseline alert untouched; a kill between any two start-up writes is retired by `--cleanup`
+  and the next start then proceeds; a passing run, a completed cleanup and a run whose baseline
+  listing failed each leave `state/probes/` without their directory, and the next start is not
+  refused (V003).
 
 ## Acceptance and predefined verification
 Commands exist today; no new Task target is created. Every offline command runs through
@@ -322,7 +360,7 @@ under D118 from the live clone, never through the entry. Controls in `contracts/
   `apicheck.go` (`ListAlerts`, `GetAlert`, `DeleteAlert`), `apply.go` and `bootstrap_state.go`
   (alias check in setup), `chain.go` (shared budget passed to the listing); their tests.
 - `tools/internal/probes/live/alerting/` (new: the `budget-alert` probe check) and
-  `tools/cmd/lz-live/probe.go` (its registration); the production-entry recovery test in
+  `tools/cmd/lz-live/probe.go` (its registration and `--accept-lost-baseline`); the production-entry recovery test in
   `tools/cmd/lz-live/`.
 - `tools/internal/stacks/adapter.go` (`CheckProjectAliases`); `tests/fixtures/manifests/sandbox-two-tenants/`.
 - `tests/live/probes/budget-alert/` (root, lock file, tests) and its row in
@@ -345,9 +383,9 @@ under D118 from the live clone, never through the entry. Controls in `contracts/
 | Owner reads for a later Q1 (voucher binding, `/cloud/eligibility`, the order funnel summary) | input for a later spec only; nothing here depends on them (D119) | owner, optional |
 
 ## Dependencies and stop conditions
-- Depends on spec 006's live-lane tasks T022–T026 on `main` (PR #123: bounded verbs, destroy
+- Builds on spec 006's live-lane tasks T022–T026, merged on `main` (PR #123, `15bc579`: bounded verbs, destroy
   budget, the shared `retryBudget`, canary trap, Object Lock assertion): FR-001 draws on
-  `retryBudget`, and every live-lane file this spec touches changes there. US1 starts after it lands.
+  `retryBudget`, and every live-lane file this spec touches changes there.
 - Order of live work (D119): T019 (budget alert; also exercises FR-001, FR-002, FR-006–FR-008), not
   started after 2026-10-21 23:00; then T021 (retained list), which depends on T019 only if it ran;
   then T022 (final chain), finished with its recovery on 2026-10-22; then T023 (verification and

@@ -1,6 +1,6 @@
 # Research: Cleanup-first live slice
-Date: 2026-10-16 · Revised: 2026-10-16 (spec-set review round 1) · Spec: [spec.md](spec.md) · Code
-read at `df8bb3e` (main) and spec 006's US2 branch (`origin/spec-006-us2` at `cf5db72`, PR #123)
+Date: 2026-10-16 · Revised: 2026-10-16 (spec-set review rounds 1 and 2) · Spec: [spec.md](spec.md) ·
+Code read at `df8bb3e` (main) and, for spec 006's US2 (PR #123, merged), `main` at `15bc579`
 
 Decision records outside the repository: D117–D119, the judges' notes behind D119 and the
 coordinator's decisions on review round 1. Claims about OVHcloud cite the API schema or the provider
@@ -33,22 +33,24 @@ same exposure: "a baseline listing with errors ends the run there" (`chain.go:9-
 - Waits 5 s and 15 s (three attempts); the state-read retry waits 10 s and 30 s (`runner.go:798`)
   because a `tofu init` is heavier. Default confirmed by the coordinator.
 - **Shared budget.** Spec 006 builds one `retryBudget` per reconciliation in `laneRunner.leftovers`
-  (`origin/spec-006-us2:tools/internal/live/chain.go:789`, `newRetryBudget(end, minRetryReserve)`)
+  (`tools/internal/live/chain.go:789` on `main`, `newRetryBudget(end, minRetryReserve)`)
   and spends it on retained-state reads. The chain hands that same value to the leftover check's
   listings, so retries of either kind draw from one allowance; the probe core builds one from its
   destroy context's deadline. A nil budget means "no retry admitted" (as spec 006's own reading of
   "none"), never "deadline only", so a missing wire fails toward fewer retries. Pinned by a
   chain-level test (T004).
 - **Clock.** The landed code has `waitClock{Now() time.Time; After(d) <-chan time.Time}` and
-  `wallClock` (`origin/spec-006-us2:tools/internal/live/deadline.go:78-91`), but spec 006's data
-  model does not fix it. This spec fixes that interface in its own data model and uses it; if spec
-  006's merge renames it, T006 follows the merged name and records it.
+  `wallClock` (`tools/internal/live/deadline.go:78-91` on `main`), but spec 006's data model does
+  not fix it. This spec fixes that interface in its own data model and uses it.
 - A cancellation during a wait selects on `ctx.Done()` and returns the context's cause; no attempt
   follows.
 - A retried page resumes from its cursor; a successful retry still goes through reconciliation, so a
   real leftover listed on the retry is `fail`.
-- FR-002 moves the whole run record except `inventory.jsonl` and `baseline.json` (which the cleanup
-  needs) into `attempts/<n>/`; this turns P1 from "believed" into an observation.
+- FR-002 moves the whole run record except `inventory.jsonl`, `baseline.json` and
+  `observations.json` into `attempts/<n>/`; `observations.json` is copied there and stays in place,
+  because a cleanup's undo hands it to `Recorded` (`runner.go:786-794`) and storage-iam relies on
+  the recorded policy ids when a listing lags (`tools/internal/probes/live/storageiam/storageiam.go:181,532`).
+  This turns P1 from "believed" into an observation.
 
 ## R2 Resolved-project aliasing (FR-003, FR-004)
 **Question for T001.** Does FR-003's rule refuse two tenants on the one sandbox project?
@@ -100,6 +102,29 @@ and, after the process exits, possibly no recovery files: nothing could remove i
   baseline (`DELETE /cloud/project/{serviceName}/alerting/{id}`, "Delete an alert", action
   `publicCloudProject:apiovh:alerting/delete`, `kb/api/v1/cloud.json:5916-5970`), lists again and
   fails unless they are gone. Without a readable baseline it refuses and deletes nothing.
+- **Start-up phases (review round 2).** `Probe.Start` writes `probe.env` and then the passphrase
+  (`runner.go:1358-1361` on `main`) before `Execute`. A kill in that window, or a baseline listing
+  that fails on every attempt, used to leave a directory the start refusal would honour forever and
+  a sweep that refuses without a baseline. The phases are now explicit and synced (probe.env,
+  passphrase, baseline in both places, then apply), and a run is **pre-create** when it has no
+  state, no inventory entry and either no baseline or a failed one: nothing can exist, so the sweep
+  passes with nothing to delete and `--cleanup` retires the files without a passphrase or `tofu`. A
+  missing state alone is never that proof: a lost create answer leaves no state either, and then the
+  baseline exists.
+- **Where the baseline lives.** In the record directory `.local/live/<run-id>/`, which the success
+  path keeps, never under `state/probes/<run-id>/`, which the success path removes file by file and
+  then `os.Remove`s (`runner.go:1308`, `files.go:685-690`): an extra file there would make every
+  passing run fail and block the next. The recovery copy lives in
+  `accounts/<account>/state/baselines/<run-id>.json`, outside the disposable record, and is removed
+  only with the run's other recovery files.
+- **Baseline authority.** A readable file is not enough to delete: the baseline must name this run,
+  carry the digest of the project `probe.env` records (the cleanup works in that recorded project,
+  `tools/cmd/lz-live/probe.go:225`), list the alert kind explicitly, be complete and carry no
+  errors. Even then the sweep deletes a non-baseline alert only if its read matches the root's plan
+  (threshold 1, delay 3600, the account's own address): an alert the owner sets between the run and
+  a late cleanup is reported, never removed. No baseline is ever rebuilt from a later listing. When
+  no trustworthy baseline survives a possible create, the owner removes matching alerts by hand and
+  retires the run with `--accept-lost-baseline`, which needs a terminal and the run id typed back.
 - **Recovery files.** Kept until the sweep and the leftover check pass, with or without state, so a
   fresh `--cleanup` can reload the baseline. Pinned by a production-entry test through
   `tools/cmd/lz-live` with a fresh process (T013), as spec 003's T037 did for the sweep.
@@ -110,11 +135,13 @@ and, after the process exits, possibly no recovery files: nothing could remove i
   check passed (`runner.go:1306-1312`), so its presence is exactly "unreconciled"; the refusal needs
   no record from another checkout and cannot be fooled by a record that was overwritten or never
   written. Cost: a stale directory from an older run must be cleaned up first, which is the point.
-- **Read-back.** The check's `Observe` reads `GET …/alerting/{id}` for the published `alert_id`
-  before the destroy and records id, threshold, delay and project; a mismatch fails the observation
+- **Read-back.** The runner hands a check only a map-of-strings output (`runner.go:721-741`), while
+  the module's `budget_alert_id` is a scalar (`modules/cloud-project/outputs.tf:11-13`); the root
+  therefore publishes `budget_alert_check = { alert_id = … }` for the check beside its scalar
+  `alert_id`. The check's `Observe` reads `GET …/alerting/{id}` before the destroy and records id, threshold, delay and project; a mismatch fails the observation
   and the runner still destroys and sweeps (the observer never ends the run early).
-- **Risk.** An alert created by someone else during the run is deleted by the sweep as the run's.
-  The sandbox has one maintainer; the evidence names any id the sweep deleted.
+- **Risk.** An alert matching the plan that someone else creates during the run is deleted as the
+  run's. The sandbox has one maintainer; the evidence names any id the sweep deleted.
 
 ## R4 The budget-alert root (FR-005)
 - **Probe, not the `project` stack.** A retained alert in `project` state would be orphaned or
