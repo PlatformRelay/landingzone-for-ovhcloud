@@ -282,3 +282,75 @@ func TestLaneEntryDefaultApply(t *testing.T) {
 		t.Errorf("exit %d, stderr %q; want 3 naming %s (live.Apply)", code, stderr, live.CondBootstrapOwned)
 	}
 }
+
+// TestLaneEntryBounded (T017, spec 006 FR-001; data-model *Live run record, non-chain verbs*):
+// through the entry, with no seam, every plan, apply and destroy ends with its summary line on
+// stdout, `LZ_RUN <run_id> <verb> <outcome>` (` inventory=<run dir>/inventory.jsonl` for apply),
+// apply and destroy with the cost reminder, and its run.json records DefaultDeadline: the entry
+// takes no --deadline for these verbs (TestLaneEntryUsage), so the run is bounded by the default,
+// never unbounded (main.go hands 0 today). Each run here is live.Apply's own early refusal (exit
+// 3), which reaches no API, S3 or tofu.
+func TestLaneEntryBounded(t *testing.T) {
+	for _, c := range []struct {
+		verb, target, cond string
+		reminder           bool
+	}{
+		{"apply", "account-bootstrap", live.CondBootstrapOwned, true},
+		{"plan", "account-bootstrap", live.CondBootstrapOwned, false},
+		{"destroy", "demo-state", live.CondRetained, true},
+	} {
+		t.Run(c.verb, func(t *testing.T) {
+			w, _ := laneEntryWorld(t, true)
+			code, stderr := w.run(c.verb, "--reviewed-sha", fakeHead, c.target)
+			if code != live.RefusalExit || !strings.Contains(stderr, "("+c.cond+")") {
+				t.Fatalf("exit %d, stderr %q; want 3 naming %s (live.Apply)", code, stderr, c.cond)
+			}
+			out := w.stdout.String()
+			_, rest, ok := strings.Cut(out, "LZ-LIVE run ")
+			runID, _, _ := strings.Cut(rest, " ")
+			if !ok || !live.RunIDPattern.MatchString(runID) {
+				t.Fatalf("stdout %q does not announce the run", out)
+			}
+			runDir := filepath.Join(w.checkout, ".local", "live", runID)
+			want := "LZ_RUN " + runID + " " + c.verb + " fail"
+			if c.verb == "apply" {
+				want += " inventory=" + filepath.Join(runDir, "inventory.jsonl")
+			}
+			reminder := "record approximate cost for run " + runID + " in the PR"
+			var got []string
+			hasReminder := false
+			for _, l := range strings.Split(out, "\n") {
+				if strings.HasPrefix(l, "LZ_RUN ") {
+					got = append(got, l)
+				}
+				hasReminder = hasReminder || l == reminder
+			}
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("summary lines %q, want exactly %q", got, want)
+			}
+			if hasReminder != c.reminder {
+				t.Errorf("cost reminder %q printed %t, want %t", reminder, hasReminder, c.reminder)
+			}
+			raw, err := os.ReadFile(filepath.Join(runDir, "run.json"))
+			if err != nil {
+				t.Fatalf("run.json: %v", err)
+			}
+			var rec struct {
+				RunID    string  `json:"run_id"`
+				Verb     string  `json:"verb"`
+				Deadline float64 `json:"deadline_seconds"`
+				Outcome  string  `json:"outcome"`
+				Reviewed string  `json:"reviewed_sha"`
+			}
+			if err := json.Unmarshal(raw, &rec); err != nil {
+				t.Fatalf("run.json does not decode: %v", err)
+			}
+			if rec.Deadline != live.DefaultDeadline.Seconds() {
+				t.Errorf("run.json deadline_seconds %v, want %v (DefaultDeadline)", rec.Deadline, live.DefaultDeadline.Seconds())
+			}
+			if rec.RunID != runID || rec.Verb != c.verb || rec.Outcome != "fail" || rec.Reviewed != fakeHead {
+				t.Errorf("run.json %+v, want run %s verb %s outcome fail reviewed %s", rec, runID, c.verb, fakeHead)
+			}
+		})
+	}
+}

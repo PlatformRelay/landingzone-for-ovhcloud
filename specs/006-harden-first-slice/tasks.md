@@ -172,7 +172,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
 Independent test: V002. Test tasks T017–T021, then implementation tasks T022–T026. Starts after
 T016 (shared `test:live-lane`).
 
-- [ ] T017 [US2] Write bounded-verb tests in tools/internal/live/apply_test.go and tools/cmd/lz-live/lane_test.go
+- [x] T017 [US2] Write bounded-verb tests in tools/internal/live/apply_test.go and tools/cmd/lz-live/lane_test.go — closed 2026-10-16, evidence: evidence/T017.md
   - Requirements: FR-001; ADRs: 0008, 0024. Depends on: T016.
   - Cases (given / when / then → defect exposed), against fake `tofu` children:
     - given an `apply` of an ephemeral instance with `Deadline` 0 / when `runLane` runs / then the deadline is `DefaultDeadline` → exposes the entry's deadline 0 (`tools/cmd/lz-live/main.go:173`).

@@ -82,6 +82,9 @@ type ApplyOptions struct {
 	Terminal io.Writer
 	// API binds every OAuth2 credential to the account (GET /auth/details) before its first use.
 	API API
+	// Deadline bounds plan, apply and destroy (0: DefaultDeadline; spec 006 FR-001). Not honoured
+	// yet: T022 implements it (T017 tests).
+	Deadline time.Duration
 }
 
 func stageOf(m *stacks.Manifest, id string) (stacks.Instance, stacks.Stage, error) {
