@@ -278,7 +278,7 @@ Independent test: V003, V004 (T001–T004 above).
 ## Phase 5: User Story 3 — The offline entry bounds memory and processes (P2)
 Independent test: V005, V006. Test tasks T029–T031, then implementation tasks T032–T034.
 
-- [ ] T029 [US3] Write entry-limit tests in tools/cmd/lz-offline/limits_test.go and tools/cmd/lz-offline/limits_host_test.go
+- [x] T029 [US3] Write entry-limit tests in tools/cmd/lz-offline/limits_test.go and tools/cmd/lz-offline/limits_host_test.go — closed 2026-10-16, evidence: evidence/T029.md
   - Requirements: FR-013; ADRs: 0008, 0021. Depends on: none.
   - Cases (given / when / then → defect exposed):
     - given limits and a bwrap argv / when `scopeArgv` builds the command / then it carries `MemoryMax`, `TasksMax`, the unit and the unchanged bwrap argv → exposes a dropped limit or an altered sandbox.
