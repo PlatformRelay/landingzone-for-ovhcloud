@@ -7,7 +7,10 @@ package live
 // closed set of named S3 operations, each with its method and sub-resource fixed. A DELETE is only
 // DeleteObject on an object key (with an optional versionId) or DeleteBucketPolicy on `?policy`;
 // a bucket is never deleted. Only a versioned DeleteObject may carry the governance bypass header
-// (T099: the probe bucket is locked in governance mode). It shares the store's endpoint rule, name checks, SigV4 signer,
+// (T099: the probe bucket is locked in governance mode). Spec 003 T036 adds the locked-recovery
+// check's two writes: CopyObject of a named version of an object of the same bucket over a key
+// (the version restore; the source travels in x-amz-copy-source, no body), and a PutObject with
+// `If-None-Match: *` (a conditional write, the S3 lockfile's own exclusion). It shares the store's endpoint rule, name checks, SigV4 signer,
 // redirect refusal, size cap and quiet transport errors, and keeps of an answer only the status,
 // the S3 error code when it is well-formed, a well-formed x-amz-version-id, a well-formed
 // x-amz-server-side-encryption (T100) and, for GetObject (T100: the storage-iam check classifies
@@ -43,6 +46,7 @@ const (
 	S3DeleteBucketPolicy  S3Op = "DeleteBucketPolicy"
 	S3PutBucketVersioning S3Op = "PutBucketVersioning"
 	S3GetBucketVersioning S3Op = "GetBucketVersioning"
+	S3CopyObject          S3Op = "CopyObject" // spec 003 T036
 )
 
 // S3Call is one operation on one bucket.
@@ -57,6 +61,16 @@ type S3Call struct {
 	// holds s3:BypassGovernanceRetention (docs.ovhcloud.com storage-and-backup/object-storage/
 	// s3-managing-object-lock.mdx:57-59, :241-255).
 	Bypass bool
+	// IfNoneMatch sends `If-None-Match: *` (spec 003 T036): PutObject only, which then writes
+	// only when the key has no current object (OpenTofu 1.13.0's S3 lockfile takes its lock this
+	// way, internal/backend/remote-state/s3/client.go:313-345). Whether OVHcloud honours it is
+	// UNVERIFIED (spec 003 research.md; T028 observes it).
+	IfNoneMatch bool
+	// CopyFrom and CopyVersion name CopyObject's source (spec 003 T036): a key of the same bucket
+	// and its version, both required, sent as x-amz-copy-source
+	// `/<bucket>/<key>?versionId=<version>`, URL-encoded (AWS S3 API reference, CopyObject).
+	CopyFrom    string
+	CopyVersion string
 }
 
 // s3OpSpec fixes an operation's request: method, sub-resource (`?versions`, `?policy`,
@@ -79,6 +93,7 @@ var s3Ops = map[S3Op]s3OpSpec{
 	S3DeleteBucketPolicy:  {method: http.MethodDelete, sub: "policy"},
 	S3PutBucketVersioning: {method: http.MethodPut, sub: "versioning", body: true},
 	S3GetBucketVersioning: {method: http.MethodGet, sub: "versioning", keep: true},
+	S3CopyObject:          {method: http.MethodPut, object: true},
 }
 
 var (
@@ -149,6 +164,19 @@ func (c *S3Checker) Do(ctx context.Context, call S3Call) (S3Answer, error) {
 	if call.Bypass && (call.Op != S3DeleteObject || call.VersionID == "") {
 		return S3Answer{}, fmt.Errorf("S3 check: %s with the governance bypass refused (a versioned DeleteObject only)", call.Op)
 	}
+	if call.IfNoneMatch && call.Op != S3PutObject {
+		return S3Answer{}, fmt.Errorf("S3 check: %s with If-None-Match refused (PutObject only)", call.Op)
+	}
+	var copySource string
+	switch {
+	case call.Op == S3CopyObject:
+		if err := checkObjectKey(call.CopyFrom); err != nil || !validVersionID(call.CopyVersion) {
+			return S3Answer{}, fmt.Errorf("S3 check: CopyObject needs a source key and a well-formed source version")
+		}
+		copySource = escapePath("/"+call.Bucket+"/"+call.CopyFrom) + "?versionId=" + url.QueryEscape(call.CopyVersion)
+	case call.CopyFrom != "" || call.CopyVersion != "":
+		return S3Answer{}, fmt.Errorf("S3 check: %s takes no copy source", call.Op)
+	}
 	switch {
 	case spec.body && spec.sub != "" && len(call.Body) == 0:
 		return S3Answer{}, fmt.Errorf("S3 check: %s without a body", call.Op)
@@ -177,6 +205,12 @@ func (c *S3Checker) Do(ctx context.Context, call S3Call) (S3Answer, error) {
 	}
 	if call.Bypass {
 		signed.Set("X-Amz-Bypass-Governance-Retention", "true")
+	}
+	if call.IfNoneMatch {
+		signed.Set("If-None-Match", "*")
+	}
+	if copySource != "" {
+		signed.Set("X-Amz-Copy-Source", copySource)
 	}
 	for k, v := range signed {
 		if k != "Host" {

@@ -1131,7 +1131,11 @@ type Probe struct {
 // S3 user's Deny statement). The root publishes the check's variables, credentials included, as
 // the sensitive output named Output (a map of strings); lz-live reads it from `tofu output -json`
 // into memory only — no file, no argv, no child environment — and adds every value whose key is
-// not in Public to the run's redactor before the check sees it. Observe runs once, after the
+// not in Public to the run's redactor before the check sees it. One child is the exception (spec
+// 003 T036): the locked-recovery check's tofu seam (cmd/lz-live recovery_tofu.go), the pinned
+// OpenTofu on that probe's disposable backend root, receives the state user's key pair
+// (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) in its environment, and nothing else the root
+// published; the seam refuses any other key. Observe runs once, after the
 // root's apply (never in a plan-only run); the record it returns is written, redacted, to
 // observations.json in the run record, also when it fails. Undo runs on every way out before the
 // root is destroyed, and on `--cleanup` from the root's retained state; it must remove whatever

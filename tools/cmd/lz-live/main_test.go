@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeTofu(os.Args[1:]))
 	case "ovhcloud":
 		os.Exit(fakeOvhcloud(os.Args[1:]))
+	case "seam-tofu":
+		os.Exit(fakeSeamTofu(os.Args[1:]))
 	}
 	os.Exit(m.Run())
 }
