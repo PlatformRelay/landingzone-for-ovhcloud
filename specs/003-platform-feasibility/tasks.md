@@ -239,7 +239,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
 ### Probe 1: the tenant S3 user's reach through Keystone/Swift
 
-- [ ] T029 [US2] Write the swift-reach check's tests in tools/internal/probes/live/storageiam/swiftreach_test.go with the stub of tools/internal/probes/live/storageiam/swiftreach.go
+- [x] T029 [US2] Write the swift-reach check's tests in tools/internal/probes/live/storageiam/swiftreach_test.go with the stub of tools/internal/probes/live/storageiam/swiftreach.go — closed 2026-10-16, evidence: evidence/T029.md
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: 005/T049 (tenant S3 user pattern), 005/T100 (storageiam check shape). The S3 user belongs to a cloud-project (OpenStack) user; whether that user's Keystone token reaches another bucket through Swift, bypassing the S3 bucket-ARN policy (005 G6), is not observed anywhere (UNVERIFIED). Whether Swift serves S3-API buckets at all is UNVERIFIED too.
   - Cases (given / when / then → defect exposed), against a fake Keystone, a fake Swift and a fake S3 endpoint (httptest) through `SwiftOptions.HTTP`; every case runs both directions, user a against bucket b and user b against bucket a:
     - given each user's own bucket lists 200 and the other bucket lists, reads or accepts a write 2xx / when Observe runs / then each step of that direction is `reach`, the record carries a finding per step and Observe returns an error naming them → exposes a check that does not try the other bucket, or counts any 2xx as expected.

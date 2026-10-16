@@ -40,6 +40,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 ## Tasks
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
 |---|---|---|---|
+| T029 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CONCERNS, r2 REQUEST_CHANGES/CONCERNS; verified findings fixed) | round-2 fixes unreviewed (last round); Sweep on a non-empty bucket UNVERIFIED (T030/T025) |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
