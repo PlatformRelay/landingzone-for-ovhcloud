@@ -158,7 +158,7 @@ Independent test: V001. Test tasks T005–T010, then implementation tasks T011�
   - Verify: `task test:live-lane`: T008's cases green; `credentialFiles` (`apply.go:597-608`) writes through `WriteCredentialSet`. Guard G18 reader mutant (accept a `current` naming no sibling `gen-` directory) is killed.
   - Evidence: `evidence/T014.md`; PR; initial status `not-run`.
 
-- [ ] T015 [US1] Take the child's home explicitly in tools/internal/live/env.go and its callers
+- [x] T015 [US1] Take the child's home explicitly in tools/internal/live/env.go and its callers — closed 2026-10-16, evidence: evidence/T015.md
   - Requirements: FR-007, SC-001; ADRs: 0009, 0021. Depends on: T009.
   - Verify: `task test:bootstrap; task test:live-lane`: T009's cases green; `hardening_test.go` follows the new signature. Guard G20 bootstrap-path mutant is killed.
   - Evidence: `evidence/T015.md`; PR; initial status `not-run`.
