@@ -1,5 +1,5 @@
 # Implementation Plan: Cleanup-first live slice
-Branch: worktree of `main` per task · Date: 2026-10-16 · Revised: 2026-10-16 (spec-set review round 1) · Spec: [spec.md](spec.md) · Status: draft
+Branch: worktree of `main` per task · Date: 2026-10-16 · Revised: 2026-10-16 (spec-set review rounds 1 and 2) · Spec: [spec.md](spec.md) · Status: draft
 
 ## Summary
 Make the live lane's cleanup survive transient OVHcloud listing errors inside one shared retry
@@ -92,9 +92,8 @@ killed. Live: the commands of `contracts/checks.md` *Live run contracts*, with t
 outcome, retries, cost and credit left in the task's evidence.
 
 ## Dependencies and live change ordering
-- Spec 006's live-lane tasks T022–T026 (PR #123) land on `main` before T003 and T004: the shared
-  `retryBudget` and every live-lane file of US1–US3 change there. Its symbols are re-read on `main`
-  first; a renamed one is followed and recorded.
+- Spec 006's live-lane tasks T022–T026 (PR #123) are on `main` (`15bc579`): the shared
+  `retryBudget` and `waitClock` there are what data-model.md fixes.
 - US1 → US2 → US3 on `test:live-lane`; T001 before T017 and T018.
 - Live: T019 needs T006, T007, T009, T014, T015 and T016 on `main` at a reviewed SHA, each reviewed
   by an independent leg (D118), and is dropped if not started by 2026-10-21 23:00. T021 needs T019
