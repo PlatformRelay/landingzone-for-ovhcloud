@@ -503,6 +503,8 @@ type chainExec struct {
 	deadline time.Duration
 	// destroyAtBlock: the destroy-on-exit's budget runs out once a call blocks (T018).
 	destroyAtBlock bool
+	// clock is the retained state reads' waitClock (T019; nil: the wall clock).
+	clock waitClock
 }
 
 // chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114):
@@ -722,7 +724,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
 		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt), destroyAt: destroyAtOpt,
-		stateReadBackoff: c.stateReadBackoff()})
+		stateReadBackoff: c.stateReadBackoff(), stateReadClock: c.clock})
 	process := streams()
 	close(stop)
 	<-watched
@@ -1461,6 +1463,8 @@ const chainAnswerMark = "fake-answer-t110"
 // retried at most twice, each after its wait, unless the wait would end after the deadline; a
 // read that then succeeds exempts the instance's objects; a 4xx or any other failure is not
 // retried; each retry prints one `LZ-LIVE retry` line naming the instance, without tofu's output.
+// Spec 006 FR-008 (T019): a wait the deadline does not leave time for is refused and the check is
+// blocked waiting for the instance (it was a plain fail naming "no retry").
 func TestChainStateUnreadable(t *testing.T) {
 	answer := func(s string) string { return s + " (" + chainAnswerMark + ")" }
 	errReset := answer("Error: reading the state: read tcp 10.0.0.1:443: connection reset by peer")
@@ -1473,7 +1477,7 @@ func TestChainStateUnreadable(t *testing.T) {
 		reads    int             // calls of fail.Call (or show-state) the run makes
 		retries  int             // LZ-LIVE retry lines
 		ok       bool            // the read finally succeeded: no error, no leftover, pass
-		noRetry  bool            // the report error says the deadline left no time for the wait
+		noRetry  bool            // the wait is refused: blocked waiting for the instance (spec 006 FR-008)
 	}{
 		{name: "transient-then-ok-show", stack: "account-governance",
 			fail:  &laneReadFail{Call: "show-state", Answers: []string{answer("GET /v1/iam/policy: 503 Service Unavailable")}},
@@ -1517,6 +1521,13 @@ func TestChainStateUnreadable(t *testing.T) {
 				if len(rep.Leftovers) != 0 || len(rep.Errors) != 0 {
 					t.Errorf("leftovers %v, errors %v; want none once the read of %s succeeded", leftoverKeys(rep.Leftovers), rep.Errors, c.stack)
 				}
+			} else if c.noRetry {
+				// Spec 006 FR-008 (T019): a wait the retry budget refuses is reported blocked,
+				// waiting for the instance, never a pass; the destroys ran before it.
+				if got := r.applies(true); !slices.Equal(got, chainDestroyOrder) {
+					t.Errorf("destroy applies %v, want %v", got, chainDestroyOrder)
+				}
+				retryBlocked(t, h, r, rep, c.stack)
 			} else {
 				laneExit(t, r.laneRun, 1)
 				chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
@@ -1525,9 +1536,6 @@ func TestChainStateUnreadable(t *testing.T) {
 				}
 			}
 			if c.noRetry {
-				if !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, "no retry") }) {
-					t.Errorf("report errors %v, want one saying the deadline left no time for the retry", rep.Errors)
-				}
 				if took > 15*time.Second {
 					t.Errorf("the run took %v: it waited for a retry the deadline did not leave time for", took)
 				}
@@ -2153,5 +2161,260 @@ func TestChainDestroyBudgetExceeded(t *testing.T) {
 		if len(h.record(id)) == 0 {
 			t.Errorf("record of %s removed although its destroy did not complete", id)
 		}
+	}
+}
+
+// ---------------------------------------------------------------- T019 (spec 006 FR-008)
+
+// TestRetryBudgetAdmit (FR-008, data-model *Retry budget*): a wait is admitted only if the reserve
+// (the read and the remaining listings) is still left after it: end - now - wait >= reserve. Each
+// row asks for one wait that leaves at least the reserve (admitted) and one that leaves less
+// (refused), so a budget that admits everything or nothing fails every row.
+func TestRetryBudgetAdmit(t *testing.T) {
+	t0 := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	end := t0.Add(10 * time.Minute)
+	for _, c := range []struct {
+		name    string
+		reserve time.Duration
+		now     time.Time     // when the refused wait would start
+		admitAt time.Time     // when the admitted wait would start
+		admit   time.Duration // leaves at least the reserve
+		refuse  time.Duration // leaves less
+	}{
+		// Exactly the reserve left is admitted; one nanosecond less is not.
+		{name: "exactly-the-reserve", reserve: 30 * time.Second, now: t0, admitAt: t0,
+			admit: 9*time.Minute + 30*time.Second, refuse: 9*time.Minute + 30*time.Second + time.Nanosecond},
+		// A wait that fits the time left but eats the reserve is refused (chain.go readRetained
+		// takes it today: it compares the wait with the time left only).
+		{name: "fits-but-eats-the-reserve", reserve: 30 * time.Second, now: t0, admitAt: t0,
+			admit: 5 * time.Minute, refuse: 9*time.Minute + 45*time.Second},
+		// The time left counts from now, not from the budget's start.
+		{name: "counts-from-now", reserve: 30 * time.Second, now: t0.Add(5 * time.Minute), admitAt: t0.Add(5 * time.Minute),
+			admit: 4*time.Minute + 30*time.Second, refuse: 4*time.Minute + 31*time.Second},
+		// A larger reserve (a slow listing so far) is kept as well.
+		{name: "larger-reserve", reserve: 2 * time.Minute, now: t0, admitAt: t0,
+			admit: 8 * time.Minute, refuse: 8*time.Minute + time.Second},
+		// Less than the reserve left: even a zero wait is refused, where a minute earlier the same
+		// budget admits a 30 s wait.
+		{name: "reserve-already-gone", reserve: 30 * time.Second, now: t0.Add(9*time.Minute + 40*time.Second), admitAt: t0.Add(8*time.Minute + 40*time.Second),
+			admit: 30 * time.Second, refuse: 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newRetryBudget(end, c.reserve)
+			if !b.admit(c.admitAt, c.admit) {
+				t.Errorf("admit(now=end-%v, wait %v) with reserve %v = false, want true: %v is left after the wait",
+					end.Sub(c.admitAt), c.admit, c.reserve, end.Sub(c.admitAt)-c.admit)
+			}
+			if b.admit(c.now, c.refuse) {
+				t.Errorf("admit(now=end-%v, wait %v) with reserve %v = true, want false: only %v is left after the wait, "+
+					"no time for the read and the listings", end.Sub(c.now), c.refuse, c.reserve, end.Sub(c.now)-c.refuse)
+			}
+			if b.admit(end.Add(time.Second), 0) {
+				t.Errorf("admit(now=end+1s, wait 0) = true, want false: the budget has ended")
+			}
+		})
+	}
+}
+
+// retryClock is the waitClock of the retry-budget cases (T019): the wall clock moved on by spent
+// (how much of the destroy-on-exit's budget is gone when the leftover check starts) plus every wait
+// taken; After takes no real time. A budget of tens of minutes then runs out without waiting for it.
+type retryClock struct {
+	mu     sync.Mutex
+	spent  time.Duration
+	waited []time.Duration
+}
+
+func (c *retryClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.nowLocked()
+}
+
+func (c *retryClock) nowLocked() time.Time {
+	at := time.Now().Add(c.spent)
+	for _, w := range c.waited {
+		at = at.Add(w)
+	}
+	return at
+}
+
+func (c *retryClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.waited = append(c.waited, d)
+	ch := make(chan time.Time, 1)
+	ch <- c.nowLocked()
+	return ch
+}
+
+// total is the sum of the waits taken, and how many.
+func (c *retryClock) total() (time.Duration, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var sum time.Duration
+	for _, w := range c.waited {
+		sum += w
+	}
+	return sum, len(c.waited)
+}
+
+// The retry-budget cases' times (T019). The run deadline is budgetLongRun, so the destroy-on-exit
+// has budgetLongRun from the destroy's start both today and under FR-002 (T018); retryClock starts
+// budgetLongRun - left later, so the leftover check has about left of it. retryWait is every
+// retained read's first wait; retryReserveFloor is the least reserve data-model sets
+// (`reserve_seconds`, floor 30 s); retryMargin covers the real time the destroy phase takes before
+// the check (under 1 s unloaded) on either side of a decision.
+const (
+	retryWait         = 4 * time.Minute
+	retryReserveFloor = 30 * time.Second
+	retryMargin       = 20 * time.Second
+)
+
+// retryChain runs a complete chain whose retained stacks in failing each answer their first
+// `show -json` with a transient failure (then succeed), with about left of the leftover check's
+// budget; it returns the harness, the run, the clock and the report. The fake listings take
+// milliseconds, so a reserve estimated from the slowest listing stays at its 30 s floor.
+func retryChain(t *testing.T, left time.Duration, failing ...string) (*laneHarness, chainRun, *retryClock, Report) {
+	t.Helper()
+	h := newChainHarness(t)
+	for _, id := range failing {
+		h.setStack(id, func(s *laneStack) {
+			s.ReadFail = &laneReadFail{Call: "show-state", Answers: []string{
+				"Error: reading the state: GET /v1/iam/policy: 503 Service Unavailable (" + chainAnswerMark + ")"}}
+		})
+	}
+	clk := &retryClock{spent: budgetLongRun - left}
+	r := h.chain(chainExec{deadline: budgetLongRun, clock: clk, stateBackoff: []time.Duration{retryWait, retryWait}})
+	return h, r, clk, chainReport(t, r.runDir)
+}
+
+// retryReads counts the leftover check's `show -json` reads of a retained stack (after the last
+// destroy).
+func retryReads(r chainRun, stack string) int {
+	n := 0
+	for i := r.index(true, func(x laneCall) bool { return x.Destroy }) + 1; i < len(r.calls); i++ {
+		if x := r.calls[i]; x.Stack == stack && x.Cmd == "show-state" {
+			n++
+		}
+	}
+	return n
+}
+
+// retryLines are the terminal's `LZ-LIVE retry` lines.
+func retryLines(h *laneHarness) []string {
+	var out []string
+	for _, l := range strings.Split(h.term.String(), "\n") {
+		if strings.HasPrefix(l, "LZ-LIVE retry") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// retryBlocked checks a leftover check whose wait for stack was refused (FR-008): the report is
+// `blocked` with an error carrying `blocked waiting-for=<stack>`, the run neither exits 0 nor ends
+// with a pass summary, and the check still listed after its last state read (the reserve kept the
+// time for it).
+func retryBlocked(t *testing.T, h *laneHarness, r chainRun, rep Report, stack string) {
+	t.Helper()
+	want := "blocked waiting-for=" + stack
+	if rep.Outcome != "blocked" || !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, want) }) {
+		t.Errorf("leftover report outcome %q, errors %v; want blocked with an error carrying %q (FR-008: a refused wait is never a late pass)",
+			rep.Outcome, rep.Errors, want)
+	}
+	if ExitCode(r.err) == 0 {
+		t.Errorf("the run exited 0 (%v): a leftover check that could not wait for %s passed", r.err, stack)
+	}
+	for _, l := range strings.Split(h.term.String(), "\n") {
+		if strings.HasPrefix(l, "LZ-LIVE summary "+r.runID+" pass ") {
+			t.Errorf("summary %q: a pass although the wait for %s was refused", l, stack)
+		}
+	}
+	lastRead := r.index(true, func(x laneCall) bool { return x.Cmd == "show-state" && slices.Contains(chainRetained, x.Stack) })
+	if lastList := r.index(true, func(x laneCall) bool { return x.Cmd == "list" }); lastRead < 0 || lastList < lastRead {
+		t.Errorf("no leftover listing after the last state read (events %v): the refusal keeps the time for the listings", laneEvents(r.calls))
+	}
+}
+
+// TestChainRetryBudgetShared (FR-008): three retained instances each need one retry, and the
+// leftover check reads them under one retry budget: the waits it takes, across the instances, all
+// finish within that budget with the reserve left. all-fit (a pin today): with 30 min left, the
+// three waits fit; every read is retried once and the check passes. third-does-not-fit: with
+// 3*retryWait + retryMargin left, the third instance's wait would eat the reserve; it is refused
+// and the check is blocked waiting for that instance. Today's code judges each wait against the
+// time left only (chain.go readRetained, called afresh per instance by leftovers): it takes the
+// third wait and passes with retryMargin left for the read and the listings.
+func TestChainRetryBudgetShared(t *testing.T) {
+	three := []string{"account-bootstrap", "account-governance", "demo-state"}
+	t.Run("all-fit", func(t *testing.T) {
+		left := 30 * time.Minute
+		h, r, clk, rep := retryChain(t, left, three...)
+		laneExit(t, r.laneRun, 0)
+		if rep.Outcome != "pass" || len(rep.Errors) != 0 || len(rep.Leftovers) != 0 {
+			t.Errorf("report outcome %q, errors %v, leftovers %v; want pass: the three waits fit the budget",
+				rep.Outcome, rep.Errors, leftoverKeys(rep.Leftovers))
+		}
+		for _, id := range three {
+			if n := retryReads(r, id); n != 2 {
+				t.Errorf("%d reads of %s, want 2 (one retry)", n, id)
+			}
+		}
+		if got := len(retryLines(h)); got != 3 {
+			t.Errorf("%d LZ-LIVE retry lines, want 3", got)
+		}
+		if got, n := clk.total(); n != 3 || got > left-retryReserveFloor {
+			t.Errorf("the check waited %v (%d waits) of the %v left; want 3 waits, at most %v (the reserve kept)",
+				got, n, left, left-retryReserveFloor)
+		}
+	})
+	t.Run("third-does-not-fit", func(t *testing.T) {
+		left := 3*retryWait + retryMargin
+		h, r, clk, rep := retryChain(t, left, three...)
+		if got, n := clk.total(); n != 2 || got > left-retryReserveFloor {
+			t.Errorf("the check waited %v (%d waits) of the %v left; want 2 waits, at most %v: one budget for every instance, "+
+				"the reserve kept for the read and the listings", got, n, left, left-retryReserveFloor)
+		}
+		for _, c := range []struct {
+			id    string
+			reads int
+		}{{"account-bootstrap", 2}, {"account-governance", 2}, {"demo-state", 1}} {
+			if n := retryReads(r, c.id); n != c.reads {
+				t.Errorf("%d reads of %s, want %d", n, c.id, c.reads)
+			}
+		}
+		if got := retryLines(h); len(got) != 2 {
+			t.Errorf("%d LZ-LIVE retry lines, want 2 (account-bootstrap, account-governance):\n%s", len(got), strings.Join(got, "\n"))
+		}
+		retryBlocked(t, h, r, rep, "demo-state")
+	})
+}
+
+// TestChainRetryBudgetRefused (FR-008): a retained instance needs a retry whose wait the budget
+// refuses; the check reports `blocked waiting-for=<instance>`, never pass, and takes no wait.
+// reserve-not-left: the wait fits the time left but leaves retryMargin, less than the reserve
+// (today: taken, then a late pass). beyond-the-budget: the wait is longer than the time left
+// (today: refused, but reported as a plain fail naming no instance waited for).
+func TestChainRetryBudgetRefused(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		left time.Duration
+	}{
+		{name: "reserve-not-left", left: retryWait + retryMargin},
+		{name: "beyond-the-budget", left: retryWait / 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, r, clk, rep := retryChain(t, c.left, "account-governance")
+			if got, n := clk.total(); n != 0 {
+				t.Errorf("the check took %d waits (%v) with %v left: a wait of %v leaves less than the reserve", n, got, c.left, retryWait)
+			}
+			if n := retryReads(r, "account-governance"); n != 1 {
+				t.Errorf("%d reads of account-governance, want 1 (the retry refused)", n)
+			}
+			if got := retryLines(h); len(got) != 0 {
+				t.Errorf("LZ-LIVE retry lines %v, want none", got)
+			}
+			retryBlocked(t, h, r, rep, "account-governance")
+		})
 	}
 }

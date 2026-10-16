@@ -83,6 +83,9 @@ type ChainOptions struct {
 	// stateReadBackoff are the waits before the retries of a retained state read (T110; nil:
 	// defaultStateReadBackoff). Tests shorten them.
 	stateReadBackoff []time.Duration
+	// stateReadClock is the time those retries read against the destroy context's deadline and
+	// wait on (tests, T019); nil in production: the wall clock.
+	stateReadClock waitClock
 }
 
 // CondConsumerApplied refuses `destroy -- <producer>` while a stack consuming it has a record
@@ -307,7 +310,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 		destroyErr = errors.Join(destroyErr, e)
 	}
 
-	rep := r.leftovers(dctx, check, c.stateReadBackoff)
+	rep := r.leftovers(dctx, check, c.stateReadBackoff, c.stateReadClock)
 	var recErr error
 	for typ, items := range rep.Listings {
 		raw, e := json.Marshal(items)
@@ -598,10 +601,14 @@ var stateIDAttr = map[string]string{tStorage: "name", tUser: "id", tCred: "acces
 // leftovers): at most len(backoff) retries (nil: defaultStateReadBackoff), each after its wait; a
 // wait that would end after ctx's deadline is not started. A 4xx, any other failure and the last
 // attempt's failure are returned (the report's error: fail closed). Each retry prints one line
-// naming the instance with the redacted error, nothing of tofu's output.
-func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into map[string][]string, backoff []time.Duration) error {
+// naming the instance with the redacted error, nothing of tofu's output. clk is the time the waits
+// read and take (nil: the wall clock).
+func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into map[string][]string, backoff []time.Duration, clk waitClock) error {
 	if backoff == nil {
 		backoff = defaultStateReadBackoff
+	}
+	if clk == nil {
+		clk = wallClock{}
 	}
 	for attempt := 0; ; attempt++ {
 		err := r.retainedIDs(ctx, in, into)
@@ -616,13 +623,13 @@ func (r *laneRunner) readRetained(ctx context.Context, in stacks.Instance, into 
 			return err
 		}
 		wait := backoff[attempt]
-		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
+		if dl, ok := ctx.Deadline(); ok && dl.Sub(clk.Now()) < wait {
 			return fmt.Errorf("%w; no retry: the deadline leaves less than %v", err, wait)
 		}
 		fmt.Fprintf(r.term, "LZ-LIVE retry state read %s in %v: transient failure (attempt %d of %d): %s\n",
 			in.ID, wait, attempt+2, len(backoff)+1, r.red.Redact(err.Error()))
 		select {
-		case <-time.After(wait):
+		case <-clk.After(wait):
 		case <-ctx.Done():
 			return errors.Join(err, context.Cause(ctx))
 		}
@@ -700,8 +707,8 @@ func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into m
 // leftovers is the final reconciliation: the retained instances' states, the admin exemption, the
 // inventory and the baseline record read back from the run directory. A state, exemption,
 // inventory or baseline that cannot be read, or a baseline listing that failed, is an error of the
-// report (fail closed).
-func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff []time.Duration) Report {
+// report (fail closed). backoff and clk are readRetained's.
+func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff []time.Duration, clk waitClock) Report {
 	o, m := r.o, r.o.Manifest
 	check.Retained = map[string][]string{}
 	var errs []string
@@ -714,7 +721,7 @@ func (r *laneRunner) leftovers(ctx context.Context, check LeftoverCheck, backoff
 		if st.Chain != "retained" {
 			continue
 		}
-		if err := r.readRetained(ctx, in, check.Retained, backoff); err != nil {
+		if err := r.readRetained(ctx, in, check.Retained, backoff, clk); err != nil {
 			errs = append(errs, fmt.Sprintf("state of %s: %s", in.ID, r.red.Redact(err.Error())))
 		}
 	}
