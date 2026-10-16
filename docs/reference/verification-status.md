@@ -7,8 +7,8 @@ references:
   - path: tools/internal/live/chain.go
     blob: a6f62e8f56021fd72e5578274bc70eee99e003c5
   - path: tools/internal/live/observe.go
-    blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
-last_verified: 5d620e6dabc9bad0cbf1c92ffabbe65e893b585e
+    blob: 8ee38320789b0e00a873d926b96c1247ba4fef14
+last_verified: 55e58935652e62bc23359c1942aec276e3d31780
 ---
 
 # Verification status of the first slice

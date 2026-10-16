@@ -7,8 +7,10 @@ package live
 // tools/internal/probes/live/chain/, build tag live) and T062 (collect_test.go).
 //
 // The judge (Assess): positive assertions observe `holds` or `violated`, negative ones (a request
-// that must be refused) `denied` or `allowed`; `error` or any other value is a fail (an error is
-// never a pass). Every observation counts, in any order. An assertion with no observation, a
+// that must be refused) `denied` or `allowed`; `blocked` (the fact could not be set up for a
+// reason that is not the subject's, spec 006 FR-009) makes the assertion `blocked` when nothing
+// worse is observed, never a pass; `error` or any other value is a fail (an error is never a
+// pass). Every observation counts, in any order. An assertion with no observation, a
 // required subject unobserved (deployer-binding: platform and tenant, P26; kd1-canary: both KD-1
 // calls; and every subject the set's `expected` names, which the chain derives from the manifest,
 // L7Subjects), or a name outside the L7 set is a fail. KD-1 (R20): both canary calls denied is a
@@ -28,6 +30,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks"
@@ -77,6 +80,7 @@ const (
 	aTenantS3Read     = "tenant-s3-read"
 	kd1ID             = "KD-1"
 	outcomeNotRun     = "not-run"
+	outcomeBlocked    = "blocked"
 	outcomeKnownDev   = "known-deviation"
 	canaryBulk        = "bulkDeleteObjects"
 	canaryDelete      = "DELETE"
@@ -87,6 +91,7 @@ const (
 	observedDenied    = "denied"
 	observedAllowed   = "allowed"
 	observedError     = "error"
+	observedBlocked   = "blocked"
 	versioningEnabled = "enabled"
 )
 
@@ -150,10 +155,12 @@ func assess(name string, obs []Observation, required []string, shared bool) Asse
 	if negative[name] {
 		ok, gap = observedDenied, observedAllowed
 	}
-	var bad, gaps []string
+	var bad, gaps, blocked []string
 	for _, o := range obs {
 		switch o.Observed {
 		case ok:
+		case observedBlocked:
+			blocked = append(blocked, strings.TrimSpace(o.Subject+": "+o.Observed+" "+o.Detail))
 		case gap:
 			gaps = append(gaps, o.Subject+": "+o.Observed)
 		default:
@@ -161,8 +168,12 @@ func assess(name string, obs []Observation, required []string, shared bool) Asse
 		}
 	}
 	switch {
-	case len(bad) > 0:
-		a.Detail = strings.Join(append(bad, gaps...), "; ")
+	case len(bad) > 0 || len(blocked) > 0 && len(gaps) > 0:
+		// `blocked` only alone: next to an error or a gap it is a fail, never hidden by a pass
+		// or a known deviation.
+		a.Detail = strings.Join(append(append(bad, blocked...), gaps...), "; ")
+	case len(blocked) > 0:
+		a.Outcome, a.Detail = outcomeBlocked, strings.Join(blocked, "; ")
 	case len(gaps) > 0 && name == aKD1Canary && shared:
 		a.Outcome, a.Deviation, a.Detail = outcomeKnownDev, kd1ID, strings.Join(gaps, "; ")+" (spec.sandbox.shared_state_project)"
 	case len(gaps) > 0 && name == aKD1Canary:
@@ -433,11 +444,20 @@ func storageBase(project, region string) string {
 
 // ObserveCanary observes KD-1: a disposable canary bucket `<org>-bkt-canary-<run id, lowercase>`
 // with one object (a presigned PUT: the bootstrap authority holds no S3 keys) in the state project
-// and region, created by the bootstrap authority and registered for the trap once it exists and
-// before the tenant's first call (never a name taken by someone else: a 409 is not ours); then the
-// tenant deployer's bulkDeleteObjects and DELETE on it through the management API. Each call
-// observes `denied` (403), `allowed` (2xx that did what it asked) or `error` (anything else). A
-// canary not set up observes `error` twice and the tenant makes no call.
+// and region, created by the bootstrap authority; then the tenant deployer's bulkDeleteObjects and
+// DELETE on it through the management API. Each call observes `denied` (403), `allowed` (2xx that
+// did what it asked) or `error` (anything else). A canary not set up observes `error` twice and
+// the tenant makes no call.
+//
+// Spec 006 FR-009: the canary is registered for the trap before its create call, so a create that
+// answers an error, or drops the connection, after the bucket exists still ends with the trap
+// removing it or naming it in the trap's error. The name is read first: the trap removes the
+// bucket only when the read answered 404. A name the read found is never adopted or removed:
+// after any create answer but 409 the trap names it in its error if it still exists (the create
+// may have made it after the name was freed, or not), and a create that succeeds anyway observes
+// `blocked` with no tenant call. A create answered 409 disarms the trap whatever the read said
+// (another creator in between) and both calls observe `blocked`. A read that fails otherwise sets
+// nothing up.
 func ObserveCanary(ctx context.Context, o CanaryOptions) []Observation {
 	name := strings.ToLower(o.Org + "-bkt-canary-" + o.RunID)
 	base := storageBase(o.Project, o.Region)
@@ -452,10 +472,36 @@ func ObserveCanary(ctx context.Context, o CanaryOptions) []Observation {
 	if err != nil {
 		return notSetUp(err.Error())
 	}
-	if err := admin.post(ctx, base, map[string]any{"name": name}, nil); err != nil {
+	var mode atomic.Int32 // what the trap does with the bucket under name
+	switch err := admin.get(ctx, base+"/"+name, nil); {
+	case statusOf(err) == http.StatusNotFound:
+		mode.Store(trapRemove)
+	case err != nil:
+		return notSetUp("canary name not checked: " + err.Error())
+	default:
+		mode.Store(trapReport)
+	}
+	o.Trap.Add(name, func(ctx context.Context) error {
+		switch mode.Load() {
+		case trapRemove:
+			return deleteCanary(ctx, o, base, name)
+		case trapReport:
+			return reportCanary(ctx, o, base, name)
+		}
+		return nil
+	})
+	switch err := admin.post(ctx, base, map[string]any{"name": name}, nil); {
+	case statusOf(err) == http.StatusConflict:
+		mode.Store(trapNone)
+		why := "canary name existed before the run (409): not adopted"
+		return both(observedBlocked, why, why)
+	case err != nil:
 		return notSetUp(err.Error())
 	}
-	o.Trap.Add(name, func(ctx context.Context) error { return deleteCanary(ctx, o, base, name) })
+	if mode.Load() == trapReport {
+		why := "canary name existed before its create, which answered success: not adopted"
+		return both(observedBlocked, why, why)
+	}
 	var ps struct {
 		URL string `json:"url"`
 	}
@@ -502,6 +548,30 @@ func refusal(assertion, subject string, err error, did bool) Observation {
 		o.Detail = "accepted without effect"
 	}
 	return o
+}
+
+// What the canary's trap does with the bucket under its name (spec 006 FR-009).
+const (
+	trapRemove int32 = iota // the name was absent before the create: deleteCanary
+	trapReport              // the name existed before the create: reportCanary, never removed
+	trapNone                // the create answered 409: someone else's, nothing
+)
+
+// reportCanary is the trap of a canary name that existed before its create: it removes nothing
+// and names the bucket in its error while it exists, so the run fails and a human looks.
+func reportCanary(ctx context.Context, o CanaryOptions, base, name string) error {
+	admin, err := newBearer(ctx, o.API, o.Admin)
+	if err != nil {
+		return err
+	}
+	err = admin.get(ctx, base+"/"+name, nil)
+	if statusOf(err) == http.StatusNotFound {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("canary %s: %w", name, err)
+	}
+	return fmt.Errorf("canary %s existed before its create: not removed, check it by hand", name)
 }
 
 // deleteCanary is the canary's trap: with the bootstrap authority, its objects first, then the

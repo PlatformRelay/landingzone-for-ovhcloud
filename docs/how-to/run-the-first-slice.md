@@ -11,7 +11,7 @@ references:
   - path: tools/internal/live/chain.go
     blob: a6f62e8f56021fd72e5578274bc70eee99e003c5
   - path: tools/internal/live/observe.go
-    blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
+    blob: 8ee38320789b0e00a873d926b96c1247ba4fef14
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: mise.toml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: d7d14f151ffa44c3be077f530489741562f0f697
-last_verified: 5d620e6dabc9bad0cbf1c92ffabbe65e893b585e
+last_verified: 55e58935652e62bc23359c1942aec276e3d31780
 ---
 
 # Run the first slice on an OVHcloud account
@@ -418,11 +418,20 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   and there is no generic `ovhcloud api get` (P18 refuted, evidence T009). The kinds and API
   paths are listed in the
   [probe run sheet](../../tests/live/probes/README.md#leftover-listing-per-matrix-kind).
-- Two kinds of debris are known not to be cleaned up (evidence T062, gaps 6 and 7):
-  - a KD-1 canary whose create answered an error after the bucket was created. The leftover
-    check lists it (`lz-` prefix); delete it by hand.
-  - a delete marker and a noncurrent version of `<key>.tflock` in the versioned state bucket,
-    left by every L7 run. Whether OVHcloud keeps them is UNVERIFIED.
+- The KD-1 canary is registered with the trap before its create call (spec 006 FR-009), so a
+  create that answers an error after making the bucket still ends with the trap removing it. If
+  that removal fails, the run fails naming the canary and the leftover check lists it (`lz-`
+  prefix); delete it by hand. The run reads the name first and removes only a bucket the read
+  found absent. A name the read found is never adopted or removed: `kd1-canary` is `blocked` or
+  `fail`, and the run fails naming the bucket while it exists; check it by hand. A create
+  answered 409 means the name existed before: nothing is removed and `kd1-canary` is `blocked`.
+  A `blocked` assertion still fails the run (exit 1), as any outcome other than `pass` or
+  `known-deviation` does; only the assertion is `blocked`. Two narrow windows remain (evidence T025): another creator between the read and a create that
+  answers 5xx would have its bucket removed, and a trap that runs while the create is in flight
+  (an interrupt) can miss a bucket the create then makes; the leftover check lists it.
+- One kind of debris is known not to be cleaned up (evidence T062, gap 7): a delete marker and a
+  noncurrent version of `<key>.tflock` in the versioned state bucket, left by every L7 run.
+  Whether OVHcloud keeps them is UNVERIFIED.
 - The leftover check does not catch everything:
   - A resource created during a run without the `lz-` prefix, and missed by the inventory, is
     not found (evidence T047, gap 4).
