@@ -17,11 +17,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // Run core (FR-011, research R12): one runner serves probes, chain and bootstrap. For each stack
@@ -527,28 +529,36 @@ func identities(env map[string]string, endpoint string) ([]Credential, error) {
 	return out, nil
 }
 
-// reservedCompanionNames are set or owned by the run for the companion (T081): a root may not
-// publish them, in any case, or it would override the run's endpoint, state, run id, project, scratch
-// and search path. TF_DATA_DIR and TF_CLI_* fall under reservedCompanionName's TF_* rule.
-var reservedCompanionNames = []string{"OVH_ENDPOINT", "TF_VAR_state_passphrase", "TF_VAR_state_path",
-	"TF_VAR_run_id", "TF_VAR_project_id", "HOME", "TMPDIR", "PATH"}
+// companionPairs are the identities a root may hand its companion (FR-006), by exact name: the
+// OVHcloud OAuth2 client and the S3 key. Each pair is published complete or not at all.
+var companionPairs = [][2]string{{"OVH_CLIENT_ID", "OVH_CLIENT_SECRET"}, {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}}
 
-// reservedCompanionName reports whether a published name is the run's to set (T082): a listed
-// name, or any TF_* name other than TF_VAR_* (tofu's own settings, TF_LOG_PATH and future ones
-// included), in any case.
-func reservedCompanionName(k string) bool {
-	l := strings.ToLower(k)
-	if strings.HasPrefix(l, "tf_") && !strings.HasPrefix(l, "tf_var_") {
-		return true
-	}
-	return slices.ContainsFunc(reservedCompanionNames, func(r string) bool { return strings.EqualFold(k, r) })
-}
+// companionVarName is the root's own Terraform variables (FR-006), matched case-sensitively: tofu
+// reads TF_VAR_ only in that case.
+var companionVarName = regexp.MustCompile(`^TF_VAR_[A-Za-z0-9_]+$`)
 
-// admitCompanionName judges one published name against the companion allow-list (FR-006): nil for
-// an admitted name, else COMPANION_NAME_REFUSED <name>. Stub of the signature data-model fixes; T016
-// implements it and makes companionEnv use it.
+// companionRunVars are the run's own variables for the companion (T081): a root may not publish
+// them, in any case, or it would override the run's state, run id and project.
+var companionRunVars = []string{"TF_VAR_state_passphrase", "TF_VAR_state_path", "TF_VAR_run_id", "TF_VAR_project_id"}
+
+// admitCompanionName judges one published name against the companion allow-list (FR-006, D115): nil
+// for a TF_VAR_ name other than the run's own or a half of companionPairs, else
+// COMPANION_NAME_REFUSED <name>. Anything else (the endpoint, HOME, PATH, tofu's own TF_* settings,
+// another provider's credential, a name in another case) is refused, including names nobody has
+// thought of yet. Pair completeness is companionEnv's.
 func admitCompanionName(name string) error {
-	return errors.New("admitCompanionName: not implemented")
+	if companionVarName.MatchString(name) && !slices.ContainsFunc(companionRunVars, func(r string) bool { return strings.EqualFold(name, r) }) {
+		return nil
+	}
+	if slices.ContainsFunc(companionPairs, func(p [2]string) bool { return name == p[0] || name == p[1] }) {
+		return nil
+	}
+	// A name with a line break, an escape or invalid UTF-8 is quoted, so it cannot forge lines in
+	// lz-live's output (review r2).
+	if !utf8.ValidString(name) || strings.ContainsFunc(name, func(r rune) bool { return !strconv.IsPrint(r) }) {
+		name = strconv.Quote(name)
+	}
+	return fmt.Errorf("COMPANION_NAME_REFUSED %s", name)
 }
 
 // companionEnv reads the variables the stage published (under the admin credential), has
@@ -590,6 +600,21 @@ func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error)
 		secrets = append(secrets, v)
 	}
 	s.red.Add(secrets...)
+	// A name off the allow-list, or half a pair, is refused before anything is written, bound or
+	// run (FR-006), so a name that is no variable name at all is refused by name too, and on a
+	// cleanup such a name keeps nothing (review r1); the error names the key, never its value.
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		if err := admitCompanionName(k); err != nil {
+			return false, publishedRefusal{fmt.Errorf("output %s publishes a name off the allow-list: %w", companionOutput, err)}
+		}
+	}
+	for _, p := range companionPairs {
+		_, id := env[p[0]]
+		_, secret := env[p[1]]
+		if id != secret {
+			return false, publishedRefusal{fmt.Errorf("output %s publishes half the pair %s/%s", companionOutput, p[0], p[1])}
+		}
+	}
 	if err := WriteCredentialFile(c.configRoot, c.rel, env); err != nil {
 		return false, err
 	}
@@ -597,13 +622,6 @@ func (s *session) companionEnv(ctx context.Context, optional bool) (bool, error)
 	cred, err := ReadCredentialFile(s.credFile)
 	if err != nil {
 		return false, err
-	}
-	// A name the run sets is refused before anything is bound or run (T082); the error names the
-	// key, never its value.
-	for _, k := range slices.Sorted(maps.Keys(cred)) {
-		if reservedCompanionName(k) {
-			return false, publishedRefusal{fmt.Errorf("output %s publishes %s, a name reserved for the run", companionOutput, k)}
-		}
 	}
 	// Bound as the companion gets them: from the file.
 	ids, err := identities(cred, s.r.Creds["OVH_ENDPOINT"])
@@ -675,7 +693,7 @@ func (s *session) cleanupCompanion(ctx context.Context) (keep bool, err error) {
 }
 
 // publishedRefusal is companionEnv's refusal of what a stage published (an output of the wrong shape,
-// a reserved name, a credential that pairs with no identity): it depends on the published values only, so the run refused it too,
+// a name off the allow-list or half a pair, a credential that pairs with no identity): it depends on the published values only, so the run refused it too,
 // before the companion ran (T095).
 type publishedRefusal struct{ error }
 

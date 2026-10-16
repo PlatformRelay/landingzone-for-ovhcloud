@@ -134,12 +134,14 @@ under the one `task live:probe` command of its row:
    sensitive output `companion_env` (storage-iam: the P9 tenant identity as `OVH_CLIENT_ID` /
    `OVH_CLIENT_SECRET`, the P1 S3 user's keys as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`;
    since T100 the P25 identity is the storage-iam check's, below).
-2. `lz-live` reads that output, writes it 0600 to
-   `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/companion.env`, refuses (before
-   binding anything; the root is still destroyed) a name reserved for the run —
-   `OVH_ENDPOINT`, `TF_VAR_state_passphrase`, `TF_VAR_state_path`, `TF_VAR_run_id`,
-   `TF_VAR_project_id`, `HOME`, `TMPDIR`, `PATH` and every `TF_*` name other than `TF_VAR_*`, in
-   any case — binds every
+2. `lz-live` reads that output and refuses (before writing or binding anything; the root is
+   still destroyed, spec 006 FR-006) every name off the allow-list with
+   `COMPANION_NAME_REFUSED <name>` — admitted are only `TF_VAR_` followed by `[A-Za-z0-9_]+`,
+   case-sensitively, other than the run's `TF_VAR_state_passphrase`, `TF_VAR_state_path`,
+   `TF_VAR_run_id` and `TF_VAR_project_id` (refused in any case), the pair `OVH_CLIENT_ID` /
+   `OVH_CLIENT_SECRET` (required) and the pair `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+   (complete or absent); half a pair is refused. It then writes the output 0600 to
+   `~/.config/ovh-lz/accounts/<account>/state/probes/<run-id>/companion.env`, binds every
    published identity to the account (`GET /auth/details`; an identity of another account stops
    the run with exit 3 before the companion, and the root is still destroyed), initialises the
    second writer's data directory, then plans and applies the companion with those variables in
