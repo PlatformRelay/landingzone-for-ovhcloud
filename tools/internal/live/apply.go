@@ -128,6 +128,8 @@ type laneRunner struct {
 	started []string
 	stop    atomic.Value
 	s3HTTP  *http.Client // the state-object check's S3 client (ChainOptions.S3HTTP)
+	// chain only: ChainOptions.childStarted (tests); nil in production.
+	childStarted func(ctx context.Context, args []string)
 	// chain only: the L7 assessments (nil: not judged) and why the assertions were not run.
 	assessments []Assessment
 	notRun      string

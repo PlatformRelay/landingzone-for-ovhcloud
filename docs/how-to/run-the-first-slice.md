@@ -5,11 +5,11 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
-    blob: 741e8426e57b1998b81e56652f9ce51059c26738
+    blob: d703eefcb29c92c6212fa36e84d4c718b3c547cc
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 199e999242cde6f24bb46c2af9419461c33bcc40
+    blob: 79b31f596571d36bdcbaf7e4ab92101322692384
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
   - path: stacks/deployments.yaml
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: d7d14f151ffa44c3be077f530489741562f0f697
-last_verified: 055851bf77591e11474095822705623ee27b58a3
+last_verified: b2a1cfff7f3813e6dc25a1e9c79b1c1723776004
 ---
 
 # Run the first slice on an OVHcloud account
@@ -306,8 +306,10 @@ The run prints one `LZ-LIVE assert <assertion> <outcome> [<deviation>]` line per
 cost. In the sandbox, expect `kd1-canary known-deviation KD-1`. That outcome is recorded, not
 counted as `pass`, and it does not change the exit code.
 
-The chain's destroy-on-exit and final check get their own time budget, equal to `--deadline`
-(evidence T047, gap 7). Do not shorten the deadline below what a destroy needs. `chain -- <instance>` applies one instance and records every
+The chain's destroy-on-exit and final check get their own time budget, counted from the
+destroy's start: `--deadline` or the default 45 min, whichever is longer, so a short
+`--deadline` no longer shortens the destroy (spec 006 FR-002). A destroy-on-exit that runs out
+of that budget fails the run; what it did not destroy keeps its inventory and state for `--cleanup`. `chain -- <instance>` applies one instance and records every
 assertion as `not-run`.
 
 Exit codes for every `lz-live` verb:

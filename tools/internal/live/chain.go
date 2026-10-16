@@ -80,6 +80,9 @@ type ChainOptions struct {
 	// destroyAt, once closed, ends the destroy-on-exit as its budget running out does (tests);
 	// nil in production.
 	destroyAt <-chan struct{}
+	// childStarted, when set, sees the context and arguments of every child the chain starts
+	// (tests: the destroy's own context, spec 006 FR-002); nil in production.
+	childStarted func(ctx context.Context, args []string)
 	// stateReadBackoff are the waits before the retries of a retained state read (T110; nil:
 	// defaultStateReadBackoff). Tests shorten them.
 	stateReadBackoff []time.Duration
@@ -223,6 +226,7 @@ func (r *laneRunner) ephemeralOf() ([]string, error) {
 func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (err error) {
 	o, m := r.o, r.o.Manifest
 	r.s3HTTP = c.S3HTTP
+	r.childStarted = c.childStarted
 	eph, err := r.ephemeralOf()
 	if err != nil {
 		return err
@@ -326,8 +330,10 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 		runErr = errors.Join(context.Cause(runCtx), runErr)
 	}
 
-	// Destroy-on-exit, with its own time: the run's context may have expired.
-	dctx, dcancel := destroyContext(ctx, deadline, c.destroyAt)
+	// Destroy-on-exit, with its own time: the run's context may have expired. One context serves the
+	// destroys, the trap and the leftover check, with at least DefaultDeadline (FR-002).
+	budget := destroyBudget(deadline)
+	dctx, dcancel := destroyContext(ctx, budget, c.destroyAt)
 	defer dcancel()
 	var destroyErr error
 	for i := len(eph) - 1; i >= 0; i-- {
@@ -349,6 +355,9 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	}
 
 	rep := r.leftovers(dctx, check, c.stateReadBackoff, c.stateReadClock)
+	// A call that ignores its context may still answer after the budget ran out: the context's own
+	// state fails the run too.
+	destroyErr = errors.Join(destroyErr, destroyBudgetSpent(dctx, budget))
 	var recErr error
 	for typ, items := range rep.Listings {
 		raw, e := json.Marshal(items)
@@ -625,7 +634,7 @@ func (r *laneRunner) prepare(ctx context.Context, in stacks.Instance) (*childEnv
 		}
 		vars["TF_VAR_lz_account_dir"] = dir
 	}
-	return &childEnv{home: r.home, vars: vars, grace: DefaultGrace}, filepath.Join(o.Checkout, filepath.FromSlash(in.Path)), store, nil
+	return &childEnv{home: r.home, vars: vars, grace: DefaultGrace, started: r.childStarted}, filepath.Join(o.Checkout, filepath.FromSlash(in.Path)), store, nil
 }
 
 // stateIDAttr is, per provider type, the state attribute holding the id the listing reports

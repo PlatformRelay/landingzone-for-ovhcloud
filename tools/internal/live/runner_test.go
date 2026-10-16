@@ -3215,3 +3215,47 @@ func TestProbeDestroyBudgetExceeded(t *testing.T) {
 		t.Errorf("after a destroy past its budget: state kept %v, passphrase kept %v; want both for --cleanup", exists(state), exists(pass))
 	}
 }
+
+// ---------------------------------------------------------------- T023 (spec 006 FR-002)
+
+// TestRunnerDestroyContext (FR-002, T018's deferred check): the probe core, as TestChainDestroyContext:
+// stacks a and b, b's apply fails; every destroy call runs under the destroy-on-exit's one context,
+// the one the leftover check lists under, and that context has the budget.
+func TestRunnerDestroyContext(t *testing.T) {
+	t.Parallel()
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{ApplyExit: 1}))
+	b, children := &budgetLister{inner: r.Leftovers.Lister}, &childDeadlines{}
+	r.Leftovers.Lister, r.childStarted = b, children.started
+	err, _ := execute(t, r)
+	if ExitCode(err) == 0 {
+		t.Error("a failed apply exited 0")
+	}
+	if got := sequence(w.calls(t, "tofu.log"), "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+		t.Errorf("destroys %v, want [b a] (reverse order)", got)
+	}
+	oneDestroyContext(t, children, b, r.Deadline, 0)
+}
+
+// TestProbeDestroyBudgetEndsInCheck (FR-002, constitution V): the probe core, as
+// TestChainDestroyBudgetEndsInCheck: both stacks apply and are destroyed, and the destroy budget
+// runs out during the leftover check while the listings still answer. The run fails on the
+// context's state, not only on an error a call returned.
+func TestProbeDestroyBudgetEndsInCheck(t *testing.T) {
+	t.Parallel()
+	w := newRunWorld(t)
+	r := w.runner(t, w.stack(t, "a", true, tofuStack{}), w.stack(t, "b", true, tofuStack{}))
+	children, end := &childDeadlines{}, make(chan struct{})
+	r.Leftovers.Lister = endingLister{inner: r.Leftovers.Lister, children: children, end: end, once: &sync.Once{}}
+	r.childStarted, r.destroyAt = children.started, end
+	err, _ := execute(t, r)
+	if got := sequence(w.calls(t, "tofu.log"), "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+		t.Fatalf("destroys %v, want [b a] (the destroys complete before the budget ends)", got)
+	}
+	if ExitCode(err) == 0 {
+		t.Error("a destroy-on-exit whose budget ran out during the leftover check exited 0")
+	}
+	if s := w.summary(t); s["outcome"] != "fail" {
+		t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
+	}
+}
