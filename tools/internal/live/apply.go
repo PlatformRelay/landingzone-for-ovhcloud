@@ -625,7 +625,7 @@ func writeRunSet(s CredentialSet) error {
 	if !accountID.MatchString(s.Instance) {
 		return fmt.Errorf("credential set: instance %q is not a plain path segment", s.Instance)
 	}
-	if err := noSymlinkBelow(acct, filepath.Join("sets", s.Instance)); err != nil {
+	if err := noSymlinkBelow(s.Root, filepath.Join("accounts", s.Account, "sets", s.Instance)); err != nil {
 		return err
 	}
 	setDir := filepath.Join(acct, "sets", s.Instance)
