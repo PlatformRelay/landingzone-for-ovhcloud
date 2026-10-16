@@ -90,6 +90,8 @@ type Runner struct {
 	cleanupOnly bool // Probe.Cleanup: destroy every ephemeral stack, plan and apply nothing
 	companion   *companionStage
 	check       *ProbeCheck // Probe.Check, on the run's one stack
+	// sweepProject is the project probe.env records, for the check's Sweep (sweep.go).
+	sweepProject string
 	// companionBackoff are the waits before each retry of the companion's destroy (T095); nil:
 	// defaultCompanionBackoff. Tests shorten them.
 	companionBackoff []time.Duration
@@ -952,6 +954,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	// the companion later (T095; before, the stage's destroy removed the identity and left the
 	// companion's resources out of every cleanup's reach).
 	keepStage := false
+	rootKept := false // the probe root stays for --cleanup: the check's Sweep waits for it (sweep.go)
 	for i := len(s.started) - 1; i >= 0; i-- {
 		st := s.started[i]
 		if !st.Ephemeral {
@@ -962,6 +965,7 @@ func (r Runner) Execute(ctx context.Context) error {
 			// A fresh process: the root may never have been initialised in this checkout.
 			if e := s.tofu(dctx, st, term, initArgs...); e != nil {
 				destroyErr = errors.Join(destroyErr, e)
+				rootKept = rootKept || st.ID == r.Stacks[0].ID
 				continue
 			}
 			// The companion first, under the identity the root still holds.
@@ -990,9 +994,11 @@ func (r Runner) Execute(ctx context.Context) error {
 		}
 		if keepStage && c != nil && st.ID == c.stage.ID {
 			destroyErr = errors.Join(destroyErr, fmt.Errorf("%s kept: its companion %s was not destroyed and needs the identities %s holds; destroy both with --cleanup %s", st.ID, c.stack.ID, st.ID, r.ID))
+			rootKept = true
 			continue
 		}
 		if keepCheck {
+			rootKept = true
 			continue
 		}
 		if e := s.destroy(dctx, st); e != nil {
@@ -1004,6 +1010,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	if s.credFile != "" {
 		destroyErr = errors.Join(destroyErr, removeFiles(s.credFile))
 	}
+	destroyErr = errors.Join(destroyErr, s.sweep(dctx, rootKept))
 
 	entries, invErr := ReadInventory(r.Dir)
 	if errors.Is(invErr, os.ErrNotExist) {
@@ -1035,7 +1042,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	}
 	var leftErr error
 	if rep.Outcome != "pass" {
-		leftErr = fmt.Errorf("leftover check: %s (%d leftovers, %d errors)", rep.Outcome, len(rep.Leftovers), len(rep.Errors))
+		leftErr = s.reconciled(fmt.Errorf("leftover check: %s (%d leftovers, %d errors)", rep.Outcome, len(rep.Leftovers), len(rep.Errors)))
 	}
 	err = errors.Join(runErr, destroyErr, invErr, leftErr, recErr)
 	outcome := "pass"
@@ -1095,7 +1102,8 @@ func errString(err error) string {
 // leftover check pass, then both are deleted, with the run record (probe.env: the probe root and
 // the project the run ran against) that lets `--cleanup` find the root and its project again. A
 // run that wrote no state (it failed before any apply wrote one, or was plan-only) leaves nothing
-// to clean up, so its files go whatever the outcome.
+// to clean up, so its files go whatever the outcome, unless its check's Sweep or the leftover
+// check failed (sweep.go).
 // Children get TF_VAR_state_path, TF_VAR_state_passphrase and TF_VAR_run_id (the probe roots name
 // their resources with it).
 //
@@ -1145,7 +1153,10 @@ type ProbeCheck struct {
 	Recorded func(record []byte, term io.Writer) error
 	// Sweep (optional) deletes, by listing exact run-derived names, every resource the root
 	// or the check may have created, whether or not an output or a state entry exists; it
-	// never reads a published output. nil: none (spec 005's roots). The runner's call: sweep.go.
+	// never reads a published output. nil: none (spec 005's roots). The runner calls it with the
+	// run id, the project probe.env records and the run's redacted terminal, after destroy and
+	// before the leftover check, on every way out and on `--cleanup`, except while the root is
+	// kept and in a plan-only run; a failure keeps the run's files for `--cleanup` (sweep.go).
 	Sweep func(ctx context.Context, runID, projectID string, term io.Writer) error
 }
 
@@ -1259,6 +1270,12 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 	r.Vars["TF_VAR_run_id"] = r.ID
 	r.cleanupOnly = cleanup
 	r.check = p.Check
+	if p.Check != nil && p.Check.Sweep != nil {
+		// Sweep gets the project probe.env records, never the caller's.
+		if r.sweepProject, err = recordedProject(root, r.ID); err != nil {
+			return err
+		}
+	}
 	// A companion root (its `companion/` directory) runs after a full apply of the root (never in
 	// a plan-only run: Execute), and is destroyed first on exit and on `--cleanup`.
 	cdir := filepath.Join(r.Stacks[0].Dir, "companion")
@@ -1272,9 +1289,12 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 			configRoot: p.ConfigRoot, rel: filepath.Join(rel, "companion.env"), bind: p.Bind}
 	}
 	if err := r.Execute(ctx); err != nil {
-		if _, serr := os.Lstat(state); errors.Is(serr, os.ErrNotExist) {
+		sweeps := p.Check != nil && p.Check.Sweep != nil
+		if _, serr := os.Lstat(state); errors.Is(serr, os.ErrNotExist) && !isUnreconciled(err) && !(cleanup && sweeps) {
 			// No state was ever written: nothing to destroy, so no cleanup can use the
-			// passphrase; it goes whatever the outcome.
+			// passphrase; it goes whatever the outcome, unless the check's Sweep or the
+			// leftover check failed (sweep.go), or a cleanup of a run with a Sweep failed
+			// before both passed: then `--cleanup` sweeps again.
 			_ = removeFiles(pass, root)
 			dir, _, _, _, _ := p.files()
 			_ = removeEmptyDir(dir)

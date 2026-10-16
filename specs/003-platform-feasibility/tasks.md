@@ -231,7 +231,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
   - Verify: `task test:live-lane`: each case fails on the stub (Sweep never called, files removed) for its stated reason; spec 005's runner tests stay green.
   - Evidence: `specs/003-platform-feasibility/evidence/T037.md`; initial status `not-run`.
 
-- [ ] T038 [US1] Implement the runner's sweep in tools/internal/live/sweep.go and tools/internal/live/runner.go
+- [x] T038 [US1] Implement the runner's sweep in tools/internal/live/sweep.go and tools/internal/live/runner.go — closed 2026-10-16, evidence: evidence/T038.md
   - Requirements: FR-002, FR-003; ADRs: 0008, 0021. Depends on: T037.
   - Scope: the `Sweep` field of `ProbeCheck` (data-model.md *Probe checks*) and its comment; the runner calls it as T037 fixes, keeps probe.env, the passphrase and the root record until Sweep and the leftover check pass, and passes the run's redacted terminal; `--cleanup` reads run id and project from probe.env (`ProbeProject`) only.
   - Verify: `task test:live-lane`: T037's cases green; `task test:traceability` green.
