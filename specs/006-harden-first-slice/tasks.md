@@ -186,7 +186,7 @@ T016 (shared `test:live-lane`).
   - Verify: `task test:live-lane`: every case fails on today's code; the chain's rows stay green.
   - Evidence: `evidence/T017.md`; PR; initial status `not-run`.
 
-- [ ] T018 [US2] Write destroy-budget tests in tools/internal/live/chain_test.go and tools/internal/live/runner_test.go
+- [x] T018 [US2] Write destroy-budget tests in tools/internal/live/chain_test.go and tools/internal/live/runner_test.go — closed 2026-10-16, evidence: evidence/T018.md
   - Requirements: FR-002; ADRs: 0008, 0024. Depends on: T016.
   - Cases (given / when / then → defect exposed):
     - given `destroyBudget` / when called with 0, with a run deadline below `DefaultDeadline`, and with one above / then it returns `DefaultDeadline`, `DefaultDeadline` and the longer value → exposes a run deadline below `DefaultDeadline` giving a destroy budget below `DefaultDeadline` (`chain.go:226-228,285-287`).

@@ -5,10 +5,10 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 25c706686fc6c9e49961cda7fdd60bb02682fd06
+    blob: 30d2e47afbb5621005d7ac89d6017582cb7c696b
   - path: tools/internal/live/observe.go
     blob: 34d48bfd49a54f3dd62df5e8b45a4309d0ff81f7
-last_verified: 9093b147e00e8da77f1f477484114457f9812402
+last_verified: caca82e0abb8882cc9465fd7f60d3797a759269a
 ---
 
 # Verification status of the first slice
@@ -48,15 +48,10 @@ evidence gaps.
   resource per tenant project and an in-place update of the platform policy; nothing there is
   destroyed or replaced. Whether the admin's tag PUT and the L7 read-back
   (`GET /iam/resource/{urn}`) succeed on the project is UNVERIFIED until that run. If either is
-  refused, stop and record it for a decision. Spec 003's iam-urn probe (T027) found
-  `account:apiovh:iam/policy/get` checked against the account URN, not the project's; for
-  `iam/resource/edit` it had no owned target, so that action's URN is still not shown.
+  refused, stop and record it for a decision.
 - **Chain (T049):** runs 1 and 3 ended at `demo-dev-project`, run 2 at `account-governance`
   (above).
-  Spec 003's locked-recovery probe (T028) observed, on a governance-locked probe bucket, the lock
-  object's conditional create (`If-None-Match`) refused 412 and OpenTofu 1.13.0's lock-refusal
-  text, then a `force-unlock` and a version restore with the state credential. On a lane stack's
-  state these are UNVERIFIED:
+  These are UNVERIFIED:
   - the lock object's conditional create (`If-None-Match`);
   - the lock-refusal text;
   - the versioning and tag fields;

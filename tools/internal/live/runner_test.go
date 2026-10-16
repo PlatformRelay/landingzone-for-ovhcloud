@@ -62,6 +62,26 @@ type tofuStack struct {
 	DestroyErrors     []string `json:"destroy_errors"`
 	// MissingStateEmpty (T038): destroy reads a missing state file as an empty state.
 	MissingStateEmpty bool `json:"missing_state_empty"`
+	// DestroyHang (T018): the destroy apply hangs as a HangAfter apply does, until stopped.
+	DestroyHang bool `json:"destroy_hang"`
+	// ApplyDelay and DestroyDelay (T018): the apply, or the destroy apply, takes that long, then
+	// logs "delay-done" and goes on as configured; a SIGINT or SIGTERM meanwhile is logged as a
+	// "signal" call and stops it (exit 130).
+	ApplyDelay   time.Duration `json:"apply_delay"`
+	DestroyDelay time.Duration `json:"destroy_delay"`
+}
+
+// fakeDelay waits d for the fake's apply or destroy of stack (tofuStack.ApplyDelay, DestroyDelay):
+// 0 when it waited it out ("delay-done" logged), 130 when a signal stopped it ("signal" logged).
+func fakeDelay(bin, stack string, d time.Duration, sigs chan os.Signal) int {
+	select {
+	case sig := <-sigs:
+		logCall(bin, "tofu.log", tofuCall{Cmd: "signal", Stack: stack, Args: []string{sig.String()}})
+		return 130
+	case <-time.After(d):
+		logCall(bin, "tofu.log", tofuCall{Cmd: "delay-done", Stack: stack})
+		return 0
+	}
 }
 
 // planChange is one resource change the fake plan holds.
@@ -424,7 +444,20 @@ func fakeTofu(args []string) int {
 					return 1
 				}
 			}
+			var sigs chan os.Signal
+			if st.DestroyHang || st.DestroyDelay > 0 {
+				sigs = make(chan os.Signal, 8) // trapped before the call is logged, as for HangAfter
+				signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+			}
 			logCall(bin, "tofu.log", call)
+			if st.DestroyHang {
+				return hang(bin, call.Stack, sigs, false)
+			}
+			if st.DestroyDelay > 0 {
+				if code := fakeDelay(bin, call.Stack, st.DestroyDelay, sigs); code != 0 {
+					return code
+				}
+			}
 			if len(st.DestroyErrors) > 0 {
 				if n := nthCall(bin, call.Stack, "destroy"); n < len(st.DestroyErrors) {
 					fmt.Fprintln(os.Stderr, st.DestroyErrors[n])
@@ -443,7 +476,7 @@ func fakeTofu(args []string) int {
 		}
 		call.Cmd = "apply"
 		var sigs chan os.Signal
-		if st.HangAfter > 0 {
+		if st.HangAfter > 0 || st.ApplyDelay > 0 {
 			// Trapped before the call is logged, so a signal sent once the call (or the stream) is
 			// seen is logged.
 			sigs = make(chan os.Signal, 8)
@@ -477,6 +510,11 @@ func fakeTofu(args []string) int {
 						logCall(bin, "tofu.log", tofuCall{Cmd: "lock-timeout", Stack: call.Stack})
 					}
 				}
+			}
+		}
+		if st.ApplyDelay > 0 {
+			if code := fakeDelay(bin, call.Stack, st.ApplyDelay, sigs); code != 0 {
+				return code
 			}
 		}
 		if st.ApplyExit != 0 {
@@ -2846,7 +2884,9 @@ func TestProbeCompanionDestroyRetry(t *testing.T) {
 		var binds int
 		p := w.companionRetryProbe(t, root, []string{errOAuth500, errOAuth500}, nil, &binds)
 		p.Run.Deadline = 20 * time.Second
-		p.Run.companionBackoff = []time.Duration{time.Minute}
+		// Longer than the destroy-on-exit's budget, whichever it is: the run's 20 s deadline today,
+		// at least DefaultDeadline under FR-002 (spec 006, T018).
+		p.Run.companionBackoff = []time.Duration{DefaultDeadline + time.Minute}
 		start := time.Now()
 		err := p.Start(context.Background())
 		if took := time.Since(start); took > 15*time.Second {
@@ -3065,5 +3105,113 @@ func TestRunnerErrorRecord(t *testing.T) {
 	}
 	if fi, err := os.Stat(filepath.Join(w.runDir, "errors.txt")); err == nil && fi.Mode().Perm() != 0o600 {
 		t.Errorf("errors.txt mode %o, want 600", fi.Mode().Perm())
+	}
+}
+
+// ---------------------------------------------------------------- T018 (spec 006 FR-002)
+
+// TestRunnerDestroyBudget: the probe core, as the chain (TestChainDestroyBudget): runs with a
+// deadline shorter than DefaultDeadline whose apply of b fails destroy b then a. from-destroy-start:
+// b's apply takes budgetForward; the destroy-on-exit's context is bounded by DefaultDeadline from
+// the destroy's start. outlives-run-deadline: run deadline budgetShortRun, a's destroy takes
+// budgetSlowDestroy; it is not stopped and completes under the same budget. above-default: run
+// deadline budgetLongRun; the destroy's budget is that, not DefaultDeadline.
+func TestRunnerDestroyBudget(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		deadline     time.Duration // 0: the run world's (testWaitCap)
+		forward      time.Duration // b's failing apply takes this long
+		slowDestroy  time.Duration // a's destroy takes this long
+		spentInDelay time.Duration
+	}{
+		{name: "from-destroy-start", forward: budgetForward},
+		{name: "outlives-run-deadline", deadline: budgetShortRun, slowDestroy: budgetSlowDestroy, spentInDelay: budgetSlowDestroy},
+		{name: "above-default", deadline: budgetLongRun}, // a pin today: the budget stays the longer run deadline
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := newRunWorld(t)
+			s := []Stack{w.stack(t, "a", true, tofuStack{DestroyDelay: tc.slowDestroy}), w.stack(t, "b", true, tofuStack{ApplyExit: 1, ApplyDelay: tc.forward})}
+			r := w.runner(t, s...)
+			if tc.deadline > 0 {
+				r.Deadline = tc.deadline
+			}
+			b := &budgetLister{inner: r.Leftovers.Lister}
+			r.Leftovers.Lister = b
+			err, _ := execute(t, r)
+			if ExitCode(err) == 0 {
+				t.Error("a failed apply exited 0")
+			}
+			calls := w.calls(t, "tofu.log")
+			if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"b", "a"}) {
+				t.Errorf("destroys %v, want [b a] (reverse order)", got)
+			}
+			if got := signals(calls, "a"); len(got) != 0 {
+				t.Errorf("the destroy of a got %v: the destroy-on-exit was bounded by the run's --deadline %v", got, r.Deadline)
+			}
+			if tc.slowDestroy > 0 && !slices.Contains(sequence(calls, "delay-done"), "a") {
+				t.Errorf("the destroy of a (%v) did not complete", tc.slowDestroy)
+			}
+			if s := w.summary(t); s["outcome"] != "fail" {
+				t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
+			}
+			destroyBudgetJudge(t, b, r.Deadline, tc.spentInDelay)
+		})
+	}
+}
+
+// TestProbeDestroyBudgetExceeded: a probe whose destroy-on-exit outlives its budget (the destroy
+// hangs; Runner.destroyAt ends the budget there, as 45 minutes would) fails: the hung destroy is
+// interrupted, the run reports fail, and the inventory, the state and the passphrase stay for
+// `--cleanup`. It holds today (the budget is the run's deadline) and pins that T023's longer
+// budget keeps it.
+func TestProbeDestroyBudgetExceeded(t *testing.T) {
+	root := tempPrivate(t)
+	w := newRunWorld(t)
+	p := w.probe(t, root, tofuStack{DestroyHang: true})
+	p.Run.destroyAt = w.hanging(t, "p")
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- p.Start(context.Background()) }()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(45 * time.Second):
+		t.Fatal("Start did not return within 45 s")
+	}
+	if took := time.Since(start); took > testWaitCap {
+		t.Errorf("Start took %v: the exhausted budget did not stop the hung destroy", took)
+	}
+	if ExitCode(err) == 0 {
+		t.Errorf("a destroy past its budget exited 0 (%v)", err)
+	}
+	calls := w.calls(t, "tofu.log")
+	if got := sequence(calls, "destroy"); !slices.Equal(got, []string{"p"}) {
+		t.Errorf("destroys %v, want [p]", got)
+	}
+	// The budget's end interrupts the hung destroy (it may write its state), once; the fake's own
+	// give-up logs hang-timeout instead.
+	if got := signals(calls, "p"); !slices.Equal(got, []string{"interrupt"}) {
+		t.Errorf("the hung destroy of p received %v when its budget ended, want [interrupt]", got)
+	}
+	if s := w.summary(t); s["outcome"] != "fail" {
+		t.Errorf("summary.json outcome = %v, want fail", s["outcome"])
+	}
+	if !strings.Contains(w.term.String(), "LZ-LIVE summary 20261006T120000Z-a1b2 fail") {
+		t.Errorf("terminal lacks the fail summary:\n%s", w.term.String())
+	}
+	var ids []string
+	for _, e := range readInventory(t, w.runDir) {
+		if e.Stack == "p" {
+			ids = append(ids, e.ID)
+		}
+	}
+	if !slices.Equal(ids, []string{"pn-p-1", "pn-p-2"}) {
+		t.Errorf("inventory of p %v, want [pn-p-1 pn-p-2] kept for --cleanup", ids)
+	}
+	_, state, pass := probeFiles(t, root)
+	if !exists(state) || !exists(pass) {
+		t.Errorf("after a destroy past its budget: state kept %v, passphrase kept %v; want both for --cleanup", exists(state), exists(pass))
 	}
 }
