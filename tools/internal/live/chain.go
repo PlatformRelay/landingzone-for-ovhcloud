@@ -77,6 +77,9 @@ type ChainOptions struct {
 	S3HTTP *http.Client
 	// deadlineAt, once closed, ends the run as its deadline does (tests); nil in production.
 	deadlineAt <-chan struct{}
+	// destroyAt, once closed, ends the destroy-on-exit as its budget running out does (tests);
+	// nil in production.
+	destroyAt <-chan struct{}
 	// stateReadBackoff are the waits before the retries of a retained state read (T110; nil:
 	// defaultStateReadBackoff). Tests shorten them.
 	stateReadBackoff []time.Duration
@@ -283,7 +286,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	}
 
 	// Destroy-on-exit, with its own time: the run's context may have expired.
-	dctx, dcancel := context.WithTimeout(context.WithoutCancel(ctx), deadline)
+	dctx, dcancel := destroyContext(ctx, deadline, c.destroyAt)
 	defer dcancel()
 	var destroyErr error
 	for i := len(eph) - 1; i >= 0; i-- {

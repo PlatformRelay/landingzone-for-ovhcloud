@@ -496,10 +496,23 @@ type chainExec struct {
 	// stateBackoff are the waits before the retries of a retained state read (T110; nil:
 	// testBackoff, never the production default).
 	stateBackoff []time.Duration
+	// budget, when set, wraps the run's Lister seam and records what each listing's context has
+	// left (T018); it needs production false (the production path has no Lister to wrap).
+	budget *budgetLister
+	// deadline replaces the harness's run deadline (T018; 0: testWaitCap).
+	deadline time.Duration
+	// destroyAtBlock: the destroy-on-exit's budget runs out once a call blocks (T018).
+	destroyAtBlock bool
 }
 
-// chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114).
-func (c chainExec) chainDeadline() time.Duration { return testWaitCap }
+// chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114):
+// c.deadline, else testWaitCap.
+func (c chainExec) chainDeadline() time.Duration {
+	if c.deadline > 0 {
+		return c.deadline
+	}
+	return testWaitCap
+}
 
 // stateReadBackoff is the retained state read's backoff the chain harness passes (T110).
 func (c chainExec) stateReadBackoff() []time.Duration {
@@ -606,6 +619,14 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	sigs := make(chan os.Signal, 1)
 	var invAtBlock []InventoryEntry
 	stop, watched, deadlineAt := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	destroyAt := make(chan struct{})
+	var destroyAtOpt <-chan struct{}
+	if c.destroyAtBlock {
+		destroyAtOpt = destroyAt
+	}
+	if c.budget != nil && c.production {
+		t.Fatal("chainExec.budget wraps the Lister seam, which the production path does not use")
+	}
 	go func() {
 		defer close(watched)
 		for {
@@ -650,6 +671,9 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 			if c.deadlineAtBlock {
 				close(deadlineAt) // the deadline is reached at the block (T114)
 			}
+			if c.destroyAtBlock {
+				close(destroyAt) // the destroy's budget runs out at the block (T018)
+			}
 			return
 		}
 	}()
@@ -669,6 +693,9 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 		}
 	}
 	var lister Lister = cl
+	if c.budget != nil {
+		c.budget.inner, lister = cl, c.budget
+	}
 	var bearers *chainBearers
 	if c.production {
 		lister = nil
@@ -694,7 +721,7 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
 		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
-		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt),
+		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt), destroyAt: destroyAtOpt,
 		stateReadBackoff: c.stateReadBackoff()})
 	process := streams()
 	close(stop)
@@ -1464,8 +1491,10 @@ func TestChainStateUnreadable(t *testing.T) {
 			fail:  &laneReadFail{Call: "show-state", Answers: []string{answer("GET /v1/iam/resource: 403 Forbidden"), answer("x")}},
 			reads: 1},
 		{name: "deadline-too-close", stack: "account-governance",
-			fail:    &laneReadFail{Call: "show-state", Answers: []string{errReset, errReset}},
-			backoff: []time.Duration{time.Minute, time.Minute}, // the harness's deadline is 30 s
+			fail: &laneReadFail{Call: "show-state", Answers: []string{errReset, errReset}},
+			// Longer than the destroy-on-exit's budget, whichever it is: the run's 30 s deadline
+			// today, at least DefaultDeadline under FR-002 (spec 006, T018).
+			backoff: []time.Duration{DefaultDeadline + time.Minute, DefaultDeadline + time.Minute},
 			reads:   1, noRetry: true},
 		{name: "undecodable", stack: "account-bootstrap", undecode: true, reads: 1},
 	} {
@@ -1948,4 +1977,181 @@ func TestChainLeftoverTokenRedacted(t *testing.T) {
 			t.Errorf("LeftoverCheck.Red did not hold the bearer token when the first listing was requested")
 		}
 	})
+}
+
+// ---------------------------------------------------------------- T018 (spec 006 FR-002)
+
+// TestDestroyBudget: the destroy-on-exit's budget is max(DefaultDeadline, run deadline), and
+// DefaultDeadline for an unset one (data-model *Fixed signatures*, FR-002 row): a run deadline
+// shorter than DefaultDeadline never shortens the destroy (chain.go and runner.go use the run's
+// deadline today).
+func TestDestroyBudget(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		run  time.Duration
+		want time.Duration
+	}{
+		{"unset", 0, DefaultDeadline},
+		{"negative", -time.Second, DefaultDeadline},
+		{"below", 5 * time.Minute, DefaultDeadline},
+		{"just-below", DefaultDeadline - time.Second, DefaultDeadline},
+		{"equal", DefaultDeadline, DefaultDeadline},
+		{"above", 90 * time.Minute, 90 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := destroyBudget(tc.run); got != tc.want {
+				t.Errorf("destroyBudget(%v) = %v, want %v", tc.run, got, tc.want)
+			}
+		})
+	}
+}
+
+// budgetLister passes listings through and records, for each, what its context has left (-1: no
+// deadline). The leftover check after the destroys lists under the destroy-on-exit's context, so
+// its last listing shows the destroy's budget without waiting for it (T018: the budget's clock is
+// read, not run).
+type budgetLister struct {
+	inner Lister
+	mu    sync.Mutex
+	left  []time.Duration
+}
+
+func (b *budgetLister) Get(ctx context.Context, path, cursor string) ([]byte, string, error) {
+	left := time.Duration(-1)
+	if dl, ok := ctx.Deadline(); ok {
+		left = time.Until(dl)
+	}
+	b.mu.Lock()
+	b.left = append(b.left, left)
+	b.mu.Unlock()
+	return b.inner.Get(ctx, path, cursor)
+}
+
+// The destroy-budget cases' times (T018). budgetForward: how long the failing forward apply takes,
+// so a budget counted from the run's start shows; budgetSlack: the most the destroy phase's own
+// calls (destroys, trap, state reads, listings) may take before the last listing; budgetShortRun
+// and budgetSlowDestroy: a run deadline, and a destroy longer than it, so a destroy bounded by the
+// run's deadline is stopped; budgetLongRun: a run deadline above DefaultDeadline, which the
+// destroy keeps. The margins are wide for a loaded machine: a fake chain's forward part and
+// destroy phase each take under 1 s unloaded.
+const (
+	budgetForward     = 15 * time.Second
+	budgetSlack       = 8 * time.Second
+	budgetShortRun    = 10 * time.Second
+	budgetSlowDestroy = 12 * time.Second
+	budgetLongRun     = 90 * time.Minute
+)
+
+// destroyBudgetJudge checks that the last listing (the leftover check after the destroys, under the
+// destroy-on-exit's context) ran with what is left of the destroy budget FR-002 gives a run with
+// deadline run (DefaultDeadline, or run when longer), counted from the destroy's start: at most
+// that budget (bounded, never longer), and more than it less spent (the destroys' own delay) less
+// budgetSlack.
+func destroyBudgetJudge(t *testing.T, b *budgetLister, run, spent time.Duration) {
+	t.Helper()
+	if run <= 0 {
+		t.Fatalf("run deadline %v, want a set one", run)
+	}
+	want := DefaultDeadline
+	if run > want {
+		want = run
+	}
+	b.mu.Lock()
+	left := slices.Clone(b.left)
+	b.mu.Unlock()
+	if len(left) == 0 {
+		t.Fatal("no listing ran: the leftover check after the destroys was never reached")
+	}
+	last, floor := left[len(left)-1], want-spent-budgetSlack
+	if last <= floor || last > want {
+		t.Errorf("the leftover check after the destroys had %v left (-1: unbounded); want the destroy-on-exit's own budget, "+
+			"%v counted from the destroy's start (> %v) for --deadline %v: not a run deadline shorter than DefaultDeadline, "+
+			"nor DefaultDeadline for a longer one, nor a budget counted from the run's start (FR-002)", last, want, floor, run)
+	}
+}
+
+// TestChainDestroyBudget: chain runs with a --deadline shorter than DefaultDeadline whose runtime
+// apply fails. from-destroy-start: the failing apply takes budgetForward; the destroy-on-exit's
+// context is bounded by DefaultDeadline from the destroy's start (not from the run's start, nor
+// by the run's deadline). outlives-run-deadline: run deadline budgetShortRun, runtime's destroy
+// takes budgetSlowDestroy; it is not stopped and completes, then network's, under the same budget.
+// above-default (a pin today): run deadline budgetLongRun; the destroy's budget is that, not
+// DefaultDeadline.
+func TestChainDestroyBudget(t *testing.T) {
+	t.Run("above-default", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.setApplyExit("demo-dev-gra11-runtime", 1)
+		b := &budgetLister{}
+		r := h.chain(chainExec{budget: b, deadline: budgetLongRun})
+		laneExit(t, r.laneRun, 1)
+		chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+		destroyBudgetJudge(t, b, budgetLongRun, 0)
+	})
+	t.Run("from-destroy-start", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.setStack("demo-dev-gra11-runtime", func(s *laneStack) { s.ApplyExit, s.ApplyDelay = 1, budgetForward })
+		b := &budgetLister{}
+		r := h.chain(chainExec{budget: b})
+		laneExit(t, r.laneRun, 1)
+		chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+		destroyBudgetJudge(t, b, (chainExec{}).chainDeadline(), 0) // the forward delay is before the destroy
+	})
+	t.Run("outlives-run-deadline", func(t *testing.T) {
+		h := newChainHarness(t)
+		h.setApplyExit("demo-dev-gra11-runtime", 1)
+		h.setStack("demo-dev-gra11-runtime", func(s *laneStack) { s.DestroyDelay = budgetSlowDestroy })
+		b := &budgetLister{}
+		r := h.chain(chainExec{budget: b, deadline: budgetShortRun})
+		laneExit(t, r.laneRun, 1)
+		for _, c := range r.tofu() {
+			if c.Destroy && c.Signal != "" {
+				t.Errorf("the destroy of %s (taking %v) got %s: the destroy-on-exit was bounded by the run's --deadline %v",
+					c.Stack, budgetSlowDestroy, c.Signal, budgetShortRun)
+			}
+		}
+		chainDestroyedAfter(t, h, r, chainDestroyOrder, "fail")
+		destroyBudgetJudge(t, b, budgetShortRun, budgetSlowDestroy)
+	})
+}
+
+// TestChainDestroyBudgetExceeded: the chain as TestProbeDestroyBudgetExceeded: a complete chain
+// whose first destroy (runtime's) hangs, and the destroy-on-exit's budget runs out there
+// (chainExec destroyAtBlock, as 45 minutes would). The hung destroy is interrupted once; network's
+// destroy gets no time; the run fails with the fail summary; the inventory, both states and both
+// records (what `--cleanup` reads) are kept.
+func TestChainDestroyBudgetExceeded(t *testing.T) {
+	h := newChainHarness(t)
+	h.setStack("demo-dev-gra11-runtime", func(s *laneStack) { s.Block = "destroy" })
+	start := time.Now()
+	r := h.chain(chainExec{destroyAtBlock: true})
+	if took := time.Since(start); took > testWaitCap {
+		t.Errorf("the chain took %v: the exhausted budget did not stop the hung destroy", took)
+	}
+	if ExitCode(r.err) == 0 {
+		t.Errorf("a destroy past its budget exited 0 (%v)", r.err)
+	}
+	blocked := r.index(false, func(c laneCall) bool { return c.Destroy && c.Stack == "demo-dev-gra11-runtime" && c.Cmd == "apply" })
+	if blocked < 0 || r.calls[blocked].Signal != "interrupt" {
+		t.Errorf("the hung destroy of demo-dev-gra11-runtime was not interrupted when its budget ran out (calls %v)", laneEvents(r.calls))
+	}
+	if got := r.applies(true); slices.Contains(got, "demo-dev-gra11-network") {
+		t.Errorf("destroy applies %v: network destroyed after the budget ran out", got)
+	}
+	lines := strings.Split(strings.TrimSpace(h.term.String()), "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-2], "LZ-LIVE summary "+r.runID+" fail ") {
+		t.Errorf("terminal does not end with a fail summary:\n%s", strings.Join(lines[max(0, len(lines)-3):], "\n"))
+	}
+	inv, _ := ReadInventory(r.runDir)
+	if all := chainExpectedInventory(laneOrder); !slices.Equal(inv, all) {
+		t.Errorf("inventory %v, want %v kept for --cleanup", inv, all)
+	}
+	for _, id := range chainDestroyOrder {
+		if s, ok := h.stateOf(id); !ok || s.Empty {
+			t.Errorf("state of %s emptied or gone although the budget ran out before its destroy completed", id)
+		}
+		if len(h.record(id)) == 0 {
+			t.Errorf("record of %s removed although its destroy did not complete", id)
+		}
+	}
 }

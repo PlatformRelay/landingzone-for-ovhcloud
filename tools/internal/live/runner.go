@@ -98,6 +98,9 @@ type Runner struct {
 	// deadlineAt, once closed, ends the run as its deadline does (tests: once the run reaches the
 	// call the deadline is to stop); nil in production. Deadline still bounds run and destroy.
 	deadlineAt <-chan struct{}
+	// destroyAt, once closed, ends the destroy-on-exit as its budget running out does (tests: once
+	// a destroy hangs); nil in production.
+	destroyAt <-chan struct{}
 }
 
 // companionStage is a probe root's second stage (T075/T076): after the root's apply, the
@@ -946,7 +949,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	}
 
 	// Destroy-on-exit, with its own time: the run's context may have expired.
-	dctx, dcancel := context.WithTimeout(context.WithoutCancel(ctx), deadline)
+	dctx, dcancel := destroyContext(ctx, deadline, r.destroyAt)
 	defer dcancel()
 	var destroyErr error
 	// keepStage: the companion was not destroyed, so its stage — the identities it runs under, the

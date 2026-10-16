@@ -198,6 +198,11 @@ type laneStack struct {
 	// DestroyExit makes the apply of the stack's `plan -destroy` file fail, its state kept (T047,
 	// coordinator decision 4).
 	DestroyExit int `json:"destroy_exit,omitempty"`
+	// ApplyDelay and DestroyDelay (T018) make the forward apply, or the apply of a `plan -destroy`
+	// file, take that long before it goes on as configured; a SIGINT or SIGTERM meanwhile stops it,
+	// as tofu stops on one, the call failing with the signal logged.
+	ApplyDelay   time.Duration `json:"apply_delay,omitempty"`
+	DestroyDelay time.Duration `json:"destroy_delay,omitempty"`
 	// LockHeld (T062): a plan that must not wait for the lock (-lock-timeout) is refused, as
 	// OpenTofu refuses a second writer, naming this lock id; "" when the state is not locked.
 	LockHeld string `json:"lock_held,omitempty"`
@@ -601,6 +606,21 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		}
 		pf, ok := readPlan(positional[0])
 		call.Plan, call.Nonce, call.Destroy = positional[0], pf.Nonce, pf.Destroy
+		delay := st.ApplyDelay
+		if ok && pf.Destroy {
+			delay = st.DestroyDelay
+		}
+		if delay > 0 {
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+			select {
+			case s := <-sig:
+				call.Signal = s.String()
+				return fail("interrupted by %s", s)
+			case <-time.After(delay):
+			}
+			signal.Stop(sig)
+		}
 		if !initialised() {
 			return fail(`Backend initialization required, please run "tofu init"`)
 		}
