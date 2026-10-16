@@ -2,6 +2,7 @@ package stacks
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1004,6 +1006,255 @@ func TestRepositoryStackLocksMatchStages(t *testing.T) {
 			t.Errorf("%s/.terraform.lock.hcl differs from stages/%s/.terraform.lock.hcl", in.Path, in.Stage)
 		}
 	}
+}
+
+// fixtureStageLocks writes root/stages/<stage>/.terraform.lock.hcl for every stage m names: the
+// repository's bootstrap lock with a comment naming the stage, so each stage's lock differs from
+// every other's byte for byte and a lock copied from the wrong stage shows. It returns them by stage.
+func fixtureStageLocks(t *testing.T, root string, m *Manifest) map[string][]byte {
+	t.Helper()
+	base := readFile(t, filepath.Join(repositoryRoot, "stages", "bootstrap", ".terraform.lock.hcl"))
+	locks := map[string][]byte{}
+	for _, in := range m.Instances {
+		if _, done := locks[in.Stage]; done {
+			continue
+		}
+		lock := append([]byte("# Fixture lock of stage "+in.Stage+".\n"), base...)
+		writeFile(t, filepath.Join(root, "stages", in.Stage, ".terraform.lock.hcl"), lock)
+		locks[in.Stage] = lock
+	}
+	return locks
+}
+
+// treeFiles returns every file under root with its content, keyed by slash-separated path
+// relative to root: stack metadata, locks and generated files alike.
+func treeFiles(t *testing.T, root string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		data, err := os.ReadFile(path)
+		files[filepath.ToSlash(rel)] = string(data)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// Generate refuses a manifest with a row stacks:reconcile has not made a stack for, with
+// UNRECONCILED_ROW naming an unreconciled row, before it writes anything: no file of the project
+// root is created, changed or removed (no generated file, lock or stack metadata), so a
+// half-generated tree never results (006 FR-011, T027 case 1). The stage locks are in
+// place, so the refusal cannot be a missing lock's.
+func TestGenerateRefusesUnreconciledRow(t *testing.T) {
+	data := manifestOf(t, "sandbox")
+	m, err := DecodeManifest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := m.Instances[2] // demo-state: a tenant row between account rows and the project rows
+	var rowIDs []string
+	for _, in := range m.Instances {
+		rowIDs = append(rowIDs, in.ID)
+	}
+	for _, tc := range []struct {
+		name      string
+		reconcile bool     // reconcile the whole manifest first
+		remove    string   // then remove this row's stack again
+		names     []string // the ids of which the refusal must name one
+	}{
+		{name: "one-row-unreconciled", reconcile: true, remove: missing.Path, names: []string{missing.ID}},
+		{name: "none-reconciled", names: rowIDs},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := generationRoot(t, data)
+			fixtureStageLocks(t, root, m)
+			if tc.reconcile {
+				if _, err := Reconcile(ReconcileOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+					t.Fatalf("reconcile: %v", err)
+				}
+			}
+			if tc.remove != "" {
+				if err := os.RemoveAll(filepath.Join(root, filepath.FromSlash(tc.remove))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if files := generatedFiles(t, root); len(files) != 0 {
+				t.Fatalf("the tree holds generated files before generation: %q", slices.Sorted(maps.Keys(files)))
+			}
+			before := treeFiles(t, root)
+			err := Generate(GenerateOptions{Root: root, Terramate: pinnedTerramate(t)})
+			var ge *GenerateError
+			if !errors.As(err, &ge) || ge.Code != CodeUnreconciledRow {
+				t.Errorf("want refusal %s, got %v", CodeUnreconciledRow, err)
+			} else if !slices.ContainsFunc(tc.names, func(id string) bool { return strings.Contains(err.Error(), id) }) {
+				t.Errorf("refusal %q names none of the unreconciled rows %q", err, tc.names)
+			}
+			if files := generatedFiles(t, root); len(files) != 0 {
+				t.Errorf("a refused generation wrote %d files (%s, …)", len(files), slices.Sorted(maps.Keys(files))[0])
+			}
+			after := treeFiles(t, root)
+			for _, path := range slices.Sorted(maps.Keys(after)) {
+				content := after[path]
+				if old, ok := before[path]; !ok {
+					t.Errorf("a refused generation created %s", path)
+				} else if old != content {
+					t.Errorf("a refused generation changed %s", path)
+				}
+			}
+			for path := range before {
+				if _, ok := after[path]; !ok {
+					t.Errorf("a refused generation removed %s", path)
+				}
+			}
+		})
+	}
+}
+
+// A stack stacks:reconcile creates gets its stage's .terraform.lock.hcl from generation, byte for
+// byte: `task lint` and the live runner initialise it with -lockfile=readonly (006 FR-011, T027
+// case 2). Each fixture stage's lock differs, so a lock from another stage fails.
+func TestGenerateCopiesStageLock(t *testing.T) {
+	data := manifestOf(t, "sandbox")
+	m, err := DecodeManifest(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkLocks := func(t *testing.T, root string, locks map[string][]byte) {
+		t.Helper()
+		for _, in := range m.Instances {
+			got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(in.Path), ".terraform.lock.hcl"))
+			if err != nil {
+				t.Errorf("%s: no dependency lock file after generation (stage %s): %v", in.Path, in.Stage, err)
+			} else if !bytes.Equal(got, locks[in.Stage]) {
+				t.Errorf("%s/.terraform.lock.hcl is not stages/%s/.terraform.lock.hcl", in.Path, in.Stage)
+			}
+		}
+	}
+	t.Run("all-stacks-new", func(t *testing.T) {
+		root := generationRoot(t, data)
+		locks := fixtureStageLocks(t, root, m)
+		if err := generateIn(t, root); err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		checkLocks(t, root, locks)
+	})
+	t.Run("one-stack-new", func(t *testing.T) {
+		root := generationRoot(t, data)
+		locks := fixtureStageLocks(t, root, m)
+		if err := generateIn(t, root); err != nil {
+			t.Fatalf("first generate: %v", err)
+		}
+		added := m.Instances[len(m.Instances)-1]
+		if err := os.RemoveAll(filepath.Join(root, filepath.FromSlash(added.Path))); err != nil {
+			t.Fatal(err)
+		}
+		report, err := Reconcile(ReconcileOptions{Root: root, Terramate: pinnedTerramate(t)})
+		if err != nil || !slices.Equal(report.Created, []string{added.Path}) {
+			t.Fatalf("reconcile created %q (%v), want only %s", report.Created, err, added.Path)
+		}
+		if err := Generate(GenerateOptions{Root: root, Terramate: pinnedTerramate(t)}); err != nil {
+			t.Fatalf("second generate: %v", err)
+		}
+		checkLocks(t, root, locks)
+	})
+}
+
+// stageLock is a dependency lock file pinning registry.opentofu.org/ovh/ovh at version with
+// hashes, after a comment line.
+func stageLock(comment, version string, hashes ...string) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\nprovider \"registry.opentofu.org/ovh/ovh\" {\n  version     = %q\n  constraints = \"~> 2.21\"\n  hashes = [\n", comment, version)
+	for _, h := range hashes {
+		fmt.Fprintf(&b, "    %q,\n", h)
+	}
+	b.WriteString("  ]\n}\n")
+	return []byte(b.String())
+}
+
+// CheckStageLocks reports two stages whose locks pin different ovh/ovh versions or hashes, with a
+// STAGE_LOCK_MISMATCH finding naming both, since every stack shares one plugin cache (006 FR-011,
+// T027 case 3). Locks that agree on versions and hashes, whatever their comments, are no finding.
+func TestCheckStageLocks(t *testing.T) {
+	const (
+		h1    = "h1:z26YaKCDJJThNY9i+hCIq7YSiWiTc8vsC0RhX0hRwMc="
+		zh    = "zh:54dc88d0e863d9f87e9a9c63407f9d9e6a73c0f29d16b226f9bafc6fd2507712"
+		other = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	)
+	same := stageLock("pinned", "2.21.0", h1, zh)
+	for _, tc := range []struct {
+		name   string
+		stages map[string][]byte
+		pairs  [][2]string // each pair some finding must name; none: no finding
+	}{
+		{name: "agree", stages: map[string][]byte{"bootstrap": same, "tenant-state": same}},
+		{name: "agree-other-comment", stages: map[string][]byte{"bootstrap": same, "tenant-state": stageLock("copied from bootstrap", "2.21.0", h1, zh)}},
+		{name: "one-stage", stages: map[string][]byte{"bootstrap": same}},
+		{name: "version-differs", stages: map[string][]byte{"bootstrap": same, "tenant-state": stageLock("pinned", "2.22.0", h1, zh)},
+			pairs: [][2]string{{"bootstrap", "tenant-state"}}},
+		{name: "hash-differs", stages: map[string][]byte{"bootstrap": same, "tenant-state": stageLock("pinned", "2.21.0", other, zh)},
+			pairs: [][2]string{{"bootstrap", "tenant-state"}}},
+		{name: "hash-added", stages: map[string][]byte{"bootstrap": same, "tenant-state": stageLock("pinned", "2.21.0", h1, other, zh)},
+			pairs: [][2]string{{"bootstrap", "tenant-state"}}},
+		{name: "third-differs", stages: map[string][]byte{"bootstrap": same, "project": same, "runtime": stageLock("pinned", "2.22.0", h1, zh)},
+			pairs: [][2]string{{"runtime", ""}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for stage, lock := range tc.stages {
+				writeFile(t, filepath.Join(root, "stages", stage, ".terraform.lock.hcl"), lock)
+			}
+			findings := CheckStageLocks(root)
+			if len(tc.pairs) == 0 {
+				if len(findings) != 0 {
+					t.Errorf("findings %q, want none", findings)
+				}
+				return
+			}
+			for _, f := range findings {
+				if !strings.HasPrefix(f, CodeStageLockMismatch) {
+					t.Errorf("finding %q does not start with %s", f, CodeStageLockMismatch)
+				}
+			}
+			for _, p := range tc.pairs {
+				named := slices.ContainsFunc(findings, func(f string) bool {
+					if p[1] == "" { // the differing stage and either stage it differs from
+						return strings.Contains(f, p[0]) && (strings.Contains(f, "bootstrap") || strings.Contains(f, "project"))
+					}
+					return strings.Contains(f, p[0]) && strings.Contains(f, p[1])
+				})
+				if !named {
+					t.Errorf("findings %q: none names stages %s and %s", findings, p[0], cmp.Or(p[1], "bootstrap or project"))
+				}
+			}
+		})
+	}
+}
+
+// The repository itself stays green under FR-011 (T027 case 4): its stage locks agree, and the
+// sandbox manifest generates against the repository's own stages as its expectations say.
+// TestRepositoryStackLocksMatchStages above is unchanged.
+func TestRepositoryStageLocksAgree(t *testing.T) {
+	if findings := CheckStageLocks(repositoryRoot); len(findings) != 0 {
+		t.Errorf("the repository's stage locks: findings %q, want none", findings)
+	}
+	root := generationRoot(t, manifestOf(t, "sandbox"))
+	stages, err := filepath.Abs(filepath.Join(repositoryRoot, "stages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(stages, filepath.Join(root, "stages")); err != nil {
+		t.Fatal(err)
+	}
+	if err := generateIn(t, root); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	compareGenerated(t, "sandbox", expectedFiles(t, "sandbox"), generatedFiles(t, root))
 }
 
 // A `git` stage source is the schema's seam: Generate refuses it before writing anything, and the

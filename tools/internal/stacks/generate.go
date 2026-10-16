@@ -27,7 +27,20 @@ const (
 	// CodeNameCollision refuses one bucket name planned twice across the generated stacks (FR-007,
 	// data-model *Derived instance fields*, research R15).
 	CodeNameCollision = "NAME_COLLISION"
+	// CodeUnreconciledRow refuses a manifest with a row that stacks:reconcile has not yet made a
+	// stack for: nothing is generated from it (006 FR-011, research R12).
+	CodeUnreconciledRow = "UNRECONCILED_ROW"
+	// CodeStageLockMismatch starts each stacks:check finding of two stages whose dependency locks
+	// pin different provider versions or hashes (006 FR-011, research R12).
+	CodeStageLockMismatch = "STAGE_LOCK_MISMATCH"
 )
+
+// CheckStageLocks compares the dependency lock files of the stages under root/stages and returns
+// one finding, starting with CodeStageLockMismatch, per disagreement (006 FR-011). Not implemented
+// (T028).
+func CheckStageLocks(root string) []string {
+	return nil
+}
 
 // GenerateOptions configures one generation run.
 type GenerateOptions struct {
