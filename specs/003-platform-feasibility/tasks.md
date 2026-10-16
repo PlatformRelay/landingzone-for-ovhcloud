@@ -306,7 +306,7 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
 ### Probe 3: the URN `account:apiovh:iam/*` actions are checked against
 
-- [ ] T033 [US3] Write the iam-urn check's tests in tools/internal/probes/live/identity/urn_test.go with the stub of tools/internal/probes/live/identity/urn.go
+- [x] T033 [US3] Write the iam-urn check's tests in tools/internal/probes/live/identity/urn_test.go with the stub of tools/internal/probes/live/identity/urn.go — closed 2026-10-16, evidence: evidence/T033.md
   - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T031 (the package and its target line), 005/T049 run 3 and D109 (`account:apiovh:iam/resource/edit` granted on a project URN did not authorise tagging that project; the account URN is the likely target, UNVERIFIED).
   - Each identity's policy grants the probed action and a control action on the same URN: a known-working read on that URN (for the account URN `account:apiovh:me/get`, GET /me, which spec 005 observed; for the project URN the project's read, its action name taken from the IAM action reference and cited, UNVERIFIED until then). The probed call is judged only after that identity's control succeeds; the control is retried at bounded intervals up to a bounded stabilisation time.
   - Cases (given / when / then → defect exposed), against a fake OVHcloud API:
