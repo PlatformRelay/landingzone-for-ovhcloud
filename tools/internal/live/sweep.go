@@ -52,6 +52,16 @@ func (s *session) reconciled(leftErr error) error {
 	return unreconciled{fmt.Errorf("%w; finish with --cleanup %s", leftErr, s.r.ID)}
 }
 
+// keepRecord archives a run directory's earlier record before a probe `--cleanup` writes its own
+// (spec 007 FR-002, data-model *Run record archive*): every entry but inventory.jsonl,
+// baseline.json, observations.json and attempts/ moves into attempts/<n>/ (n = 1 + the highest
+// existing number), observations.json is copied there and stays in place; it returns that
+// directory, or "" when there was nothing to move. Stub (spec 007 T005): not implemented until
+// T007.
+func keepRecord(runDir string) (kept string, err error) {
+	return "", fmt.Errorf("keepRecord %s: not implemented", runDir)
+}
+
 // isUnreconciled reports whether a run's error says its Sweep or leftover check did not pass.
 func isUnreconciled(err error) bool {
 	var u unreconciled
