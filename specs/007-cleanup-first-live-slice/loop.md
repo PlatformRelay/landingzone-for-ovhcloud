@@ -46,6 +46,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T008 | CLOSED: 8 unit cases (5 refusals, 3 pins red on the stub's "not implemented"), lane table (plan, apply, destroy, chain) and bootstrap case red on the stub for their stated reasons; lane and bootstrap KD-1 pins pass; scratch reference green, 11 of 11 mutants killed (4 G26, the case defects, 2 from review) | leg 1 and strong leg, rounds 1 and 2 (round 1: bootstrap stdout id scan, two-tenant KD-1 pin) | for T009: `TestObserveChainReported/kd1-without-flag` runs the KD-1 account with the flag cleared and is refused by a correct FR-003 check; T009 changes it as a TEST-class correction |
 | T009 | CLOSED: `CheckProjectAliases` (state ref and tenant environments' refs, pairwise; KD-1 only state-beside-tenant and never when a tenant owns `STATE`; unresolved refs skipped) wired through `boundUnaliased` in the lane's `runLane` and the bootstrap's `(*stateRun).setup`; all 12 of T008's known-red rows green; 2 tests added (unresolved-refs pin, bootstrap malformed binding); 20 mutant runs (17 distinct), each killed, one of them by a crash rather than an assertion; every CI target green | leg 1 and strong leg, round 1 (no behaviour defect, so no round 2) | deferred to stage B: `identify --fresh-account` writes an aliased answer before `state` refuses it (optional earlier check). Rejected: `destroy` refused on an already-aliased account (FR-003 names destroy) |
 | T010 | CLOSED-WITH-GAPS: budget-alert root (lock file and `probe.tf` copied, stub `main.tf` with the alert object in `local.budget_alert`), 8 `tofu test` runs: 2 red on the stub for their stated reasons, 6 pins pass; P2 observed (mirror-only init with the lock file passes); reference 8/8, 10 of 11 mutants red; every other CI target green | leg 1 and strong leg, rounds 1 and 2; round-2 test fix (type-stable key check) unreviewed by rule | G1: the wiring line `budget_alert = local.budget_alert` is not observable from `tofu test` (T016 review, T019 read-back; plan-JSON check proposed). G2: an `ovh_cloud_project` declared outside `module.project` not caught (T016 review). T016 must keep `budget_alert = local.budget_alert` |
+| T011 | CLOSED: 12 tests (15 `ClassifyRun` rows) red on the stubs for their stated reasons; 1 pin and 2 `Before` regression guards pass (outcome already holds); stubs `Before`, `namelessKinds`, `probeBaseline`, `Baseline`, `LoadBaseline`, `RunClass`, `ClassifyRun`, `CondUnreconciledRun`, `unreconciledRuns`; scratch reference green, 35 of 35 mutants killed, 1 control survives; every other CI target green | leg 1 and strong leg, rounds 1 and 2; round-2 test fixes (post-apply listing, order-free ids) unreviewed by rule | for T014: earlier tests FR-006 retires (`sweep_test.go` order checks see the baseline listing before apply; `TestProbeRerun` run 2 now refused `unreconciled-run`; `TestProbeListingRetryBudget`/`Line` see the check's clock read before any child) and the baseline listing's retry, clock and budget. Deferred to the coordinator: data-model "record copy first, else recovery copy" when the record copy is unreadable; optionally "of this run and project" in the pre-create predicate |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -86,6 +87,16 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | bootstrap_alias_test.go:TestBootstrapProjectAlias | US2 | T008 | T009 |
 | tests/live/probes/budget-alert/probe.tftest.hcl:module_alert_on_run_project | US3 | T010 | |
 | tests/live/probes/budget-alert/probe.tftest.hcl:outputs_name_the_module_alert | US3 | T010 | |
+| probe_baseline_test.go:TestProbeBaselineBeforeApply | US3 | T011 | |
+| probe_baseline_test.go:TestProbeBaselineEmptyListing | US3 | T011 | |
+| probe_baseline_test.go:TestProbeBaselinePassingRunRetires | US3 | T011 | |
+| probe_baseline_test.go:TestProbeBaselineListingFails | US3 | T011 | |
+| probe_baseline_test.go:TestProbeBaselineDigestNotID | US3 | T011 | |
+| probe_baseline_test.go:TestLeftoverBefore (alert-absent-from-baseline, named-kind-in-before) | US3 | T011 | |
+| probe_baseline_test.go:TestClassifyRun (15 rows) | US3 | T011 | |
+| probe_baseline_test.go:TestLoadBaselineRecoveryCopy | US3 | T011 | |
+| probe_baseline_test.go:TestProbeStartUnreconciledRun | US3 | T011 | |
+| probe_baseline_test.go:TestUnreconciledRuns | US3 | T011 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -120,3 +131,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - An OpenTofu test reaches a child module only through its outputs (`module.x.<resource>` is `Unsupported attribute`, and the error skips every later run): assert a module call's inputs through a root local, and record the wiring line as a gap. (T010)
 - An HCL key check of an output that may be an object or a map is `sort(keys(x)) == tolist([...])`; `keys(x) == [...]` compares a list with a tuple and fails on a `tomap()` root. (T010)
 - A known red in `test:live-lane` stops every later `LZ_TARGETS` target in CI (`set -e`): FINAL runs them all through the entry, and a PR opened over that range says so. (T010)
+- A content check after the run cannot tell a record written before the apply from one rewritten after it: make the fake world change at the apply (a listing that gains the created resource). (T011)
+- To read a file that is kept only until reconciliation, fail a later step (the destroy) so the run stays unreconciled. (T011)

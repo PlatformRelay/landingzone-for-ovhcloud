@@ -93,6 +93,23 @@ type LeftoverCheck struct {
 	Clock waitClock
 	// Term receives one line per retry; nil discards them.
 	Term io.Writer
+	// Before is provider type -> the ids a probe's baseline listed before its first apply (spec
+	// 007 FR-006), consulted for namelessKinds only: an id there is not a candidate, an id absent
+	// is. nil, or no entry for a kind, leaves the inventory and run-id matching for that kind.
+	Before map[string][]string
+}
+
+// namelessKinds are the kinds whose resources carry no run-derived name or tag, so a probe's
+// baseline lists them before its first apply (spec 007 FR-006).
+var namelessKinds = []string{tAlert}
+
+// probeBaseline lists the namelessKinds of the run's recorded project through check's lister and
+// writes baseline.json to the record directory and its recovery copy under state/baselines/
+// (data-model *Probe baseline*), both synced, before the first apply; a listing that failed on
+// every attempt is written with complete false and its errors, which it returns.
+// Stub for T014 (spec 007 T011).
+func (s *session) probeBaseline(ctx context.Context, check LeftoverCheck) error {
+	return errors.New("probeBaseline: not implemented")
 }
 
 // defaultListingBackoff is the leftover check's retry waits (spec 007 FR-001): three attempts per

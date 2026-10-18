@@ -145,7 +145,7 @@ T014–T016.
   - Verify: `task test:live-lane`: the root initialises from the entry's mirror with its lock file (no initialisation failure); the first two cases fail on the stub for the stated reason; the three *pins* pass.
   - Evidence: `evidence/T010.md`; initial status `not-run`.
 
-- [ ] T011 [US3] Write probe-baseline, start-up-phase and unreconciled-run tests in tools/internal/live/probe_baseline_test.go
+- [x] T011 [US3] Write probe-baseline, start-up-phase and unreconciled-run tests in tools/internal/live/probe_baseline_test.go — closed 2026-10-18, evidence: evidence/T011.md
   - Requirements: FR-006; ADRs: 0008, 0024. Depends on: T009.
   - Cases (given / when / then → defect exposed), fake API and fake `tofu`, `LoadBaseline` and `ClassifyRun` as data-model.md fixes them:
     - given the fake `tofu` checking, when `apply` starts, for `.local/live/<run-id>/baseline.json` and `state/baselines/<run-id>.json` / when a probe runs / then both exist, are synced (written through a temporary file and renamed), name the run and the project digest, and list the alerts with `complete: true` → exposes a baseline written after the first create, in one place only, or under `state/probes/<run-id>/`.

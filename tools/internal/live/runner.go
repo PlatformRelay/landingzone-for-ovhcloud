@@ -1250,6 +1250,49 @@ const probeProjectKey = "LZ_PROBE_PROJECT_ID"
 // CondRecord names the refusal of a cleanup whose run record (probe.env) names no project id.
 const CondRecord = "record"
 
+// CondUnreconciledRun names the refusal of a probe start while another probe run is unreconciled
+// (its directory exists under state/probes/; spec 007 FR-006).
+const CondUnreconciledRun = "unreconciled-run"
+
+// Baseline is a probe run's baseline.json (spec 007 FR-006, data-model *Probe baseline*): the ids
+// of the namelessKinds listed before the run's first apply.
+type Baseline struct {
+	RunID         string              `json:"run_id"`
+	ProjectSHA256 string              `json:"project_sha256"`
+	Listed        map[string][]string `json:"listed"`
+	Complete      bool                `json:"complete"`
+	Errors        []string            `json:"errors"`
+}
+
+// RunClass is what a `--cleanup` may do with a probe run (data-model *Start-up phases and run
+// classes*).
+type RunClass string
+
+const (
+	RunPreCreate      RunClass = "pre-create"
+	RunBaselineBacked RunClass = "baseline-backed"
+	RunUntrusted      RunClass = "untrusted"
+)
+
+// LoadBaseline reads a run's baseline: recordDir's baseline.json first, else the recovery copy at
+// recoveryPath, and validates it against runID and projectID; its error text starts
+// BASELINE_MISSING or BASELINE_INVALID <reason>. Stub for T014 (spec 007 T011).
+func LoadBaseline(recordDir, recoveryPath, runID, projectID string) (Baseline, error) {
+	return Baseline{}, errors.New("LoadBaseline: not implemented")
+}
+
+// ClassifyRun classes a probe run from whether its state exists, whether its inventory holds an
+// entry, and its baseline as LoadBaseline returned it. Stub for T014 (spec 007 T011).
+func ClassifyRun(stateExists, inventoryHasEntry bool, b Baseline, loadErr error) RunClass {
+	return ""
+}
+
+// unreconciledRuns returns the run ids of the directories under probesDir other than self, sorted.
+// Stub for T014 (spec 007 T011).
+func unreconciledRuns(probesDir, self string) ([]string, error) {
+	return nil, errors.New("unreconciledRuns: not implemented")
+}
+
 // ProbeProject reads the project a run recorded (probe.env), for `--cleanup`: a cleanup destroys
 // and checks leftovers in that project, not the one account.env names now (T077/T078).
 func ProbeProject(configRoot, account, runID string) (string, error) {
