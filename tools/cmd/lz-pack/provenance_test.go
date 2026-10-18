@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/bundle/bundletest"
 )
 
 // packMainEnv makes the test binary run lz-pack's main with the JSON list of
@@ -527,4 +529,106 @@ func TestPackProvenanceNeedsCommit(t *testing.T) {
 	if _, err := os.Lstat(out); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("BEHAVIORAL_RED: lz-pack without -commit left %s (%v; %s)", out, err, stderr)
 	}
+}
+
+// Given a builder that is not lz-pack@<version>, provenance refuses: the
+// builder id must name lz-pack and a version. Each row first renders the
+// full input (the control).
+func TestProvenanceRefusesBuilder(t *testing.T) {
+	for name, builder := range map[string]string{"other-tool": "other@v1.0.0", "no-version": "lz-pack@", "unprefixed": "v1.0.0", "space": "lz-pack@v1 extra", "newline": "lz-pack@v1\n"} {
+		t.Run(name, func(t *testing.T) {
+			in := statementFixture()
+			if _, err := provenance(in); err != nil {
+				t.Fatalf("BEHAVIORAL_RED: control: valid input refused: %v", err)
+			}
+			in.Builder = builder
+			if data, err := provenance(in); err == nil || data != nil {
+				t.Errorf("BEHAVIORAL_RED: builder %q rendered %s (err %v)", builder, data, err)
+			}
+		})
+	}
+}
+
+// Given a commit that is not a full object id, attestedPack refuses before
+// anything is written: the pack never reaches its write and no layout is
+// left. The control packs the same bundle with the full id.
+func TestAttestedPackRefusesCommitFirst(t *testing.T) {
+	b := prepared(t)
+	if _, err := attestedPack(b.Dir, b.Launcher, b.ManifestSHA, filepath.Join(t.TempDir(), "control"), statementCommit); err != nil {
+		t.Fatalf("BEHAVIORAL_RED: control: %v", err)
+	}
+	for name, commit := range map[string]string{"empty": "", "ref": "main", "short": statementCommit[:7], "upper": strings.ToUpper(statementCommit)} {
+		t.Run(name, func(t *testing.T) {
+			written := false
+			setBeforeWrite(t, func() { written = true })
+			out := filepath.Join(t.TempDir(), "layout")
+			if _, err := attestedPack(b.Dir, b.Launcher, b.ManifestSHA, out, commit); err == nil || written {
+				t.Errorf("BEHAVIORAL_RED: commit %q: err %v, layer written %v", commit, err, written)
+			}
+			if _, err := os.Lstat(out); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("BEHAVIORAL_RED: commit %q left %s (%v)", commit, out, err)
+			}
+		})
+	}
+}
+
+// Given a layout whose statement cannot be written (provenance.json is
+// already taken when the pack writes it: a directory, a file, or a link to a
+// file outside the layout, present or not), attestedPack fails, removes the
+// layout it created and writes nothing through the link: no image stands
+// without its statement, and the statement never replaces or follows what is
+// there. The control takes another name in the same hook and keeps its
+// layout and statement.
+func TestAttestedPackStatementFailureLeavesNoLayout(t *testing.T) {
+	b := prepared(t)
+	t.Run("control", func(t *testing.T) {
+		out, err := attestedPackTaking(t, b, "provenance.tmp", func(path string) error { return os.Mkdir(path, 0o700) })
+		if info, statErr := os.Lstat(filepath.Join(out, "provenance.json")); err != nil || statErr != nil || !info.Mode().IsRegular() {
+			t.Fatalf("BEHAVIORAL_RED: control: %v, statement %v", err, statErr)
+		}
+	})
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, take := range map[string]func(string) error{
+		"directory":     func(path string) error { return os.Mkdir(path, 0o700) },
+		"file":          func(path string) error { return os.WriteFile(path, []byte("taken"), 0o600) },
+		"link":          func(path string) error { return os.Symlink(outside, path) },
+		"dangling-link": func(path string) error { return os.Symlink(outside+".new", path) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := attestedPackTaking(t, b, "provenance.json", take)
+			if _, statErr := os.Lstat(out); err == nil || !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("BEHAVIORAL_RED: statement not writable: err %v, layout left (%v)", err, statErr)
+			}
+			outsideUnchanged(t, outside)
+		})
+	}
+}
+
+// outsideUnchanged checks that the file outside the layout still holds what
+// the test wrote, and that nothing was created beside it.
+func outsideUnchanged(t *testing.T, outside string) {
+	t.Helper()
+	if data, err := os.ReadFile(outside); err != nil || string(data) != "outside" {
+		t.Errorf("BEHAVIORAL_RED: the statement wrote through a link: %q (%v)", data, err)
+	}
+	if _, err := os.Lstat(outside + ".new"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("BEHAVIORAL_RED: the statement created a file through a link (%v)", err)
+	}
+}
+
+// attestedPackTaking packs the bundle with the test commit into a new
+// layout, after take has made the name taken in it while the pack runs.
+func attestedPackTaking(t *testing.T, b bundletest.Bundle, taken string, take func(path string) error) (string, error) {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "layout")
+	setBeforeWrite(t, func() {
+		if err := take(filepath.Join(out, taken)); err != nil {
+			t.Error(err)
+		}
+	})
+	_, err := attestedPack(b.Dir, b.Launcher, b.ManifestSHA, out, statementCommit)
+	return out, err
 }

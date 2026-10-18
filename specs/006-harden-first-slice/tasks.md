@@ -318,7 +318,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
   - Verify: `task test:runtime-image`: T030's cases green; `checks.Packages` is the one pin table; `prepare.py` gone and referenced only in history; the existing lz-pack and lz-offline rows unchanged.
   - Evidence: `evidence/T033.md`; PR; initial status `not-run`.
 
-- [ ] T034 [US3] Write `provenance.json` beside each packed image in tools/cmd/lz-pack/provenance.go and tools/cmd/lz-pack/main.go
+- [x] T034 [US3] Write `provenance.json` beside each packed image in tools/cmd/lz-pack/provenance.go and tools/cmd/lz-pack/main.go — closed 2026-10-18, evidence: evidence/T034.md
   - Requirements: FR-017; ADRs: 0010, 0021. Depends on: T031, T033.
   - Verify: `task test:runtime-image`: T031's cases green.
   - Evidence: `evidence/T034.md`; PR; initial status `not-run`.
