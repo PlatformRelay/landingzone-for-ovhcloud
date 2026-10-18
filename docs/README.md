@@ -29,6 +29,9 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
 
 - [Run the first slice on an OVHcloud account](how-to/run-the-first-slice.md) — bootstrap,
   apply and destroy the stacks, read a run's record, clean up. Maintainer only.
+- [Set up a fresh OVHcloud account](how-to/set-up-a-fresh-account.md) — the owner's command
+  sheet from signup to a first chain, with the old account kept beside the new one. Maintainer
+  only.
 
 ## Reference (look things up)
 
