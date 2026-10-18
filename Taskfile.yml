@@ -172,7 +172,7 @@ tasks:
   test:live-lane:
     desc: Live-lane safety core and lz-live entry against fake git, fake API and fake children (005 V007)
     cmds:
-      - go -C tools test -count=1 -run '^Test(Chain|Observe)' ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./internal/probes/live/identity ./cmd/lz-live & shard=$!; rest=0; go -C tools test -count=1 -skip '^Test(Chain|Observe)' ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./internal/probes/live/identity ./cmd/lz-live || rest=$?; wait $shard || rest=1; exit $rest
+      - go -C tools test -count=1 -run '^Test(Chain|Observe)' ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./internal/probes/live/identity ./internal/probes/live/alerting ./cmd/lz-live & shard=$!; rest=0; go -C tools test -count=1 -skip '^Test(Chain|Observe)' ./internal/planjson ./internal/live ./internal/probes/live/state ./internal/probes/live/storageiam ./internal/probes/live/identity ./internal/probes/live/alerting ./cmd/lz-live || rest=$?; wait $shard || rest=1; exit $rest
       - go -C tools test -count=1 -tags live ./internal/probes/live/chain
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/alerting
       - go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/iam

@@ -243,6 +243,20 @@ func TestProbeCheckTokenResidual(t *testing.T) {
 	}
 }
 
+// TestProbeCheckBudgetAlert (spec 007 T012, FR-007): the budget-alert root gets the budget-alert
+// check with an Observe and a Sweep, selecting the map output budget_alert_check (never the scalar
+// alert_id); a root of another name still gets none. The arguments are today's; T015 may add the
+// run's paths to probeCheck's parameters and adapt every call alike.
+func TestProbeCheckBudgetAlert(t *testing.T) {
+	c := probeCheck("budget-alert", deps{}, live.API{}, live.Credential{}, nil, nil, "0123456789abcdef0123456789abcdef")
+	if c == nil || c.Output != "budget_alert_check" || !slices.Equal(c.Public, []string{"alert_id"}) || c.Sweep == nil || c.Observe == nil {
+		t.Fatalf("probeCheck(budget-alert) = %+v, want the budget-alert check with a Sweep and output budget_alert_check", c)
+	}
+	if c := probeCheck("budget-alert-x", deps{}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
+		t.Errorf("probeCheck(budget-alert-x) = %+v, want none", c)
+	}
+}
+
 // TestProbeCheckIamURN (spec 003 T034): the iam-urn root gets the iam-urn check with a Sweep; a
 // root of another name still gets none.
 func TestProbeCheckIamURN(t *testing.T) {

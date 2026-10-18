@@ -47,6 +47,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T009 | CLOSED: `CheckProjectAliases` (state ref and tenant environments' refs, pairwise; KD-1 only state-beside-tenant and never when a tenant owns `STATE`; unresolved refs skipped) wired through `boundUnaliased` in the lane's `runLane` and the bootstrap's `(*stateRun).setup`; all 12 of T008's known-red rows green; 2 tests added (unresolved-refs pin, bootstrap malformed binding); 20 mutant runs (17 distinct), each killed, one of them by a crash rather than an assertion; every CI target green | leg 1 and strong leg, round 1 (no behaviour defect, so no round 2) | deferred to stage B: `identify --fresh-account` writes an aliased answer before `state` refuses it (optional earlier check). Rejected: `destroy` refused on an already-aliased account (FR-003 names destroy) |
 | T010 | CLOSED-WITH-GAPS: budget-alert root (lock file and `probe.tf` copied, stub `main.tf` with the alert object in `local.budget_alert`), 8 `tofu test` runs: 2 red on the stub for their stated reasons, 6 pins pass; P2 observed (mirror-only init with the lock file passes); reference 8/8, 10 of 11 mutants red; every other CI target green | leg 1 and strong leg, rounds 1 and 2; round-2 test fix (type-stable key check) unreviewed by rule | G1: the wiring line `budget_alert = local.budget_alert` is not observable from `tofu test` (T016 review, T019 read-back; plan-JSON check proposed). G2: an `ovh_cloud_project` declared outside `module.project` not caught (T016 review). T016 must keep `budget_alert = local.budget_alert` |
 | T011 | CLOSED: 12 tests (15 `ClassifyRun` rows) red on the stubs for their stated reasons; 1 pin and 2 `Before` regression guards pass (outcome already holds); stubs `Before`, `namelessKinds`, `probeBaseline`, `Baseline`, `LoadBaseline`, `RunClass`, `ClassifyRun`, `CondUnreconciledRun`, `unreconciledRuns`; scratch reference green, 35 of 35 mutants killed, 1 control survives; every other CI target green | leg 1 and strong leg, rounds 1 and 2; round-2 test fixes (post-apply listing, order-free ids) unreviewed by rule | for T014: earlier tests FR-006 retires (`sweep_test.go` order checks see the baseline listing before apply; `TestProbeRerun` run 2 now refused `unreconciled-run`; `TestProbeListingRetryBudget`/`Line` see the check's clock read before any child) and the baseline listing's retry, clock and budget. Deferred to the coordinator: data-model "record copy first, else recovery copy" when the record copy is unreadable; optionally "of this run and project" in the pre-create predicate |
+| T012 | CLOSED: 12 tests in `alerting/check_test.go` (sweep: delete only the non-baseline plan-matching alert in the `Sweep` argument's project and list again; still listed fails; foreign alert reported and kept, beside B too; untrusted 7 rows; recovery copy; lost create; pre-create sends nothing; gate 6 rows with controls; read-back and mismatches) and `TestProbeCheckBudgetAlert`, all red on the stubs; stubs `alerting.Options`/`Check`, `APIListAlerts`/`APIGetAlert`/`APIDeleteAlert`; `Options` gains `StateDir` and `Project` (coordinator decisions 2026-10-18, data-model row updated); scratch reference green, 38 mutants killed, 1 control survives | leg 1 and strong leg, rounds 1 and 2; round-2 test fixes (B beside a foreign alert, `get-no-id`) unreviewed by rule | for T015: `probeCheck` needs the run paths (`RunDir`, `StateDir`) and must assert them (the registration test cannot see them unwired; T013's entry cases partly do); add `tools/internal/probes/live/alerting` to `test:bootstrap`/`bootstrap:account` inputs with the import. For the coordinator: data-model's registration row still names `RunDir: …` only (proposed: `…, StateDir: …, Project: project`) |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -97,6 +98,19 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | probe_baseline_test.go:TestLoadBaselineRecoveryCopy | US3 | T011 | |
 | probe_baseline_test.go:TestProbeStartUnreconciledRun | US3 | T011 | |
 | probe_baseline_test.go:TestUnreconciledRuns | US3 | T011 | |
+| alerting/check_test.go:TestSweepDeletesOnlyNewAlert | US3 | T012 | |
+| alerting/check_test.go:TestSweepFailsWhenStillListed | US3 | T012 | |
+| alerting/check_test.go:TestSweepBaselineOnly | US3 | T012 | |
+| alerting/check_test.go:TestSweepLeavesForeignAlert (4 rows) | US3 | T012 | |
+| alerting/check_test.go:TestSweepDeletesBesideForeign (2 rows) | US3 | T012 | |
+| alerting/check_test.go:TestSweepUntrusted (7 rows) | US3 | T012 | |
+| alerting/check_test.go:TestSweepRecoveryCopy (2 rows) | US3 | T012 | |
+| alerting/check_test.go:TestSweepLostCreate (3 rows) | US3 | T012 | |
+| alerting/check_test.go:TestSweepPreCreate (2 rows) | US3 | T012 | |
+| alerting/check_test.go:TestAlertCallsGated (6 rows, red on their controls) | US3 | T012 | |
+| alerting/check_test.go:TestObserveReadsBack | US3 | T012 | |
+| alerting/check_test.go:TestObserveMismatch (3 rows) | US3 | T012 | |
+| probe_check_test.go:TestProbeCheckBudgetAlert | US3 | T012 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -133,3 +147,8 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - A known red in `test:live-lane` stops every later `LZ_TARGETS` target in CI (`set -e`): FINAL runs them all through the entry, and a PR opened over that range says so. (T010)
 - A content check after the run cannot tell a record written before the apply from one rewritten after it: make the fake world change at the apply (a listing that gains the created resource). (T011)
 - To read a file that is kept only until reconciliation, fail a later step (the destroy) so the run stays unreconciled. (T011)
+- A refusal row that passes on a stub (the gate refuses the unknown op) is red only with its acceptance control in the same row: put the control call inside each refusal subtest. (T012)
+- A sweep test whose deleting fixtures all carry state cannot tell a lost create (valid baseline, no state, no inventory) from pre-create; give the delete case a row without state. (T012)
+- When a function gets the same value two ways (the `Sweep` argument and an `Options` field), set them apart in the fixture, or a mutant reading the wrong one survives. (T012)
+- A "report the foreign one and fail" case needs the run's own resource beside it, listed before and after it, or a sweep that stops at the first mismatch passes. (T012)
+- Test-package names (`digest`, `observation`) collide with the implementation the next task writes in the same package: prefix the test's package-level names. (T012)

@@ -73,6 +73,13 @@ const (
 	APIListResources     APIOp = "ListResources"     // GET /iam/resource?resourceName={name}, every page: the resources of that name
 	APIPutResourceTags   APIOp = "PutResourceTags"   // PUT /iam/resource/{urn} with {"tags": …}
 	APIDeleteResourceTag APIOp = "DeleteResourceTag" // DELETE /iam/resource/{urn}/tag/{key}
+
+	// The budget-alert check (spec 007 FR-007), v1 under /cloud/project/{project}; ID is one path
+	// segment (kb api/v1/cloud.json: an alert id is a uuid). Stubs for T015 (spec 007 T012):
+	// apiGate refuses them until then.
+	APIListAlerts  APIOp = "ListAlerts"  // GET …/alerting
+	APIGetAlert    APIOp = "GetAlert"    // GET …/alerting/{id}
+	APIDeleteAlert APIOp = "DeleteAlert" // DELETE …/alerting/{id}
 )
 
 // APICall is one operation; each takes only its own parts.
