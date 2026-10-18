@@ -9,6 +9,10 @@
 // admission, and its entry must have that digest compiled in, so a layout is
 // kept only if the entry it carries admits the bundle it carries.
 //
+// Every pack also writes provenance.json into the layout, an unsigned in-toto
+// statement binding the image to the source commit given with -commit (a
+// required flag), resources.json and the entry (FR-017).
+//
 // `lz-pack prepare` writes that bundle first, from the fetched artefacts
 // the pin tables pin (internal/bundle Prepare).
 package main
@@ -36,7 +40,9 @@ import (
 
 const source = "https://github.com/PlatformRelay/landingzone-for-ovhcloud"
 
-type packed struct{ Layer, Manifest string }
+// packed names what pack wrote: the layer and manifest digests, and the
+// digest (bare hex) of the entry the layer carries.
+type packed struct{ Layer, Manifest, Entry string }
 
 type descriptor struct {
 	MediaType string `json:"mediaType"`
@@ -392,32 +398,38 @@ func extractFile(root *os.Root, name string, mode fs.FileMode, content io.Reader
 // verify extracts the written layer beside out and requires that the bundle
 // it carries passes admission with the launcher it carries, and that the
 // entry it carries was compiled for manifestSHA. It judges the bytes that
-// were archived, whatever happened to the inputs meanwhile.
-func verify(out, layerDigest, manifestSHA string) error {
+// were archived, whatever happened to the inputs meanwhile, and returns the
+// digest (bare hex) of that entry's bytes for the provenance statement.
+func verify(out, layerDigest, manifestSHA string) (string, error) {
 	parent, err := filepath.EvalSymlinks(filepath.Dir(out))
 	if err != nil {
-		return err
+		return "", err
 	}
 	scratch, err := os.MkdirTemp(parent, ".lz-pack-verify-")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer os.RemoveAll(scratch)
 	if err := extract(filepath.Join(out, "blobs", "sha256", strings.TrimPrefix(layerDigest, "sha256:")), layerDigest, scratch); err != nil {
-		return err
+		return "", err
 	}
 	runtime := filepath.Join(scratch, "runtime")
 	if _, err := bundle.Admit(runtime, manifestSHA, filepath.Join(scratch, "host", "bwrap")); err != nil {
-		return fmt.Errorf("PACK_VERIFY: packed bundle refused: %w", err)
+		return "", fmt.Errorf("PACK_VERIFY: packed bundle refused: %w", err)
 	}
-	compiled, err := compiledDigest(filepath.Join(runtime, "lz-offline"))
+	entryPath := filepath.Join(runtime, "lz-offline")
+	compiled, err := compiledDigest(entryPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if compiled != manifestSHA {
-		return fmt.Errorf("PACK_VERIFY: entry compiled for manifest %q, not %s", compiled, manifestSHA)
+		return "", fmt.Errorf("PACK_VERIFY: entry compiled for manifest %q, not %s", compiled, manifestSHA)
 	}
-	return nil
+	entry, err := bundle.Regular(entryPath)
+	if err != nil {
+		return "", fmt.Errorf("PACK_VERIFY: %w", err)
+	}
+	return bundle.Hash(entry), nil
 }
 
 // beforeWrite runs between planning and writing; tests use it to change the
@@ -435,17 +447,11 @@ func store(out, mediaType string, value any) (descriptor, error) {
 	return d, os.WriteFile(filepath.Join(out, "blobs", "sha256", hex.EncodeToString(sum[:])), data, 0o644)
 }
 
+// pack admits the bundle, creates out and writes the image layout into it.
+// A failed pack removes the output it created, and only that.
 func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
-	for _, path := range []string{dir, launcher, out} {
-		if err := canonical(path); err != nil {
-			return packed{}, err
-		}
-	}
-	items, err := plan(dir, launcher, manifestSHA)
+	items, err := admitPack(dir, launcher, manifestSHA, out)
 	if err != nil {
-		return packed{}, err
-	}
-	if err := outside(dir, out); err != nil {
 		return packed{}, err
 	}
 	if err := os.Mkdir(out, 0o755); err != nil {
@@ -457,13 +463,52 @@ func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
 			os.RemoveAll(out)
 		}
 	}()
+	return writeLayout(out, items, manifestSHA)
+}
+
+// admitPack checks the paths, admits the bundle and plans the layer before
+// anything is written.
+func admitPack(dir, launcher, manifestSHA, out string) ([]item, error) {
+	for _, path := range []string{dir, launcher, out} {
+		if err := canonical(path); err != nil {
+			return nil, err
+		}
+	}
+	items, err := plan(dir, launcher, manifestSHA)
+	if err != nil {
+		return nil, err
+	}
+	return items, outside(dir, out)
+}
+
+// writeLayout writes the layer, verifies what it carries, then writes the
+// config, manifest and index that make out an image layout.
+func writeLayout(out string, items []item, manifestSHA string) (packed, error) {
 	blobs := filepath.Join(out, "blobs", "sha256")
 	if err := os.MkdirAll(blobs, 0o755); err != nil {
 		return packed{}, err
 	}
-	file, err := os.CreateTemp(blobs, "layer-")
+	layerDigest, layerSize, diffID, err := writeLayer(blobs, items)
 	if err != nil {
 		return packed{}, err
+	}
+	entry, err := verify(out, layerDigest, manifestSHA)
+	if err != nil {
+		return packed{}, err
+	}
+	manifest, err := writeIndex(out, descriptor{"application/vnd.oci.image.layer.v1.tar+gzip", layerDigest, layerSize}, diffID)
+	if err != nil {
+		return packed{}, err
+	}
+	return packed{layerDigest, manifest, entry}, nil
+}
+
+// writeLayer writes the layer blob under its digest and returns the digest,
+// its size and the uncompressed tar's digest.
+func writeLayer(blobs string, items []item) (string, int64, string, error) {
+	file, err := os.CreateTemp(blobs, "layer-")
+	if err != nil {
+		return "", 0, "", err
 	}
 	beforeWrite()
 	layerDigest, layerSize, diffID, err := layer(file, items)
@@ -471,40 +516,63 @@ func pack(dir, launcher, manifestSHA, out string) (result packed, err error) {
 		err = closeErr
 	}
 	if err != nil {
-		return packed{}, err
+		return "", 0, "", err
 	}
 	if err := os.Rename(file.Name(), filepath.Join(blobs, strings.TrimPrefix(layerDigest, "sha256:"))); err != nil {
-		return packed{}, err
+		return "", 0, "", err
 	}
-	if err := verify(out, layerDigest, manifestSHA); err != nil {
-		return packed{}, err
-	}
+	return layerDigest, layerSize, diffID, nil
+}
+
+// writeIndex writes the config and manifest blobs for the layer, then
+// index.json and oci-layout, and returns the manifest's digest.
+func writeIndex(out string, layerBlob descriptor, diffID string) (string, error) {
 	config, err := store(out, "application/vnd.oci.image.config.v1+json", map[string]any{
 		"architecture": "amd64", "os": "linux", "config": map[string]any{},
 		"rootfs": map[string]any{"type": "layers", "diff_ids": []string{diffID}},
 	})
 	if err != nil {
-		return packed{}, err
+		return "", err
 	}
 	manifest, err := store(out, "application/vnd.oci.image.manifest.v1+json", map[string]any{
 		"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json", "config": config,
-		"layers":      []descriptor{{"application/vnd.oci.image.layer.v1.tar+gzip", layerDigest, layerSize}},
+		"layers":      []descriptor{layerBlob},
 		"annotations": map[string]string{"org.opencontainers.image.source": source},
 	})
 	if err != nil {
-		return packed{}, err
+		return "", err
 	}
 	index, err := json.Marshal(map[string]any{"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": []descriptor{manifest}})
 	if err != nil {
-		return packed{}, err
+		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(out, "index.json"), index, 0o644); err != nil {
-		return packed{}, err
+		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(out, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o644); err != nil {
+		return "", err
+	}
+	return manifest.Digest, nil
+}
+
+// attestedPack packs as pack does and writes the image's provenance
+// statement into the layout (FR-017). The commit's form is checked before
+// anything is written, and a statement that cannot be rendered or written
+// removes the layout pack created. Like pack's own removal, this covers
+// failures lz-pack sees, not a process killed between the two writes.
+func attestedPack(dir, launcher, manifestSHA, out, commit string) (packed, error) {
+	if err := checkCommit(commit); err != nil {
 		return packed{}, err
 	}
-	return packed{layerDigest, manifest.Digest}, nil
+	result, err := pack(dir, launcher, manifestSHA, out)
+	if err != nil {
+		return packed{}, err
+	}
+	if err := writeStatement(out, result, manifestSHA, commit); err != nil {
+		os.RemoveAll(out)
+		return packed{}, err
+	}
+	return result, nil
 }
 
 func main() {
@@ -515,12 +583,13 @@ func main() {
 	manifestSHA := flag.String("manifest-sha", "", "resources.json digest the bundle's entry was built with")
 	launcher := flag.String("bwrap", "/usr/bin/bwrap", "launcher the bundle manifest pins (absolute)")
 	out := flag.String("out", "", "new OCI image layout directory (absolute)")
+	commit := flag.String("commit", "", "full source commit id the bundle was built from, for the provenance statement")
 	flag.Parse()
-	if *dir == "" || *manifestSHA == "" || *out == "" || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: lz-pack -bundle <dir> -manifest-sha <hex> [-bwrap <file>] -out <new-dir>")
+	if *dir == "" || *manifestSHA == "" || *out == "" || *commit == "" || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: lz-pack -bundle <dir> -manifest-sha <hex> [-bwrap <file>] -out <new-dir> -commit <sha>")
 		os.Exit(2)
 	}
-	result, err := pack(*dir, *launcher, *manifestSHA, *out)
+	result, err := attestedPack(*dir, *launcher, *manifestSHA, *out, *commit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
