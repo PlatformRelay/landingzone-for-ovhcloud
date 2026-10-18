@@ -162,7 +162,7 @@ T014–T016.
   - Verify: `task test:live-lane`: every case except the *pin* fails against the stubs `probeBaseline`, `LoadBaseline`, `ClassifyRun` and `unreconciledRuns`.
   - Evidence: `evidence/T011.md`; initial status `not-run`.
 
-- [ ] T012 [US3] Write the budget-alert probe check's tests in tools/internal/probes/live/alerting/check_test.go, with the stub package and its line in Taskfile.yml's `test:live-lane`
+- [x] T012 [US3] Write the budget-alert probe check's tests in tools/internal/probes/live/alerting/check_test.go, with the stub package and its line in Taskfile.yml's `test:live-lane` — closed 2026-10-18, evidence: evidence/T012.md
   - Requirements: FR-007, FR-008; ADRs: 0006, 0008. Depends on: T009.
   - Scope: stub package `tools/internal/probes/live/alerting` with `Check` and `Options` as data-model.md fixes them; stub `APIListAlerts`, `APIGetAlert`, `APIDeleteAlert` in tools/internal/live/apicheck.go; add `./internal/probes/live/alerting` to both `go test` commands of `test:live-lane`, and `tools/internal/probes/live/alerting` to `live:probe`'s registry inputs.
   - Cases (given / when / then → defect exposed), fake API recording every call:
