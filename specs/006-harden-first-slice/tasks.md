@@ -323,7 +323,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
   - Verify: `task test:runtime-image`: T031's cases green.
   - Evidence: `evidence/T034.md`; PR; initial status `not-run`.
 
-- [ ] T049 [US3] Take the tofu and terramate binaries from their verified archives in tools/internal/bundle/prepare.go, test first in tools/internal/bundle/prepare_test.go (found in T033)
+- [x] T049 [US3] Take the tofu and terramate binaries from their verified archives in tools/internal/bundle/prepare.go, test first in tools/internal/bundle/prepare_test.go (found in T033) — closed 2026-10-18, evidence: evidence/T049.md
   - Requirements: FR-014; ADRs: 0002, 0021. Depends on: T033.
   - Cases (given / when / then → defect exposed):
     - given pinned tofu and terramate archives and a toolchain whose tofu binary differs from the archive's / when `Prepare` runs / then the bundle's tofu is the archive's (by hash) → exposes binaries copied from the toolchain unhashed while their archives are verified but unused.

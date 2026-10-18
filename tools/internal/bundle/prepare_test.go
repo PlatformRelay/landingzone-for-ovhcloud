@@ -3,6 +3,7 @@ package bundle
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	_ "embed"
 	"fmt"
 	"io"
@@ -348,7 +349,9 @@ var fixturePins = map[string]string{
 
 const fixtureProvider = "terraform-provider-ovh_2.21.0_linux_amd64.zip"
 
-// fixtureToolchain is the qualified toolchain root's content Prepare copies.
+// fixtureToolchain is the qualified toolchain root: the Go tree Prepare
+// copies, and tofu and terramate binaries that differ from their archives'
+// members, which Prepare must not take (T049).
 var fixtureToolchain = map[string]string{
 	"tools/go/go/bin/go":        "go binary\n",
 	"tools/go/go/VERSION":       "go1.27.1\n",
@@ -448,13 +451,14 @@ func TestPrepareResourcesAdmitted(t *testing.T) {
 }
 
 // fixturePrepared is what the entry binds (lz-offline main.go, bwrap argv),
-// with the bytes each fixture put there.
+// with the bytes each fixture put there: the four tools from their release
+// archives (tofu and terramate too since T049, not from the toolchain).
 func fixturePrepared() map[string]string {
 	return map[string]string{
 		"task":                           "task\n",
 		"tflint":                         "tflint\n",
-		"tofu":                           fixtureToolchain["tools/tofu/tofu"],
-		"terramate":                      fixtureToolchain["tools/terramate/terramate"],
+		"tofu":                           "tofu release\n",
+		"terramate":                      "terramate release\n",
 		"go/bin/go":                      fixtureToolchain["tools/go/go/bin/go"],
 		"go/VERSION":                     fixtureToolchain["tools/go/go/VERSION"],
 		"rootfs/bin/busybox":             "busybox\n",
@@ -551,6 +555,129 @@ func TestPrepareRefusesUnpinnedArtefacts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrepareTakesToolsFromArchives (T049, case 1): the toolchain's tofu and
+// terramate differ from the members of their pinned release archives; the
+// bundle holds the archives' members, owner-only, so what runs is what was
+// verified.
+func TestPrepareTakesToolsFromArchives(t *testing.T) {
+	f := newPrepareFixture(t)
+	if err := Prepare(f.options); err != nil {
+		t.Fatalf("BEHAVIORAL_RED: valid fixtures refused: %v", err)
+	}
+	resources := filepath.Join(f.options.Root, "bundle/resources")
+	for _, tool := range []string{"tofu", "terramate"} {
+		member := testArchiveMember(t, readTestFile(t, f.options.Archives[tool]), tool)
+		if bytes.Equal(member, readTestFile(t, filepath.Join(f.options.Toolchain, "tools", tool, tool))) {
+			t.Fatalf("fixture: the toolchain's %s equals its archive's member", tool)
+		}
+		info, err := os.Lstat(filepath.Join(resources, tool))
+		if err != nil {
+			t.Fatalf("BEHAVIORAL_RED: bundle has no %s: %v", tool, err)
+		}
+		if got := Hash(readTestFile(t, filepath.Join(resources, tool))); got != Hash(member) {
+			t.Errorf("BEHAVIORAL_RED: bundle's %s has digest %s, not its verified archive's member %s", tool, got, Hash(member))
+		}
+		if info.Mode() != 0o700 {
+			t.Errorf("BEHAVIORAL_RED: bundle's %s has mode %v; want owner-only 0700", tool, info.Mode())
+		}
+	}
+}
+
+// TestPrepareRefusesToolArchiveMember (T049, case 2): a tofu or terramate
+// archive whose member is not one bounded regular file under the tool's name
+// in an archive with its pinned digest is refused, and nothing is published.
+// The pin-kept rows change the member under an unchanged pin, which the
+// archive's verification refuses before any member is read (it held before
+// T049 too); the re-pinned rows pin the changed archive, so only the member
+// check stands between it and the bundle. Each row first prepares the unchanged fixtures.
+func TestPrepareRefusesToolArchiveMember(t *testing.T) {
+	planted := func(name string) *tar.Header { return &tar.Header{Typeflag: tar.TypeReg, Name: name, Mode: 0o755} }
+	for name, row := range map[string]struct {
+		tool    string
+		members []*tar.Header
+		repin   bool
+	}{
+		"tofu-member-changed-pin-kept":      {"tofu", []*tar.Header{planted("tofu")}, false},
+		"terramate-member-changed-pin-kept": {"terramate", []*tar.Header{planted("terramate")}, false},
+		"tofu-member-missing":               {"tofu", []*tar.Header{planted("README.md")}, true},
+		"terramate-member-missing":          {"terramate", []*tar.Header{planted("terramate-ls")}, true},
+		"tofu-member-nested":                {"tofu", []*tar.Header{planted("bin/tofu")}, true},
+		"tofu-member-twice":                 {"tofu", []*tar.Header{planted("tofu"), planted("tofu")}, true},
+		"terramate-member-link": {"terramate", []*tar.Header{
+			{Typeflag: tar.TypeSymlink, Name: "terramate", Linkname: "/usr/bin/true"},
+		}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Prepare(newPrepareFixture(t).options); err != nil {
+				t.Fatalf("BEHAVIORAL_RED: control: valid fixtures refused: %v", err)
+			}
+			f := newPrepareFixture(t)
+			archive := testToolArchive(t, row.members...)
+			writeTestFile(t, f.options.Archives[row.tool], archive, 0o600)
+			if row.repin {
+				setFixturePin(row.tool, Hash(archive))
+			}
+			err := Prepare(f.options)
+			if err == nil {
+				t.Fatalf("BEHAVIORAL_RED: %s prepared", name)
+			}
+			if !strings.Contains(err.Error(), row.tool) {
+				t.Errorf("BEHAVIORAL_RED: refusal does not name %s: %v", row.tool, err)
+			}
+			assertRootHoldsOnlyProof(t, f.options.Root)
+		})
+	}
+}
+
+// testToolArchive is a gzipped tar of the given members, as tools' release
+// archives are; a regular member's content is "planted\n".
+func testToolArchive(t *testing.T, members ...*tar.Header) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	stream := gzip.NewWriter(&out)
+	writer := tar.NewWriter(stream)
+	for _, member := range members {
+		copied := *member
+		appendMember(t, writer, &copied)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+// testArchiveMember reads the regular member called name out of a gzipped
+// tar, independently of the code under test.
+func testArchiveMember(t *testing.T, archive []byte, name string) []byte {
+	t.Helper()
+	stream, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := tar.NewReader(stream)
+	for {
+		header, err := reader.Next()
+		if err != nil {
+			t.Fatalf("fixture archive has no %s member: %v", name, err)
+		}
+		if header.Name == name && header.Typeflag == tar.TypeReg {
+			return readAllTest(t, reader)
+		}
+	}
+}
+
+func readAllTest(t *testing.T, reader io.Reader) []byte {
+	t.Helper()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 // TestPrepareRefusesExistingDestination: Prepare writes only into absent

@@ -56,6 +56,9 @@ const (
 	exportTimeout   = 120 * time.Second
 	maxTaskBytes    = 64 << 20
 	maxTflintBytes  = 128 << 20
+	// The OpenTofu 1.13.0 and Terramate 0.17.3 binaries are 109 and 97 MiB.
+	maxTofuBytes      = 256 << 20
+	maxTerramateBytes = 256 << 20
 )
 
 const (
@@ -442,7 +445,7 @@ func prepareStage(o PrepareOptions, stage string) ([]byte, error) {
 	if err := os.Mkdir(resources, 0o700); err != nil {
 		return nil, err
 	}
-	if err := copyToolchain(o, resources); err != nil {
+	if err := copyGo(o, filepath.Join(resources, "go")); err != nil {
 		return nil, err
 	}
 	if err := extractReleaseTools(o.Archives, resources); err != nil {
@@ -490,24 +493,6 @@ func verifyArchives(archives map[string]string) error {
 	for _, name := range slices.Sorted(maps.Keys(checks.Artifacts)) {
 		if _, ok := archives[name]; !ok {
 			return fmt.Errorf("PIN_ARCHIVE: no archive for %s", name)
-		}
-	}
-	return nil
-}
-
-// copyToolchain copies the qualified toolchain's Go tree, checked against its
-// proof, and its tofu and terramate binaries.
-func copyToolchain(o PrepareOptions, resources string) error {
-	if err := copyGo(o, filepath.Join(resources, "go")); err != nil {
-		return err
-	}
-	for _, tool := range []string{"tofu", "terramate"} {
-		data, err := readInput(filepath.Join(o.Toolchain, "tools", tool, tool))
-		if err != nil {
-			return err
-		}
-		if err := writeNew(filepath.Join(resources, tool), data, 0o700); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -597,29 +582,41 @@ func copyGoFile(source, dest, sum string) error {
 	return writeNew(dest, data, mode.Perm()&0o700)
 }
 
-// extractReleaseTools writes task and tflint from their verified release
-// archives.
+// releaseTools are the binaries taken from the tools' verified release
+// archives, by pin name: tofu, terramate and task each as the one bounded
+// member of that name in a gzipped tar, tflint as the only file of a zip.
+var releaseTools = []struct {
+	name  string
+	zip   bool
+	limit int64
+}{
+	{"tofu", false, maxTofuBytes},
+	{"terramate", false, maxTerramateBytes},
+	{"task", false, maxTaskBytes},
+	{"tflint", true, maxTflintBytes},
+}
+
+// extractReleaseTools writes each release tool, owner-only, from the very
+// bytes of its archive that were verified against its pin.
 func extractReleaseTools(archives map[string]string, resources string) error {
-	taskArchive, err := readVerified(archives["task"], checks.Artifacts["task"])
-	if err != nil {
-		return err
+	for _, tool := range releaseTools {
+		archive, err := readVerified(archives[tool.name], checks.Artifacts[tool.name])
+		if err != nil {
+			return err
+		}
+		member := tarMember
+		if tool.zip {
+			member = zipOnlyMember
+		}
+		data, err := member(archive, tool.name, tool.limit)
+		if err != nil {
+			return err
+		}
+		if err := writeNew(filepath.Join(resources, tool.name), data, 0o700); err != nil {
+			return err
+		}
 	}
-	task, err := tarMember(taskArchive, "task", maxTaskBytes)
-	if err != nil {
-		return err
-	}
-	if err := writeNew(filepath.Join(resources, "task"), task, 0o700); err != nil {
-		return err
-	}
-	tflintArchive, err := readVerified(archives["tflint"], checks.Artifacts["tflint"])
-	if err != nil {
-		return err
-	}
-	tflint, err := zipOnlyMember(tflintArchive, "tflint", maxTflintBytes)
-	if err != nil {
-		return err
-	}
-	return writeNew(filepath.Join(resources, "tflint"), tflint, 0o700)
+	return nil
 }
 
 // tarMember returns the one bounded regular member called name of a gzipped
@@ -657,12 +654,12 @@ func tarMember(archive []byte, name string, limit int64) ([]byte, error) {
 
 // zipOnlyMember returns the content of a zip archive that holds exactly one
 // bounded file called name.
-func zipOnlyMember(archive []byte, name string, limit uint64) ([]byte, error) {
+func zipOnlyMember(archive []byte, name string, limit int64) ([]byte, error) {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return nil, fmt.Errorf("RELEASE_ARCHIVE: %w", err)
 	}
-	if len(reader.File) != 1 || reader.File[0].Name != name || !reader.File[0].Mode().IsRegular() || reader.File[0].UncompressedSize64 > limit {
+	if len(reader.File) != 1 || reader.File[0].Name != name || !reader.File[0].Mode().IsRegular() || reader.File[0].UncompressedSize64 > uint64(limit) {
 		return nil, fmt.Errorf("RELEASE_ARCHIVE: exactly one bounded %s file required", name)
 	}
 	content, err := reader.File[0].Open()
@@ -670,8 +667,8 @@ func zipOnlyMember(archive []byte, name string, limit uint64) ([]byte, error) {
 		return nil, fmt.Errorf("RELEASE_ARCHIVE: %w", err)
 	}
 	defer content.Close()
-	data, err := io.ReadAll(io.LimitReader(content, int64(limit)+1))
-	if err != nil || uint64(len(data)) > limit {
+	data, err := io.ReadAll(io.LimitReader(content, limit+1))
+	if err != nil || int64(len(data)) > limit {
 		return nil, fmt.Errorf("RELEASE_ARCHIVE: %s unreadable or over its bound", name)
 	}
 	return data, nil
