@@ -202,6 +202,9 @@ leaves it out of `all`.
 
 ### A fresh account (migration)
 
+The owner's step-by-step sheet for this, with two accounts side by side, is
+[Set up a fresh OVHcloud account](set-up-a-fresh-account.md).
+
 1. In the Control Panel, create the account and one Public Cloud project. Ordering is not
    automated. Whether a trial account lets you create one is UNVERIFIED (P22).
 2. Create a short-lived application key, application secret and consumer key on the OVHcloud
