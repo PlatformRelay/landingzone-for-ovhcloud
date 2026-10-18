@@ -1,7 +1,7 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: L — US3 (T029–T034, entry limits and runtime preparation in Go), then US5, US6, exit
+Next: L — T049 (tofu/terramate from verified archives), then US5 (T035–T038), US6 (T039–T044), exit (T045, T046)
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
@@ -77,6 +77,16 @@ Holistic run at B: not run yet.
 | L T028 | stacks:check does not compare stack locks with stage locks | minor | review | defer | stage B (FR-011 asks stage-to-stage; TestRepositoryStackLocksMatchStages covers this repository) | no |
 | L T028 | Planner fallback copying a missing lock in scratch (plan.go:277-286) may now be unreachable; os.Link needs hard-link support | minor | review | defer | stage B | no |
 | L T028 | A missing stage lock is refused, not skipped | — | task | accept | coordinator agrees: skipping leaves a lockless stack, the defect V003 names | no |
+| L US4-sonar | PR #126 SonarCloud gate: S2612 (copied lock chmod 0644) fixed (0600 kept); generate.go S3776 refactored; test-file S3776 left | — | coordinator | fix | b9bedaf; open for stage B: planner scratch lock copy still 0644 (plan.go:283), no test pins the mode, four readLock error branches untested | no |
+| L T029 | Entry wiring untestable from T029 (no seam); fork storm not stopped within 10 s (pids.max refuses but never ends a retrying storm); swap state can turn an OOM into swapping | minor | both | defer | T032: wire refusal before start and the RESOURCE_LIMIT/LIMITS_UNAVAILABLE lines with G22 mutants 1 and 3; end the scope when pids.events max rises; record swap; read events while the scope exists (ENODEV after exit) | no |
+| L T030 | In-root hard links not pinned; no real multi-member apk fixture; moving the provider pin into checks.Packages makes prepare.py bundles fail Admit (re-prepare; update toolchain.go:21); the three pin helpers need a TEST-class change if checks.Packages changes shape | minor | strong | defer | T033 (evidence *Readings* fix how PrepareOptions is read; launcherFile seam because the entry sandbox has no /usr/bin/bwrap) | no |
+| L T031 | A statement write failing after the layout exists leaves a layout without a statement; whether OCI tools accept an extra provenance.json at the layout root (UNVERIFIED) | minor | review | defer | T034: write the statement inside pack's removal-on-error (pack is already cognitive complexity 19: split it); confirm on the push path | no |
+| L T032 | Refusal waits 10 s and drops systemd-run's stderr; holder guards have no unit test; test:runtime-image peak measured while red; free-swap host untested | minor | both | defer | follow-up entry task; re-measure peaks in T033/T034; free-swap host is a known gap | no |
+| L T032 | Publishing a limited entry needs P3: a CI runner with a reachable user manager and delegated controllers | — | task | defer | coordinator: a CI probe before pinning a new runtime (spec 006 out-of-scope row) | no |
+| L T033 | tofu/terramate archives verified but unused; binaries copied from the toolchain unhashed | major | review | decide fix | Coordinator decision 2026-10-18: new task T049 extracts tofu and terramate from their verified archives (updates T030's fixtures; TEST-class changes cited) | no |
+| L T033 | Pin-table reading: archive/image rows stay in checks.Artifacts/checks.Image, every prepare.py-only pin in checks.Packages | — | task | accept | coordinator 2026-10-18 | no |
+| L T033 | A real crane export is never projected; bundles written by prepare.py are refused (PIN_PACKAGE) | — | task | defer | the next entry build re-prepares with lz-pack prepare (publish task, D120) | no |
+| L T034 | -commit is the operator's word, not bound to the bundle; the provenance file is 0600 while the layout is 0644; no test pins the entry digest to the extracted layer | minor | both | defer | stage B (binding with the C6 signing decision; layout privacy) | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
