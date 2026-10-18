@@ -133,7 +133,7 @@ Independent test: V002. Test task T008, then implementation task T009.
 Independent test: V003 offline, V005 live (T019). Test tasks T010–T013, then implementation tasks
 T014–T016.
 
-- [ ] T010 [US3] Write the budget-alert root's scaffolding and tests in tests/live/probes/budget-alert/ (`.terraform.lock.hcl`, `probe.tf`, a stub `main.tf`, `probe.tftest.hcl`) with its `lz-check unit` line in Taskfile.yml
+- [x] T010 [US3] Write the budget-alert root's scaffolding and tests in tests/live/probes/budget-alert/ (`.terraform.lock.hcl`, `probe.tf`, a stub `main.tf`, `probe.tftest.hcl`) with its `lz-check unit` line in Taskfile.yml — closed 2026-10-18, evidence: evidence/T010.md
   - Requirements: FR-005; ADRs: 0006, 0024. Depends on: T009.
   - Scope: copy the `alerting` root's `.terraform.lock.hcl` (the module uses only `ovh/ovh` 2.21.0) and `probe.tf` (state path pattern ending `/budget-alert.tfstate`); the stub `main.tf` holds `data "ovh_me" "account"` and `module "project"` in `reference` mode with `budget_alert = { enabled = false }` and outputs `alert_id` (null), `budget_alert_check` (`{ alert_id = "" }`) and `run_id`, so init and plan succeed offline (premise P2, observed through the entry and recorded); add `go -C tools run ./cmd/lz-check -root .. unit tests/live/probes/budget-alert` to `test:live-lane`, and `tests/live/probes/budget-alert` and `modules/cloud-project` to `test:live-lane`'s registry inputs in tools/harness/checks.yaml.
   - Cases (given / when / then → defect exposed), mocked provider as the `alerting` root's tests:
