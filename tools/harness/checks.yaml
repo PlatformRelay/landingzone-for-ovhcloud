@@ -210,6 +210,8 @@
        "modules/identity-group/README.md", "modules/naming/README.md", "modules/object-storage-protected/README.md", "modules/object-storage-user/README.md",
        "modules/object-storage/README.md", "modules/private-network/README.md", "pipelines/README.md", "schemas/README.md", "specs/README.md",
        "stacks/README.md", "stages/README.md", "tests/README.md", "tests/live/probes/README.md", "tools/README.md"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/cmd/lz-check", "tools/internal/checks", "tools/internal/report"]}
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/cmd/lz-check", "tools/internal/checks", "tools/internal/report",
+       "mise.toml", "mise.live.toml", "stages", "modules", "components",
+       ".github", ".specify", ".tflint.hcl", "AGENTS.md", "LICENSE", "NOTICE", "pipelines/README.md", "pipelines/github/foundation-source.json", "schemas", "specs", "stacks", "terramate.tm.hcl", "tests", "tools"]}
   ]
 }

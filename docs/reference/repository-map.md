@@ -4,7 +4,8 @@ references:
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: tools/internal/checks/dependencies.go
     blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
-last_verified: 7e9e3a80357ab2a0b9b923d888854e2c4835230f
+verified_against: {task: "3.53"}
+last_verified: 81461ebe946c0e29b8a7e79268995af055a920a9
 ---
 
 # Repository map

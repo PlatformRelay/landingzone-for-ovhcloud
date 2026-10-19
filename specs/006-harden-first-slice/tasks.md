@@ -394,7 +394,7 @@ docs-only tasks T043–T044.
   - Verify: `task docs:check`: the first two cases fail on today's `docs.go`; the third fails for want of the count.
   - Evidence: `evidence/T040.md`; PR; initial status `not-run`.
 
-- [ ] T041 [US6] Add the `verified_against` and superseded-ADR gates to tools/cmd/lz-check/docs.go, `verified_against` to the pages under docs/how-to/ and docs/reference/ that name a tool command, and the gates' reads to the `docs:check` inputs in tools/harness/checks.yaml
+- [x] T041 [US6] Add the `verified_against` and superseded-ADR gates to tools/cmd/lz-check/docs.go, `verified_against` to the pages under docs/how-to/ and docs/reference/ that name a tool command, and the gates' reads to the `docs:check` inputs in tools/harness/checks.yaml — closed 2026-10-19, evidence: evidence/T041.md
   - Requirements: FR-018, SC-005; ADRs: 0013. Depends on: T040.
   - Verify: `task docs:check`: T039's cases green (T040's rows stay red until T042, named in the evidence); the real pages pass the gates; `docs:check`'s inputs gain `mise.toml`, `mise.live.toml` and the lock files the gate reads, with a `TestRegistryInputsCoverReads` row that fails when one is removed; every edited page has its `references` blobs and `last_verified` updated (D102).
   - Evidence: `evidence/T041.md`; PR; initial status `not-run`.

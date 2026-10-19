@@ -692,6 +692,19 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 		// infrastructure trees and the schema snapshot.
 		"test:update-lane": {".github/renovate.json", "mise.toml", "mise.live.toml", "tools/go.mod", "stages", "components",
 			"modules", "stacks", "tests/fixtures/provider-schema", "tests/check/fixtures/updatelane"},
+		// 006 T041: the docs gates read the tool pins and the lock trees, and the
+		// superseded-ADR scan every file the entry admits (.gitignore and
+		// .sonarcloud.properties are host-only and absent inside it).
+		// The CI run record is the one file the scan skips (review round 2).
+		"docs:check": {"mise.toml", "mise.live.toml", "stages", "modules", "components", ".github", ".specify",
+			".tflint.hcl", "AGENTS.md", "LICENSE", "NOTICE", "README.md", "Taskfile.yml", "docs", "pipelines/README.md",
+			"pipelines/github/foundation-source.json", "schemas", "specs", "stacks", "terramate.tm.hcl", "tests", "tools"},
+	}
+	// docs:check is a foundation target: if its digest covered the run
+	// record, recording a run would change the digest the run recorded, and
+	// ci:foundation would find every head run stale (review round 2).
+	if covered(reads["docs:check"], checks.FoundationRunsPath) {
+		t.Errorf("BEHAVIORAL_RED: docs:check's scope or inputs cover %s", checks.FoundationRunsPath)
 	}
 	for id, paths := range want {
 		entries, ok := reads[id]

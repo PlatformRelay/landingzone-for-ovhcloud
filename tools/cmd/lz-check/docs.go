@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -13,8 +14,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 // The documentation rules of ADR-0013 that hold without a site build: every
@@ -30,6 +34,10 @@ import (
 // testdata and vendor trees) are held to the link and anchor rules only (T107);
 // DOCS_OK counts them and says whether the root README was checked or absent
 // (the offline entry's snapshot holds none).
+//
+// 006 FR-018 adds two anti-rot gates (versionGate, supersededScan): a page's
+// verified_against is compared with the tool pins, and no file outside the
+// ADRs and vendored code names or links a Superseded ADR.
 //
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
 // from the file on disk: on a clean checkout that is the id of HEAD:<path>,
@@ -74,6 +82,8 @@ type docChecker struct {
 	// snapshot).
 	rootReadme   bool
 	unjudgedRoot int
+	// pins are the tool pins verified_against is judged against (FR-018).
+	pins map[string]docPin
 }
 
 func docs(out io.Writer, root string) int {
@@ -107,6 +117,7 @@ func docs(out io.Writer, root string) int {
 		return 2
 	}
 	c := &docChecker{root: root, targets: taskfileTargets(string(taskfile)), anchors: map[string]map[string]bool{}, rootReadme: rootReadme}
+	c.loadPins()
 	headed, references := 0, 0
 	for _, page := range pages {
 		data, err := os.ReadFile(filepath.Join(root, page))
@@ -121,6 +132,7 @@ func docs(out io.Writer, root string) int {
 			references += c.header(page, text)
 		}
 		c.body(page, text, bodyRules{ids: true, targets: !adr})
+		c.versionGate(page, text)
 	}
 	if len(pages) == 0 {
 		c.add("NO_PAGES", "docs", "no Markdown page under docs/")
@@ -133,6 +145,7 @@ func docs(out io.Writer, root string) int {
 		}
 		c.body(page, string(data), bodyRules{readme: true})
 	}
+	c.supersededScan()
 	rootState := fmt.Sprintf("absent unjudged_root_links=%d", c.unjudgedRoot)
 	if rootReadme {
 		rootState = "checked"
@@ -226,13 +239,7 @@ func (c *docChecker) header(page, text string) int {
 		c.add("HEADER_MISSING", page, "no ADR-0013 front matter (references, last_verified)")
 		return 0
 	}
-	end := -1
-	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
-			end = i
-			break
-		}
-	}
+	end := closingLine(lines)
 	if end < 0 {
 		c.add("HEADER_MALFORMED", page, "front matter not closed by ---")
 		return 0
@@ -263,6 +270,17 @@ func (c *docChecker) header(page, text string) int {
 		}
 	}
 	return len(refs)
+}
+
+// closingLine is the index of the line closing front matter that opens at
+// lines[0], or -1 when it is never closed.
+func closingLine(lines []string) int {
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "---" {
+			return i
+		}
+	}
+	return -1
 }
 
 // inside reports whether dir, symbolic links resolved, is in the repository;
@@ -543,4 +561,482 @@ func slug(h string) string {
 		}
 	}
 	return b.String()
+}
+
+// 006 FR-018, the version gate. A page under docs/ outside the ADRs and the
+// known-issue records may carry `verified_against: {tool: "major.minor", …}`
+// (data-model *Docs front matter*), an inline mapping with quoted versions
+// (unquoted, YAML reads 1.10 as 1.1); any other form is HEADER_MALFORMED.
+// Each tool is compared with its pin: more than two minor versions behind,
+// an older major or a version ahead of the pin is VERIFIED_AGAINST_STALE
+// (ahead names a version the repository does not run); a tool with no pin
+// is VERIFIED_AGAINST_UNKNOWN_TOOL. A page under docs/how-to/ or
+// docs/reference/ naming a tofu, terramate, task or ovhcloud command without
+// the mapping is VERIFIED_AGAINST_MISSING. A tool the page names but the
+// mapping omits is not judged (FR-018 asks for the mapping, not for a
+// complete one).
+
+const knownIssuesDir = "docs/known-issues/"
+
+// docPin is a tool's pinned version and where it was read.
+type docPin struct{ version, source string }
+
+// miseTools says where a verified_against key is pinned: a mise file's
+// [tools] key. ovh is pinned by the provider lock files (lockTrees).
+var miseTools = map[string]struct{ file, key string }{
+	"tofu":      {"mise.toml", "opentofu"},
+	"terramate": {"mise.toml", "aqua:terramate-io/terramate"},
+	"task":      {"mise.toml", "task"},
+	"tflint":    {"mise.toml", "tflint"},
+	"go":        {"mise.toml", "go"},
+	"ovhcloud":  {"mise.live.toml", "github:ovh/ovhcloud-cli"},
+}
+
+// lockTrees hold the stage, module and component lock files whose ovh/ovh
+// version pins ovh (stacks/ holds copies of the stage locks, tests/ fixtures).
+var lockTrees = []string{"stages", "modules", "components"}
+
+var (
+	// tomlTools is the [tools] table header, with an optional comment.
+	tomlTools = regexp.MustCompile(`^\[\s*tools\s*\]\s*(?:#.*)?$`)
+	// tomlString is a `key = "value"` line: the key bare, "quoted" or
+	// 'literal', the value a string without escapes, an optional comment.
+	tomlString = regexp.MustCompile(`^(?:"([^"\\]*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$`)
+	// docLockProvider is one provider block of a lock file.
+	docLockProvider = regexp.MustCompile(`(?ms)^provider\s+"([^"]+)"\s*\{(.*?)^\}`)
+	docLockVersion  = regexp.MustCompile(`(?m)^\s*version\s*=\s*"([^"]+)"`)
+	// version is major.minor with an optional patch.
+	version = regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?$`)
+	// stampEntry is one `tool: "major.minor"` entry of verified_against.
+	stampEntry = regexp.MustCompile(`^([a-z][a-z0-9_-]*)\s*:\s*(?:"([^"]*)"|'([^']*)')$`)
+	// toolUse is a tool word followed by a flag (task --list), a subcommand
+	// or a target.
+	toolUse = regexp.MustCompile(`\b(tofu|terramate|task|ovhcloud)[ \t]+(--?[A-Za-z][A-Za-z0-9-]*|[a-z][a-z0-9_-]*(?::[a-z0-9_-]+)*)`)
+)
+
+// loadPins reads the pins of every miseTools key and of ovh. A missing pin
+// file pins nothing; an unreadable one is a finding.
+func (c *docChecker) loadPins() {
+	c.pins = map[string]docPin{}
+	for _, file := range []string{"mise.toml", "mise.live.toml"} {
+		data, err := os.ReadFile(filepath.Join(c.root, file))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			c.add("INPUT_UNREADABLE", file, "%v", err)
+			continue
+		}
+		tools := tomlToolsTable(string(data))
+		for name, at := range miseTools {
+			if v, ok := tools[at.key]; ok && at.file == file && version.MatchString(v) {
+				c.pins[name] = docPin{v, file}
+			}
+		}
+	}
+	for _, tree := range lockTrees {
+		if err := c.lockPins(tree); err != nil {
+			c.add("INPUT_UNREADABLE", tree, "%v", err)
+		}
+	}
+}
+
+// tomlToolsTable is the [tools] table of a mise file: its `key = "value"`
+// lines, other tables skipped. A line it cannot read pins nothing, so the
+// tool reads as unpinned (fail closed).
+func tomlToolsTable(text string) map[string]string {
+	tools := map[string]string{}
+	inTools := false
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "[") {
+			inTools = tomlTools.MatchString(line)
+			continue
+		}
+		if m := tomlString.FindStringSubmatch(line); inTools && m != nil {
+			tools[m[1]+m[2]+m[3]] = m[4] + m[5]
+		}
+	}
+	return tools
+}
+
+// lockPins raises the ovh pin to the highest ovh/ovh version among the lock
+// files under tree (outside hidden and fixtures directories): lock files that
+// disagree pin the newest, so no page is judged against an older lock.
+func (c *docChecker) lockPins(tree string) error {
+	dir := filepath.Join(c.root, tree)
+	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir() && (strings.HasPrefix(d.Name(), ".") || d.Name() == "fixtures"):
+			return filepath.SkipDir
+		case d.Name() != ".terraform.lock.hcl" || !d.Type().IsRegular():
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, m := range docLockProvider.FindAllStringSubmatch(string(data), -1) {
+			v := docLockVersion.FindStringSubmatch(m[2])
+			if strings.HasSuffix(m[1], "/ovh/ovh") && v != nil && version.MatchString(v[1]) && newer(v[1], c.pins["ovh"].version) {
+				c.pins["ovh"] = docPin{v[1], "the ovh/ovh provider lock files"}
+			}
+		}
+		return nil
+	})
+}
+
+// versionParts is a version's major, minor and patch (0 when absent); ok is
+// false when v is not a version.
+func versionParts(v string) (parts [3]int, ok bool) {
+	m := version.FindStringSubmatch(v)
+	if m == nil {
+		return parts, false
+	}
+	for i, s := range m[1:] {
+		if s == "" {
+			continue
+		}
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return parts, false
+		}
+		parts[i] = n
+	}
+	return parts, true
+}
+
+// newer reports whether v is a higher version than than, which may be empty.
+func newer(v, than string) bool {
+	a, _ := versionParts(v)
+	b, ok := versionParts(than)
+	if !ok {
+		return true
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] > b[i]
+		}
+	}
+	return false
+}
+
+// versionGate judges one page's verified_against.
+func (c *docChecker) versionGate(page, text string) {
+	if strings.HasPrefix(page, adrDir) || strings.HasPrefix(page, knownIssuesDir) {
+		return
+	}
+	stamp, present, problem := stampOf(text)
+	switch {
+	case problem != "":
+		c.add("HEADER_MALFORMED", page, "%s", problem)
+	case present:
+		c.judgeStamp(page, stamp)
+	case stampRequired(page):
+		if command := toolCommand(text, c.targets); command != "" {
+			c.add("VERIFIED_AGAINST_MISSING", page, "names the command %q but has no verified_against", command)
+		}
+	}
+}
+
+// stampRequired reports whether page must carry verified_against when it
+// names a tool command.
+func stampRequired(page string) bool {
+	return strings.HasPrefix(page, "docs/how-to/") || strings.HasPrefix(page, "docs/reference/")
+}
+
+// stampOf reads the top-level verified_against key of a page's front matter:
+// the mapping, whether the key is present, and a problem when it is
+// malformed (given twice, block form, unquoted or not major.minor).
+func stampOf(text string) (stamp map[string]string, present bool, problem string) {
+	lines := strings.Split(text, "\n")
+	end := closingLine(lines)
+	if lines[0] != "---" || end < 0 {
+		return nil, false, ""
+	}
+	for _, line := range lines[1:end] {
+		key, value, found := strings.Cut(line, ":")
+		if !found || strings.TrimRight(key, " \t") != "verified_against" {
+			continue
+		}
+		if present {
+			return nil, true, "verified_against given twice"
+		}
+		present = true
+		if stamp, problem = parseStamp(strings.TrimSpace(value)); problem != "" {
+			return nil, true, problem
+		}
+	}
+	return stamp, present, ""
+}
+
+// parseStamp reads an inline mapping {tool: "major.minor", …}.
+func parseStamp(value string) (map[string]string, string) {
+	const form = "verified_against is not an inline mapping {tool: \"major.minor\", …}"
+	inner, opened := strings.CutPrefix(value, "{")
+	inner, closed := strings.CutSuffix(inner, "}")
+	if !opened || !closed || strings.TrimSpace(inner) == "" {
+		return nil, form
+	}
+	stamp := map[string]string{}
+	for _, entry := range strings.Split(inner, ",") {
+		m := stampEntry.FindStringSubmatch(strings.TrimSpace(entry))
+		if m == nil || !version.MatchString(m[2]+m[3]) {
+			return nil, fmt.Sprintf("%s: %q", form, strings.TrimSpace(entry))
+		}
+		if _, seen := stamp[m[1]]; seen {
+			return nil, fmt.Sprintf("verified_against names %s twice", m[1])
+		}
+		stamp[m[1]] = m[2] + m[3]
+	}
+	return stamp, ""
+}
+
+// judgeStamp compares each stamped tool with its pin, in name order.
+func (c *docChecker) judgeStamp(page string, stamp map[string]string) {
+	tools := make([]string, 0, len(stamp))
+	for tool := range stamp {
+		tools = append(tools, tool)
+	}
+	sort.Strings(tools)
+	for _, tool := range tools {
+		pin, ok := c.pins[tool]
+		if !ok {
+			c.add("VERIFIED_AGAINST_UNKNOWN_TOOL", page, "%s has no pin in mise.toml, mise.live.toml or the ovh/ovh provider lock files", tool)
+			continue
+		}
+		if why := staleness(stamp[tool], pin.version); why != "" {
+			c.add("VERIFIED_AGAINST_STALE", page, "%s %q is %s its pin %s (%s); re-check the page, then update verified_against", tool, stamp[tool], why, pin.version, pin.source)
+		}
+	}
+}
+
+// staleness says how a stamped version fails its pin, or "" when it is at
+// the pin or at most two minor versions behind it (ADR-0013).
+func staleness(stamp, pin string) string {
+	s, _ := versionParts(stamp)
+	p, _ := versionParts(pin)
+	switch {
+	case newer(stamp, pin):
+		return "ahead of"
+	case s[0] < p[0]:
+		return "a major version behind"
+	case p[1]-s[1] > 2:
+		return "more than two minor versions behind"
+	}
+	return ""
+}
+
+// toolCommand is the first tofu, terramate, task or ovhcloud command a page
+// names, or "". In code (block or span) a tool word followed by a flag or a
+// word is a command; in prose `task` is one only with a flag or a namespaced
+// or existing target ("this task has" is English, as for TASK_TARGET), the
+// other tools with any following word ("run tofu plan").
+func toolCommand(text string, targets map[string]bool) string {
+	var code fenced
+	for _, line := range strings.Split(text, "\n") {
+		if code.step(line) {
+			if m := toolUse.FindString(line); m != "" {
+				return m
+			}
+			continue
+		}
+		if m := lineCommand(line, targets); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// lineCommand is the first command a line outside code blocks names, in a
+// code span or, under toolCommand's rule, in prose.
+func lineCommand(line string, targets map[string]bool) string {
+	for _, span := range codeSpan.FindAllString(line, -1) {
+		if m := toolUse.FindString(span); m != "" {
+			return m
+		}
+	}
+	for _, m := range toolUse.FindAllStringSubmatch(codeSpan.ReplaceAllString(line, " "), -1) {
+		if m[1] != "task" || strings.HasPrefix(m[2], "-") || strings.Contains(m[2], ":") || targets[m[2]] {
+			return m[0]
+		}
+	}
+	return ""
+}
+
+// 006 FR-018, the superseded-ADR scan. An ADR is Superseded when the first
+// `- Status:` line of docs/adr/NNNN-*.md starts so (the ADR template,
+// docs/adr/README.md); an ADR without a status line is not. Every regular
+// text file outside docs/adr/ and tools/vendor/ that names `ADR-NNNN` or
+// links `adr/NNNN-` for such an ADR is SUPERSEDED_ADR, once per file and
+// ADR. "Tracked" is read without git (the entry's snapshot carries no .git):
+// .git and what the root .gitignore names by a plain or wildcard name
+// (`agent-context/`, `.terraform/`, `*.tfstate`) are skipped; a pattern with
+// an inner slash or a negation is not read, and `name/*` skips all of name/.
+// A file holding a NUL byte is binary and skipped.
+
+var (
+	adrStatus = regexp.MustCompile(`^- Status:\s*(.*)$`)
+	adrCite   = regexp.MustCompile(`(?:\bADR-|\badr/)(\d{4})(?:[^0-9]|$)`)
+)
+
+// ignoreRule is one .gitignore pattern the scan honours.
+type ignoreRule struct {
+	pattern           string
+	dirOnly, anchored bool
+}
+
+// supersededScan reports every citation of a Superseded ADR.
+func (c *docChecker) supersededScan() {
+	withdrawn, err := supersededADRs(c.root)
+	if err != nil {
+		c.add("INPUT_UNREADABLE", "docs/adr", "%v", err)
+		return
+	}
+	ignored, err := ignoreRules(c.root)
+	if err != nil {
+		c.add("INPUT_UNREADABLE", ".gitignore", "%v", err)
+		return
+	}
+	err = filepath.WalkDir(c.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return c.scanEntry(p, d, withdrawn, ignored)
+	})
+	if err != nil {
+		c.add("INPUT_UNREADABLE", ".", "%v", err)
+	}
+}
+
+// scanEntry skips docs/adr/, tools/vendor/ and ignored directories, and
+// judges a regular file that is not ignored, except the generated CI run
+// record: docs:check is a foundation target, so reading it would put the
+// record into the digest each recorded run must match (ci:foundation).
+func (c *docChecker) scanEntry(p string, d fs.DirEntry, withdrawn map[string]bool, ignored []ignoreRule) error {
+	rel, err := filepath.Rel(c.root, p)
+	if err != nil || rel == "." {
+		return err
+	}
+	rel = filepath.ToSlash(rel)
+	if d.IsDir() && (rel == "docs/adr" || rel == "tools/vendor" || ignoredBy(ignored, rel, true)) {
+		return filepath.SkipDir
+	}
+	if d.IsDir() || !d.Type().IsRegular() || rel == checks.FoundationRunsPath || ignoredBy(ignored, rel, false) {
+		return nil
+	}
+	return c.citations(p, rel, withdrawn)
+}
+
+// supersededADRs are the numbers of the ADRs whose status is Superseded.
+func supersededADRs(root string) (map[string]bool, error) {
+	dir := filepath.Join(root, "docs", "adr")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	withdrawn := map[string]bool{}
+	for _, e := range entries {
+		m := adrFile.FindStringSubmatch(e.Name())
+		if m == nil || !e.Type().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(adrStatusOf(string(data)), "Superseded") {
+			withdrawn[m[1]] = true
+		}
+	}
+	return withdrawn, nil
+}
+
+// adrStatusOf is the value of an ADR's first status line, or "".
+func adrStatusOf(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if m := adrStatus.FindStringSubmatch(strings.TrimRight(line, "\r")); m != nil {
+			return strings.TrimSpace(m[1])
+		}
+	}
+	return ""
+}
+
+// ignoreRules reads the root .gitignore's plain and wildcard name patterns;
+// .git is always skipped. A missing .gitignore (the entry's snapshot) skips
+// nothing else.
+func ignoreRules(root string) ([]ignoreRule, error) {
+	rules := []ignoreRule{{pattern: ".git"}}
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return rules, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if r, ok := ignoreRuleOf(strings.TrimSpace(line)); ok {
+			rules = append(rules, r)
+		}
+	}
+	return rules, nil
+}
+
+// ignoreRuleOf reads one .gitignore line, false for a comment, a negation or
+// a pattern with an inner slash.
+func ignoreRuleOf(line string) (ignoreRule, bool) {
+	if line == "" || line[0] == '#' || line[0] == '!' {
+		return ignoreRule{}, false
+	}
+	r := ignoreRule{}
+	line, r.dirOnly = strings.CutSuffix(line, "/")
+	if trimmed, wild := strings.CutSuffix(line, "/*"); wild {
+		line, r.dirOnly = trimmed, true
+	}
+	line, r.anchored = strings.CutPrefix(line, "/")
+	r.pattern = line
+	return r, line != "" && !strings.Contains(line, "/")
+}
+
+// ignoredBy reports whether a rule skips rel (a directory when dir).
+func ignoredBy(rules []ignoreRule, rel string, dir bool) bool {
+	name := path.Base(rel)
+	for _, r := range rules {
+		if r.dirOnly && !dir || r.anchored && strings.Contains(rel, "/") {
+			continue
+		}
+		if ok, _ := path.Match(r.pattern, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// citations adds a finding for each Superseded ADR the file names or links.
+func (c *docChecker) citations(file, rel string, withdrawn map[string]bool) error {
+	if len(withdrawn) == 0 {
+		return nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil || bytes.IndexByte(data, 0) >= 0 {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, m := range adrCite.FindAllSubmatchIndex(data, -1) {
+		n := string(data[m[2]:m[3]])
+		if withdrawn[n] && !seen[n] {
+			seen[n] = true
+			line := bytes.Count(data[:m[2]], []byte("\n")) + 1
+			c.add("SUPERSEDED_ADR", rel, "line %d cites ADR-%s, whose status is Superseded; cite the ADR that replaced it", line, n)
+		}
+	}
+	return nil
 }
