@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/alerting"
@@ -97,9 +99,23 @@ func acceptLostBaseline(ctx context.Context, d deps, runID string) error {
 		return refused("no line read from the terminal (%v)", err)
 	}
 	if line != runID {
-		return refused("the line typed back is not the run id")
+		return refused("the line typed back is not the run id: %s; expected the run id %s", readSummary(line), runID)
 	}
 	return nil
+}
+
+// readSummary says what a refused line was without showing it (the owner may have typed or pasted
+// a secret): its length, or that it was empty, and whether it held control characters (an arrow
+// key, say).
+func readSummary(line string) string {
+	if line == "" {
+		return "read an empty line"
+	}
+	s := fmt.Sprintf("read %d characters", utf8.RuneCountInString(line))
+	if strings.ContainsFunc(line, unicode.IsControl) {
+		s += ", with control characters"
+	}
+	return s
 }
 
 // `lz-live probe` (spec 005 FR-011, research R12 *Probe state*, contracts/checks.md): after the

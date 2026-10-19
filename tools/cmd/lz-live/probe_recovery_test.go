@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -375,7 +376,29 @@ type rcProc struct {
 	cmd            *exec.Cmd
 	stdout, stderr bytes.Buffer
 	done           chan struct{}
+	prompted       chan struct{} // closed once a process on a terminal has shown rcTypeBack
 	code           int
+}
+
+// rcTypeBack ends the --accept-lost-baseline prompt: the owner types after it.
+const rcTypeBack = "Type the run id to continue: "
+
+// promptTap closes seen once the stream has carried mark (one writer: exec's stderr copier).
+type promptTap struct {
+	mark, got []byte
+	seen      chan struct{}
+	done      bool
+}
+
+func (w *promptTap) Write(b []byte) (int, error) {
+	if !w.done {
+		w.got = append(w.got, b...)
+		if bytes.Contains(w.got, w.mark) {
+			w.done = true
+			close(w.seen)
+		}
+	}
+	return len(b), nil
 }
 
 func (p *rcProc) kill() { _ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL) }
@@ -407,12 +430,13 @@ func (w *rcWorld) start(t *testing.T, tty *os.File, args ...string) *rcProc {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &rcProc{cmd: exec.Command(self, rcEntryArg, cfg), done: make(chan struct{})}
+	p := &rcProc{cmd: exec.Command(self, rcEntryArg, cfg), done: make(chan struct{}), prompted: make(chan struct{})}
 	p.cmd.Stdout, p.cmd.Stderr = &p.stdout, &p.stderr
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if tty != nil {
 		p.cmd.Stdin = tty
 		p.cmd.SysProcAttr.Setctty = true
+		p.cmd.Stderr = io.MultiWriter(&p.stderr, &promptTap{mark: []byte(rcTypeBack), seen: p.prompted})
 	}
 	if err := p.cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -969,15 +993,71 @@ func TestProbeAcceptNotUntrusted(t *testing.T) {
 }
 
 // acceptOnTTY runs --cleanup <id> --accept-lost-baseline with a pseudo-terminal as its stdin and
-// controlling terminal, typing typed.
+// controlling terminal, typing typed once the prompt is shown.
 func (w *rcWorld) acceptOnTTY(t *testing.T, id, typed string) (int, string, string) {
 	t.Helper()
+	return w.acceptTyped(t, id, "", typed)
+}
+
+// acceptTyped is acceptOnTTY with ahead already in the terminal's input before lz-live starts
+// (earlier keystrokes of a shell loop). A run that ends before its prompt gets nothing typed.
+func (w *rcWorld) acceptTyped(t *testing.T, id, ahead, typed string) (int, string, string) {
+	t.Helper()
 	master, slave := openPTY(t)
-	p := w.start(t, slave, "probe", "--reviewed-sha", fakeHead, "--cleanup", id, "--accept-lost-baseline")
-	if _, err := master.Write([]byte(typed + "\n")); err != nil {
+	if _, err := master.Write([]byte(ahead)); err != nil {
 		t.Fatal(err)
 	}
+	if ahead != "" {
+		waitQueued(t, slave)
+	}
+	p := w.start(t, slave, "probe", "--reviewed-sha", fakeHead, "--cleanup", id, "--accept-lost-baseline")
+	select {
+	case <-p.prompted:
+		if _, err := master.Write([]byte(typed + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	case <-p.done:
+	case <-time.After(rcWait):
+	}
 	return p.wait(t)
+}
+
+// TestProbeAcceptTypeAhead (spec 007 T026, FR-007 owner recovery; the owner's live session of
+// 2026-10-19, eight runs in a shell loop): given a lost create with unreadable baseline copies, B
+// removed by hand, and earlier keystrokes and an arrow key already in the terminal's input / when
+// --cleanup --accept-lost-baseline prompts / then those lines are discarded: a wrong or empty line
+// typed after the prompt is refused saying what was read (its length, or that it was empty, never
+// the line) and the run id expected, and the run id typed after the prompt is accepted → exposes a
+// prompt that reads a stale line, so every later answer is read one run late.
+func TestProbeAcceptTypeAhead(t *testing.T) {
+	const ahead = "earlier keystrokes\n\x1b[D\n"
+	w := newRCWorld(t, "lost")
+	id := w.lostCreate(t, true)
+	for _, f := range []string{w.recordCopy(id), w.recoveryCopy(id)} {
+		writePrivate(t, f, `{"run_id":`)
+	}
+	w.removeByHand(rcAlertB)
+	for _, c := range []struct{ typed, want string }{
+		{"notTheRunIdSecret", "read 17 characters"},
+		{"", "read an empty line"},
+	} {
+		code, stdout, stderr := w.acceptTyped(t, id, ahead, c.typed)
+		w.acceptRefused(t, code, stdout, stderr, "with "+c.want)
+		if out := stdout + stderr; !strings.Contains(out, c.want) || !strings.Contains(out, "expected the run id "+id) {
+			t.Errorf("refusal %s: want %q and the expected run id in it\nstdout:\n%s\nstderr:\n%s", c.want, c.want, stdout, stderr)
+		}
+		if c.typed != "" && strings.Contains(stdout+stderr, c.typed) {
+			t.Errorf("the refusal echoed the line typed back %q", c.typed)
+		}
+		w.keptUnswept(t, id, "--accept-lost-baseline "+c.want)
+	}
+	if code, stdout, stderr := w.acceptTyped(t, id, ahead, id); code != 0 {
+		t.Errorf("--accept-lost-baseline with stale input and the run id typed after the prompt: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if d := w.deletes(); len(d) != 0 {
+		t.Errorf("--accept-lost-baseline sent DELETEs %v, want none", d)
+	}
+	w.retired(t, id)
 }
 
 func (w *rcWorld) acceptRefused(t *testing.T, code int, stdout, stderr, when string) {

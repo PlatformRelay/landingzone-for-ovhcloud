@@ -309,6 +309,21 @@ func TestProbeAcceptLostBaselineUsage(t *testing.T) {
 	}
 }
 
+// TestReadSummary (spec 007 T026, FR-007 owner recovery): a refused line typed back is described by
+// its length, as empty, and with control characters (an arrow key), never shown.
+func TestReadSummary(t *testing.T) {
+	for _, c := range []struct{ line, want string }{
+		{"", "read an empty line"},
+		{"notTheRunIdSecret", "read 17 characters"},
+		{"\x1b[D", "read 3 characters, with control characters"},
+		{"Zürich", "read 6 characters"},
+	} {
+		if got := readSummary(c.line); got != c.want {
+			t.Errorf("readSummary(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
+
 // TestAcceptedCheck (spec 007 T015, FR-007 owner recovery): under --accept-lost-baseline the
 // budget-alert check runs without its Sweep (it judges by the lost baseline; the owner removed the
 // alerts by hand), and the check itself is left unchanged; every other root keeps its Sweep.

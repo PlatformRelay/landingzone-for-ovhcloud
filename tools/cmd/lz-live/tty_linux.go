@@ -40,22 +40,34 @@ type tty struct {
 	ctx    context.Context
 	in     *os.File
 	prompt io.Writer
-	lines  chan ttyLine // one reader goroutine feeds every prompt
+	asks   chan struct{} // one per prompt: the reader reads only when a prompt asks
+	lines  chan ttyLine  // one reader goroutine feeds every prompt
 }
 
+// newTTY starts the one reader. It reads nothing until a prompt asks, so input typed before the
+// prompt stays in the terminal, where the prompt discards it (spec 007 T026: in a loop of runs a
+// line typed ahead was read as the next run's answer); bytes past a line are never kept for the
+// next prompt.
 func newTTY(ctx context.Context, in *os.File, prompt io.Writer) *tty {
-	t := &tty{ctx: ctx, in: in, prompt: prompt, lines: make(chan ttyLine)}
+	t := &tty{ctx: ctx, in: in, prompt: prompt, asks: make(chan struct{}), lines: make(chan ttyLine)}
 	go func() {
 		r := bufio.NewReader(in)
-		for {
+		for range t.asks {
+			r.Reset(in)
 			s, err := r.ReadString('\n')
 			t.lines <- ttyLine{strings.TrimRight(s, "\r\n"), err}
-			if err != nil {
-				return
-			}
 		}
 	}()
 	return t
+}
+
+// discardPending drops what the terminal received and nobody read yet: the owner's answer must
+// be typed after the prompt it answers.
+func discardPending(fd uintptr) error {
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, fd, tcflsh, syscall.TCIFLUSH); e != 0 {
+		return e
+	}
+	return nil
 }
 
 func getTermios(fd uintptr) (syscall.Termios, error) {
@@ -73,8 +85,13 @@ func setTermios(fd uintptr, st syscall.Termios) error {
 	return nil
 }
 
-// read waits for the next line or the run's cancellation.
+// read asks the reader for the next line and waits for it or the run's cancellation.
 func (t *tty) read() (string, error) {
+	select {
+	case t.asks <- struct{}{}:
+	case <-t.ctx.Done():
+		return "", t.ctx.Err()
+	}
 	select {
 	case l := <-t.lines:
 		if l.err != nil && l.s == "" {
@@ -86,12 +103,17 @@ func (t *tty) read() (string, error) {
 	}
 }
 
-// ReadSecret reads one line with the echo off; it refuses to read at all when the echo cannot be
-// turned off.
+// ReadSecret reads one line with the echo off, discarding what was typed before the discard just
+// ahead of the prompt (input arriving between the discard and the prompt is still read); it
+// refuses to read at all when pending input cannot be discarded or the echo cannot be turned off.
 func (t *tty) ReadSecret(prompt string) (string, error) {
 	saved, err := getTermios(t.in.Fd())
 	if err != nil {
 		return "", fmt.Errorf("terminal: %w", err)
+	}
+	// Before the echo goes off: a line typed once the echo is off answers this prompt.
+	if err := discardPending(t.in.Fd()); err != nil {
+		return "", fmt.Errorf("terminal: pending input not discarded: %w", err)
 	}
 	quiet := saved
 	quiet.Lflag &^= syscall.ECHO
@@ -107,8 +129,13 @@ func (t *tty) ReadSecret(prompt string) (string, error) {
 	return t.read()
 }
 
-// ReadLine reads one line with the echo as the terminal has it (on).
+// ReadLine reads one line with the echo as the terminal has it (on), discarding what was typed
+// before the discard just ahead of the prompt (input arriving between the two is still read); it
+// refuses to read when pending input cannot be discarded.
 func (t *tty) ReadLine(prompt string) (string, error) {
+	if err := discardPending(t.in.Fd()); err != nil {
+		return "", fmt.Errorf("terminal: pending input not discarded: %w", err)
+	}
 	fmt.Fprint(t.prompt, prompt)
 	return t.read()
 }
