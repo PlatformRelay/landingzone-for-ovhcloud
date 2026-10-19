@@ -81,7 +81,8 @@ func (l swLister) Get(ctx context.Context, path, cursor string) ([]byte, string,
 }
 
 // swOrder is the order of apply, output, observe, undo, destroy-plan, destroy, sweep and the
-// leftover check's listings (consecutive listings as one `list`).
+// leftover check's listings (consecutive listings as one `list`). A listing before any apply,
+// destroy or sweep is the probe's baseline (spec 007 FR-006, T014), named `baseline`.
 func swOrder(calls []tofuCall) []string {
 	var out []string
 	for _, c := range calls {
@@ -89,9 +90,14 @@ func swOrder(calls []tofuCall) []string {
 		switch {
 		case c.Cmd == "plan" && slices.Contains(c.Args, "-destroy"):
 			k = "plan-destroy"
+		case c.Cmd == "list" && !slices.ContainsFunc(out, func(o string) bool { return o != "baseline" }):
+			k = "baseline"
 		case slices.Contains([]string{"apply", "output", "observe", "undo", "destroy", "sweep", "list"}, c.Cmd):
 			k = c.Cmd
 		default:
+			continue
+		}
+		if k == "baseline" && len(out) > 0 {
 			continue
 		}
 		if k == "list" && len(out) > 0 && out[len(out)-1] == "list" {
@@ -503,7 +509,7 @@ func TestSweepWithUndo(t *testing.T) {
 	if err := p.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v\n%s", err, w.term)
 	}
-	want := []string{"apply", "output", "observe", "output", "undo", "plan-destroy", "destroy", "sweep", "list"}
+	want := []string{"baseline", "apply", "output", "observe", "output", "undo", "plan-destroy", "destroy", "sweep", "list"}
 	if got := swOrder(w.calls(t, "tofu.log")); !slices.Equal(got, want) {
 		t.Errorf("calls %v, want %v", got, want)
 	}
@@ -529,7 +535,7 @@ func TestSweepNone(t *testing.T) {
 		if err := p.Start(context.Background()); err != nil {
 			t.Fatalf("Start: %v\n%s", err, w.term)
 		}
-		want := []string{"apply", "output", "observe", "output", "undo", "plan-destroy", "destroy", "list"}
+		want := []string{"baseline", "apply", "output", "observe", "output", "undo", "plan-destroy", "destroy", "list"}
 		if got := swOrder(w.calls(t, "tofu.log")); !slices.Equal(got, want) {
 			t.Errorf("calls %v, want %v", got, want)
 		}
@@ -722,9 +728,9 @@ func TestSweepPlanOnly(t *testing.T) {
 
 // TestSweepCleanupNoState (T038, T037's deferred gap): a run that wrote no state (its plan failed)
 // and whose Sweep failed keeps its files and names `--cleanup <run-id>`; that cleanup, in which
-// the root has no state to destroy (a missing local state reads as empty), sweeps once after the
-// destroy and before the leftover check, passes and removes the run's files. Exposes a cleanup
-// that a run without state can never finish.
+// the root has no state to destroy, runs no tofu (spec 007 data-model *Start-up phases and run
+// classes*: "destroy if state"; DR-T013-b, confirmed), sweeps once before the leftover check,
+// passes and removes the run's files. Exposes a cleanup that a run without state can never finish.
 func TestSweepCleanupNoState(t *testing.T) {
 	t.Parallel()
 	root := tempPrivate(t)
@@ -763,9 +769,9 @@ func TestSweepCleanupNoState(t *testing.T) {
 		t.Fatalf("cleanup of a run without state: %v\n%s", err, w.term)
 	}
 	order := swOrder(w.calls(t, "tofu.log")[before:])
-	swAfterDestroyBeforeList(t, order, true)
-	if n := swCount(order, "undo") + swCount(order, "observe"); n != 0 {
-		t.Errorf("the cleanup ran observe or undo for a root that published nothing: %v", order)
+	swAfterDestroyBeforeList(t, order, false)
+	if n := swCount(order, "destroy") + swCount(order, "undo") + swCount(order, "observe"); n != 0 {
+		t.Errorf("the cleanup ran destroy, observe or undo for a root without state: %v", order)
 	}
 	if got := h.calls(); len(got) != 2 || got[1].runID != swRunID || got[1].project != probeProject {
 		t.Errorf("Sweep got %+v, want the run's and then the cleanup's, with run id %s and project %s", got, swRunID, probeProject)

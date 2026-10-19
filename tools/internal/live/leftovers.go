@@ -97,6 +97,10 @@ type LeftoverCheck struct {
 	// 007 FR-006), consulted for namelessKinds only: an id there is not a candidate, an id absent
 	// is. nil, or no entry for a kind, leaves the inventory and run-id matching for that kind.
 	Before map[string][]string
+	// beforeProject is the project Before was listed in (the probe's recorded project): Before
+	// judges only that project's resources, and another project's keep the matching above, since
+	// a probe creates nothing outside its project. "" judges every project's (tests).
+	beforeProject string
 }
 
 // namelessKinds are the kinds whose resources carry no run-derived name or tag, so a probe's
@@ -106,10 +110,68 @@ var namelessKinds = []string{tAlert}
 // probeBaseline lists the namelessKinds of the run's recorded project through check's lister and
 // writes baseline.json to the record directory and its recovery copy under state/baselines/
 // (data-model *Probe baseline*), both synced, before the first apply; a listing that failed on
-// every attempt is written with complete false and its errors, which it returns.
-// Stub for T014 (spec 007 T011).
+// every attempt is written with complete false and its errors, which it returns. The record copy
+// goes first and the recovery copy only for a complete listing; neither is ever rewritten. A
+// complete baseline becomes the run's Before.
 func (s *session) probeBaseline(ctx context.Context, check LeftoverCheck) error {
-	return errors.New("probeBaseline: not implemented")
+	project := s.r.Vars["TF_VAR_project_id"]
+	b, listErr := listBaseline(ctx, check, project)
+	b.RunID = s.r.ID
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	raw = []byte(s.red.Redact(string(raw)))
+	if err := writeOnce(filepath.Join(s.r.Dir, baselineFile), raw); err != nil {
+		return fmt.Errorf("probe baseline of run %s: %w", s.r.ID, err)
+	}
+	if listErr != nil {
+		return listErr
+	}
+	if err := writeRecoveryCopy(s.r.baseline.root, s.r.baseline.rel, raw); err != nil {
+		return fmt.Errorf("probe baseline of run %s, recovery copy: %w", s.r.ID, err)
+	}
+	s.r.Leftovers.Before, s.r.Leftovers.beforeProject = b.Listed, project
+	return nil
+}
+
+// listBaseline lists the alerts of project (the one nameless kind, namelessKinds) with check's
+// lister, retry, clock and budget, and returns the baseline without its run id; its errors name
+// the project as <project>, never by id (the record holds only its digest).
+func listBaseline(ctx context.Context, check LeftoverCheck, project string) (Baseline, error) {
+	var errs []string
+	b := Baseline{ProjectSHA256: projectDigest(project), Listed: map[string][]string{}, Errors: []string{}}
+	if src, err := check.source(); err != nil {
+		errs = append(errs, err.Error())
+	} else {
+		l := lister{ctx: ctx, l: src, errs: &errs, rec: map[string][]json.RawMessage{}, try: check.retry()}
+		if base, ok := l.under("/cloud/project", project); ok {
+			if ids, ok := l.strings(base + "/alerting"); ok {
+				b.Listed[tAlert] = append([]string{}, ids...)
+			}
+		}
+	}
+	for _, e := range errs {
+		b.Errors = append(b.Errors, strings.ReplaceAll(e, project, "<project>"))
+	}
+	b.Complete = len(b.Errors) == 0
+	if !b.Complete {
+		return b, fmt.Errorf("probe baseline: the alert listing failed, nothing created: %s", strings.Join(b.Errors, "; "))
+	}
+	return b, nil
+}
+
+// source is the check's lister: Lister, or lz-live's API client with the run's redactor.
+func (c LeftoverCheck) source() (Lister, error) {
+	if c.Lister != nil {
+		return c.Lister, nil
+	}
+	if c.API.BaseURL == "" {
+		return nil, errors.New("no API client")
+	}
+	al := newAPILister(c.API, c.Cred)
+	al.red = c.Red
+	return al, nil
 }
 
 // defaultListingBackoff is the leftover check's retry waits (spec 007 FR-001): three attempts per
@@ -269,6 +331,7 @@ type item struct {
 	typ, id, name string
 	values        []string
 	parent        *item
+	project       string // the project of a nameless kind's resource (Before is one project's)
 }
 
 // apiLister is the leftover check's read-only client of the OVHcloud API: the bearer token of the
@@ -811,15 +874,9 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 			created[e.Type+"\x00"+e.ID] = true
 		}
 	}
-	var src Lister = c.Lister
-	if src == nil {
-		if c.API.BaseURL == "" {
-			fail("no API client")
-		} else {
-			al := newAPILister(c.API, c.Cred)
-			al.red = c.Red
-			src = al
-		}
+	src, err := c.source()
+	if err != nil {
+		fail("%v", err)
 	}
 	if len(c.Projects) == 0 {
 		fail("no project to list")
@@ -840,23 +897,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 			retained[typ+"\x00"+id] = true
 		}
 	}
-	var candidate func(*item) bool
-	candidate = func(it *item) bool {
-		if c.Prefix != "" && strings.HasPrefix(it.name, c.Prefix) {
-			return true
-		}
-		if c.RunID != "" {
-			for _, v := range append([]string{it.id, it.name}, it.values...) {
-				if strings.Contains(v, c.RunID) {
-					return true
-				}
-			}
-		}
-		if created[it.typ+"\x00"+it.id] {
-			return true
-		}
-		return it.parent != nil && candidate(it.parent)
-	}
+	candidate := func(it *item) bool { return c.candidate(it, created) }
 	var isRetained func(*item) bool
 	isRetained = func(it *item) bool {
 		if it.parent != nil {
@@ -882,6 +923,28 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		rep.Outcome = "fail"
 	}
 	return rep
+}
+
+// candidate reports whether a listed resource may be the run's: its name starts with Prefix, its
+// id, name or a tag value holds RunID, it is in the inventory (created), or its parent is a
+// candidate. For a nameless kind for which Before has an entry (a probe's baseline, spec 007
+// FR-006) an id of beforeProject absent from that entry is a candidate and one in it is not;
+// Before never decides a named kind or another project's resource, and nil or no entry leaves
+// that kind to the matching above.
+func (c LeftoverCheck) candidate(it *item, created map[string]bool) bool {
+	if c.Prefix != "" && strings.HasPrefix(it.name, c.Prefix) {
+		return true
+	}
+	if c.RunID != "" && slices.ContainsFunc(append([]string{it.id, it.name}, it.values...), func(v string) bool { return strings.Contains(v, c.RunID) }) {
+		return true
+	}
+	if created[it.typ+"\x00"+it.id] {
+		return true
+	}
+	if ids, ok := c.Before[it.typ]; ok && slices.Contains(namelessKinds, it.typ) && (c.beforeProject == "" || it.project == c.beforeProject) {
+		return !slices.Contains(ids, it.id)
+	}
+	return it.parent != nil && c.candidate(it.parent, created)
 }
 
 // list lists every kind. Buckets are listed in every region of each project; the storage
@@ -1022,7 +1085,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 				if ap, ok := l.under(base+"/alerting", id); ok && l.object(ap, &a) {
 					raw, _ := json.Marshal(a)
 					l.record(tAlert, raw)
-					add(&item{typ: tAlert, id: id, name: a.Name})
+					add(&item{typ: tAlert, id: id, name: a.Name, project: p.ID})
 				}
 			}
 		}

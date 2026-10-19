@@ -2105,20 +2105,21 @@ func TestProbeRerun(t *testing.T) {
 				}
 			}
 			before = treeSnapshot(t, dir)
-			// Run 2 of the same root under a new run id, destroy working again.
 			w.scenario.Stacks["p"] = tofuStack{ApplyStream: w.scenario.Stacks["p"].ApplyStream}
 			w.save(t)
 			p2 := p1
 			p2.Run.ID, p2.Run.Dir = id2, filepath.Join(filepath.Dir(w.runDir), id2)
-			if err := p2.Start(context.Background()); err != nil {
-				t.Errorf("run 2 of the same root under a new run id: %v", err)
+			refusedBesideRun1(t, w, p2)
+			// A fresh process cleans up run 1, with the destroy working again.
+			if out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}}).CombinedOutput(); err != nil {
+				t.Errorf("cleanup of run 1: %v\n%s", err, out)
+			} else if strings.Contains(string(out), "Backend") {
+				t.Errorf("cleanup of run 1 initialised against another backend:\n%s", out)
 			}
 			n2 := len(w.calls(t, "tofu.log"))
-			// A fresh process cleans up run 1 after run 2.
-			if out, err := w.subprocess(t, fakeRunConfig{Mode: "probe-cleanup", ConfigRoot: root, Stacks: []fakeRunStack{{"p", true}}}).CombinedOutput(); err != nil {
-				t.Errorf("cleanup of run 1 after run 2: %v\n%s", err, out)
-			} else if strings.Contains(string(out), "Backend") {
-				t.Errorf("cleanup of run 1 after run 2 initialised against another backend:\n%s", out)
+			// Run 2 of the same root under a new run id, after the cleanup.
+			if err := p2.Start(context.Background()); err != nil {
+				t.Errorf("run 2 of the same root under a new run id: %v", err)
 			}
 			for _, msg := range []string{"Backend configuration changed", "Backend initialization required"} {
 				if strings.Contains(w.term.String(), msg) {
@@ -2132,8 +2133,8 @@ func TestProbeRerun(t *testing.T) {
 				calls            []tofuCall
 			}{
 				{"run 1", p1.Run.ID, p1.Run.Dir, calls[:n1]},
-				{"run 2", id2, p2.Run.Dir, calls[n1:n2]},
-				{"cleanup of run 1", p1.Run.ID, w.runDir, calls[n2:]},
+				{"cleanup of run 1", p1.Run.ID, w.runDir, calls[n1:n2]},
+				{"run 2", id2, p2.Run.Dir, calls[n2:]},
 			}
 			dataDirs := make([]string, len(runs))
 			for i, r := range runs {
@@ -2174,11 +2175,25 @@ func TestProbeRerun(t *testing.T) {
 					t.Errorf("%s: %d inits and %d destroys, want one each", r.name, inits, destroys)
 				}
 			}
-			if dataDirs[1] != "" && (dataDirs[1] == dataDirs[0] || dataDirs[1] == dataDirs[2]) {
-				t.Errorf("run 2 shares its data directory %s with run 1 or its cleanup", dataDirs[1])
+			if dataDirs[2] != "" && (dataDirs[2] == dataDirs[0] || dataDirs[2] == dataDirs[1]) {
+				t.Errorf("run 2 shares its data directory %s with run 1 or its cleanup", dataDirs[2])
 			}
 			unchanged("run 2 and the cleanup", before)
 		})
+	}
+}
+
+// refusedBesideRun1: spec 007 FR-006 (T014): a probe start beside an unreconciled run is refused
+// (CondUnreconciledRun) before any tofu call.
+func refusedBesideRun1(t *testing.T, w *runWorld, p Probe) {
+	t.Helper()
+	n := len(w.calls(t, "tofu.log"))
+	var ref *Refusal
+	if err := p.Start(context.Background()); !errors.As(err, &ref) || ref.Condition != CondUnreconciledRun {
+		t.Errorf("run 2 beside unreconciled run 1: %v, want refused (%s)", err, CondUnreconciledRun)
+	}
+	if m := len(w.calls(t, "tofu.log")); m != n {
+		t.Errorf("the refused run 2 made %d tofu calls", m-n)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,6 +93,14 @@ type Runner struct {
 	check       *ProbeCheck // Probe.Check, on the run's one stack
 	// sweepProject is the project probe.env records, for the check's Sweep (sweep.go).
 	sweepProject string
+	// baseline is a probe run's baseline recovery copy (spec 007 FR-006), set by Probe.run on a
+	// start and a cleanup: a start lists its baseline before the first apply (session.open), and
+	// a failed leftover check leaves any probe run unreconciled (session.reconciled). nil for
+	// every other run.
+	baseline *recoveryCopy
+	// stateless: a probe cleanup of a run without state, which runs no tofu (data-model *Start-up
+	// phases and run classes*; DR-T013-b).
+	stateless bool
 	// companionBackoff are the waits before each retry of the companion's destroy (T095); nil:
 	// defaultCompanionBackoff. Tests shorten them.
 	companionBackoff []time.Duration
@@ -880,6 +889,42 @@ func (r Runner) recordDir() error {
 	return err
 }
 
+// open opens the run's inventory and, on a probe start that applies, lists and writes the
+// probe's baseline before any child runs (spec 007 FR-006 phase 3), under runCtx (the run's
+// deadline and signals): its retries use the leftover check's backoff and clock and a retry
+// budget ending at that deadline. A failed baseline ends the run here: nothing was created.
+func (s *session) open(runCtx context.Context) error {
+	inv, err := OpenInventory(s.r.Dir, s.red)
+	if err != nil {
+		return err
+	}
+	s.inv = inv
+	if s.r.baseline == nil || s.r.cleanupOnly || s.r.PlanOnly {
+		return nil
+	}
+	check := s.r.Leftovers
+	check.Red, check.Term = s.red, s.term
+	end, _ := runCtx.Deadline()
+	check.Budget = newRetryBudget(end, minRetryReserve)
+	if err := s.probeBaseline(runCtx, check); err != nil {
+		if runCtx.Err() != nil {
+			err = errors.Join(context.Cause(runCtx), err)
+		}
+		inv.Close()
+		return redactedError{err, s.red}
+	}
+	return nil
+}
+
+// cleanupStacks are the stacks a cleanup destroys: every stack, or none for a stateless probe
+// cleanup, which runs no tofu.
+func (r Runner) cleanupStacks() []Stack {
+	if r.stateless {
+		return nil
+	}
+	return r.Stacks
+}
+
 // Execute runs r; the error maps to the exit code through ExitCode.
 func (r Runner) Execute(ctx context.Context) error {
 	deadline := r.Deadline
@@ -919,13 +964,9 @@ func (r Runner) Execute(ctx context.Context) error {
 	maps.Copy(vars, r.Creds)
 	delete(vars, "TF_DATA_DIR") // set per stack by tofuCmd; a caller cannot move it
 	s := &session{r: r, red: red, term: term, child: &childEnv{home: home, vars: vars, grace: grace, started: r.childStarted}, stackVars: map[string]map[string]string{}}
-	if s.inv, err = OpenInventory(r.Dir, red); err != nil {
-		return err
-	}
-	defer s.inv.Close()
-
 	// The destroy-on-exit is registered before the first apply: from here on every way out of
-	// the stack loop (failure, refusal, signal, deadline) reaches the destroy below.
+	// the stack loop (failure, refusal, signal, deadline) reaches the destroy below. The run's
+	// deadline and signals already bound the probe's baseline (session.open).
 	runCtx, cancelTimeout := withDeadline(ctx, deadline, r.deadlineAt)
 	defer cancelTimeout()
 	runCtx, cancel := context.WithCancelCause(runCtx)
@@ -949,10 +990,14 @@ func (r Runner) Execute(ctx context.Context) error {
 		case <-runCtx.Done():
 		}
 	}()
+	if err = s.open(runCtx); err != nil {
+		return err
+	}
+	defer s.inv.Close()
 
 	var runErr error
 	if r.cleanupOnly {
-		s.started = r.Stacks
+		s.started = r.cleanupStacks()
 	} else {
 		for _, st := range r.Stacks {
 			if runCtx.Err() != nil {
@@ -1050,7 +1095,7 @@ func (r Runner) Execute(ctx context.Context) error {
 	// the one every record below and the terminal go through, whatever Red the caller set. Its
 	// listing retries wait in a budget ending at the destroy context's deadline and print to the
 	// run's terminal (spec 007 FR-001).
-	check := r.Leftovers
+	check := s.r.Leftovers // with the baseline's Before (probeBaseline)
 	check.Red, check.Term = red, term
 	end, _ := dctx.Deadline()
 	check.Budget = newRetryBudget(end, minRetryReserve)
@@ -1274,23 +1319,133 @@ const (
 	RunUntrusted      RunClass = "untrusted"
 )
 
-// LoadBaseline reads a run's baseline: recordDir's baseline.json first, else the recovery copy at
-// recoveryPath, and validates it against runID and projectID; its error text starts
-// BASELINE_MISSING or BASELINE_INVALID <reason>. Stub for T014 (spec 007 T011).
+// The reasons of LoadBaseline's errors that ClassifyRun reads (baselineError).
+const (
+	baselineMissing    = "missing"
+	baselineIncomplete = "incomplete"
+)
+
+// baselineError is LoadBaseline's error: BASELINE_MISSING, or BASELINE_INVALID <reason>.
+type baselineError struct{ reason, detail string }
+
+func (e *baselineError) Error() string {
+	if e.reason == baselineMissing {
+		return "BASELINE_MISSING: " + e.detail
+	}
+	return "BASELINE_INVALID " + e.reason + ": " + e.detail
+}
+
+// LoadBaseline reads a run's baseline and validates it against runID and projectID (data-model
+// *Probe baseline*, *Fixed signatures*): recordDir's baseline.json first; if that copy is missing
+// or unreadable, the recovery copy at recoveryPath; two readable copies that differ are
+// BASELINE_INVALID copies-differ. Its error text starts BASELINE_MISSING or BASELINE_INVALID
+// <reason>; it never names the project id.
 func LoadBaseline(recordDir, recoveryPath, runID, projectID string) (Baseline, error) {
-	return Baseline{}, errors.New("LoadBaseline: not implemented")
+	b, err := chooseBaseline(filepath.Join(recordDir, baselineFile), recoveryPath)
+	if err != nil {
+		return Baseline{}, err
+	}
+	return b, b.check(runID, projectID)
+}
+
+// baselineRead is one copy of a baseline as read: its bytes and their decoding.
+type baselineRead struct {
+	raw []byte
+	b   Baseline
+	err error // fs.ErrNotExist, a read error or a decoding error
+}
+
+func readBaselineCopy(path string) baselineRead {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return baselineRead{err: err}
+	}
+	var b Baseline
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return baselineRead{err: err}
+	}
+	return baselineRead{raw: raw, b: b}
+}
+
+// chooseBaseline is the copy LoadBaseline validates: the record copy, else the recovery copy.
+func chooseBaseline(record, recovery string) (Baseline, error) {
+	rc, rv := readBaselineCopy(record), readBaselineCopy(recovery)
+	switch {
+	case rc.err == nil && rv.err == nil && !bytes.Equal(rc.raw, rv.raw):
+		return Baseline{}, &baselineError{"copies-differ", fmt.Sprintf("%s and %s are both readable and differ", record, recovery)}
+	case rc.err == nil:
+		return rc.b, nil
+	case rv.err == nil:
+		return rv.b, nil
+	case errors.Is(rc.err, fs.ErrNotExist) && errors.Is(rv.err, fs.ErrNotExist):
+		return Baseline{}, &baselineError{baselineMissing, fmt.Sprintf("neither %s nor %s exists", record, recovery)}
+	}
+	return Baseline{}, &baselineError{"unreadable", fmt.Sprintf("%s: %v; %s: %v", record, rc.err, recovery, rv.err)}
+}
+
+// check validates a baseline read for runID and projectID: its run, the project's digest, a
+// complete listing without errors, and the alert kind listed (an empty list, never null).
+func (b Baseline) check(runID, projectID string) error {
+	alerts, listed := b.Listed[tAlert]
+	switch {
+	case b.RunID != runID:
+		return &baselineError{"another-run", fmt.Sprintf("it names run %q, not %s", b.RunID, runID)}
+	case b.ProjectSHA256 != projectDigest(projectID):
+		return &baselineError{"another-project", "its project digest is not the one probe.env records"}
+	case !b.Complete:
+		return &baselineError{baselineIncomplete, fmt.Sprintf("its listing failed (%d errors): nothing was created after it", len(b.Errors))}
+	case len(b.Errors) > 0:
+		return &baselineError{"errors", fmt.Sprintf("it records %d errors", len(b.Errors))}
+	case !listed || alerts == nil:
+		return &baselineError{"no-alert-key", "it lists no " + tAlert}
+	}
+	return nil
+}
+
+// projectDigest is the hex SHA-256 of a project id, which a baseline records instead of the id.
+func projectDigest(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(h[:])
 }
 
 // ClassifyRun classes a probe run from whether its state exists, whether its inventory holds an
-// entry, and its baseline as LoadBaseline returned it. Stub for T014 (spec 007 T011).
+// entry, and its baseline as LoadBaseline returned it (data-model *Start-up phases and run
+// classes*): a valid baseline is baseline-backed; with no state and no inventory entry, a missing
+// baseline or one of this run and project whose listing failed is pre-create; everything else is
+// untrusted. Missing state alone never makes a run pre-create.
 func ClassifyRun(stateExists, inventoryHasEntry bool, b Baseline, loadErr error) RunClass {
-	return ""
+	if loadErr == nil {
+		return RunBaselineBacked
+	}
+	var be *baselineError
+	if stateExists || inventoryHasEntry || !errors.As(loadErr, &be) {
+		return RunUntrusted
+	}
+	if be.reason == baselineMissing || be.reason == baselineIncomplete {
+		return RunPreCreate
+	}
+	return RunUntrusted
 }
 
-// unreconciledRuns returns the run ids of the directories under probesDir other than self, sorted.
-// Stub for T014 (spec 007 T011).
+// unreconciledRuns returns the run ids of the entries under probesDir other than self, sorted:
+// every directory, and every symlink (fail closed); a regular file is no run, and a missing
+// probesDir holds none.
 func unreconciledRuns(probesDir, self string) ([]string, error) {
-	return nil, errors.New("unreconciledRuns: not implemented")
+	des, err := os.ReadDir(probesDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, de := range des {
+		if de.Name() != self && (de.IsDir() || de.Type()&fs.ModeSymlink != 0) {
+			out = append(out, de.Name())
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // ProbeProject reads the project a run recorded (probe.env), for `--cleanup`: a cleanup destroys
@@ -1335,17 +1490,36 @@ func (p Probe) files() (dir, state, pass, root string, err error) {
 	return dir, filepath.Join(dir, p.Run.Stacks[0].ID+".tfstate"), filepath.Join(dir, "passphrase.env"), filepath.Join(dir, "probe.env"), nil
 }
 
-func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
-	_, state, pass, root, err := p.files()
-	if err != nil {
-		return err
+// recoveryCopy is a probe run's baseline recovery copy, <root>/<rel> with rel
+// accounts/<account>/state/baselines/<run-id>.json (data-model *Probe baseline*).
+type recoveryCopy struct{ root, rel string }
+
+func (c *recoveryCopy) path() string { return filepath.Join(c.root, c.rel) }
+
+// recovery is the run's baseline recovery copy.
+func (p Probe) recovery() (*recoveryCopy, error) {
+	if !RunIDPattern.MatchString(p.Run.ID) {
+		return nil, fmt.Errorf("run id %q is not YYYYMMDDThhmmssZ-<4 hex>", p.Run.ID)
 	}
+	if _, err := AccountDir(p.ConfigRoot, p.Account); err != nil {
+		return nil, err
+	}
+	return &recoveryCopy{root: p.ConfigRoot, rel: filepath.Join("accounts", p.Account, "state", "baselines", p.Run.ID+".json")}, nil
+}
+
+// runner is the probe's Runner for one run or cleanup: the passphrase (none for a stateless
+// cleanup) in its credentials, the state path and run id in its variables, the check, the
+// project its Sweep gets, the companion stage and the baseline's recovery copy.
+func (p Probe) runner(phrase, state string, cleanup bool) (Runner, error) {
+	_, _, _, root, _ := p.files()
 	r := p.Run
 	r.Creds = maps.Clone(r.Creds)
 	if r.Creds == nil {
 		r.Creds = map[string]string{}
 	}
-	r.Creds["TF_VAR_state_passphrase"] = phrase // a secret: redacted, environment only
+	if phrase != "" {
+		r.Creds["TF_VAR_state_passphrase"] = phrase // a secret: redacted, environment only
+	}
 	r.Vars = maps.Clone(r.Vars)
 	if r.Vars == nil {
 		r.Vars = map[string]string{}
@@ -1354,46 +1528,79 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 	r.Vars["TF_VAR_run_id"] = r.ID
 	r.cleanupOnly = cleanup
 	r.check = p.Check
+	var err error
+	if r.baseline, err = p.recovery(); err != nil {
+		return Runner{}, err
+	}
 	if p.Check != nil && p.Check.Sweep != nil {
 		// Sweep gets the project probe.env records, never the caller's.
 		if r.sweepProject, err = recordedProject(root, r.ID); err != nil {
-			return err
+			return Runner{}, err
 		}
 	}
-	// A companion root (its `companion/` directory) runs after a full apply of the root (never in
-	// a plan-only run: Execute), and is destroyed first on exit and on `--cleanup`.
-	cdir := filepath.Join(r.Stacks[0].Dir, "companion")
-	if fi, err := os.Stat(cdir); err == nil && fi.IsDir() {
-		dir, _, _, _, _ := p.files()
-		rel, err := filepath.Rel(p.ConfigRoot, dir)
-		if err != nil {
-			return err
-		}
-		r.companion = &companionStage{stage: r.Stacks[0], stack: Stack{ID: r.Stacks[0].ID + "-companion", Dir: cdir, Ephemeral: true},
-			configRoot: p.ConfigRoot, rel: filepath.Join(rel, "companion.env"), bind: p.Bind}
-	}
-	if err := r.Execute(ctx); err != nil {
-		sweeps := p.Check != nil && p.Check.Sweep != nil
-		if _, serr := os.Lstat(state); errors.Is(serr, os.ErrNotExist) && !isUnreconciled(err) && !(cleanup && sweeps) {
-			// No state was ever written: nothing to destroy, so no cleanup can use the
-			// passphrase; it goes whatever the outcome, unless the check's Sweep or the
-			// leftover check failed (sweep.go), or a cleanup of a run with a Sweep failed
-			// before both passed: then `--cleanup` sweeps again.
-			_ = removeFiles(pass, root)
-			dir, _, _, _, _ := p.files()
-			_ = removeEmptyDir(dir)
-		}
-		return err
-	}
-	if err := removeFiles(state, state+".backup", pass, root); err != nil {
-		return err
+	r.companion, err = p.companion()
+	return r, err
+}
+
+// companion is the probe root's companion stage, when the root has a `companion/` directory: it
+// runs after a full apply of the root (never in a plan-only run: Execute), and is destroyed first
+// on exit and on `--cleanup`.
+func (p Probe) companion() (*companionStage, error) {
+	cdir := filepath.Join(p.Run.Stacks[0].Dir, "companion")
+	if fi, err := os.Stat(cdir); err != nil || !fi.IsDir() {
+		return nil, nil
 	}
 	dir, _, _, _, _ := p.files()
+	rel, err := filepath.Rel(p.ConfigRoot, dir)
+	if err != nil {
+		return nil, err
+	}
+	st := p.Run.Stacks[0]
+	return &companionStage{stage: st, stack: Stack{ID: st.ID + "-companion", Dir: cdir, Ephemeral: true},
+		configRoot: p.ConfigRoot, rel: filepath.Join(rel, "companion.env"), bind: p.Bind}, nil
+}
+
+func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
+	dir, state, pass, root, err := p.files()
+	if err != nil {
+		return err
+	}
+	r, err := p.runner(phrase, state, cleanup)
+	if err != nil {
+		return err
+	}
+	if err := r.Execute(ctx); err != nil {
+		if _, serr := os.Lstat(state); errors.Is(serr, os.ErrNotExist) && !isUnreconciled(err) && !cleanup {
+			// A start that wrote no state and whose sweep and leftover check passed (or that
+			// ended at or before its baseline, before any create): nothing to destroy, so no
+			// cleanup can use the passphrase; the run's files and the baseline's recovery copy
+			// go whatever the outcome. A failed Sweep or leftover check keeps them, also without
+			// state (sweep.go, spec 007 FR-007). A failed cleanup always keeps them: it may have
+			// ended before its sweep and leftover check ran.
+			_ = retire(dir, root, pass, r.baseline.path())
+		}
+		return err
+	}
+	return retire(dir, root, state, state+".backup", pass, r.baseline.path())
+}
+
+// retire removes a reconciled run's files, probe.env (root, which a cleanup starts from) last, and
+// then its directory: a crash part-way leaves probe.env, so `--cleanup` can still finish the run.
+func retire(dir, root string, files ...string) error {
+	if err := removeFiles(files...); err != nil {
+		return err
+	}
+	if err := removeFiles(root); err != nil {
+		return err
+	}
 	return removeEmptyDir(dir)
 }
 
-// Start creates the passphrase, records the probe root, runs the probe and deletes the probe's
-// files only after destroy and the leftover check passed.
+// Start refuses to run beside another unreconciled probe run, then runs the start-up phases in
+// order, each written and synced before the next (spec 007 FR-006): probe.env (the root and the
+// project), the passphrase, the baseline (Execute, before the first apply); it runs the probe and
+// deletes the probe's files and the baseline's recovery copy only after destroy, the sweep and the
+// leftover check passed.
 func (p Probe) Start(ctx context.Context) error {
 	dir, _, _, _, err := p.files()
 	if err != nil {
@@ -1407,15 +1614,26 @@ func (p Probe) Start(ctx context.Context) error {
 	if p.Run.Vars["TF_VAR_project_id"] == "" {
 		return refuse(CondRecord, "probe start without a project id (TF_VAR_project_id): its cleanup would be refused")
 	}
+	rel, err := filepath.Rel(p.ConfigRoot, dir)
+	if err != nil {
+		return err
+	}
+	// An earlier run still unreconciled may have left a nameless resource this run's baseline
+	// would take in as the project's own (FR-006): refused before any file of this run. The run's
+	// own directory is claimed first (created exclusively, synced), so of two starts at once each
+	// sees the other and both are refused; a refused start removes its empty directory again.
+	if err := claimDir(p.ConfigRoot, rel); err != nil {
+		return err
+	}
+	if err := refuseUnreconciled(filepath.Dir(dir), p.Run.ID); err != nil {
+		_ = removeEmptyDir(dir)
+		return err
+	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return err
 	}
 	phrase := hex.EncodeToString(b)
-	rel, err := filepath.Rel(p.ConfigRoot, dir)
-	if err != nil {
-		return err
-	}
 	if err := WriteCredentialFile(p.ConfigRoot, filepath.Join(rel, "probe.env"), map[string]string{probeRootKey: p.Run.Stacks[0].Dir, probeProjectKey: p.Run.Vars["TF_VAR_project_id"]}); err != nil {
 		return err
 	}
@@ -1425,12 +1643,29 @@ func (p Probe) Start(ctx context.Context) error {
 	return p.run(ctx, phrase, false)
 }
 
-// Cleanup is `lz-live probe --cleanup <run-id>` from a fresh process: it reads the retained
-// passphrase, destroys the probe from its retained state (planning and applying nothing), runs the
-// leftover check and deletes the probe's files only when both pass. Without the passphrase it
-// destroys nothing.
+// refuseUnreconciled refuses a probe start while another run's directory exists under probesDir
+// (CondUnreconciledRun), naming each such run and the cleanup that finishes the first.
+func refuseUnreconciled(probesDir, self string) error {
+	others, err := unreconciledRuns(probesDir, self)
+	if err != nil {
+		return err
+	}
+	if len(others) > 0 {
+		return refuse(CondUnreconciledRun, "probe run %s is unreconciled (its directory under state/probes/ exists); finish it first: task live:probe -- --reviewed-sha <sha> --cleanup %s (a directory without probe.env cannot be cleaned up: the owner checks the project and removes it by hand)",
+			strings.Join(others, ", "), others[0])
+	}
+	return nil
+}
+
+// Cleanup is `lz-live probe --cleanup <run-id>` from a fresh process. It classes the run
+// (ClassifyRun, data-model *Start-up phases and run classes*): an untrusted run is refused before
+// anything is read or deleted, and its files stay; a run without state (pre-create, or
+// baseline-backed whose create left no state) runs no tofu and needs no passphrase; otherwise it
+// reads the retained passphrase and destroys the probe from its retained state (planning and
+// applying nothing). Then the check's Sweep and the leftover check run, with a baseline-backed
+// run's baseline as Before; the probe's files and the recovery copy go only when all passed.
 func (p Probe) Cleanup(ctx context.Context) error {
-	_, _, pass, record, err := p.files()
+	_, state, pass, record, err := p.files()
 	if err != nil {
 		return err
 	}
@@ -1448,6 +1683,12 @@ func (p Probe) Cleanup(ctx context.Context) error {
 		p.Run.Vars = map[string]string{}
 	}
 	p.Run.Vars["TF_VAR_project_id"] = project
+	if err := p.classify(state, project); err != nil {
+		return err
+	}
+	if p.Run.stateless {
+		return p.run(ctx, "", true)
+	}
 	v, err := ReadCredentialFile(pass)
 	if err != nil {
 		return err
@@ -1457,4 +1698,31 @@ func (p Probe) Cleanup(ctx context.Context) error {
 		return errors.New("probe passphrase missing or shorter than 16 characters")
 	}
 	return p.run(ctx, phrase, true)
+}
+
+// classify classes the run a cleanup finishes: untrusted is refused (nothing deleted, the files
+// kept: FR-007's owner recovery); a baseline-backed run's leftover check gets its baseline as
+// Before; a run without state is stateless. A state file that cannot be examined counts as state,
+// and an unreadable inventory refuses the cleanup.
+func (p *Probe) classify(state, project string) error {
+	rc, err := p.recovery()
+	if err != nil {
+		return err
+	}
+	b, loadErr := LoadBaseline(p.Run.Dir, rc.path(), p.Run.ID, project)
+	_, serr := os.Lstat(state)
+	hasState := !errors.Is(serr, fs.ErrNotExist)
+	inv, err := ReadInventory(p.Run.Dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	switch ClassifyRun(hasState, len(inv) > 0, b, loadErr) {
+	case RunUntrusted:
+		return refuse(string(RunUntrusted), "cleanup of run %s: %v; nothing deleted and its files kept: owner recovery, then --cleanup %s --accept-lost-baseline",
+			p.Run.ID, loadErr, p.Run.ID)
+	case RunBaselineBacked:
+		p.Run.Leftovers.Before, p.Run.Leftovers.beforeProject = b.Listed, project
+	}
+	p.Run.stateless = !hasState
+	return nil
 }

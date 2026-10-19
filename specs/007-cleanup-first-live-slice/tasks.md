@@ -192,7 +192,7 @@ T014–T016.
   - Verify: `task test:live-lane`: the cases fail on today's runner (no sweep, no phases, files removed).
   - Evidence: `evidence/T013.md`; initial status `not-run`.
 
-- [ ] T014 [US3] Write the start-up phases, both baseline copies, run classes and the unreconciled-run refusal in tools/internal/live/runner.go and tools/internal/live/leftovers.go, keeping recovery files until reconciliation
+- [x] T014 [US3] Write the start-up phases, both baseline copies, run classes and the unreconciled-run refusal in tools/internal/live/runner.go and tools/internal/live/leftovers.go, keeping recovery files until reconciliation — closed 2026-10-19, evidence: evidence/T014.md
   - Requirements: FR-006, FR-007; ADRs: 0008, 0024. Depends on: T011, T013.
   - Verify: `task test:live-lane`: T011's cases and T013's recovery-file and start-up cases green; G27 mutants (baseline after apply, apply after a failed baseline, `Before` deciding a named kind, nil `Before` making every alert a candidate, start beside an unreconciled run, missing state alone classed pre-create, files removed before reconciliation) each turn a case red.
   - Evidence: `evidence/T014.md`; initial status `not-run`.

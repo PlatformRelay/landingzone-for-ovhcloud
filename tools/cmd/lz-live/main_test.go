@@ -280,6 +280,19 @@ func checkoutSnapshot(t *testing.T, checkout string) map[string]string {
 	return out
 }
 
+// refusedBesideRun1: spec 007 FR-006 (T014): a probe start beside an unreconciled run is refused
+// (unreconciled-run) before any child.
+func (w *probeWorld) refusedBesideRun1(t *testing.T) {
+	t.Helper()
+	n := len(w.childCalls(t, "tofu.log"))
+	if code, stdout, stderr := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net"); code == 0 || !strings.Contains(stdout+stderr, live.CondUnreconciledRun) {
+		t.Errorf("run 2 beside unreconciled run 1: exit %d, want refused %s\nstdout:\n%s\nstderr:\n%s", code, live.CondUnreconciledRun, stdout, stderr)
+	}
+	if m := len(w.childCalls(t, "tofu.log")); m != n {
+		t.Errorf("the refused run 2 made %d tofu calls", m-n)
+	}
+}
+
 // TestProbeRerunEntry (T073; found in T008, evidence/T008.md decision requests 3 and 4): the
 // owner probes a root a second time under a new run id, then cleans up the first run. Both
 // initialise without "Backend configuration changed" (the backend path changes per run id; tofu
@@ -338,15 +351,17 @@ func TestProbeRerunEntry(t *testing.T) {
 		}
 		before = checkoutSnapshot(t, w.checkout)
 		w.now = time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC)
+		w.refusedBesideRun1(t)
+		code, stdout3, stderr3 := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id1)
+		if code != 0 {
+			t.Errorf("cleanup of run 1: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout3, stderr3)
+		}
+		n2 := len(w.childCalls(t, "tofu.log"))
+		w.now = time.Date(2026, 10, 6, 13, 30, 0, 0, time.UTC)
 		code, stdout2, stderr2 := w.run(t, "probe", "--reviewed-sha", fakeHead, "tests/live/probes/net")
 		id2 := runIDOf(t, stdout2)
 		if code != 0 || id2 == id1 {
 			t.Errorf("run 2 of the same root under run id %s (run 1: %s): exit %d\nstdout:\n%s\nstderr:\n%s", id2, id1, code, stdout2, stderr2)
-		}
-		n2 := len(w.childCalls(t, "tofu.log"))
-		code, stdout3, stderr3 := w.run(t, "probe", "--reviewed-sha", fakeHead, "--cleanup", id1)
-		if code != 0 {
-			t.Errorf("cleanup of run 1 after run 2: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout3, stderr3)
 		}
 		for _, out := range []string{stdout1, stdout2, stdout3, stderr2, stderr3} {
 			for _, msg := range []string{"Backend configuration changed", "Backend initialization required"} {
@@ -362,8 +377,8 @@ func TestProbeRerunEntry(t *testing.T) {
 			want     []string
 		}{
 			{"run 1", id1, calls[:n1], []string{"init", "plan", "show", "show", "apply", "plan-destroy", "show-destroy", "destroy"}},
-			{"run 2", id2, calls[n1:n2], []string{"init", "plan", "show", "show", "apply", "plan-destroy", "show-destroy", "destroy"}},
-			{"cleanup of run 1", id1, calls[n2:], []string{"init", "plan-destroy", "show-destroy", "destroy"}},
+			{"cleanup of run 1", id1, calls[n1:n2], []string{"init", "plan-destroy", "show-destroy", "destroy"}},
+			{"run 2", id2, calls[n2:], []string{"init", "plan", "show", "show", "apply", "plan-destroy", "show-destroy", "destroy"}},
 		}
 		dataDirs := make([]string, len(runs))
 		for i, r := range runs {
@@ -394,8 +409,8 @@ func TestProbeRerunEntry(t *testing.T) {
 				}
 			}
 		}
-		if dataDirs[1] != "" && (dataDirs[1] == dataDirs[0] || dataDirs[1] == dataDirs[2]) {
-			t.Errorf("run 2 shares its data directory %s with run 1 or its cleanup", dataDirs[1])
+		if dataDirs[2] != "" && (dataDirs[2] == dataDirs[0] || dataDirs[2] == dataDirs[1]) {
+			t.Errorf("run 2 shares its data directory %s with run 1 or its cleanup", dataDirs[2])
 		}
 		unchanged("run 2 and the cleanup", before)
 		w.noSecret(t, stdout1, stdout2, stdout3, stderr, stderr2, stderr3)

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -92,14 +90,14 @@ func cleanupPlaceProblem(rel, content string, after map[string]string) string {
 func TestProbeCleanupKeepsRecord(t *testing.T) {
 	w := newProbeWorld(t)
 	id, rec := w.failedNetRun(t)
-	for _, f := range []string{"summary.json", "leftovers.json", "errors.txt", "inventory.jsonl"} {
+	// The run wrote its own baseline.json before its first apply (spec 007 FR-006, T014); a
+	// hand-written one without the alert key would be invalid, and differ from the recovery copy.
+	for _, f := range []string{"summary.json", "leftovers.json", "errors.txt", "inventory.jsonl", "baseline.json"} {
 		if _, err := os.Stat(filepath.Join(rec, f)); err != nil {
 			t.Fatalf("premise: the failed run wrote no %s: %v", f, err)
 		}
 	}
-	sum := sha256.Sum256([]byte("p1"))
 	writePrivate(t, filepath.Join(rec, "listings", "network.json"), `[{"id":"pn-old","name":"lzprobe-old"}]`)
-	writePrivate(t, filepath.Join(rec, "baseline.json"), fmt.Sprintf(`{"run_id":%q,"project_sha256":%q,"listed":{},"complete":true,"errors":[]}`, id, hex.EncodeToString(sum[:])))
 	writePrivate(t, filepath.Join(rec, "observations.json"), `{"check":"none","observations":[]}`)
 	before := recordFiles(t, rec)
 
