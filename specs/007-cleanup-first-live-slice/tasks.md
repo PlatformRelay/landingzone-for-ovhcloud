@@ -179,7 +179,7 @@ T014–T016.
   - Verify: `task test:live-lane`: every case fails against the stubs for its stated reason.
   - Evidence: `evidence/T012.md`; initial status `not-run`.
 
-- [ ] T013 [US3] Write the production-entry recovery and start-up tests in tools/cmd/lz-live/probe_recovery_test.go
+- [x] T013 [US3] Write the production-entry recovery and start-up tests in tools/cmd/lz-live/probe_recovery_test.go — closed 2026-10-19, evidence: evidence/T013.md
   - Requirements: FR-007, SC-005; ADRs: 0008, 0024. Depends on: T011, T012.
   - Cases (given / when / then → defect exposed), `lz-live probe` run as a fresh process of the test binary (as spec 003 T037), fake API and fake `tofu`:
     - given a fake `tofu apply` that makes the fake API create alert B and then exits non-zero before writing any state, so no state and no inventory exist / when the first process ends (its exit, then a kill of a second variant before its own cleanup) / then `probe.env`, the passphrase, the root record and `baseline.json` are still on disk → exposes `runner.go:1295-1304` removing the recovery files after an error without state.
