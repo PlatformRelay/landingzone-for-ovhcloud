@@ -360,7 +360,7 @@ Independent test: V006 (T034), V007, V008. Test tasks T035–T036, then implemen
   - Verify: `task test:release` (created here): every case fails against the stub. This task registers `test:release` (creator 006/T036).
   - Evidence: `evidence/T036.md`; PR; initial status `not-run`.
 
-- [ ] T037 [US5] Add the update lane in tools/internal/checks/updatelane.go and .github/renovate.json
+- [x] T037 [US5] Add the update lane in tools/internal/checks/updatelane.go and .github/renovate.json — closed 2026-10-19, evidence: evidence/T037.md
   - Requirements: FR-015, SC-004; ADRs: 0011, 0021. Depends on: T035.
   - Verify: `task test:update-lane`: T035's cases green and the committed configuration passes; T003's registry test stays green for `test:update-lane`.
   - Evidence: `evidence/T037.md`; PR; initial status `not-run`.

@@ -288,6 +288,22 @@ func TestDependencyCommands(t *testing.T) {
 	}
 }
 
+// update-lane prints CheckUpdateLane's findings and exits 1 on any (006
+// FR-015, data-model *Fixed signatures*); this repository's configuration
+// passes; it takes no argument.
+func TestUpdateLaneCommand(t *testing.T) {
+	if code, out := lzCheck(repo(t, nil), "update-lane"); code != 1 ||
+		!strings.Contains(out, "UPDATE_UNCOVERED .github/renovate.json") || !strings.Contains(out, "UPDATE_LANE_FAIL findings=1") {
+		t.Errorf("BEHAVIORAL_RED: a tree without a configuration passed or was not reported: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(filepath.Join("..", "..", ".."), "update-lane"); code != 0 || !strings.Contains(out, "UPDATE_LANE_OK") {
+		t.Errorf("BEHAVIORAL_RED: this repository's update lane refused: code=%d\n%s", code, out)
+	}
+	if code, out := lzCheck(repo(t, nil), "update-lane", "x"); code != 2 || !strings.HasPrefix(out, "usage:") {
+		t.Errorf("BEHAVIORAL_RED: update-lane with an argument not refused with usage: code=%d\n%s", code, out)
+	}
+}
+
 // Without the pinned tools (outside the offline entry, or a wrong path) lint
 // is blocked, and a module directory that does not exist yet is not run; both
 // exit non-zero. The real tool runs are covered by task test:static.
@@ -672,6 +688,10 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 		"test:live-lane": {"tests/fixtures/ovhcloud", "tests/fixtures/tofu-probes/locked-recovery", "stacks/deployments.yaml"},
 		// 007 T008: the project-alias tests add a tenant to the checkout's sandbox manifest text.
 		"test:bootstrap": {"stacks/deployments.yaml"},
+		// 006 T037: the update-lane check reads the configuration, every pin source under the
+		// infrastructure trees and the schema snapshot.
+		"test:update-lane": {".github/renovate.json", "mise.toml", "mise.live.toml", "tools/go.mod", "stages", "components",
+			"modules", "stacks", "tests/fixtures/provider-schema", "tests/check/fixtures/updatelane"},
 	}
 	for id, paths := range want {
 		entries, ok := reads[id]

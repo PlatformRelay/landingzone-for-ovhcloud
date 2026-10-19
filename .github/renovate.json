@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Update lane (spec 006 FR-015, research R8): every pin source watched, nothing auto-merged; runtime-mirrored tools need a new offline entry; provider bumps travel with the schema snapshot. Judged offline by task test:update-lane.",
+  "automerge": false,
+  "ignorePaths": ["**/fixtures/**"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The offline runtime's base image digest (LZ_OFFLINE_IMAGE in mise.toml).",
+      "managerFilePatterns": ["/^mise\\.toml$/"],
+      "matchStrings": ["LZ_OFFLINE_IMAGE = \"(?<depName>[^@\"]+)@(?<currentDigest>sha256:[0-9a-f]{64})\""],
+      "datasourceTemplate": "docker",
+      "currentValueTemplate": "latest"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Tools the offline runtime mirrors, and its base image: a bump needs an entry revision (checks.Packages, the runtime bundle).",
+      "groupName": "runtime-tools",
+      "matchFileNames": ["mise.toml"],
+      "labels": ["needs-entry-revision"]
+    },
+    {
+      "description": "The ovh/ovh provider, with its schema snapshot (task capture:provider-schema) re-captured in the same pull request.",
+      "groupName": "provider-ovh",
+      "matchFileNames": ["**/.terraform.lock.hcl", "**/*.tf", "tests/fixtures/provider-schema/**"]
+    },
+    {
+      "description": "Host-only live tools (mise.live.toml); not mirrored in the runtime.",
+      "groupName": "host-tools",
+      "matchFileNames": ["mise.live.toml"]
+    },
+    {
+      "description": "Go modules of the tools (vendored).",
+      "groupName": "go-modules",
+      "matchFileNames": ["tools/go.mod"]
+    }
+  ]
+}

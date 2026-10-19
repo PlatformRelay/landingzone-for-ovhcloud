@@ -13,6 +13,7 @@
 //	lz-check [-root <repo>] ci-runs
 //	lz-check ci-observe (<role> <candidate> <capture-dir>)...
 //	lz-check [-root <repo>] docs
+//	lz-check [-root <repo>] update-lane
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
@@ -29,7 +30,10 @@
 // pipelines/github/foundation-runs.json against that source and exits 1 on
 // any finding or an absent record; ci-observe prints that record from
 // captured GitHub output. docs judges every Markdown page under docs/ by the
-// rules of ADR-0013 and exits 1 on any finding. Usage and input errors exit 2.
+// rules of ADR-0013 and exits 1 on any finding. update-lane judges the
+// dependency-update configuration against the pin sources and the provider
+// schema snapshot (006 FR-015) and exits 1 on any finding. Usage and input
+// errors exit 2.
 package main
 
 import (
@@ -57,6 +61,11 @@ var (
 	specNumber = regexp.MustCompile(`^(\d{3})-`)
 )
 
+// rootCommands take the repository root and no argument.
+var rootCommands = map[string]func(io.Writer, string) int{
+	"deps": deps, "ci-workflow": ciWorkflow, "docs": docs, "ci-runs": ciRuns, "update-lane": updateLane,
+}
+
 func run(args []string, out io.Writer) int {
 	flags := flag.NewFlagSet("lz-check", flag.ContinueOnError)
 	flags.SetOutput(out)
@@ -76,22 +85,16 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() == 1 && flags.Arg(0) == "slice":
 		tools := checks.StaticTools{Tofu: *tofu, TFLint: *tflint, TFLintConfig: filepath.Join(*root, ".tflint.hcl")}
 		return slice(out, *root, tools)
-	case flags.NArg() == 1 && flags.Arg(0) == "deps":
-		return deps(out, *root)
+	case flags.NArg() == 1 && rootCommands[flags.Arg(0)] != nil:
+		return rootCommands[flags.Arg(0)](out, *root)
 	case flags.NArg() == 2 && flags.Arg(0) == "select":
 		return selectChanged(out, *root, flags.Arg(1))
-	case flags.NArg() == 1 && flags.Arg(0) == "ci-workflow":
-		return ciWorkflow(out, *root)
-	case flags.NArg() == 1 && flags.Arg(0) == "docs":
-		return docs(out, *root)
-	case flags.NArg() == 1 && flags.Arg(0) == "ci-runs":
-		return ciRuns(out, *root)
 	case flags.NArg() > 1 && (flags.NArg()-1)%3 == 0 && flags.Arg(0) == "ci-observe":
 		return ciObserve(out, flags.Args()[1:])
 	case flags.NArg() >= 2 && flags.Arg(0) == "ci-source":
 		// One or more spec dirs; judged with the registry below.
-	case flags.NArg() != 2 || flags.Arg(0) == "deps":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs")
+	case flags.NArg() != 2 || flags.Arg(0) == "deps" || flags.Arg(0) == "update-lane":
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs | update-lane")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -550,6 +553,20 @@ func ciRuns(out io.Writer, root string) int {
 		fmt.Fprintf(out, "RUN_OK %s run=%d check=%d event=%s head=%s %s\n", r.Role, r.RunID, r.CheckRunID, r.Event, r.HeadSHA, outcome)
 	}
 	fmt.Fprintf(out, "FOUNDATION_RUNS_OK runs=%d\n", len(runs.Runs))
+	return 0
+}
+
+// updateLane prints each update-lane finding, then the verdict.
+func updateLane(out io.Writer, root string) int {
+	findings := checks.CheckUpdateLane(root)
+	for _, f := range findings {
+		fmt.Fprintf(out, "%s %s: %s\n", f.Rule, f.Subject, f.Detail)
+	}
+	if len(findings) > 0 {
+		fmt.Fprintf(out, "UPDATE_LANE_FAIL findings=%d\n", len(findings))
+		return 1
+	}
+	fmt.Fprintln(out, "UPDATE_LANE_OK")
 	return 0
 }
 

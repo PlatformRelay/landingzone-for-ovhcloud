@@ -31,7 +31,7 @@ tasks:
   test:update-lane:
     desc: Update-lane rules on their fixtures, then this repository's configuration and provider schema snapshot (V007)
     cmds:
-      - go -C tools test -count=1 -run 'TestUpdateLane' ./internal/checks
+      - go -C tools test -count=1 -run 'TestUpdateLane' ./internal/checks ./cmd/lz-check
 
   test:release:
     desc: Release-train manifest on a fixture repository built with the runtime's git, against its golden output and schema (V008)

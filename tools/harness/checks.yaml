@@ -200,7 +200,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/planjson", "tools/internal/checks", "tools/internal/report", "tools/internal/stacks"], "review": true},
     {"id": "test:update-lane", "requirements": ["006/FR-015", "006/SC-004"], "command": "task test:update-lane", "creator": "006/T035", "kind": "behavioral",
      "scope": ["tools/internal/checks/updatelane.go", "tools/internal/checks/updatelane_test.go", "tests/check/fixtures/updatelane", ".github/renovate.json", "tests/fixtures/provider-schema"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "mise.toml", "mise.live.toml", "stages", "components", "modules", "tools/internal/checks", "tools/internal/report"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "mise.toml", "mise.live.toml", "stages", "components", "modules", "stacks", "tools/internal/checks", "tools/internal/report", "tools/cmd/lz-check"]},
     {"id": "test:release", "requirements": ["006/FR-016", "006/SC-006"], "command": "task test:release", "creator": "006/T036", "kind": "behavioral",
      "scope": ["tools/internal/release", "tools/cmd/lz-release", "schemas/release-manifest.schema.json"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks"]},

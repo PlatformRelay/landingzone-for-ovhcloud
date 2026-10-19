@@ -231,3 +231,93 @@ func TestUpdateLaneRepository(t *testing.T) {
 		t.Errorf("BEHAVIORAL_RED: the repository's update lane reports %v, want no finding", got)
 	}
 }
+
+// updateLaneAdd injects top-level keys (JSON members with a trailing comma) into the base configuration.
+func updateLaneAdd(members string) func(t *testing.T, root string) {
+	return updateLaneReplace(".github/renovate.json", `"automerge": false,`, `"automerge": false, `+members)
+}
+
+// updateLaneLock writes a lock pinning ovh/ovh 2.22.0 at rel, creating its directory.
+func updateLaneLock(rel string) func(t *testing.T, root string) {
+	return func(t *testing.T, root string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(updateLaneMovedLock), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// updateLaneLink places a dangling symbolic link at rel.
+func updateLaneLink(rel string) func(t *testing.T, root string) {
+	return func(t *testing.T, root string) {
+		t.Helper()
+		if err := os.Symlink(filepath.Join(root, "absent.tf"), filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestUpdateLaneReadings pins T037's fail-closed reading of the configuration
+// and of the pin trees (006 FR-015: every pin source watched, never
+// auto-merged, the runtime group labelled): keys that drop or auto-merge
+// updates the check cannot attribute are findings, a lock under stacks/ is a
+// pin, and a lock in a fixture, hidden or tests/ tree is not.
+func TestUpdateLaneReadings(t *testing.T) {
+	refused := []updateLaneRow{
+		{name: "ignore-paths-drops-a-pin", change: updateLaneAdd(`"ignorePaths": ["stages/**"],`), rule: "UPDATE_UNCOVERED", needles: []string{"stages/demo/.terraform.lock.hcl"}},
+		{name: "ignore-paths-substring", change: updateLaneAdd(`"ignorePaths": ["tools/"],`), rule: "UPDATE_UNCOVERED", needles: []string{"tools/go.mod"}},
+		{name: "ignore-paths-unreadable-glob", change: updateLaneAdd(`"ignorePaths": ["{mise,x}.toml"],`), rule: "UPDATE_UNCOVERED", needles: []string{"mise.toml"}},
+		{name: "disabled", change: updateLaneAdd(`"enabled": false,`), rule: "UPDATE_UNCOVERED", needles: []string{"enabled"}},
+		{name: "enabled-managers", change: updateLaneAdd(`"enabledManagers": ["gomod"],`), rule: "UPDATE_UNCOVERED", needles: []string{"enabledManagers"}},
+		{name: "ignore-deps", change: updateLaneAdd(`"ignoreDeps": ["tflint"],`), rule: "UPDATE_UNCOVERED", needles: []string{"ignoreDeps"}},
+		{name: "rule-disables-a-pin", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["mise.live.toml"]`, `"matchFileNames": ["mise.live.toml"], "enabled": false`), rule: "UPDATE_UNCOVERED", needles: []string{"mise.live.toml"}},
+		{name: "preset", change: updateLaneAdd(`"extends": ["config:recommended"],`), rule: "UPDATE_AUTOMERGE", needles: []string{"extends"}},
+		{name: "automerge-string", change: updateLaneReplace(".github/renovate.json", `"automerge": false,`, `"automerge": "true",`), rule: "UPDATE_AUTOMERGE"},
+		{name: "later-labels-drop-the-label", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["mise.toml"], "matchDepNames": ["task"], "labels": ["tools"]`), rule: "UPDATE_RUNTIME_GROUP", needles: []string{"task"}},
+		{name: "stacks-lock-is-a-pin", change: updateLaneLock("stacks/demo/.terraform.lock.hcl"), rule: "SCHEMA_VERSION", needles: []string{"stacks/demo/.terraform.lock.hcl"}},
+		// Review round 1.
+		{name: "include-paths", change: updateLaneAdd(`"includePaths": ["stages/**"],`), rule: "UPDATE_UNCOVERED", needles: []string{"includePaths"}},
+		{name: "manager-disabled", change: updateLaneAdd(`"terraform": {"enabled": false},`), rule: "UPDATE_UNCOVERED", needles: []string{"terraform"}},
+		{name: "update-type-disabled", change: updateLaneAdd(`"major": {"enabled": false},`), rule: "UPDATE_UNCOVERED", needles: []string{"major"}},
+		{name: "manager-files-redefined", change: updateLaneAdd(`"gomod": {"managerFilePatterns": ["/nomatch/"]},`), rule: "UPDATE_UNCOVERED", needles: []string{"gomod"}},
+		{name: "disable-unreadable-glob", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["{mise,mise.live}.toml"], "enabled": false`), rule: "UPDATE_UNCOVERED", needles: []string{"mise.toml"}},
+		{name: "narrowed-provider-group", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchPackageNames": ["ovh/ovh"], "groupName": "separate-provider"`), rule: "UPDATE_PROVIDER_GROUP", needles: []string{"separate-provider"}},
+		{name: "label-dropped-before-the-group", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["mise.toml"], "matchDepNames": ["tflint"], "labels": []}, {"matchFileNames": ["mise.toml"], "groupName": "runtime-tools"`), rule: "UPDATE_RUNTIME_GROUP", needles: []string{"tflint"}},
+		{name: "labels-replaced", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["mise.toml"], "labels": ["tools"]`), rule: "UPDATE_RUNTIME_GROUP", needles: []string{"mise.toml"}},
+		// Review round 2.
+		{name: "nested-rule-switch", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["mise.toml"], "major": {"enabled": false}`), rule: "UPDATE_UNCOVERED", needles: []string{"major"}},
+		{name: "runtime-group-emptied", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["mise.toml"], "groupName": ""`), rule: "UPDATE_RUNTIME_GROUP", needles: []string{"ungrouped"}},
+		{name: "provider-group-emptied", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["**/.terraform.lock.hcl"], "groupName": ""`), rule: "UPDATE_PROVIDER_GROUP", needles: []string{"ungrouped"}},
+		{name: "regex-pattern-disable", change: updateLaneReplace(".github/renovate.json", `"matchFileNames": ["tools/go.mod"]`, `"matchFileNames": ["tools/go.mod"]}, {"matchFileNames": ["/^mise\\.toml$/"], "enabled": false`), rule: "UPDATE_UNCOVERED", needles: []string{"mise.toml"}},
+		{name: "second-configuration", change: updateLaneWrite(`{"automerge": true}`, "renovate.json"), rule: "UPDATE_UNCOVERED", needles: []string{"second Renovate configuration"}},
+		{name: "image-match-string-misses", change: updateLaneReplace(".github/renovate.json", `LZ_OFFLINE_IMAGE = `, `LZ_OFFLINE_IMAGE=`), rule: "UPDATE_UNCOVERED", needles: []string{"LZ_OFFLINE_IMAGE"}},
+		{name: "dangling-link-in-a-tree", change: updateLaneLink("stages/demo/aaa.tf"), rule: "UPDATE_UNCOVERED", needles: []string{"stages"}},
+		{name: "tofu-file-unwatched", change: updateLaneWrite("terraform {\n  required_providers {\n    ovh = { source = \"ovh/ovh\" }\n  }\n}\n", "stages/demo/versions.tofu"), rule: "UPDATE_UNCOVERED", needles: []string{"stages/demo/versions.tofu"}},
+	}
+	for _, row := range refused {
+		t.Run("refused/"+row.name, func(t *testing.T) {
+			got := CheckUpdateLane(updateLaneTree(t, row))
+			if !reportsUpdateLane(got, row.rule, row.needles) {
+				t.Errorf("BEHAVIORAL_RED: want a %s finding (naming one of %q when given), got %v", row.rule, row.needles, got)
+			}
+		})
+	}
+	accepted := []updateLaneRow{
+		{name: "fixture-tree", change: updateLaneLock("stages/demo/fixtures/old/.terraform.lock.hcl")},
+		{name: "hidden-tree", change: updateLaneLock("modules/demo/.terraform/modules/x/.terraform.lock.hcl")},
+		{name: "tests-tree", change: updateLaneLock("tests/live/probes/x/.terraform.lock.hcl")},
+		{name: "ignore-paths-tests", change: updateLaneAdd(`"ignorePaths": ["tests/**", "**/fixtures/**"],`)},
+		{name: "narrowed-rule-before-the-group", change: updateLaneReplace(".github/renovate.json", `"packageRules": [`, `"packageRules": [{"groupName": "lint", "matchFileNames": ["mise.toml"], "matchDepNames": ["tflint"]},`)},
+	}
+	for _, row := range accepted {
+		t.Run("accepted/"+row.name, func(t *testing.T) {
+			if got := CheckUpdateLane(updateLaneTree(t, row)); len(got) != 0 {
+				t.Errorf("BEHAVIORAL_RED: want no finding, got %v", got)
+			}
+		})
+	}
+}
