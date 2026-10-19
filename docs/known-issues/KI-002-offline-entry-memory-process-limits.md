@@ -15,10 +15,10 @@ source: independent review of the T003 offline entry, 2026-10-04
 decision:
 references:
   - path: tools/cmd/lz-offline/main.go
-    blob: 1561dacadcec35f3bee515d7cc26363f4509ef4c
+    blob: 6b0916bca504d2a4c8c0b6a31577bb8ac3a03980
   - path: tools/cmd/lz-offline/limits.go
     blob: 90ec35fdb1b1fd535e669e29280b92717d1debfb
-last_verified: 71c2de81d7bfd86776df728dc5ae87976e26836b
+last_verified: b09e28cf8a2c99fb7568d7e5b66b33d733bb77c0
 ---
 
 ## What is true

@@ -29,6 +29,21 @@ func MountDevices(mountinfo string) []string {
 	return devices
 }
 
+// EntryAdmitted returns the top-level names lz-offline's snapshot copies from
+// a candidate; nothing else at the top level is visible inside the entry. The
+// docs check's repository map judges only paths under these names (006
+// FR-019), so the entry and the check read this one list.
+func EntryAdmitted() []string {
+	return []string{"Taskfile.yml", "mise.toml", "mise.live.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "stacks", "terramate.tm.hcl", "README.md", "LICENSE", "NOTICE", "AGENTS.md", ".specify", "probe.sh", "included.yml", "bin", "lz-offline"}
+}
+
+// EntrySkipped reports whether the snapshot leaves out a directory entry of
+// this name at any depth (version control, local state, caches and secrets);
+// a map path through one does not exist inside the entry (006 FR-019).
+func EntrySkipped(name string) bool {
+	return name == ".git" || name == ".local" || name == ".terraform" || name == ".cache" || name == ".env" || strings.HasPrefix(name, ".env.") || name == ".envrc"
+}
+
 // Mount points lz-offline creates. Anything else, a writable trusted mount or a
 // host-backed or unbounded writable area refuses admission.
 var (

@@ -4,14 +4,21 @@ references:
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: tools/internal/checks/dependencies.go
     blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
+  - path: tools/cmd/lz-check/docs.go
+    blob: 73a8894eb68edb4f91cb5197564c5598689a3a1d
+  - path: tools/internal/checks/offline.go
+    blob: 761a61f38609c26f431c4ef80fcb35d85e3f067c
 verified_against: {task: "3.53"}
-last_verified: 81461ebe946c0e29b8a7e79268995af055a920a9
+last_verified: b09e28cf8a2c99fb7568d7e5b66b33d733bb77c0
 ---
 
 # Repository map
 
 Every top-level entry and its main subdirectories, one line each. This map is written by hand;
-ADR-0002 plans to generate it from the tree later. Counts are as of the first slice
+ADR-0002 plans to generate it from the tree later. `task docs:check` holds it to the tree: every
+path under a top-level name the offline entry admits must exist, and every such top-level
+directory needs a row of its own; other paths (`.gitignore`, `.sonarcloud.properties`) are
+counted as unjudged. Counts are as of the first slice
 ([spec 005](../../specs/005-first-landing-zone-slice/spec.md)). How the layers fit together:
 [architecture overview](../explanation/architecture-overview.md). Terms: [glossary](glossary.md).
 
@@ -21,9 +28,9 @@ ADR-0002 plans to generate it from the tree later. Counts are as of the first sl
 | --- | --- |
 | `modules/` | **11 modules**, layer 1: one OVHcloud concern each. |
 | `modules/naming/` | The pure naming and labelling module every name and label comes from. |
-| `modules/cloud-project/`, `cloud-quota/` | The Public Cloud project (retained) and its quota guard. |
-| `modules/iam-policy/`, `iam-resource-tags/`, `iam-service-account/`, `identity-group/` | IAM: policies, tags on IAM resources, OAuth2 service accounts, groups. |
-| `modules/object-storage/`, `object-storage-protected/`, `object-storage-user/` | Buckets: plain, protected against deletion (state buckets), and bucket-scoped S3 users. |
+| `modules/cloud-project/`, `modules/cloud-quota/` | The Public Cloud project (retained) and its quota guard. |
+| `modules/iam-policy/`, `modules/iam-resource-tags/`, `modules/iam-service-account/`, `modules/identity-group/` | IAM: policies, tags on IAM resources, OAuth2 service accounts, groups. |
+| `modules/object-storage/`, `modules/object-storage-protected/`, `modules/object-storage-user/` | Buckets: plain, protected against deletion (state buckets), and bucket-scoped S3 users. |
 | `modules/private-network/` | A private network and its subnet. |
 | `components/` | **5 components**, layer 2: features composed from modules. |
 | `components/state-backend/` | A state bucket and its S3 users (used by `bootstrap` and `tenant-state`). |
@@ -49,11 +56,14 @@ ADR-0002 plans to generate it from the tree later. Counts are as of the first sl
 | `tools/vendor/` | Vendored Go dependencies, so builds need no network. |
 | `tools/scripts/` | Host scripts: `fetch-offline-entry.sh` fetches, verifies and installs the offline entry. |
 | `tools/harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
+| `tests/` | Test data outside the Go packages: check fixtures, captured tool output, live probes and chain results. |
 | `tests/check/` | Fixtures for `lz-check`'s own tests. |
 | `tests/fixtures/` | Manifests, output envelopes, captured `tofu`, Terramate and `ovhcloud` output, probe captures. |
 | `tests/live/probes/` | Live probe roots, one per premise group; owner sessions only. |
 | `tests/live/chain/` | Expected and observed live-chain results that the chain's assertions are tested against. |
+| `pipelines/` | The CI source and the record of CI runs. |
 | `pipelines/github/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
+| `.github/` | GitHub configuration: the CI workflow, Renovate rules, contribution and security policies. |
 | `.github/workflows/foundation.yml` | The one CI workflow; its `LZ_TARGETS` list is what CI runs. |
 | `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | How to contribute (checks, commits, merging); how to report a vulnerability. |
 | `Taskfile.yml` | Every check and operation as `task <target>`; `task --list` shows them. |

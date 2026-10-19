@@ -180,7 +180,8 @@ const (
 	maxTotalBytes = 128 << 20
 )
 
-// Snapshot an explicit input allowlist, never the repository root. Every copied
+// Snapshot an explicit input allowlist (checks.EntryAdmitted, which the docs
+// check's repository map also reads), never the repository root. Every copied
 // file is regular/single-link and bounded; secrets/cache/config are excluded.
 // specs and docs are data for the trace check; .github and pipelines are data
 // for the foundation CI check; stacks and terramate.tm.hcl are the generated
@@ -194,7 +195,7 @@ func snapshot(ctx context.Context, candidate, destination string) error {
 	if err := bundle.RealDirectory(candidate); err != nil {
 		return err
 	}
-	allowed := []string{"Taskfile.yml", "mise.toml", "mise.live.toml", ".tflint.hcl", ".github", "pipelines", "tools", "tests", "specs", "docs", "modules", "components", "stages", "profiles", "schemas", "policies", "catalog", "examples", "stacks", "terramate.tm.hcl", "README.md", "LICENSE", "NOTICE", "AGENTS.md", ".specify", "probe.sh", "included.yml", "bin", "lz-offline"}
+	allowed := checks.EntryAdmitted()
 	var total int64
 	count, entries := 0, 0
 	charge := func(depth int) error {
@@ -226,7 +227,7 @@ func snapshot(ctx context.Context, candidate, destination string) error {
 						return err
 					}
 					base := child.Name()
-					if base == ".git" || base == ".local" || base == ".terraform" || base == ".cache" || base == ".env" || strings.HasPrefix(base, ".env.") || base == ".envrc" {
+					if checks.EntrySkipped(base) {
 						continue
 					}
 					descriptor, err := syscall.Openat(int(file.Fd()), base, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
