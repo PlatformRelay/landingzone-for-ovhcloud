@@ -11,7 +11,7 @@ zone. Most `task` targets in `Taskfile.yml` call one of them.
 | `cmd/lz-live` | The live lane to a real account. Host only, maintainer only; it refuses to run inside the entry. |
 | `cmd/lz-pack` | Packs the runtime bundle and launcher into a reproducible OCI image. |
 | `cmd/json2junit` | Renders a `tofu test -json` stream as JUnit XML. |
-| `internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`. |
+| `internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`, `release`. |
 | `vendor/` | Vendored dependencies, so builds need no network. |
 | `scripts/` | Host scripts, not Go: `fetch-offline-entry.sh` fetches, verifies and installs the offline entry ([README](../README.md#try-it-offline-about-5-minutes-no-credentials)). |
 | `harness/` | Data, not Go: the check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |

@@ -1,0 +1,87 @@
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "changelog": {
+    "build": [
+      ":package: build(tools): pin the renderer"
+    ],
+    "chore": [],
+    "ci": [
+      ":construction_worker: ci: run the train checks"
+    ],
+    "docs": [
+      ":memo: docs: describe the stages"
+    ],
+    "feat": [
+      ":sparkles: feat(state): add the state backend component"
+    ],
+    "fix": [
+      ":bug: fix(naming): trim the prefix"
+    ],
+    "refactor": [
+      ":recycle: refactor(state): split the backend"
+    ],
+    "style": [
+      ":art: style(naming): align the arguments"
+    ],
+    "test": [
+      ":white_check_mark: test(naming): cover the prefix"
+    ],
+    "unclassified": [
+      "Update README",
+      "✨ feat(stages): add the bootstrap stage",
+      ":wrench: release(train): prepare the train"
+    ]
+  },
+  "closure": [
+    {
+      "path": "components/state-backend",
+      "tree": "34c234023357bd91a92200139a387b2b51cab9af"
+    },
+    {
+      "path": "modules/naming",
+      "tree": "0b9b5670bf079c3dc79b3226bc86548fa0202bf7"
+    },
+    {
+      "path": "modules/object-storage-user",
+      "tree": "12e88dbd430dd2358a42076be62e57575726dcd3"
+    },
+    {
+      "path": "stages/bootstrap",
+      "tree": "a29d0c6cee87272c49dd6e76b62984bf9c7da42b"
+    }
+  ],
+  "kind": "ReleaseTrain",
+  "lockfiles": [
+    {
+      "blob": "bb484dc080316b17f74396a64bdf2c7fe0cacb0f",
+      "path": "components/state-backend/.terraform.lock.hcl"
+    },
+    {
+      "blob": "beed0e349e7d5b501441eca9a4ed4646e0c5b4b1",
+      "path": "modules/naming/examples/basic/.terraform.lock.hcl"
+    },
+    {
+      "blob": "bb484dc080316b17f74396a64bdf2c7fe0cacb0f",
+      "path": "stages/bootstrap/.terraform.lock.hcl"
+    }
+  ],
+  "schemas": [
+    {
+      "blob": "20144e451a9f3b09e49393ca54b0cf45b9062911",
+      "path": "schemas/deployments.schema.json"
+    },
+    {
+      "blob": "424a2102140911aea34b493b19fa2114f6332d8e",
+      "path": "schemas/outputs/envelope.schema.json"
+    }
+  ],
+  "source_commit": "fb0351f83dfc0c45bff6b676060cb66f864dc46d",
+  "tested": [],
+  "toolchain": {
+    "aqua:terramate-io/terramate": "0.17.3",
+    "go": "1.27.1",
+    "opentofu": "1.13.0",
+    "task": "3.53.1"
+  },
+  "version": "2026.10.0"
+}
