@@ -389,3 +389,37 @@ func TestStackPlans(t *testing.T) {
 		}
 	})
 }
+
+// TestPinnedTofuProbeHome (spec 006 FR-007, T056): PinnedTofu's version probe runs with a fresh
+// private HOME under TMPDIR (0700 while it runs, removed after), never TMPDIR itself (os.TempDir(),
+// which every process shares) and never the caller's HOME.
+func TestPinnedTofuProbeHome(t *testing.T) {
+	root, dir, tmp := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "mise.toml"), []byte("[tools]\nopentofu = \"1.2.3\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "home.log")
+	fake := filepath.Join(dir, "tofu")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$HOME\" > '" + log + "'\nls -ld \"$HOME\" >> '" + log + "'\necho '{\"terraform_version\":\"1.2.3\"}'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LZ_TOFU", fake)
+	t.Setenv("TMPDIR", tmp)
+	if got, err := PinnedTofu(root); err != nil || got != fake {
+		t.Fatalf("PinnedTofu = %q, %v; want %s", got, err, fake)
+	}
+	home, mode, _ := strings.Cut(string(readFile(t, log)), "\n")
+	if home == tmp || filepath.Dir(home) != tmp {
+		t.Errorf("version probe HOME %s, want a fresh directory directly under TMPDIR %s, not TMPDIR itself", home, tmp)
+	}
+	if caller, _ := os.UserHomeDir(); home == caller {
+		t.Errorf("version probe HOME %s is the caller's", home)
+	}
+	if !strings.HasPrefix(mode, "drwx------") {
+		t.Errorf("version probe HOME listed %q, want mode 0700", mode)
+	}
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("version probe HOME %s after the probe: %v, want it removed", home, err)
+	}
+}

@@ -146,8 +146,9 @@ func run(args []string, d deps) int {
 			Git:           d.Git,
 		}
 		return live.Run(verb, h, func() error {
-			// Before any credential, API call or tofu run (T093), and so before the verbs' own
-			// credential-free refusals (TMPDIR, probe root).
+			// Before any credential, API call or tofu run (T093). pinnedTofu checks TMPDIR first
+			// (its probe's scratch HOME goes under it, T056), then the version, so both come before
+			// the verbs' own credential-free refusals (probe root).
 			tofu, err := pinnedTofu(d, h, dir)
 			if err != nil {
 				return err
@@ -185,7 +186,9 @@ func run(args []string, d deps) int {
 // pinnedTofu resolves the OpenTofu every child of the run uses (T093, ADR-0011): stacks'
 // pinned rule against the checkout's mise.toml, with LZ_TOFU from the environment, else from
 // live.env (the live command line is fixed, so the owner sets it there), else the entry's tofu,
-// else tofu on PATH. Any failure is blocked (exit 2) and names LZ_TOFU: another version is never
+// else tofu on PATH. A TMPDIR inside the checkout is refused first (exit 3, scratch): the version
+// probe's private scratch HOME goes under it (FR-007, T056). Any other failure is blocked (exit 2)
+// and names LZ_TOFU: another version is never
 // skipped for the next candidate, and a relative LZ_TOFU would name another file in the
 // children's working directories.
 func pinnedTofu(d deps, h live.Host, checkout string) (string, error) {
@@ -200,7 +203,17 @@ func pinnedTofu(d deps, h live.Host, checkout string) (string, error) {
 		}
 		return "", &live.Blocked{Phase: "tofu", Detail: fmt.Sprintf("LZ_TOFU %q is not an absolute path; name the pinned OpenTofu %s by its absolute path", lz, pin)}
 	}
-	tofu, err := stacks.ResolveTofu(checkout, lz, filepath.Join(d.OfflineMarker, "tofu"), d.LookPath)
+	// The probe's HOME is a fresh private scratch directory (FR-007, T056), under a TMPDIR outside
+	// the checkout (scratchHome's precondition), removed once the version is read.
+	if err := live.ScratchOutside(checkout); err != nil {
+		return "", err
+	}
+	home, remove, err := live.ScratchHome()
+	if err != nil {
+		return "", &live.Blocked{Phase: "tofu", Detail: fmt.Sprintf("version probe scratch home: %v", err)}
+	}
+	defer remove()
+	tofu, err := stacks.ResolveTofu(checkout, lz, filepath.Join(d.OfflineMarker, "tofu"), home, d.LookPath)
 	if err != nil {
 		return "", &live.Blocked{Phase: "tofu", Detail: fmt.Sprintf("%v (LZ_TOFU in %s or in the environment names the pinned binary)", err, h.LiveEnv)}
 	}

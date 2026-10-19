@@ -1,7 +1,7 @@
 ---
 references:
   - path: tools/cmd/lz-live/main.go
-    blob: d8f135726b97f45209049066bfe01672dc3a365a
+    blob: 0f07bee04de813455817624ddefbfa0b9a293aa2
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
@@ -11,7 +11,7 @@ references:
   - path: tools/internal/live/chain.go
     blob: c10e5cb1cbd24317bf1508e70bffeb990a7dc92a
   - path: tools/internal/live/observe.go
-    blob: 7febdec79596d9781a5bec211fc7ca9840b35fc9
+    blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: mise.toml
@@ -21,7 +21,7 @@ references:
   - path: tests/live/probes/README.md
     blob: 65fdf99b2090b95e0c007010a9de857d88a27a7e
 verified_against: {task: "3.53", tofu: "1.13", ovhcloud: "0.15"}
-last_verified: 34dff5ea7e0946853752335b99c4f59137f309f9
+last_verified: 749281eff0fa0f1342a6f6817e273a6fcd4c1a76
 ---
 
 # Run the first slice on an OVHcloud account

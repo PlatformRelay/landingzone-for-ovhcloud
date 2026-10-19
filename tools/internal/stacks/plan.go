@@ -39,16 +39,24 @@ var tofuPin = regexp.MustCompile(`(?m)^opentofu\s*=\s*"([^"]+)"`)
 
 // PinnedTofu returns the OpenTofu binary for the project at root: LZ_TOFU, else the entry's
 // /tcb/tofu, else tofu on PATH. It must report exactly the version root/mise.toml pins; another
-// one is refused, never skipped for the next candidate.
+// one is refused, never skipped for the next candidate. The version probe's HOME is a fresh
+// private directory (os.MkdirTemp creates it 0700), removed after the probe.
 func PinnedTofu(root string) (string, error) {
-	return ResolveTofu(root, os.Getenv("LZ_TOFU"), TofuTCB, exec.LookPath)
+	home, err := os.MkdirTemp("", "lz-tofu-home-")
+	if err != nil {
+		return "", fmt.Errorf("tofu version probe home: %w", err)
+	}
+	defer os.RemoveAll(home)
+	return ResolveTofu(root, os.Getenv("LZ_TOFU"), TofuTCB, home, exec.LookPath)
 }
 
 // ResolveTofu is PinnedTofu with its candidates given: lzTofu (LZ_TOFU, wherever the caller read
 // it), the entry's tofu at tcb, and lookPath for tofu on PATH (lz-live, T093).
-// The version probe runs with PATH and a HOME only (no caller export reaches it: an .envrc may
-// export a credential, T093 review r1), and is given versionProbeTimeout.
-func ResolveTofu(root, lzTofu, tcb string, lookPath func(string) (string, error)) (string, error) {
+// The version probe runs with PATH and HOME only (no caller export reaches it: an .envrc may
+// export a credential, T093 review r1), and is given versionProbeTimeout. home is the probe's
+// HOME, as given: the caller passes a fresh private scratch directory it removes afterwards, never
+// os.TempDir() or its own HOME (spec 006 FR-007, T056).
+func ResolveTofu(root, lzTofu, tcb, home string, lookPath func(string) (string, error)) (string, error) {
 	pin, err := TofuPin(root)
 	if err != nil {
 		return "", err
@@ -64,7 +72,7 @@ func ResolveTofu(root, lzTofu, tcb string, lookPath func(string) (string, error)
 	ctx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "version", "-json")
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir()}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
 	out, err := cmd.Output()
 	var v struct {
 		Version string `json:"terraform_version"`

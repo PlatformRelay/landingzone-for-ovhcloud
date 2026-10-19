@@ -446,7 +446,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:foundation-ci`: a record whose durations plus 240 s exceed 15 minutes is refused, a record under it passes; the capture script records durations; the current record is re-captured.
   - Evidence: `evidence/T055.md`; PR; initial status `not-run`.
 
-- [ ] T056 [US1] Give lz-live's `tofu version` probe a scratch home in tools/internal/stacks/plan.go and make the canary trap's zero mode report in tools/internal/live/observe.go, test first (stage B round 1)
+- [x] T056 [US1] Give lz-live's `tofu version` probe a scratch home in tools/internal/stacks/plan.go and make the canary trap's zero mode report in tools/internal/live/observe.go, test first (stage B round 1) — closed 2026-10-20, evidence: evidence/T056.md
   - Requirements: FR-007, FR-009; ADRs: 0008, 0009, 0021, 0024. Depends on: T015, T025.
   - Verify: `task test:live-lane`: the probe's child environment has a fresh private HOME, not `os.TempDir()` (red first); an unset trap mode reports and removes nothing (red first).
   - Evidence: `evidence/T056.md`; PR; initial status `not-run`.

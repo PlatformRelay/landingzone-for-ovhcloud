@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -255,6 +256,69 @@ func TestTofuEntryVersionProbeEnvironment(t *testing.T) {
 		if k != "PATH" && k != "HOME" {
 			t.Errorf("the version probe inherited %s", k)
 		}
+	}
+}
+
+// TestTofuEntryVersionProbeHome (spec 006 FR-007, T056): the version probe's HOME is a fresh
+// private scratch directory under TMPDIR (0700 while it runs, removed after), never TMPDIR itself
+// (os.TempDir(), which every process shares) and never the caller's HOME.
+func TestTofuEntryVersionProbeHome(t *testing.T) {
+	for _, verb := range tofuLaneVerbs {
+		t.Run(verb, func(t *testing.T) {
+			w, _ := laneEntryWorld(t, true)
+			tmp := resolvedPath(os.Getenv("TMPDIR"))
+			r := runLaneVerb(w, verb)
+			if r.code != 0 {
+				t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
+			}
+			calls := w.childCalls(t, "tofu-version.log")
+			if len(calls) != 1 {
+				t.Fatalf("%d version probes, want 1", len(calls))
+			}
+			wantProbeHome(t, calls[0], tmp, w.home)
+		})
+	}
+}
+
+// wantProbeHome: the probe's HOME was a fresh 0700 directory directly under tmp (resolved), not
+// tmp itself nor the caller's home, and is gone now.
+func wantProbeHome(t *testing.T, call childCall, tmp, callerHome string) {
+	t.Helper()
+	home := envMap(call.Env)["HOME"]
+	real := resolvedPath(home)
+	if real == tmp || real == resolvedPath(os.TempDir()) || filepath.Dir(real) != tmp {
+		t.Errorf("version probe HOME %s, want a fresh directory directly under TMPDIR %s, not TMPDIR itself", home, tmp)
+	}
+	if real == resolvedPath(callerHome) {
+		t.Errorf("version probe HOME %s is the caller's", home)
+	}
+	if call.HomeMode != "0700" {
+		t.Errorf("version probe HOME mode %s, want 0700", call.HomeMode)
+	}
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("version probe HOME %s after the run: %v, want it removed", home, err)
+	}
+}
+
+// TestTofuEntryVersionProbeScratchInsideCheckout (T056): the probe's scratch HOME goes under
+// TMPDIR only once TMPDIR is known to lie outside the checkout: a TMPDIR inside it is refused
+// (exit 3) before the version probe runs, and nothing is made in it.
+func TestTofuEntryVersionProbeScratchInsideCheckout(t *testing.T) {
+	w, _ := laneEntryWorld(t, true)
+	tmp := filepath.Join(w.checkout, ".local", "tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmp)
+	r := runLaneVerb(w, "plan")
+	if r.code != live.RefusalExit || !strings.Contains(r.stderr, "("+live.CondScratch+")") {
+		t.Errorf("exit %d, stderr %q; want %d naming %s", r.code, r.stderr, live.RefusalExit, live.CondScratch)
+	}
+	if n := len(w.childCalls(t, "tofu-version.log")); n != 0 {
+		t.Errorf("%d version probes with TMPDIR inside the checkout, want none", n)
+	}
+	if left, err := os.ReadDir(tmp); err != nil || len(left) != 0 {
+		t.Errorf("TMPDIR inside the checkout holds %v (%v), want nothing made in it", left, err)
 	}
 }
 

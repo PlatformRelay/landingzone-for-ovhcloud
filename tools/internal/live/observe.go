@@ -484,15 +484,7 @@ func ObserveCanary(ctx context.Context, o CanaryOptions) []Observation {
 	default:
 		mode.Store(trapReport)
 	}
-	o.Trap.Add(name, func(ctx context.Context) error {
-		switch mode.Load() {
-		case trapRemove:
-			return deleteCanary(ctx, o, base, name)
-		case trapReport:
-			return reportCanary(ctx, o, base, name)
-		}
-		return nil
-	})
+	o.Trap.Add(name, canaryTrap(o, base, name, &mode))
 	switch err := admin.post(ctx, base, map[string]any{"name": name}, nil); {
 	case statusOf(err) == http.StatusConflict:
 		mode.Store(trapNone)
@@ -553,14 +545,30 @@ func refusal(assertion, subject string, err error, did bool) Observation {
 	return o
 }
 
-// What the canary's trap does with the bucket under its name (spec 006 FR-009).
+// What the canary's trap does with the bucket under its name (spec 006 FR-009). The zero value
+// reports, so a mode nobody set removes nothing (T056).
 const (
-	trapRemove int32 = iota // the name was absent before the create: deleteCanary
-	trapReport              // the name existed before the create: reportCanary, never removed
+	trapReport int32 = iota // the name existed before the create, or no mode was set: reportCanary, never removed
+	trapRemove              // the name was absent before the create: deleteCanary
 	trapNone                // the create answered 409: someone else's, nothing
 )
 
-// reportCanary is the trap of a canary name that existed before its create: it removes nothing
+// canaryTrap is the canary's cleanup, doing what mode says when it runs: only trapRemove deletes,
+// trapNone does nothing, and any other value (unset or unknown) reports.
+func canaryTrap(o CanaryOptions, base, name string, mode *atomic.Int32) func(context.Context) error {
+	return func(ctx context.Context) error {
+		switch mode.Load() {
+		case trapRemove:
+			return deleteCanary(ctx, o, base, name)
+		case trapNone:
+			return nil
+		}
+		return reportCanary(ctx, o, base, name)
+	}
+}
+
+// reportCanary is the trap of a canary name that existed before its create (and of a trap whose
+// mode was never set to remove, T056): it removes nothing
 // and names the bucket in its error while it exists, so the run fails and a human looks.
 func reportCanary(ctx context.Context, o CanaryOptions, base, name string) error {
 	admin, err := newBearer(ctx, o.API, o.Admin)
@@ -574,7 +582,7 @@ func reportCanary(ctx context.Context, o CanaryOptions, base, name string) error
 	if err != nil {
 		return fmt.Errorf("canary %s: %w", name, err)
 	}
-	return fmt.Errorf("canary %s existed before its create: not removed, check it by hand", name)
+	return fmt.Errorf("canary %s not removed: it existed before its create, or the trap's mode was not set to remove; check it by hand", name)
 }
 
 // deleteCanary is the canary's trap: with the bootstrap authority, its objects first, then the
