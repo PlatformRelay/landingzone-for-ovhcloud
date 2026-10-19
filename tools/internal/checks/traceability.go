@@ -47,7 +47,8 @@ type Requirement struct {
 
 // CheckDefinition is one entry of the check registry. Scope selects the paths
 // the check applies to; Scope and Inputs together are what its evidence must
-// be fresh for.
+// be fresh for, with Presence: paths the check reads only when they exist
+// (006 T053), so their appearing changes its digest.
 type CheckDefinition struct {
 	ID           string   `json:"id"`
 	Requirements []string `json:"requirements"`
@@ -56,6 +57,7 @@ type CheckDefinition struct {
 	Kind         string   `json:"kind"`
 	Scope        []string `json:"scope"`
 	Inputs       []string `json:"inputs,omitempty"`
+	Presence     []string `json:"presence,omitempty"`
 	Review       bool     `json:"review,omitempty"`
 }
 
@@ -622,7 +624,7 @@ func ParseRegistry(data []byte) (Registry, error) {
 		if len(c.Scope) == 0 {
 			return Registry{}, fmt.Errorf("REGISTRY_SCOPE: %s has no scope", c.ID)
 		}
-		for _, s := range append(append([]string{}, c.Scope...), c.Inputs...) {
+		for _, s := range append(append(append([]string{}, c.Scope...), c.Inputs...), c.Presence...) {
 			if !cleanRelative(s) {
 				return Registry{}, fmt.Errorf("REGISTRY_SCOPE: %s: %q is not a clean relative path", c.ID, s)
 			}
@@ -998,7 +1000,8 @@ func Digest(root string, scope []string) (string, error) {
 }
 
 // CheckDigest binds evidence to everything that decides a check's result: its
-// registry definition, the files it applies to and its execution inputs.
+// registry definition, the files it applies to, its execution inputs and
+// whether each of its presence paths exists, with what it holds when it does.
 func CheckDigest(root string, c CheckDefinition) (string, error) {
 	files, err := Digest(root, append(append([]string{}, c.Scope...), c.Inputs...))
 	if err != nil {
@@ -1008,8 +1011,42 @@ func CheckDigest(root string, c CheckDefinition) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(append(append(definition, '\n'), files...))
+	bound := append(append(definition, '\n'), files...)
+	if len(c.Presence) > 0 {
+		present, err := presenceDigest(root, c.Presence)
+		if err != nil {
+			return "", err
+		}
+		bound = append(append(bound, '\n'), present...)
+	}
+	sum := sha256.Sum256(bound)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// presenceDigest records each present path with the Digest of what it holds
+// (an empty directory holds nothing, a file itself); an absent path adds
+// nothing, so its appearing changes the result. A path reached through a
+// symlink, or a special file below it, is refused as walkScope refuses it.
+func presenceDigest(root string, paths []string) (string, error) {
+	h := sha256.New()
+	for _, p := range paths {
+		if !cleanRelative(p) {
+			return "", fmt.Errorf("%w: %q is not a clean relative path", errUnreadable, p)
+		}
+		err := noSymlinkComponents(root, p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		held, err := Digest(root, []string{p})
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "present %s %s\n", p, held)
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func selects(scope []string, target string) bool {

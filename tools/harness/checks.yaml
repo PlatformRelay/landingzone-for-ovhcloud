@@ -99,7 +99,10 @@
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
     {"id": "test:traceability", "requirements": ["FR-004", "SC-003", "005/FR-014", "006/FR-012", "006/FR-022", "007/FR-012"], "command": "task test:traceability", "creator": "T007", "kind": "behavioral",
      "scope": ["tools/internal/checks", "tools/cmd/lz-check"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/report", "tools/harness/checks.yaml", "specs/001-offline-foundation/tasks.md", "specs/005-first-landing-zone-slice/tasks.md", "specs/006-harden-first-slice/tasks.md", "specs/007-cleanup-first-live-slice/tasks.md"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/report", "tools/harness/checks.yaml", "specs/001-offline-foundation/tasks.md", "specs/005-first-landing-zone-slice/tasks.md", "specs/006-harden-first-slice/tasks.md", "specs/007-cleanup-first-live-slice/tasks.md",
+       "README.md", "mise.toml", "mise.live.toml", ".github/renovate.json", ".github/workflows", "pipelines/README.md", "pipelines/github/foundation-source.json",
+       "components", "modules", "stages", "stacks", "schemas", "specs", "tests", "tools", "docs/adr", "docs/reference/repository-map.md"],
+     "presence": ["profiles", "policies", "catalog", "examples", "bin", "lz-offline", "probe.sh", "included.yml", "LICENSE", "NOTICE", "AGENTS.md", "terramate.tm.hcl", ".github/renovate.json5"]},
     {"id": "check:specs", "requirements": ["FR-004", "SC-003", "005/FR-014", "006/FR-021", "006/FR-022", "006/SC-002", "007/FR-004", "007/FR-011", "007/FR-012"], "command": "task check:specs", "creator": "T007", "kind": "behavioral",
      "scope": ["specs/001-offline-foundation", "specs/005-first-landing-zone-slice", "specs/006-harden-first-slice", "specs/007-cleanup-first-live-slice", "tools/harness/checks.yaml", "docs/adr"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks", "tools/cmd/lz-check", "tools/internal/report"]},
@@ -212,6 +215,7 @@
        "stacks/README.md", "stages/README.md", "tests/README.md", "tests/live/probes/README.md", "tools/README.md"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/cmd/lz-check", "tools/internal/checks", "tools/internal/report",
        "mise.toml", "mise.live.toml", "stages", "modules", "components",
-       ".github", ".specify", ".tflint.hcl", "AGENTS.md", "LICENSE", "NOTICE", "pipelines/README.md", "pipelines/github/foundation-source.json", "schemas", "specs", "stacks", "terramate.tm.hcl", "tests", "tools"]}
+       ".github", ".specify", ".tflint.hcl", "AGENTS.md", "LICENSE", "NOTICE", "pipelines/README.md", "pipelines/github/foundation-source.json", "schemas", "specs", "stacks", "terramate.tm.hcl", "tests", "tools"],
+     "presence": ["profiles", "policies", "catalog", "examples", "bin", "lz-offline", "probe.sh", "included.yml"]}
   ]
 }

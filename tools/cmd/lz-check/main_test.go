@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -644,7 +645,8 @@ func TestFoundationCICommandsWithoutSource(t *testing.T) {
 	}
 }
 
-// registryReads is each check's scope and inputs in the committed registry.
+// registryReads is each check's scope, inputs and presence paths in the
+// committed registry.
 func registryReads(t *testing.T, root string) map[string][]string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, "tools", "harness", "checks.yaml"))
@@ -657,7 +659,7 @@ func registryReads(t *testing.T, root string) map[string][]string {
 	}
 	reads := map[string][]string{}
 	for _, c := range reg.Checks {
-		reads[c.ID] = append(append([]string{}, c.Scope...), c.Inputs...)
+		reads[c.ID] = append(append(append([]string{}, c.Scope...), c.Inputs...), c.Presence...)
 	}
 	return reads
 }
@@ -700,6 +702,15 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 		"docs:check": {"mise.toml", "mise.live.toml", "stages", "modules", "components", ".github", ".specify",
 			".tflint.hcl", "AGENTS.md", "LICENSE", "NOTICE", "README.md", "Taskfile.yml", "docs", "pipelines/README.md",
 			"pipelines/github/foundation-source.json", "schemas", "specs", "stacks", "terramate.tm.hcl", "tests", "tools"},
+		// 006 T053: test:traceability's real-tree tests read the CI source and
+		// workflow, the update-lane pins, the README walk's trees, the ADRs,
+		// the repository map and the task lists (traced through the entry,
+		// evidence/T053.md); go list reads the whole tools module. The update
+		// lane also looks for .github/renovate.json5, absent here.
+		"test:traceability": {"Taskfile.yml", "README.md", "mise.toml", "mise.live.toml", ".github/renovate.json", ".github/renovate.json5",
+			".github/workflows/foundation.yml", "pipelines/README.md", "pipelines/github/foundation-source.json",
+			"components", "modules", "stages", "stacks", "schemas", "specs", "tests", "tools", "docs/adr",
+			"docs/reference/repository-map.md"},
 	}
 	// docs:check is a foundation target: if its digest covered the run
 	// record, recording a run would change the digest the run recorded, and
@@ -720,6 +731,286 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 		}
 	}
 	mapReadsCovered(t, reads["docs:check"])
+	readmesCovered(t, reads["test:traceability"])
+	admittedCovered(t, "docs:check", reads["docs:check"], false)
+	admittedCovered(t, "test:traceability", reads["test:traceability"], true)
+	recordOutsideFoundation(t, reads)
+}
+
+// 006 T053: test:traceability's README walk (TestDocsRegistryScopeREADMEs)
+// reads which READMEs exist; its reads cover each one it finds.
+func readmesCovered(t *testing.T, entries []string) {
+	t.Helper()
+	readmes, _, err := readmePages(filepath.Join("..", "..", ".."))
+	if err != nil || len(readmes) == 0 {
+		t.Fatalf("readmePages: %v %v", readmes, err)
+	}
+	for _, p := range readmes {
+		if !covered(entries, p) {
+			t.Errorf("BEHAVIORAL_RED: test:traceability reads %s, but its registry reads do not name it", p)
+		}
+	}
+}
+
+// 006 T053: a check that reads the top level reads each name the offline
+// entry admits, present or not: creating one changes what it judges (a map
+// row due, a file to scan, a README to find). Its registry reads cover each
+// such name, so its digest sees the name appear; the directory holding the
+// CI run record is covered file by file instead, the record excepted.
+// walked keeps the names readmePages walks (readsTopName). The rule asks the
+// tree nothing about a covered name, so of the top level this test (part of
+// test:traceability) reads only the names under pipelines/, walked whole
+// (review round 1).
+func admittedCovered(t *testing.T, id string, entries []string, walked bool) {
+	t.Helper()
+	root := filepath.Join("..", "..", "..")
+	recordTop, _, _ := strings.Cut(checks.FoundationRunsPath, "/")
+	for _, name := range checks.EntryAdmitted() {
+		switch {
+		case !readsTopName(walked, name), covered(entries, name):
+		case name == recordTop:
+			for _, rel := range uncoveredFiles(t, root, name, entries) {
+				t.Errorf("BEHAVIORAL_RED: %s reads %s, but its registry reads do not cover it", id, rel)
+			}
+		default:
+			t.Errorf("BEHAVIORAL_RED: %s reads the admitted top-level name %s, but its registry reads do not cover it", id, name)
+		}
+	}
+}
+
+// readsTopName says whether a check reads the admitted top-level name: every
+// one, or with walked those readmePages lists by kind (os.ReadDir of the
+// root, e.IsDir): any name neither hidden nor docs, file or directory,
+// present or absent, since a file turned directory is walked.
+func readsTopName(walked bool, name string) bool {
+	return !walked || !strings.HasPrefix(name, ".") && name != "docs"
+}
+
+// readsTopName keeps for the README walk every non-hidden name but docs, and
+// for a check reading the whole top level every name (review round 2).
+func TestRegistryReadsTopName(t *testing.T) {
+	for _, row := range []struct {
+		walked bool
+		name   string
+		want   bool
+	}{{true, ".github", false}, {true, "docs", false}, {true, "LICENSE", true}, {true, "profiles", true}, {false, ".github", true}, {false, "docs", true}} {
+		if got := readsTopName(row.walked, row.name); got != row.want {
+			t.Errorf("BEHAVIORAL_RED: readsTopName(%t, %s) = %t, want %t", row.walked, row.name, got, row.want)
+		}
+	}
+}
+
+// uncoveredFiles are the files under dir, other than the CI run record, that
+// entries do not cover.
+func uncoveredFiles(t *testing.T, root, dir string, entries []string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(filepath.Join(root, dir), func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		rel = filepath.ToSlash(rel)
+		if err == nil && rel != checks.FoundationRunsPath && !covered(entries, rel) {
+			files = append(files, rel)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// uncoveredFiles names a file the entries miss and passes the run record and
+// the files they cover.
+func TestRegistryUncoveredFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"pipelines/README.md", "pipelines/github/foundation-source.json", checks.FoundationRunsPath, "pipelines/gitlab/offline.yml"} {
+		writePrivate(t, filepath.Join(root, filepath.FromSlash(f)))
+	}
+	got := uncoveredFiles(t, root, "pipelines", []string{"pipelines/README.md", "pipelines/github/foundation-source.json"})
+	if strings.Join(got, " ") != "pipelines/gitlab/offline.yml" {
+		t.Errorf("BEHAVIORAL_RED: uncovered %q, want [pipelines/gitlab/offline.yml]", got)
+	}
+}
+
+// 006 T053: no foundation target's registry reads cover the CI run record;
+// recording a run would change the digest the run recorded (T041).
+func recordOutsideFoundation(t *testing.T, reads map[string][]string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", checks.FoundationSourcePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := checks.ParseFoundationSource(data)
+	if err != nil || len(source.Targets) == 0 {
+		t.Fatalf("foundation source: %v, targets %v", err, source.Targets)
+	}
+	for _, id := range source.Targets {
+		if covered(reads[id], checks.FoundationRunsPath) {
+			t.Errorf("BEHAVIORAL_RED: the foundation target %s's registry reads cover %s", id, checks.FoundationRunsPath)
+		}
+	}
+}
+
+// 006 T053: creating a top-level name the entry admits changes the digest of
+// each check that reads the top level, as an empty directory, once a file is
+// in it, and as a file; a name the entry does not admit leaves it unchanged.
+// The fixture holds one file per scope and input entry of the check; the
+// rows are the admitted names it binds by presence.
+func TestRegistryDigestSeesAdmittedNames(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	data, err := os.ReadFile(filepath.Join(root, "tools", "harness", "checks.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := checks.ParseRegistry(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"docs:check", "test:traceability"} {
+		i := slices.IndexFunc(reg.Checks, func(c checks.CheckDefinition) bool { return c.ID == id })
+		if i < 0 {
+			t.Fatalf("%s is not in the registry", id)
+		}
+		c := reg.Checks[i]
+		fixture := digestFixture(t, c)
+		base := checkDigest(t, fixture, c)
+		names := presenceTopNames(c)
+		for _, name := range names {
+			t.Run(id+"/"+name, func(t *testing.T) { nameChangesDigest(t, fixture, c, name, base) })
+		}
+		if len(names) == 0 {
+			t.Fatalf("BEHAVIORAL_RED: %s binds no admitted top-level name by presence; no row judges a new one", id)
+		}
+		t.Run(id+"/not admitted", func(t *testing.T) { otherNameKeepsDigest(t, fixture, c, base) })
+	}
+}
+
+// otherNameKeepsDigest creates a top-level directory the entry does not admit
+// and checks the digest is unchanged.
+func otherNameKeepsDigest(t *testing.T, fixture string, c checks.CheckDefinition, base string) {
+	t.Helper()
+	const other = "agent-context"
+	if slices.Contains(checks.EntryAdmitted(), other) {
+		t.Fatalf("%s is admitted; the control needs a name that is not", other)
+	}
+	writePrivate(t, filepath.Join(fixture, other, "x.md"))
+	defer os.RemoveAll(filepath.Join(fixture, other))
+	if got := checkDigest(t, fixture, c); got != base {
+		t.Errorf("BEHAVIORAL_RED: %s's digest changed when %s/ appeared, which the entry does not admit", c.ID, other)
+	}
+}
+
+// 006 T053: a presence path is held to the rules of scope and inputs: the
+// registry refuses one that is not a clean relative path, and the digest
+// refuses one that is a link (even a dangling one) instead of reading it as
+// absent.
+func TestRegistryPresenceRefusals(t *testing.T) {
+	c := checks.CheckDefinition{ID: "pins", Command: "task pins", Kind: "behavioral", Scope: []string{"tools"}, Presence: []string{"profiles"}}
+	for name, target := range map[string]string{"link": "tools", "dangling link": "gone"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writePrivate(t, filepath.Join(root, "tools", "x"))
+			if err := os.Symlink(target, filepath.Join(root, "profiles")); err != nil {
+				t.Fatal(err)
+			}
+			if d, err := checks.CheckDigest(root, c); err == nil {
+				t.Errorf("BEHAVIORAL_RED: a linked presence path was digested: %s", d)
+			}
+		})
+	}
+	t.Run("unclean path", func(t *testing.T) {
+		text := strings.Replace(registry, `"scope": ["tools"]`, `"scope": ["tools"], "presence": ["../profiles"]`, 1)
+		if _, err := checks.ParseRegistry([]byte(text)); err == nil || !strings.Contains(err.Error(), "REGISTRY_SCOPE") {
+			t.Errorf("BEHAVIORAL_RED: an unclean presence path was admitted: %v", err)
+		}
+		control := strings.Replace(registry, `"scope": ["tools"]`, `"scope": ["tools"], "presence": ["profiles"]`, 1)
+		if _, err := checks.ParseRegistry([]byte(control)); err != nil {
+			t.Errorf("BEHAVIORAL_RED: a clean presence path was refused: %v", err)
+		}
+		root := t.TempDir()
+		writePrivate(t, filepath.Join(root, "tools", "x"))
+		unclean := c
+		unclean.Presence = []string{"../profiles"}
+		if d, err := checks.CheckDigest(root, unclean); err == nil {
+			t.Errorf("BEHAVIORAL_RED: an unclean presence path was digested: %s", d)
+		}
+	})
+}
+
+// presenceTopNames are the admitted top-level names c binds by presence;
+// admittedCovered requires every such name c reads and its inputs miss
+// (each one absent here among them) to be there.
+func presenceTopNames(c checks.CheckDefinition) []string {
+	var names []string
+	for _, name := range checks.EntryAdmitted() {
+		if slices.Contains(c.Presence, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// nameChangesDigest creates name in the fixture as an empty directory, then
+// with a file in it, then as a file, and checks each changes the digest.
+func nameChangesDigest(t *testing.T, fixture string, c checks.CheckDefinition, name, base string) {
+	t.Helper()
+	full := filepath.Join(fixture, name)
+	defer os.RemoveAll(full)
+	if err := os.Mkdir(full, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	empty := checkDigest(t, fixture, c)
+	if empty == base {
+		t.Errorf("BEHAVIORAL_RED: %s's digest did not change when the admitted directory %s/ appeared", c.ID, name)
+	}
+	writePrivate(t, filepath.Join(full, "x.md"))
+	if got := checkDigest(t, fixture, c); got == empty {
+		t.Errorf("BEHAVIORAL_RED: %s's digest did not change when a file appeared in %s/", c.ID, name)
+	}
+	if err := os.RemoveAll(full); err != nil {
+		t.Fatal(err)
+	}
+	writePrivate(t, full)
+	if got := checkDigest(t, fixture, c); got == base || got == empty {
+		t.Errorf("BEHAVIORAL_RED: %s's digest did not tell the admitted file %s from its absence or a directory", c.ID, name)
+	}
+}
+
+// digestFixture lays entry/x for each scope and input entry of c. Every entry
+// is a directory here, whatever its kind in this repository, so the test
+// reads nothing of the tree beyond the registry (review round 1); the digest
+// walks a directory entry as it walks a file entry.
+func digestFixture(t *testing.T, c checks.CheckDefinition) string {
+	t.Helper()
+	fixture := t.TempDir()
+	for _, e := range append(append([]string{}, c.Scope...), c.Inputs...) {
+		writePrivate(t, filepath.Join(fixture, filepath.FromSlash(e), "x"))
+	}
+	return fixture
+}
+
+// writePrivate writes a one-line file readable by its owner only, with its
+// parents.
+func writePrivate(t *testing.T, file string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkDigest(t *testing.T, root string, c checks.CheckDefinition) string {
+	t.Helper()
+	d, err := checks.CheckDigest(root, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }
 
 // 006 T042: the repository map check reads the map and whether each path it
