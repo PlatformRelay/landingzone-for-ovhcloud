@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -119,7 +121,7 @@ func TestBootstrapTerminalEcho(t *testing.T) {
 		v, err := term.ReadLine("LZ_PROJECT_ID_STATE: ")
 		got <- answer{v, err}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	waitPrompt(t, prompts, "LZ_PROJECT_ID_STATE: ")
 	if !echoOn(t, s) {
 		t.Error("echo off for a project reference")
 	}
@@ -181,4 +183,74 @@ func (w *promptWriter) shownWithEcho(prompt string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.echo[prompt]
+}
+
+// TestTerminalDiscardsTypeAhead (spec 007 T026, FR-007 owner recovery; the owner's live session of
+// 2026-10-19): given lines already in the terminal's input before a prompt (earlier keystrokes, an
+// arrow key) / when ReadLine or ReadSecret prompts / then those lines are discarded and the line
+// typed after the prompt is returned → exposes a prompt that reads a stale line, so in a loop of
+// runs every later answer is read one run late.
+func TestTerminalDiscardsTypeAhead(t *testing.T) {
+	m, s := openPTY(t)
+	prompts := &promptWriter{t: t, tty: s}
+	term := newTTY(context.Background(), s, prompts)
+	asks := []struct {
+		prompt string
+		read   func(string) (string, error)
+	}{
+		{"run id (line): ", term.ReadLine},
+		{"key (secret): ", term.ReadSecret},
+	}
+	for i, ask := range asks {
+		if _, err := m.Write([]byte("earlier keystrokes\n\x1b[D\n")); err != nil {
+			t.Fatal(err)
+		}
+		waitQueued(t, s)
+		typed := "typed-after-prompt-" + strconv.Itoa(i)
+		got := make(chan [2]string, 1)
+		go func() {
+			v, err := ask.read(ask.prompt)
+			got <- [2]string{v, fmt.Sprint(err)}
+		}()
+		waitPrompt(t, prompts, ask.prompt)
+		if _, err := m.Write([]byte(typed + "\n")); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case a := <-got:
+			if a[0] != typed || a[1] != "<nil>" {
+				t.Errorf("%q read %q, %s; want the line typed after the prompt %q", ask.prompt, a[0], a[1], typed)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q returned nothing for the line typed after it", ask.prompt)
+		}
+	}
+}
+
+// waitQueued waits until the terminal holds unread input (TIOCINQ > 0): bytes written to the
+// master reach the slave's queue through deferred kernel work, so a case of input typed before a
+// prompt waits for it to be there before the prompt's discard.
+func waitQueued(t *testing.T, slave *os.File) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		var n int32
+		if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, slave.Fd(), syscall.TIOCINQ, uintptr(unsafe.Pointer(&n))); e != 0 {
+			t.Fatalf("TIOCINQ: %v", e)
+		}
+		if n > 0 {
+			return
+		}
+	}
+	t.Fatal("input written to the terminal never reached its queue")
+}
+
+// waitPrompt waits until the prompt writer has shown prompt: a line typed earlier is discarded.
+func waitPrompt(t *testing.T, w *promptWriter, prompt string) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if strings.Contains(w.String(), prompt) {
+			return
+		}
+	}
+	t.Fatalf("prompt %q never shown", prompt)
 }

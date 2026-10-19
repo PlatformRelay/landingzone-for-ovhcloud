@@ -255,6 +255,12 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: for each run of this spec whose leftover check is not clean, `mise exec -- task live:probe -- --reviewed-sha <sha> --cleanup <run-id>` (probe), or the lane's destroy verb (task live:destroy with the reviewed SHA and the instance) for a chain's ephemeral instance, until clean; no run started whose recovery would cross 23:00; `retained.md` re-checked against the last record and the Control Panel, with nothing disposable left; the spec's total spend recorded (voucher and card).
   - Evidence: `evidence/T023.md`; initial status `not-run`.
 
+- [x] T026 [US3] Discard pending terminal input before the `--accept-lost-baseline` prompt in tools/cmd/lz-live/tty_linux.go and say what was read in its refusal in tools/cmd/lz-live/probe.go — closed 2026-10-19, evidence: evidence/T026.md
+  - Requirements: FR-007; ADRs: 0008, 0024. Depends on: T015.
+  - Scope: the owner's live session of 2026-10-19 (8 runs in a shell loop): the prompt read lines already in the terminal's input (earlier keystrokes, an arrow key), so every later answer was read one run late. Flush the terminal's input before the prompt, then read one line; the refusal gives the read line's length (or that it was empty) and the run id it expected, never the line. No non-interactive bypass (no flag carrying the id, no environment variable).
+  - Verify: `task test:live-lane`: a line in the pseudo-terminal before the prompt is ignored and the run id typed after it accepted; the wrong-line and no-terminal refusals still hold.
+  - Evidence: `evidence/T026.md`; initial status `not-run`.
+
 ## Final phase: Polish
 
 - [ ] T024 Record spec 007's state in specs/README.md and specs/007-cleanup-first-live-slice/spec.md
