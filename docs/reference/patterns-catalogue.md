@@ -1,6 +1,7 @@
 ---
 references: []
-last_verified: 3a1f06584f6a987bfd13d6a4de1168cf59b5f4fe
+verified_against: {task: "3.53", tofu: "1.13", terramate: "0.17"}
+last_verified: 81461ebe946c0e29b8a7e79268995af055a920a9
 ---
 
 # Patterns catalogue — small patterns, guidelines, tools and techniques
@@ -128,7 +129,7 @@ their summary. Naming uses a scalar interface with shared context (ADR-0003); fi
 ## 9. Documentation (ADR-0013)
 | Id | Pattern | Why | Enforced by |
 |---|---|---|---|
-| LZ-DOC-001 | Every page has `verified_against: {tofu, ovh}` front-matter; two minors behind fails | Freshness | docs lint |
+| LZ-DOC-001 | How-to and reference pages that name a `tofu`, `terramate`, `task` or `ovhcloud` command carry `verified_against: {tool: "major.minor"}` front matter; more than two minors behind a pin, ahead of it or on another major fails; two behind passes | Freshness | `task docs:check` |
 | LZ-DOC-002 | Executable examples use tested include markers; illustrative snippets are labelled; prose-only work is exempt | No rot | include tool |
 | LZ-DOC-003 | Executable how-tos end in a tested `task` target; nightly runs it dry; prose-only guidance has no invented behavior test | Runbooks stay true | docs job |
 | LZ-DOC-004 | "compliant"/"certified" banned; "aligned", "supports controls" allowed | Legal exposure | Vale rule |

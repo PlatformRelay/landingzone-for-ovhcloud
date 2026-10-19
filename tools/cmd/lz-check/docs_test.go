@@ -472,6 +472,84 @@ func TestDocsSupersededADR(t *testing.T) {
 	}
 }
 
+// 006 T041: the readings T039 left open (evidence/T041.md *Readings*). A
+// version ahead of its pin or on an older major is stale; a stamp that is not
+// an inline mapping of quoted major.minor versions is malformed; lock files
+// that disagree pin the newest (each order, so neither the first nor the last
+// lock read passes); a tracked hidden directory is scanned.
+func TestDocsGateReadingsRejected(t *testing.T) {
+	const a = "docs/how-to/a.md"
+	stale, malformed := "VERIFIED_AGAINST_STALE", "HEADER_MALFORMED"
+	olderLock := strings.Replace(fixtureLock, "\"2.24.0\"", "\"2.20.0\"", 1)
+	for name, r := range map[string]struct {
+		files              map[string]string
+		rule, page, detail string
+	}{
+		"ahead of its pin":        {map[string]string{a: docsStampedGuide(`task: "3.57"`)}, stale, a, "task"},
+		"older major":             {map[string]string{a: docsStampedGuide(`task: "2.56"`)}, stale, a, "task"},
+		"block form":              {map[string]string{a: header(helloRef+"verified_against:\n  task: \"3.56\"\n") + guide}, malformed, a, "verified_against"},
+		"unquoted version":        {map[string]string{a: docsStampedGuide(`task: 3.56`)}, malformed, a, "verified_against"},
+		"major only":              {map[string]string{a: docsStampedGuide(`task: "3"`)}, malformed, a, "verified_against"},
+		"empty mapping":           {map[string]string{a: docsStampedGuide(``)}, malformed, a, "verified_against"},
+		"tool given twice":        {map[string]string{a: docsStampedGuide(`task: "3.56", task: "3.55"`)}, malformed, a, "task"},
+		"stamp given twice":       {map[string]string{a: header(helloRef+fixtureStamp(`task: "3.56"`)+fixtureStamp(`task: "3.56"`)) + guide}, malformed, a, "twice"},
+		"older stage lock":        {map[string]string{"stages/demo/.terraform.lock.hcl": olderLock, a: docsStampedGuide(`task: "3.56", ovh: "2.20"`)}, stale, a, "ovh"},
+		"older module lock":       {map[string]string{"modules/x/.terraform.lock.hcl": olderLock, a: docsStampedGuide(`task: "3.56", ovh: "2.20"`)}, stale, a, "ovh"},
+		"hidden directory cites":  {map[string]string{".github/workflows/x.yml": "# ADR-0007\n"}, "SUPERSEDED_ADR", ".github/workflows/x.yml", "0007"},
+		"unignored sibling cites": {map[string]string{".gitignore": "agent-context/\n", "agent-contexts/x.md": "ADR-0007\n"}, "SUPERSEDED_ADR", "agent-contexts/x.md", "0007"},
+		"anchored rule at depth":  {map[string]string{".gitignore": "/notes/\n", "tools/notes/x.md": "ADR-0007\n"}, "SUPERSEDED_ADR", "tools/notes/x.md", "0007"},
+		// review round 1: a flag right after the tool is a command, and the
+		// key may carry a space before its colon (YAML reads it the same).
+		"reference names task --list": {map[string]string{"docs/reference/c.md": docsCommandPage("", "`task --list` shows them.")}, "VERIFIED_AGAINST_MISSING", "docs/reference/c.md", ""},
+		"prose names task --list":     {map[string]string{"docs/how-to/c.md": docsCommandPage("", "Run task --list to see them.")}, "VERIFIED_AGAINST_MISSING", "docs/how-to/c.md", ""},
+		// review round 2: a tab between tool and subcommand, an uppercase
+		// short flag first, and a stamp ahead only in its patch.
+		"tab after the tool":      {map[string]string{"docs/how-to/c.md": docsCommandPage("", "`tofu\tplan`")}, "VERIFIED_AGAINST_MISSING", "docs/how-to/c.md", ""},
+		"uppercase short flag":    {map[string]string{"docs/how-to/c.md": docsCommandPage("", "`task -C subdir --list`")}, "VERIFIED_AGAINST_MISSING", "docs/how-to/c.md", ""},
+		"ahead only in the patch": {map[string]string{a: docsStampedGuide(`task: "3.56.1"`)}, stale, a, "task"},
+		"key spaced before colon": {map[string]string{"docs/explanation/c.md": docsCommandPage("verified_against : {tofu: \"1.12\"}\n", "Run `tofu plan`.")},
+			stale, "docs/explanation/c.md", "tofu"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsSupersededRepo(t, r.files), "docs")
+			if code != 1 || !docsFindingLine(out, r.rule, r.page, r.detail) || !strings.Contains(out, "DOCS_FAIL") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %s %s naming %q and DOCS_FAIL:\n%s", code, r.rule, r.page, r.detail, out)
+			}
+		})
+	}
+}
+
+// 006 T041: `task` in English prose is not a command; an ADR without a status
+// line is not Superseded, whatever its body says; .git and what .gitignore
+// names (a directory, a wildcard file name) are not scanned.
+func TestDocsGateReadingsAccepted(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"task in English prose": {"docs/how-to/c.md": docsCommandPage("", "This task has no target; the task is done by hand.")},
+		"adr without a status": {"docs/adr/0008-draft.md": "# ADR-0008: Draft\n\nSuperseded by nothing yet.\n",
+			"docs/how-to/a.md": pageA + "See ADR-0008.\n"},
+		"git directory":         {".git/notes": "ADR-0007\n"},
+		"ignored directory":     {".gitignore": "# local\nagent-context/\n*.log\n", "agent-context/x.md": "ADR-0007\n", "tools/run.log": "ADR-0007\n"},
+		"ignored nested target": {".gitignore": ".terraform/\n", "stages/demo/.terraform/x.md": "ADR-0007\n"},
+		"anchored rule":         {".gitignore": "/agent-context/\n", "agent-context/x.md": "ADR-0007\n"},
+		// review round 2: the generated CI run record is not read, so that it
+		// stays out of docs:check's digest (ci:foundation compares digests).
+		"ci run record":          {"pipelines/github/foundation-runs.json": "{\"note\": \"ADR-0007\"}\n"},
+		"wildcard contents rule": {".gitignore": ".claude/*\n", ".claude/x.md": "ADR-0007\n"},
+		// Lock files in fixtures and hidden directories pin nothing: a newer
+		// ovh there would make the page's 2.24 stale.
+		"fixture and hidden locks": {"modules/x/fixtures/.terraform.lock.hcl": strings.ReplaceAll(fixtureLock, "2.24", "2.30"),
+			"stages/demo/.terraform/.terraform.lock.hcl": strings.ReplaceAll(fixtureLock, "2.24", "2.30"),
+			"docs/how-to/a.md":                           docsStampedGuide(`task: "3.56", ovh: "2.24"`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsSupersededRepo(t, files), "docs")
+			if code != 0 || !strings.Contains(out, "DOCS_OK") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with DOCS_OK:\n%s", code, out)
+			}
+		})
+	}
+}
+
 // 006 T040, FR-019: the repository map in the shape of the real
 // docs/reference/repository-map.md: front matter, then tables whose first
 // column names paths in code spans (two in one cell where the real map
