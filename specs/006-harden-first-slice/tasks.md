@@ -334,7 +334,7 @@ Independent test: V005, V006. Test tasks T029–T031, then implementation tasks 
 ## Phase 6: User Story 5 — Dependencies, releases and provenance have an offline lane (P3)
 Independent test: V006 (T034), V007, V008. Test tasks T035–T036, then implementation tasks T037–T038.
 
-- [ ] T035 [US5] Capture the pinned provider's schema into tests/fixtures/provider-schema/ through a `capture:provider-schema` target, and write update-lane tests in tools/internal/checks/updatelane_test.go with fixtures in tests/check/fixtures/updatelane/ behind a new `test:update-lane` target in Taskfile.yml
+- [x] T035 [US5] Capture the pinned provider's schema into tests/fixtures/provider-schema/ through a `capture:provider-schema` target, and write update-lane tests in tools/internal/checks/updatelane_test.go with fixtures in tests/check/fixtures/updatelane/ behind a new `test:update-lane` target in Taskfile.yml — closed 2026-10-19, evidence: evidence/T035.md
   - Requirements: FR-015, SC-004; ADRs: 0011, 0021. Depends on: T004.
   - Cases (given / when / then → defect exposed), each against `CheckUpdateLane`:
     - given a fixture configuration covering every pin source of data-model *Update-lane configuration* / then no finding → exposes false positives.

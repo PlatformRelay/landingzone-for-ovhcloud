@@ -5,8 +5,8 @@ stages live next to them (`<dir>/tests/`); the Go tests live in [`tools/`](../to
 
 | Path | What it holds |
 | --- | --- |
-| `check/fixtures/` | Valid and broken inputs for `lz-check`'s own tests (`dependencies`, `static`, `unit`). |
-| `fixtures/` | Deployment manifests, output envelopes, and captured `tofu`, Terramate and `ovhcloud` output that the Go tests replay. |
+| `check/fixtures/` | Valid and broken inputs for the checks' own tests (`dependencies`, `static`, `unit`, `updatelane`). |
+| `fixtures/` | Deployment manifests, output envelopes, the pinned provider's schema snapshot (`provider-schema/`), and captured `tofu`, Terramate and `ovhcloud` output that the Go tests replay. |
 | `live/probes/` | Live probe roots, one per premise group. Maintainer only: see its [run sheet](live/probes/README.md). |
 | `live/chain/` | Expected and observed live-chain results that the chain's assertions are tested against. |
 

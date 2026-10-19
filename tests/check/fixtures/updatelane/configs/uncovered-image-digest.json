@@ -1,0 +1,9 @@
+{
+  "automerge": false,
+  "packageRules": [
+    {"groupName": "runtime-tools", "matchFileNames": ["mise.toml"], "labels": ["needs-entry-revision"]},
+    {"groupName": "provider-ovh", "matchFileNames": ["**/.terraform.lock.hcl", "**/*.tf", "tests/fixtures/provider-schema/**"]},
+    {"groupName": "host-tools", "matchFileNames": ["mise.live.toml"]},
+    {"groupName": "go-modules", "matchFileNames": ["tools/go.mod"]}
+  ]
+}

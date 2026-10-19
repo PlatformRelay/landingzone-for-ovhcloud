@@ -1,0 +1,4 @@
+{
+  "automerge": false,
+  "packageRules": {"groupName": "runtime-tools", "matchFileNames": ["mise.toml"]}
+}

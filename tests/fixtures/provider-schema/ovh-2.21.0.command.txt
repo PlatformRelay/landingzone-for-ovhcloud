@@ -1,0 +1,6 @@
+command: lz-offline --candidate <checkout> -- task capture:provider-schema
+inner_command: tofu init -backend=false; tofu providers schema -json (root requiring only ovh/ovh = "2.21.0", stages/bootstrap's lock)
+tofu: 1.13.0
+provider: registry.opentofu.org/ovh/ovh 2.21.0
+sha256: 8f9e31e30520b9085031b56d59f4db954136c89329162aa773bb760b8b9f8a99
+captured_on: 2026-10-19

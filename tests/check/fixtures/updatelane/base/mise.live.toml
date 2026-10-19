@@ -1,0 +1,3 @@
+# Fixture for the update-lane check (006 FR-015): host-only live tools.
+[tools]
+"github:ovh/ovhcloud-cli" = "0.15.0"

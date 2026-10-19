@@ -1,0 +1,10 @@
+# Fixture for the update-lane check (006 FR-015): the repository's pin layout, not its pins.
+[tools]
+go = "1.27.1"
+opentofu = "1.13.0"
+"aqua:terramate-io/terramate" = "0.17.3"
+task = "3.53.1"
+tflint = "0.64.0"
+
+[env]
+LZ_OFFLINE_IMAGE = "cgr.dev/chainguard/wolfi-base@sha256:0000000000000000000000000000000000000000000000000000000000000001"
