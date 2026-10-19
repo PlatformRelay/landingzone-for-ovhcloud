@@ -94,11 +94,18 @@ func Manifest(repo, commit, version string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// gitEnv is the whole environment of every git call: the caller's PATH and nothing else of
-// theirs, so GIT_DIR, GIT_CONFIG_* and the like cannot point git elsewhere or configure it.
+// gitBin is the runtime's pinned git (checks.offline: /usr/bin/git), run by absolute path so the
+// caller's PATH cannot choose the binary.
+const gitBin = "/usr/bin/git"
+
+// tagRefs is the ref namespace of every tag the manifest reads.
+const tagRefs = "refs/tags/"
+
+// gitEnv is the whole environment of every git call: a fixed PATH and nothing of the caller's,
+// so GIT_DIR, GIT_CONFIG_* and the like cannot point git elsewhere or configure it.
 func gitEnv() []string {
 	return []string{
-		"PATH=" + os.Getenv("PATH"), "HOME=" + os.DevNull, "LC_ALL=C",
+		"PATH=/usr/bin:/bin", "HOME=" + os.DevNull, "LC_ALL=C",
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_ATTR_NOSYSTEM=1",
 		"GIT_NO_REPLACE_OBJECTS=1", "GIT_GRAFT_FILE=" + os.DevNull, "GIT_NO_LAZY_FETCH=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0",
 	}
@@ -106,7 +113,7 @@ func gitEnv() []string {
 
 // git runs a read-only git command in repo and returns its standard output.
 func git(repo string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	cmd := exec.Command(gitBin, append([]string{"-C", repo}, args...)...)
 	cmd.Env = gitEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -139,7 +146,7 @@ func checkComplete(repo, _, _ string) error {
 
 // checkVersionFree refuses a version any tag carries, reachable from the commit or not.
 func checkVersionFree(repo, _, version string) error {
-	ref := "refs/tags/" + version
+	ref := tagRefs + version
 	out, err := git(repo, "for-each-ref", "--format=%(refname)", ref)
 	if err != nil {
 		return err
@@ -238,13 +245,13 @@ func (l *listing) add(kind, id, path string) {
 // previousTrain is the newest train tag (by version, compared as numbers) reachable from commit,
 // or "" when none is.
 func previousTrain(repo, commit string) (string, error) {
-	tags, err := git(repo, "for-each-ref", "--merged", commit, "--format=%(refname)", "refs/tags/")
+	tags, err := git(repo, "for-each-ref", "--merged", commit, "--format=%(refname)", tagRefs)
 	if err != nil {
 		return "", err
 	}
 	newest := ""
 	for _, ref := range lines(tags) {
-		name, ok := strings.CutPrefix(ref, "refs/tags/")
+		name, ok := strings.CutPrefix(ref, tagRefs)
 		if ok && versionPattern.MatchString(name) && (newest == "" || newerVersion(name, newest)) {
 			newest = name
 		}
@@ -277,7 +284,7 @@ func changelog(repo, commit string) (map[string][]string, error) {
 	}
 	args := []string{"rev-list", "--topo-order", "--reverse", "--no-commit-header", "--encoding=UTF-8", "--format=%H %s", commit}
 	if previous != "" {
-		args = append(args, "^refs/tags/"+previous)
+		args = append(args, "^"+tagRefs+previous)
 	}
 	out, err := git(repo, append(args, "--")...)
 	if err != nil {
