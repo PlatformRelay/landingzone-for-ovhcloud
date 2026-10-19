@@ -1,0 +1,124 @@
+# Throwaway probe (D120): can the offline entry's resource limits (006 FR-013) run on hosted
+# runners? Reports only; every step continues on error. Not for main.
+name: probe-entry-limits
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.head_ref == 'probe-entry-limits'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LZ_HEAD: ${{ github.event.pull_request.head.sha }}
+      LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
+      LZ_MANIFEST: sha256:a50de0d2167583c72358b82e2394d539ed8a1fbd0f10920658e338c5e57c598e
+      LZ_LAYER: sha256:e9021795b7b0d3ec984ed9704cab5288e1382bcf58f801e037b51f774a24ecba
+    steps:
+      - name: Locate the work directories
+        run: |
+          echo "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"
+          echo "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"
+      - name: Fetch the exact head as data
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          git init -q "$LZ_CANDIDATE"
+          git -C "$LZ_CANDIDATE" fetch -q --depth=1 --no-tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$LZ_HEAD"
+          git -c core.hooksPath=/dev/null -C "$LZ_CANDIDATE" checkout -q --detach FETCH_HEAD
+      - name: Fetch the published runtime layer by digest
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          token=$(curl --proto '=https' -fsS "https://ghcr.io/token?scope=repository:$LZ_IMAGE:pull" | jq -r .token)
+          curl --proto '=https' --proto-redir '=https' -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.manifest.v1+json" -o "$RUNNER_TEMP/manifest.json" "https://ghcr.io/v2/$LZ_IMAGE/manifests/$LZ_MANIFEST"
+          echo "${LZ_MANIFEST#sha256:}  $RUNNER_TEMP/manifest.json" | sha256sum -c -
+          curl --proto '=https' --proto-redir '=https' -fsSL -H "Authorization: Bearer $token" -o "$RUNNER_TEMP/layer.tgz" "https://ghcr.io/v2/$LZ_IMAGE/blobs/$LZ_LAYER"
+          echo "${LZ_LAYER#sha256:}  $RUNNER_TEMP/layer.tgz" | sha256sum -c -
+          mkdir "$LZ_RUNTIME"
+          tar -xzpf "$RUNNER_TEMP/layer.tgz" -C "$LZ_RUNTIME"
+          ls -la "$LZ_RUNTIME" "$LZ_RUNTIME/runtime" "$LZ_RUNTIME/runtime/resources"
+      - name: Install the pinned launcher
+        continue-on-error: true
+        run: |
+          sudo install -m 0755 "$LZ_RUNTIME/host/bwrap" /usr/bin/bwrap
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+      - name: Build the branch's entry against the published bundle
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          go_bin=$(find "$LZ_RUNTIME/runtime/resources/go" -maxdepth 2 -path '*/bin/go' -type f | head -n1)
+          echo "PROBE_GO $go_bin"
+          sha=$(sha256sum "$LZ_RUNTIME/runtime/resources.json" | cut -d' ' -f1)
+          echo "PROBE_RESOURCES_SHA $sha"
+          export GOTOOLCHAIN=local GOFLAGS=-mod=vendor CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/gocache" GOPATH="$RUNNER_TEMP/gopath" GOPROXY=off
+          "$go_bin" version
+          "$go_bin" -C "$LZ_CANDIDATE/tools" build -trimpath -ldflags "-X main.manifestSHA=$sha" -o "$RUNNER_TEMP/lz-offline-branch" ./cmd/lz-offline
+          chmod u+w "$LZ_RUNTIME/runtime" "$LZ_RUNTIME/runtime/lz-offline" || true
+          install -m 0755 "$RUNNER_TEMP/lz-offline-branch" "$LZ_RUNTIME/runtime/lz-offline"
+          echo "PROBE_GO_BIN=$go_bin" >> "$GITHUB_ENV"
+          echo "PROBE_ENTRY_BUILT"
+      - name: Report the host before any setup
+        continue-on-error: true
+        run: |
+          uid=$(id -u)
+          echo "== id"; id
+          echo "== systemd"; systemctl --version | head -n2
+          echo "== kernel"; uname -a
+          echo "== cgroup fs"; stat -fc %T /sys/fs/cgroup; cat /proc/self/cgroup
+          echo "== loginctl"; loginctl list-sessions --no-pager || true; loginctl show-user "$uid" --no-pager || true
+          echo "== /run/user"; ls -la /run/user || true
+          echo "== env XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<unset>} DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-<unset>}"
+          echo "== systemctl --user (inherited env)"; systemctl --user show-environment; echo "exit=$?"
+          echo "== systemctl --user (XDG_RUNTIME_DIR=/run/user/$uid)"; XDG_RUNTIME_DIR=/run/user/$uid systemctl --user show-environment; echo "exit=$?"
+          echo "== system: user@$uid.service"; systemctl status "user@$uid.service" --no-pager || true
+          d=/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service
+          echo "== $d/cgroup.controllers"; cat "$d/cgroup.controllers"; echo "exit=$?"
+          echo "== $d/cgroup.subtree_control"; cat "$d/cgroup.subtree_control"; echo "exit=$?"
+          echo "== root cgroup.subtree_control"; cat /sys/fs/cgroup/cgroup.subtree_control
+          echo "== user.slice cgroup.subtree_control"; cat /sys/fs/cgroup/user.slice/cgroup.subtree_control || true
+      - name: Scope test before any setup
+        continue-on-error: true
+        run: |
+          uid=$(id -u)
+          XDG_RUNTIME_DIR=/run/user/$uid systemd-run --user --scope -p MemoryMax=64M -p TasksMax=32 true; echo "PROBE_SCOPE_PRE exit=$?"
+      - name: Entry preflight before any setup (verify:toolchain)
+        continue-on-error: true
+        run: |
+          "$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task verify:toolchain; echo "PROBE_ENTRY_PRE exit=$?"
+      - name: Enable linger and wait for the user manager
+        continue-on-error: true
+        run: |
+          uid=$(id -u)
+          sudo loginctl enable-linger "$(id -un)"; echo "enable-linger exit=$?"
+          for i in $(seq 1 30); do
+            if XDG_RUNTIME_DIR=/run/user/$uid systemctl --user show-environment >/dev/null 2>&1; then echo "PROBE_USER_MANAGER_UP after ${i}s"; break; fi
+            sleep 1
+          done
+          echo "== systemctl --user is-system-running"; XDG_RUNTIME_DIR=/run/user/$uid systemctl --user is-system-running; echo "exit=$?"
+          echo "== user@$uid.service"; systemctl show "user@$uid.service" -p ActiveState -p Delegate -p DelegateControllers --no-pager
+          d=/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service
+          echo "== $d/cgroup.controllers"; cat "$d/cgroup.controllers"; echo "exit=$?"
+          echo "== $d/cgroup.subtree_control"; cat "$d/cgroup.subtree_control"; echo "exit=$?"
+      - name: Scope test after linger
+        continue-on-error: true
+        run: |
+          uid=$(id -u)
+          export XDG_RUNTIME_DIR=/run/user/$uid
+          systemd-run --user --scope -p MemoryMax=64M -p TasksMax=32 true; echo "PROBE_SCOPE_TRUE exit=$?"
+          systemd-run --user --scope -p MemoryMax=64M -p MemorySwapMax=0 -p TasksMax=32 sh -c 'p=$(cut -d: -f3 /proc/self/cgroup); echo "cgroup $p"; for f in memory.max memory.swap.max pids.max; do printf "%s=" $f; cat /sys/fs/cgroup$p/$f; done'; echo "PROBE_SCOPE_LIMITS exit=$?"
+      - name: Entry preflight after linger (verify:toolchain)
+        continue-on-error: true
+        run: |
+          "$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task verify:toolchain; echo "PROBE_ENTRY_POST exit=$?"
+      - name: Entry cheap candidate target after linger (test:reports)
+        continue-on-error: true
+        run: |
+          "$LZ_RUNTIME/runtime/lz-offline" --candidate "$LZ_CANDIDATE" -- task test:reports; echo "PROBE_ENTRY_REPORTS exit=$?"
+      - name: Host limit test after linger
+        continue-on-error: true
+        run: |
+          export XDG_RUNTIME_DIR=/run/user/$(id -u) GOTOOLCHAIN=local GOFLAGS=-mod=vendor CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/gocache" GOPATH="$RUNNER_TEMP/gopath" GOPROXY=off
+          "$PROBE_GO_BIN" -C "$LZ_CANDIDATE/tools" test -count=1 -v -tags hostlimits -run TestHostLimits ./cmd/lz-offline; echo "PROBE_HOSTLIMITS exit=$?"
