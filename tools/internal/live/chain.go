@@ -261,7 +261,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	}
 	defer func() { err = errors.Join(err, release()) }()
 	// Selection again under the locks, as apply does.
-	again, _, err := r.acted()
+	again, _, err := r.acted(ctx)
 	if err != nil {
 		return err
 	}
@@ -579,7 +579,7 @@ func (r *laneRunner) destroyStack(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: id, Store: store, Schemas: o.Schemas, Account: r.account,
+	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: id, Store: artifactReader{ctx, store}, Schemas: o.Schemas, Account: r.account,
 		Dir: filepath.Join(o.RunDir, "inputs-destroy", id)})
 	if errors.Is(err, stacks.ErrBlocked) {
 		return &Blocked{Phase: "inputs", Detail: fmt.Sprintf("%s: %v", id, err)}
@@ -957,7 +957,7 @@ func (w *laneLockWriter) Prepare(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: r.o.Manifest, Consumer: id, Store: store, Schemas: r.o.Schemas, Account: r.account,
+	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: r.o.Manifest, Consumer: id, Store: artifactReader{ctx, store}, Schemas: r.o.Schemas, Account: r.account,
 		Dir: filepath.Join(r.o.RunDir, "inputs-l7", id)})
 	if err != nil {
 		return err

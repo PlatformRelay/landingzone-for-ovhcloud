@@ -11,6 +11,7 @@ package live
 // slice, so the exchange holds that binding here). A refused envelope never reaches the bucket.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,10 +28,22 @@ import (
 
 // ObjectStore is the state bucket API of the exchange: S3 with the instance's state credentials
 // live, a directory per bucket offline. Get of a missing object is an error matching
-// fs.ErrNotExist.
+// fs.ErrNotExist. Every call carries the context of the step that makes it (the run's, or a
+// detached cleanup's), so no request outlives it (spec 006 FR-001).
 type ObjectStore interface {
-	Put(bucket, key string, data []byte) error
-	Get(bucket, key string) ([]byte, error)
+	Put(ctx context.Context, bucket, key string, data []byte) error
+	Get(ctx context.Context, bucket, key string) ([]byte, error)
+}
+
+// artifactReader is store as the stacks adapter reads it (stacks.ArtifactStore), every read under
+// ctx, the context of the step that adapts.
+type artifactReader struct {
+	ctx   context.Context
+	store ObjectStore
+}
+
+func (a artifactReader) Get(bucket, key string) ([]byte, error) {
+	return a.store.Get(a.ctx, bucket, key)
 }
 
 // PublishOptions names one applied instance and what it produced.
@@ -46,8 +59,8 @@ type PublishOptions struct {
 
 // Publish builds the instance's envelope (sensitive outputs dropped), validates it as its consumers
 // will and writes it to stacks.ArtifactKey in stacks.ArtifactBucket. It returns the sha256 (hex) of
-// the written object. Every check runs before the one Put.
-func Publish(o PublishOptions) (string, error) {
+// the written object. Every check runs before the one Put, which carries ctx.
+func Publish(ctx context.Context, o PublishOptions) (string, error) {
 	// Only a row is applied here; a spec.external producer is published by the repository that
 	// applies it.
 	if _, err := o.Manifest.Row(o.Instance); err != nil {
@@ -78,7 +91,7 @@ func Publish(o PublishOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := o.Store.Put(bucket, stacks.ArtifactKey(want.InstanceID), data); err != nil {
+	if err := o.Store.Put(ctx, bucket, stacks.ArtifactKey(want.InstanceID), data); err != nil {
 		return "", fmt.Errorf("publish the artefact of %s: %w", want.InstanceID, err)
 	}
 	sum := sha256.Sum256(data)

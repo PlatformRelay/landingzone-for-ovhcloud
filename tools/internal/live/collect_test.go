@@ -412,7 +412,7 @@ type collectBucket struct {
 
 func (b collectBucket) admitted(bucket string) bool { return slices.Contains(b.w.admit[bucket], b.ak) }
 
-func (b collectBucket) Get(bucket, key string) ([]byte, error) {
+func (b collectBucket) Get(ctx context.Context, bucket, key string) ([]byte, error) {
 	b.w.f.mu.Lock()
 	defer b.w.f.mu.Unlock()
 	b.w.log = append(b.w.log, "get "+b.ak+" "+bucket+"/"+key)
@@ -439,7 +439,7 @@ func (b collectBucket) ObjectLock(_ context.Context, bucket string) (ObjectLock,
 }
 
 // PutNew is Put if absent: an existing object answers 412 (If-None-Match: *).
-func (b collectBucket) PutNew(bucket, key string, data []byte) error {
+func (b collectBucket) PutNew(ctx context.Context, bucket, key string, data []byte) error {
 	b.w.f.mu.Lock()
 	_, exists := b.w.f.buckets[bucket][key]
 	b.w.f.mu.Unlock()
@@ -447,10 +447,10 @@ func (b collectBucket) PutNew(bucket, key string, data []byte) error {
 		b.w.log = append(b.w.log, "put-new-refused "+b.ak+" "+bucket+"/"+key)
 		return &apiStatus{what: "PUT " + bucket + "/" + key, code: http.StatusPreconditionFailed}
 	}
-	return b.Put(bucket, key, data)
+	return b.Put(ctx, bucket, key, data)
 }
 
-func (b collectBucket) Put(bucket, key string, data []byte) error {
+func (b collectBucket) Put(ctx context.Context, bucket, key string, data []byte) error {
 	b.w.f.mu.Lock()
 	defer b.w.f.mu.Unlock()
 	b.w.log = append(b.w.log, "put "+b.ak+" "+bucket+"/"+key)
@@ -1095,10 +1095,10 @@ func TestS3StorePutNew(t *testing.T) {
 		return false
 	}
 	s := newTestS3Store(t, f)
-	if err := s.PutNew(s3TestBucket, "k.tflock", []byte("one")); err != nil {
+	if err := s.PutNew(context.Background(), s3TestBucket, "k.tflock", []byte("one")); err != nil {
 		t.Fatalf("first PutNew: %v", err)
 	}
-	err := s.PutNew(s3TestBucket, "k.tflock", []byte("two"))
+	err := s.PutNew(context.Background(), s3TestBucket, "k.tflock", []byte("two"))
 	if statusOf(err) != http.StatusPreconditionFailed {
 		t.Errorf("second PutNew: %v, want a typed 412", err)
 	}
@@ -1113,7 +1113,7 @@ func TestS3StorePutNew(t *testing.T) {
 			t.Errorf("%s %s not signed correctly", r.Method, r.Path)
 		}
 	}
-	if err := s.Put(s3TestBucket, "k.tflock", []byte("three")); err != nil || len(cond) != 3 || cond[2] != "" {
+	if err := s.Put(context.Background(), s3TestBucket, "k.tflock", []byte("three")); err != nil || len(cond) != 3 || cond[2] != "" {
 		t.Errorf("Put: %v, conditions %q: Put stays unconditional", err, cond)
 	}
 }
@@ -1131,14 +1131,14 @@ func TestS3StoreRefusalTyped(t *testing.T) {
 		return nil, http.StatusForbidden
 	}
 	s := newTestS3Store(t, f)
-	_, err := s.Get(s3TestBucket, "k")
+	_, err := s.Get(context.Background(), s3TestBucket, "k")
 	if statusOf(err) != http.StatusForbidden || err.Error() != "GET "+s3TestBucket+"/k answered 403" {
 		t.Errorf("GET refused: %v (status %d), want a typed 403 with the same text", err, statusOf(err))
 	}
 	if o := refusal("tenant-s3-read", "demo:"+s3TestBucket, err, err == nil); o.Observed != "denied" {
 		t.Errorf("a 403 observed %q, want denied", o.Observed)
 	}
-	_, err = s.Get(s3TestBucket, "missing")
+	_, err = s.Get(context.Background(), s3TestBucket, "missing")
 	if !errors.Is(err, fs.ErrNotExist) || statusOf(err) == http.StatusForbidden {
 		t.Errorf("GET missing: %v, want fs.ErrNotExist", err)
 	}

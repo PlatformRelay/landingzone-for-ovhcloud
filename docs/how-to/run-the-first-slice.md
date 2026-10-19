@@ -5,13 +5,13 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
-    blob: 37a13cfb4292d39d98c5f8aefe3073adb5c84354
+    blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 518aa41abaa33d8263da347b023c8cd28a418ac7
+    blob: c10e5cb1cbd24317bf1508e70bffeb990a7dc92a
   - path: tools/internal/live/observe.go
-    blob: 5203e71f8c2a9c3092d3873daab9d9be52fe94c9
+    blob: 7febdec79596d9781a5bec211fc7ca9840b35fc9
   - path: stacks/deployments.yaml
     blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
   - path: mise.toml
@@ -21,7 +21,7 @@ references:
   - path: tests/live/probes/README.md
     blob: 65fdf99b2090b95e0c007010a9de857d88a27a7e
 verified_against: {task: "3.53", tofu: "1.13", ovhcloud: "0.15"}
-last_verified: e48983dd592c328ae39b78ddbf9d7ceec39479be
+last_verified: 34dff5ea7e0946853752335b99c4f59137f309f9
 ---
 
 # Run the first slice on an OVHcloud account
@@ -272,7 +272,9 @@ task live:apply -- --reviewed-sha "$S" demo-dev-gra11-runtime    # one instance
   `--deadline`). `apply` appends every created resource to the run's `inventory.jsonl` as it is
   created. Each ends with `LZ_RUN <run-id> <verb> <outcome>` (`apply` adds `inventory=<path>`);
   `apply` and `destroy` add the cost reminder. At the deadline or on SIGINT the verb stops the
-  running `tofu`, keeps the inventory, destroys nothing and exits non-zero (spec 006 FR-001).
+  running `tofu` or state-store request, keeps the inventory, starts no further publication,
+  destroys nothing and exits non-zero (spec 006 FR-001). An envelope whose write answered just
+  as the deadline passed can stand without its record; the next run selects that stack again.
   The inventory lists created resources only, not those an apply updated or deleted. A failure
   before the run starts (no `sandbox.env`, the account lookup) prints no `LZ_RUN` line: there is
   no run id yet. Use `chain` when you want a run that cleans up after itself.

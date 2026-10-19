@@ -1024,7 +1024,7 @@ func (s bssStore) allowed(bucket string) error {
 	return fmt.Errorf("AccessDenied: %s with key %s/%s", bucket, s.ak, s.sk)
 }
 
-func (s bssStore) Put(bucket, key string, data []byte) error {
+func (s bssStore) Put(ctx context.Context, bucket, key string, data []byte) error {
 	if err := s.allowed(bucket); err != nil {
 		return err
 	}
@@ -1035,7 +1035,7 @@ func (s bssStore) Put(bucket, key string, data []byte) error {
 	return os.WriteFile(p, data, 0o600)
 }
 
-func (s bssStore) Get(bucket, key string) ([]byte, error) {
+func (s bssStore) Get(ctx context.Context, bucket, key string) ([]byte, error) {
 	if err := s.allowed(bucket); err != nil {
 		return nil, err
 	}

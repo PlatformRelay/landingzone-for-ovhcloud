@@ -181,7 +181,7 @@ func TestS3CheckerGate(t *testing.T) {
 	// The account bucket's store keeps its own gate: no DELETE (T089), whatever the checker admits.
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
-	if _, err := s.request(http.MethodDelete, s3TestBucket, "k", nil); err == nil || len(f.requests()) != 0 {
+	if _, err := s.request(context.Background(), http.MethodDelete, s3TestBucket, "k", nil); err == nil || len(f.requests()) != 0 {
 		t.Errorf("the store sent a DELETE (%v, %d requests)", err, len(f.requests()))
 	}
 }

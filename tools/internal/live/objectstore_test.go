@@ -402,15 +402,15 @@ func TestS3StoreRoundTrip(t *testing.T) {
 	key := stacks.ArtifactKey("account-bootstrap")
 	odd := "account/a b$c+d/outputs.json"
 	odd2 := "account/50%/\u1234.json"
-	if _, err := s.Get(s3TestBucket, key); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := s.Get(context.Background(), s3TestBucket, key); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("Get of a missing object: %v, want fs.ErrNotExist", err)
 	}
 	for _, k := range []string{key, odd, odd2} {
 		data := []byte(`{"k":"` + k + `"}`)
-		if err := s.Put(s3TestBucket, k, data); err != nil {
+		if err := s.Put(context.Background(), s3TestBucket, k, data); err != nil {
 			t.Fatalf("Put %s: %v", k, err)
 		}
-		got, err := s.Get(s3TestBucket, k)
+		got, err := s.Get(context.Background(), s3TestBucket, k)
 		if err != nil || !bytes.Equal(got, data) {
 			t.Errorf("Get %s = %q, %v; want %q", k, got, err, data)
 		}
@@ -470,7 +470,7 @@ func TestS3StoreMethods(t *testing.T) {
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
 	for _, m := range []string{http.MethodPost, http.MethodDelete, http.MethodPatch, http.MethodOptions, http.MethodConnect, http.MethodTrace, "get", "put", "PROPFIND", ""} {
-		if _, err := s.request(m, s3TestBucket, "k", nil); err == nil || (m != "" && !strings.Contains(err.Error(), m)) {
+		if _, err := s.request(context.Background(), m, s3TestBucket, "k", nil); err == nil || (m != "" && !strings.Contains(err.Error(), m)) {
 			t.Errorf("method %q: %v, want a refusal naming it", m, err)
 		}
 	}
@@ -478,7 +478,7 @@ func TestS3StoreMethods(t *testing.T) {
 		t.Fatalf("%d requests sent for refused methods", n)
 	}
 	for _, m := range []string{http.MethodPut, http.MethodHead, http.MethodGet} {
-		if _, err := s.request(m, s3TestBucket, "k", nil); err != nil {
+		if _, err := s.request(context.Background(), m, s3TestBucket, "k", nil); err != nil {
 			t.Errorf("method %s: %v", m, err)
 		}
 	}
@@ -494,15 +494,15 @@ func TestS3StoreNames(t *testing.T) {
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
 	for _, b := range []string{"", "ab", "LZ-bkt", "lz_bkt", "-lz", "lz-", "lz/bkt", "lz bkt", strings.Repeat("a", 64)} {
-		if _, err := s.Get(b, "k"); err == nil {
+		if _, err := s.Get(context.Background(), b, "k"); err == nil {
 			t.Errorf("bucket %q: no refusal", b)
 		}
 	}
 	for _, k := range []string{"", "/k", "k/", "a//b", "a/../b", "../b", "./b", "a/.", "a\x00b", "a\nb", "a\x7fb"} {
-		if _, err := s.Get(s3TestBucket, k); err == nil {
+		if _, err := s.Get(context.Background(), s3TestBucket, k); err == nil {
 			t.Errorf("key %q: no refusal", k)
 		}
-		if err := s.Put(s3TestBucket, k, []byte("x")); err == nil {
+		if err := s.Put(context.Background(), s3TestBucket, k, []byte("x")); err == nil {
 			t.Errorf("Put key %q: no refusal", k)
 		}
 	}
@@ -567,14 +567,14 @@ func TestS3StoreErrors(t *testing.T) {
 				var err error
 				if op == "GET" {
 					var got []byte
-					got, err = s.Get(s3TestBucket, "k")
+					got, err = s.Get(context.Background(), s3TestBucket, "k")
 					if err == nil {
 						t.Fatalf("no error (got %d bytes)", len(got))
 					}
 					if errors.Is(err, fs.ErrNotExist) != (name == "404") {
 						t.Errorf("fs.ErrNotExist %v for %s: %v", errors.Is(err, fs.ErrNotExist), name, err)
 					}
-				} else if err = s.Put(s3TestBucket, "k", []byte("{}")); err == nil {
+				} else if err = s.Put(context.Background(), s3TestBucket, "k", []byte("{}")); err == nil {
 					t.Fatal("no error")
 				}
 				msg := err.Error()
@@ -595,17 +595,110 @@ func TestS3StoreErrors(t *testing.T) {
 	}
 	f := newFakeS3(t)
 	s := newTestS3Store(t, f)
-	if err := s.Put(s3TestBucket, "k", bytes.Repeat([]byte("x"), maxObject+1)); err == nil {
+	if err := s.Put(context.Background(), s3TestBucket, "k", bytes.Repeat([]byte("x"), maxObject+1)); err == nil {
 		t.Error("Put above the cap: no refusal")
 	}
-	if err := s.Put(s3TestBucket, "k", bytes.Repeat([]byte("x"), maxObject)); err != nil {
+	if err := s.Put(context.Background(), s3TestBucket, "k", bytes.Repeat([]byte("x"), maxObject)); err != nil {
 		t.Errorf("Put at the cap: %v", err)
 	}
-	if got, err := s.Get(s3TestBucket, "k"); err != nil || len(got) != maxObject {
+	if got, err := s.Get(context.Background(), s3TestBucket, "k"); err != nil || len(got) != maxObject {
 		t.Errorf("Get at the cap: %d bytes, %v", len(got), err)
 	}
 	if n := len(f.requests()); n != 2 {
 		t.Errorf("%d requests, want 2 (the refused Put sent nothing)", n)
+	}
+}
+
+// s3StoreCall is one call of the store under ctx.
+type s3StoreCall func(ctx context.Context, s *S3Store) error
+
+var s3StoreCalls = []struct {
+	name string
+	call s3StoreCall
+}{
+	{"get", func(ctx context.Context, s *S3Store) error { _, err := s.Get(ctx, s3TestBucket, "k"); return err }},
+	{"put", func(ctx context.Context, s *S3Store) error { return s.Put(ctx, s3TestBucket, "k", []byte("{}")) }},
+	{"put-new", func(ctx context.Context, s *S3Store) error { return s.PutNew(ctx, s3TestBucket, "k", []byte("{}")) }},
+}
+
+// s3HoldMax bounds how long the endpoint holds a request whose client never gives up.
+const s3HoldMax = 5 * time.Second
+
+// TestS3StoreContext (T051, FR-001): every request carries the caller's context. An endpoint that
+// holds the request until the client gives up (or s3HoldMax) sees it end when the caller's context
+// ends, and the call fails then; a call whose context has already ended sends nothing; the
+// control, a short hold under a later deadline, succeeds.
+func TestS3StoreContext(t *testing.T) {
+	for _, c := range s3StoreCalls {
+		t.Run(c.name+"/held", func(t *testing.T) { s3Held(t, c.name, c.call) })
+		t.Run(c.name+"/ended", func(t *testing.T) { s3Ended(t, c.name, c.call) })
+		t.Run(c.name+"/control", func(t *testing.T) { s3Control(t, c.name, c.call) })
+	}
+}
+
+// s3Held: the endpoint holds the request; the call, under a 300 ms deadline, fails by then, and
+// the request ends with it.
+func s3Held(t *testing.T, name string, call s3StoreCall) {
+	const deadline = 300 * time.Millisecond
+	f := newFakeS3(t)
+	released := make(chan bool, 1) // true: the request's context ended before s3HoldMax
+	f.fault = func(rw http.ResponseWriter, r *http.Request) bool {
+		select {
+		case <-r.Context().Done():
+			released <- true
+		case <-time.After(s3HoldMax):
+			released <- false
+			rw.WriteHeader(http.StatusOK)
+		}
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	start := time.Now()
+	err := call(ctx, newTestS3Store(t, f))
+	if took := time.Since(start); err == nil || took > deadline+2*time.Second {
+		t.Errorf("a held %s returned %v after %v, want an error by its deadline (%v)", name, err, took.Round(time.Millisecond), deadline)
+	}
+	select {
+	case ended := <-released:
+		if !ended {
+			t.Errorf("the held %s request outlived the caller's context", name)
+		}
+	case <-time.After(s3HoldMax + time.Second):
+		t.Errorf("the held %s request never ended", name)
+	}
+}
+
+// s3Ended: a call under an ended context fails and sends nothing.
+func s3Ended(t *testing.T, name string, call s3StoreCall) {
+	f := newFakeS3(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := call(ctx, newTestS3Store(t, f)); err == nil {
+		t.Errorf("a %s under an ended context succeeded", name)
+	}
+	if n := len(f.requests()); n != 0 {
+		t.Errorf("a %s under an ended context sent %d requests, want none", name, n)
+	}
+}
+
+// s3Control: a request held 50 ms under an s3HoldMax deadline succeeds.
+func s3Control(t *testing.T, name string, call s3StoreCall) {
+	f := newFakeS3(t)
+	if name == "get" {
+		f.objects[s3TestBucket+"/k"] = []byte("{}")
+	}
+	f.fault = func(http.ResponseWriter, *http.Request) bool {
+		time.Sleep(50 * time.Millisecond)
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s3HoldMax)
+	defer cancel()
+	if err := call(ctx, newTestS3Store(t, f)); err != nil {
+		t.Errorf("a %s held 50 ms under a %v deadline: %v", name, s3HoldMax, err)
+	}
+	if n := len(f.requests()); n != 1 {
+		t.Errorf("the control %s sent %d requests, want 1", name, n)
 	}
 }
 
@@ -629,7 +722,7 @@ func bssS3(t *testing.T, h *bssHarness) *fakeS3 {
 		return ""
 	}
 	f.get = func(ak, bucket, key string) ([]byte, int) {
-		data, err := bssStore{h: h, ak: ak, sk: f.secretOf(ak)}.Get(bucket, key)
+		data, err := bssStore{h: h, ak: ak, sk: f.secretOf(ak)}.Get(context.Background(), bucket, key)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			return nil, http.StatusNotFound
@@ -639,7 +732,7 @@ func bssS3(t *testing.T, h *bssHarness) *fakeS3 {
 		return data, http.StatusOK
 	}
 	f.put = func(ak, bucket, key string, data []byte) int {
-		if err := (bssStore{h: h, ak: ak, sk: f.secretOf(ak)}).Put(bucket, key, data); err != nil {
+		if err := (bssStore{h: h, ak: ak, sk: f.secretOf(ak)}).Put(context.Background(), bucket, key, data); err != nil {
 			return http.StatusForbidden
 		}
 		return http.StatusOK

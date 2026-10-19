@@ -732,6 +732,9 @@ type laneStore struct {
 	objects map[string][]byte
 	// beforePut, when set, runs before each Put (T022: a store call the run's deadline outlasts).
 	beforePut func(bucket, key string)
+	// enter, when set, runs as each Get and Put starts, with the call's context; an error it
+	// returns is the call's (T051: a call that blocks until its context ends).
+	enter func(ctx context.Context, op, bucket, key string) error
 }
 
 type laneBucket struct {
@@ -749,13 +752,15 @@ func (s *laneStore) open(keys map[string]string) (ObjectStore, error) {
 	return nil, errors.New("fake store: InvalidAccessKeyId")
 }
 
-func (b *laneBucket) Put(bucket, key string, data []byte) error {
+func (b *laneBucket) Put(ctx context.Context, bucket, key string, data []byte) error {
 	if b.s.beforePut != nil {
 		b.s.beforePut(bucket, key)
 	}
+	if err := b.s.started(ctx, "put", bucket, key, b.ak); err != nil {
+		return err
+	}
 	b.s.mu.Lock()
 	defer b.s.mu.Unlock()
-	laneAppend(b.s.log, laneCall{Cmd: "put", Stack: bucket + "/" + key, Key: b.ak})
 	if _, ok := laneBucketKeys[bucket][b.ak]; !ok {
 		return errors.New("fake store: AccessDenied")
 	}
@@ -763,21 +768,34 @@ func (b *laneBucket) Put(bucket, key string, data []byte) error {
 	return nil
 }
 
+// started logs a call as it starts, then runs the enter hook outside the lock.
+func (s *laneStore) started(ctx context.Context, op, bucket, key, ak string) error {
+	s.mu.Lock()
+	laneAppend(s.log, laneCall{Cmd: op, Stack: bucket + "/" + key, Key: ak})
+	s.mu.Unlock()
+	if s.enter != nil {
+		return s.enter(ctx, op, bucket, key)
+	}
+	return nil
+}
+
 // PutNew is Put if absent (T062: the L7 lock object); an existing object answers 412.
-func (b *laneBucket) PutNew(bucket, key string, data []byte) error {
+func (b *laneBucket) PutNew(ctx context.Context, bucket, key string, data []byte) error {
 	b.s.mu.Lock()
 	_, exists := b.s.objects[bucket+"/"+key]
 	b.s.mu.Unlock()
 	if exists {
 		return &apiStatus{what: "PUT " + bucket + "/" + key, code: http.StatusPreconditionFailed}
 	}
-	return b.Put(bucket, key, data)
+	return b.Put(ctx, bucket, key, data)
 }
 
-func (b *laneBucket) Get(bucket, key string) ([]byte, error) {
+func (b *laneBucket) Get(ctx context.Context, bucket, key string) ([]byte, error) {
+	if err := b.s.started(ctx, "get", bucket, key, b.ak); err != nil {
+		return nil, err
+	}
 	b.s.mu.Lock()
 	defer b.s.mu.Unlock()
-	laneAppend(b.s.log, laneCall{Cmd: "get", Stack: bucket + "/" + key, Key: b.ak})
 	if _, ok := laneBucketKeys[bucket][b.ak]; !ok {
 		return nil, errors.New("fake store: AccessDenied")
 	}
@@ -1149,7 +1167,7 @@ func (h *laneHarness) steady() {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if digests[id], err = Publish(PublishOptions{Manifest: h.m, Instance: id, Revision: laneRevision, TofuOutput: outs, Schemas: laneSchemas(), Account: acct, Store: store}); err != nil {
+		if digests[id], err = Publish(context.Background(), PublishOptions{Manifest: h.m, Instance: id, Revision: laneRevision, TofuOutput: outs, Schemas: laneSchemas(), Account: acct, Store: store}); err != nil {
 			t.Fatalf("seed publish %s: %v", id, err)
 		}
 	}
@@ -1183,7 +1201,7 @@ func (h *laneHarness) resolvedDigest(id string) string {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	in, err := stacks.Adapt(stacks.AdaptOptions{Manifest: h.m, Consumer: id, Store: store, Schemas: laneSchemas(), Account: h.boundAccount(),
+	in, err := stacks.Adapt(stacks.AdaptOptions{Manifest: h.m, Consumer: id, Store: artifactReader{context.Background(), store}, Schemas: laneSchemas(), Account: h.boundAccount(),
 		Dir: filepath.Join(h.base, "adapt", id)})
 	if err != nil {
 		h.t.Fatalf("seed adapt %s: %v", id, err)
@@ -3295,4 +3313,159 @@ func TestBoundedApplyDeadlinePassedInStore(t *testing.T) {
 		t.Errorf("run.json outcome %v, want fail", rec["outcome"])
 	}
 	boundedInventory(t, r, boundedNetwork)
+}
+
+// boundedStoreGiveUp is how long a blocking fake store call waits for its context before it
+// answers anyway: beyond the run's deadline and boundedSlack, so a call that never sees the run's
+// context returns late, and the run then goes on.
+const boundedStoreGiveUp = boundedHang + boundedSlack + 4*time.Second
+
+// storeBlock is a row of TestBoundedApplyStoreBlocks: the nth call of op blocks until its context
+// ends (or boundedStoreGiveUp); late: it then answers success, as a store that answers just as the
+// deadline passes; inputs (a read only): the call is the stack's input read, after its binding.
+type storeBlock struct {
+	name   string
+	op     string
+	nth    int
+	late   bool
+	inputs bool
+}
+
+// T051 (FR-001; stage B round 1): every state-store call carries the run's context. A store call
+// that blocks until its context ends, a read (a selection read; the stack's input read, after its
+// two selection reads and its credential's binding) or a write (its envelope), ends at the run's
+// deadline: it returns by the deadline plus boundedSlack, the run fails naming its deadline, and
+// no publication starts after it (no later store call or tofu step, the stack's record
+// unchanged), also when the write answers success once the deadline has passed. The control
+// store answers every call after a short delay under the deadline: the apply completes and
+// publishes.
+func TestBoundedApplyStoreBlocks(t *testing.T) {
+	for _, c := range []storeBlock{
+		{name: "read-selection", op: "get", nth: 1},
+		{name: "read-inputs", op: "get", nth: 3, inputs: true},
+		{name: "write", op: "put", nth: 1},
+		{name: "write-answered-late", op: "put", nth: 1, late: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { boundedStoreBlocked(t, c) })
+	}
+	t.Run("control", boundedStoreControl)
+}
+
+// storeBlocker runs a storeBlock against the lane store and notes when the blocked call returned.
+type storeBlocker struct {
+	row      storeBlock
+	mu       sync.Mutex
+	seen     int
+	blocked  bool
+	returned time.Time
+}
+
+func (b *storeBlocker) enter(ctx context.Context, op, _, _ string) error {
+	b.mu.Lock()
+	if op == b.row.op {
+		b.seen++
+	}
+	block := op == b.row.op && b.seen == b.row.nth
+	b.blocked = b.blocked || block
+	b.mu.Unlock()
+	if !block {
+		return nil
+	}
+	var err error
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+	case <-time.After(boundedStoreGiveUp):
+	}
+	b.mu.Lock()
+	b.returned = time.Now()
+	b.mu.Unlock()
+	if b.row.late {
+		return nil
+	}
+	return err
+}
+
+// boundedStoreBlocked is one blocked row of TestBoundedApplyStoreBlocks.
+func boundedStoreBlocked(t *testing.T, row storeBlock) {
+	h := boundedHarness(t)
+	h.deadline = boundedHang
+	record := filepath.Join(h.recordsDir(), boundedNetwork+".json")
+	before, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("fixture: the steady record of %s: %v", boundedNetwork, err)
+	}
+	b := &storeBlocker{row: row}
+	h.store.enter = b.enter
+	r := h.run(VerbApply, boundedNetwork)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.blocked {
+		t.Fatalf("fixture: no %s blocked", row.op)
+	}
+	if late := b.returned.Sub(h.applyStart.Add(boundedHang + boundedSlack)); late > 0 {
+		t.Errorf("the blocked %s returned %v after the run's deadline plus %v: it did not carry the run's context", row.op, late.Round(time.Second), boundedSlack)
+	}
+	if r.err == nil || !strings.Contains(r.err.Error(), errDeadline.Error()) {
+		t.Errorf("an apply whose store %s blocked past its deadline ended with %v, want a failure naming %q", row.op, r.err, errDeadline)
+	} else if lines := strings.Split(r.err.Error(), "\n"); len(slices.Compact(slices.Sorted(slices.Values(lines)))) != len(lines) {
+		t.Errorf("the run's error %q repeats a line", r.err)
+	}
+	boundedStoreAfter(t, r, row)
+	if after, _ := os.ReadFile(record); !bytes.Equal(after, before) {
+		t.Errorf("the record of %s was rewritten after the blocked %s: a publication started after the deadline", boundedNetwork, row.op)
+	}
+	boundedSummary(t, h.term.String(), r, VerbApply, "fail", true)
+}
+
+// boundedStoreControl: every store call answers after 50 ms, under the deadline; the apply
+// completes, publishes its envelope and rewrites its record.
+func boundedStoreControl(t *testing.T) {
+	h := boundedHarness(t)
+	h.deadline = boundedHang
+	record := filepath.Join(h.recordsDir(), boundedNetwork+".json")
+	before, _ := os.ReadFile(record)
+	h.store.enter = func(ctx context.Context, _, _, _ string) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+			return nil
+		}
+	}
+	r := h.run(VerbApply, boundedNetwork)
+	laneExit(t, r, 0)
+	if _, ok := r.puts()["lz-demo-bkt-state/artifacts/"+boundedNetwork+"/outputs.json"]; !ok {
+		t.Errorf("the control apply published no envelope of %s: puts %v", boundedNetwork, r.puts())
+	}
+	if after, _ := os.ReadFile(record); bytes.Equal(after, before) {
+		t.Errorf("the control apply did not rewrite the record of %s", boundedNetwork)
+	}
+	boundedSummary(t, h.term.String(), r, VerbApply, "pass", true)
+}
+
+// boundedStoreAfter checks that nothing of the run but the release of its locks followed the
+// blocked store call (the row's nth call of its op in the log).
+func boundedStoreAfter(t *testing.T, r laneRun, row storeBlock) {
+	t.Helper()
+	at, seen := -1, 0
+	for i, c := range r.calls {
+		if c.Cmd == row.op {
+			if seen++; seen == row.nth {
+				at = i
+				break
+			}
+		}
+	}
+	if at < 0 {
+		t.Fatalf("fixture: no call %d of %s in the log %+v", row.nth, row.op, r.calls)
+	}
+	if bound := slices.ContainsFunc(r.calls[:at], func(c laneCall) bool { return c.Cmd == "bind" }); row.op == "get" && bound != row.inputs {
+		t.Errorf("fixture: a binding before the blocked read is %t, want %t (the stack's input read)", bound, row.inputs)
+	}
+	for _, c := range r.calls[at+1:] {
+		if c.Cmd != "release" {
+			t.Errorf("%s %s started after the blocked %s: a step ran after the deadline", c.Cmd, c.Stack, row.op)
+		}
+	}
 }

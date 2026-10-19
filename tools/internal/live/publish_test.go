@@ -4,6 +4,7 @@ package live
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -66,7 +67,7 @@ func (b bucketDir) path(bucket, key string) (string, error) {
 	return filepath.Join(b.root, bucket, filepath.FromSlash(key)), nil
 }
 
-func (b bucketDir) Put(bucket, key string, data []byte) error {
+func (b bucketDir) Put(ctx context.Context, bucket, key string, data []byte) error {
 	p, err := b.path(bucket, key)
 	if err != nil {
 		return err
@@ -77,7 +78,7 @@ func (b bucketDir) Put(bucket, key string, data []byte) error {
 	return os.WriteFile(p, data, 0o600)
 }
 
-func (b bucketDir) Get(bucket, key string) ([]byte, error) {
+func (b bucketDir) Get(ctx context.Context, bucket, key string) ([]byte, error) {
 	p, err := b.path(bucket, key)
 	if err != nil {
 		return nil, fs.ErrNotExist
@@ -349,7 +350,7 @@ func tail(out []byte) string {
 func adaptInputs(t *testing.T, m *stacks.Manifest, consumer string, store bucketDir, acct stacks.BoundAccount) (stacks.Inputs, string) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "inputs", consumer)
-	in, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: consumer, Store: store, Schemas: exSchemas(), Account: acct, Dir: dir})
+	in, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: consumer, Store: artifactReader{context.Background(), store}, Schemas: exSchemas(), Account: acct, Dir: dir})
 	if err != nil {
 		t.Fatalf("Adapt %s: %v", consumer, err)
 	}
@@ -443,7 +444,7 @@ func TestExchangeRoundTrip(t *testing.T) {
 		t.Fatalf("control: the applied project's project_id is %v, want %s", plain["project_id"], exProjectID)
 	}
 
-	digest, err := Publish(PublishOptions{Manifest: m, Instance: exProject, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: store})
+	digest, err := Publish(context.Background(), PublishOptions{Manifest: m, Instance: exProject, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: store})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -500,7 +501,7 @@ func TestExchangeRoundTrip(t *testing.T) {
 	// decision 2: KD-3 for runtime scope.project_id belongs to the exchange).
 	rtOutputs := runStack(t, root, instanceOf(t, m, exRuntime), "apply", inputs.Files...)
 	foreign := bucketDir{t.TempDir()}
-	if _, err := Publish(PublishOptions{Manifest: m, Instance: exRuntime, Revision: exRevision, TofuOutput: rtOutputs, Schemas: exSchemas(), Account: exAccountEnv(t, exForeignID), Store: foreign}); err == nil {
+	if _, err := Publish(context.Background(), PublishOptions{Manifest: m, Instance: exRuntime, Revision: exRevision, TofuOutput: rtOutputs, Schemas: exSchemas(), Account: exAccountEnv(t, exForeignID), Store: foreign}); err == nil {
 		t.Errorf("runtime published with a scope.project_id the bound account does not resolve to")
 	} else {
 		var r *stacks.RefusalError
@@ -511,7 +512,7 @@ func TestExchangeRoundTrip(t *testing.T) {
 	if got := foreign.objects(t); len(got) > 0 {
 		t.Errorf("refused runtime publish wrote %v", got)
 	}
-	if _, err := Publish(PublishOptions{Manifest: m, Instance: exRuntime, Revision: exRevision, TofuOutput: rtOutputs, Schemas: exSchemas(), Account: acct, Store: store}); err != nil {
+	if _, err := Publish(context.Background(), PublishOptions{Manifest: m, Instance: exRuntime, Revision: exRevision, TofuOutput: rtOutputs, Schemas: exSchemas(), Account: acct, Store: store}); err != nil {
 		t.Fatalf("Publish runtime: %v", err)
 	}
 	rtKey := exTenantBkt + "/artifacts/" + exRuntime + "/outputs.json"
@@ -554,7 +555,7 @@ func TestExchangeBootstrapPublishesToAccountBucket(t *testing.T) {
 	if plain["state_project_id"] != exStateID {
 		t.Fatalf("control: bootstrap's state_project_id is %v, want the resolved %s", plain["state_project_id"], exStateID)
 	}
-	if _, err := Publish(PublishOptions{Manifest: m, Instance: exBootstrap, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: store}); err != nil {
+	if _, err := Publish(context.Background(), PublishOptions{Manifest: m, Instance: exBootstrap, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: store}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	key := exAccountBkt + "/artifacts/" + exBootstrap + "/outputs.json"
@@ -671,7 +672,7 @@ func TestExchangePublishRefuses(t *testing.T) {
 		if o.Account.ProjectIDs == nil {
 			o.Account = acct
 		}
-		d, err := Publish(o)
+		d, err := Publish(context.Background(), o)
 		return store, d, err
 	}
 
@@ -757,9 +758,9 @@ type recordingStore struct {
 	puts *[]string
 }
 
-func (r recordingStore) Put(bucket, key string, data []byte) error {
+func (r recordingStore) Put(ctx context.Context, bucket, key string, data []byte) error {
 	*r.puts = append(*r.puts, bucket+"/"+key)
-	return r.bucketDir.Put(bucket, key, data)
+	return r.bucketDir.Put(ctx, bucket, key, data)
 }
 
 // An instance a tenant manifest lists in spec.external is applied by the platform, never here, so
@@ -793,7 +794,7 @@ func TestPublishRefusesExternalInstance(t *testing.T) {
 				t.Fatal(err)
 			}
 			var puts []string
-			_, err = Publish(PublishOptions{Manifest: m, Instance: exProject, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: recordingStore{bucketDir{t.TempDir()}, &puts}})
+			_, err = Publish(context.Background(), PublishOptions{Manifest: m, Instance: exProject, Revision: exRevision, TofuOutput: outputs, Schemas: exSchemas(), Account: acct, Store: recordingStore{bucketDir{t.TempDir()}, &puts}})
 			if name == "row" {
 				if err != nil || len(puts) != 1 {
 					t.Fatalf("control: Publish of the row: %v (Put calls %v)", err, puts)

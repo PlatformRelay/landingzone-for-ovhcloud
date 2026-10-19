@@ -160,7 +160,7 @@ func (s *BootstrapState) Rest(ctx context.Context, a BootstrapAccount) (err erro
 	if err != nil {
 		return err
 	}
-	pubChanged, err := r.publish(keys)
+	pubChanged, err := r.publish(ctx, keys)
 	if err != nil {
 		return err
 	}
@@ -532,7 +532,7 @@ func (r *stateRun) taken(ctx context.Context, before []string, ours bool) error 
 }
 
 // publish is phase 6: the bootstrap envelope into the account bucket with state.env's keys.
-func (r *stateRun) publish(keys map[string]string) (bool, error) {
+func (r *stateRun) publish(ctx context.Context, keys map[string]string) (bool, error) {
 	store, err := r.s.o.Store(keys)
 	if err != nil {
 		return false, r.fail(PhasePublish, err.Error())
@@ -541,12 +541,12 @@ func (r *stateRun) publish(keys map[string]string) (bool, error) {
 	if err != nil {
 		return false, r.fail(PhasePublish, err.Error())
 	}
-	old, err := store.Get(r.bucket, stacks.ArtifactKey(bootstrapInstance))
+	old, err := store.Get(ctx, r.bucket, stacks.ArtifactKey(bootstrapInstance))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return false, r.fail(PhasePublish, err.Error())
 	}
 	same := &unchangedStore{ObjectStore: store, old: old, had: err == nil}
-	if _, err := Publish(PublishOptions{Manifest: r.s.o.Manifest, Instance: bootstrapInstance, Revision: r.s.o.Revision,
+	if _, err := Publish(ctx, PublishOptions{Manifest: r.s.o.Manifest, Instance: bootstrapInstance, Revision: r.s.o.Revision,
 		TofuOutput: r.output, Schemas: r.s.o.Schemas, Account: acct, Store: same}); err != nil {
 		return false, r.fail(PhasePublish, err.Error())
 	}
@@ -567,12 +567,12 @@ type unchangedStore struct {
 	wrote bool
 }
 
-func (s *unchangedStore) Put(bucket, key string, data []byte) error {
+func (s *unchangedStore) Put(ctx context.Context, bucket, key string, data []byte) error {
 	if s.had && bytes.Equal(s.old, data) {
 		return nil
 	}
 	s.wrote = true
-	return s.ObjectStore.Put(bucket, key, data)
+	return s.ObjectStore.Put(ctx, bucket, key, data)
 }
 
 // verify is phase 7: init and plan account-governance against the account bucket, the state lock
@@ -589,7 +589,7 @@ func (r *stateRun) verify(ctx context.Context, keys map[string]string, changed b
 	if err != nil {
 		return r.fail(PhaseVerify, err.Error())
 	}
-	in, err := stacks.Adapt(stacks.AdaptOptions{Manifest: r.s.o.Manifest, Consumer: "account-governance", Store: store,
+	in, err := stacks.Adapt(stacks.AdaptOptions{Manifest: r.s.o.Manifest, Consumer: "account-governance", Store: artifactReader{ctx, store},
 		Schemas: r.s.o.Schemas, Account: acct, Dir: filepath.Join(r.home, "inputs", "account-governance")})
 	if err != nil {
 		return r.fail(PhaseVerify, err.Error())

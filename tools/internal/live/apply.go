@@ -192,12 +192,14 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 		ctx, cancel = withDeadline(ctx, deadline, nil)
 		defer cancel()
 		// A run whose context its deadline or a signal ended before it returned fails, naming the
-		// cause, even when the step that was running finished (the store's calls do not take the
-		// context). Unlike the chain, which checks before its destroy-on-exit, this is checked after
-		// the run locks are released, so a signal during that release fails the run too.
+		// cause, even when the step that was running finished (a store call answered just as it
+		// ended; every store call carries it, and no record is written after it, T051). Unlike
+		// the chain, which checks before its destroy-on-exit, this is checked after the run locks
+		// are released, so a signal during that release fails the run too.
 		defer func() {
-			if ctx.Err() != nil {
-				err = errors.Join(context.Cause(ctx), err)
+			// Once: a step that stopped on the ended context (the record gate) returned it already.
+			if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
+				err = errors.Join(cause, err)
 			}
 		}()
 	}
@@ -262,7 +264,7 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 	if o.Verb == VerbDestroy {
 		return r.destroyOne(ctx)
 	}
-	ids, _, err := r.acted()
+	ids, _, err := r.acted(ctx)
 	if err != nil {
 		return err
 	}
@@ -284,7 +286,7 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 	defer func() { err = errors.Join(err, release()) }()
 	// Selection again under the locks (review r1): another run that held them between the first
 	// selection and HoldRun may have applied, so the set the locks cover may be stale.
-	again, blocked, err := r.acted()
+	again, blocked, err := r.acted(ctx)
 	if err != nil {
 		return err
 	}
@@ -326,9 +328,9 @@ func runLane(ctx context.Context, o ApplyOptions, ch *ChainOptions) (err error) 
 // consumes is selected. Under `plan -- all`, blocked maps each acted stack that consumes a selected
 // producer to those producers (T090): it is reported, never planned, as `plan -- <it>` refuses the
 // same state; `apply -- all` applies the producer first and plans the consumer on its fresh artefact.
-func (r *laneRunner) acted() (ids []string, blocked map[string][]string, err error) {
+func (r *laneRunner) acted(ctx context.Context) (ids []string, blocked map[string][]string, err error) {
 	m := r.o.Manifest
-	sel, err := r.selected()
+	sel, err := r.selected(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -363,7 +365,7 @@ func (r *laneRunner) acted() (ids []string, blocked map[string][]string, err err
 // selected runs stacks.Select over the current code digests, the resolved-reference digests and
 // the published artefacts (read with each producer's own S3 keys; a producer whose keys do not
 // exist yet has published nothing) against the records.
-func (r *laneRunner) selected() ([]stacks.Selected, error) {
+func (r *laneRunner) selected(ctx context.Context) ([]stacks.Selected, error) {
 	o, m := r.o, r.o.Manifest
 	r.passes++ // each selection adapts into its own fresh directories
 	records, err := stacks.ReadRecords(o.Records, m)
@@ -402,7 +404,7 @@ func (r *laneRunner) selected() ([]stacks.Selected, error) {
 			if err != nil {
 				return nil, err
 			}
-			b, err := store.Get(bucket, stacks.ArtifactKey(e.Producer))
+			b, err := store.Get(ctx, bucket, stacks.ArtifactKey(e.Producer))
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
@@ -472,7 +474,7 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: id, Store: store, Schemas: o.Schemas, Account: r.account,
+	inputs, err := stacks.Adapt(stacks.AdaptOptions{Manifest: m, Consumer: id, Store: artifactReader{ctx, store}, Schemas: o.Schemas, Account: r.account,
 		Dir: filepath.Join(o.RunDir, "inputs", id)})
 	if errors.Is(err, stacks.ErrBlocked) {
 		return &Blocked{Phase: "inputs", Detail: fmt.Sprintf("%s: %v", id, err)}
@@ -542,11 +544,7 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 	if err := r.credentialFiles(in, out.Bytes()); err != nil {
 		return err
 	}
-	if _, err := Publish(PublishOptions{Manifest: m, Instance: id, Revision: o.Revision, TofuOutput: out.Bytes(), Schemas: o.Schemas, Account: r.account, Store: store}); err != nil {
-		return err
-	}
-	if err := WriteRecord(o.Records, id, Record{AppliedAt: time.Now().UTC().Format(time.RFC3339), SourceRevision: o.Revision,
-		CodeDigest: r.code[id], Consumed: inputs.Consumed, Resolved: inputs.Resolved}); err != nil {
+	if err := r.publish(ctx, id, store, out.Bytes(), inputs); err != nil {
 		return err
 	}
 	if r.chained {
@@ -555,6 +553,22 @@ func (r *laneRunner) stack(ctx context.Context, id string) (err error) {
 		return r.stateObject(ctx, in, s3Of(child.vars))
 	}
 	return nil
+}
+
+// publish is an applied stack's publication: its envelope into its bucket, then its record. FR-001:
+// the envelope's write carries the run's context (S3Store sends nothing under an ended one), and
+// the record is not written once that context has ended, even when the write answered success.
+// The envelope then stands without its record; the next run selects the stack again.
+func (r *laneRunner) publish(ctx context.Context, id string, store ObjectStore, out []byte, inputs stacks.Inputs) error {
+	o := r.o
+	if _, err := Publish(ctx, PublishOptions{Manifest: o.Manifest, Instance: id, Revision: o.Revision, TofuOutput: out, Schemas: o.Schemas, Account: r.account, Store: store}); err != nil {
+		return err
+	}
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	return WriteRecord(o.Records, id, Record{AppliedAt: time.Now().UTC().Format(time.RFC3339), SourceRevision: o.Revision,
+		CodeDigest: r.code[id], Consumed: inputs.Consumed, Resolved: inputs.Resolved})
 }
 
 type sensitiveOut struct {

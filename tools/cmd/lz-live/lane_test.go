@@ -149,7 +149,7 @@ func TestLaneEntryOptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _ = st.Get("lz-demo-bkt-state", stacks.ArtifactKey("demo-dev-project"))
+			_, _ = st.Get(context.Background(), "lz-demo-bkt-state", stacks.ArtifactKey("demo-dev-project"))
 			if len(s3.seen) != 1 || !strings.Contains(s3.seen[0], "s3.gra.io.cloud.ovh.net") {
 				t.Errorf("store requests %q, want one to the gra endpoint", s3.seen)
 			}
