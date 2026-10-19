@@ -17,12 +17,12 @@ references:
   - path: specs/001-offline-foundation/spec.md
     blob: 5b18e1d04a145c62f2d840542b5fbf56563fabf7
   - path: .github/workflows/foundation.yml
-    blob: 111a253fdbcf51e3f3013d06d403fdc6cc8e584b
+    blob: 4de88cbb716b8a61f8eb5762f37c8a1e08ca8b79
   - path: pipelines/github/foundation-source.json
-    blob: 4e3d3df8ff03689835e017e440afaff3eeffbb0e
+    blob: 3d57e8cb3336cfbcddba05dc986311ab6d0255cc
   - path: tools/internal/checks/foundation_ci.go
     blob: be4b579b31b6d7e7619b14c5306c4f23d85a153b
-last_verified: 9f318eaf1e9694521a38458b81409adf19e672bd
+last_verified: 74d47db61f9451c46972865598976dbffa62830b
 ---
 
 ## What is true
@@ -51,7 +51,9 @@ committed-source and settings observations, not runtime qualification:
   trigger in *Decision*; the reassessment is the owner's (spec 006 out-of-scope row C2)
   and has not happened, so the decision below still stands.
 - Spec 006 did not change admission. Its CI changes were the CI source check tracing
-  spec 006 (FR-022) and the pin of runtime r5 (PR 135).
+  spec 006 (FR-022) and the pin of runtime r5 (PR 135). Later than the `9f318ea`
+  observation, spec 006 T045 added two targets the workflow runs, `test:update-lane`
+  and `test:release`; admission is unchanged by it.
 
 The first version of this entry cited revision `996b845`, which is not in this
 repository's history (`git cat-file -t 996b845` fails); its citations are replaced by

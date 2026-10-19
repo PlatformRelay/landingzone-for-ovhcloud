@@ -416,7 +416,7 @@ docs-only tasks T043–T044.
 
 ## Final phase: Exit
 
-- [ ] T045 Admit the closed 006 targets `test:update-lane` and `test:release` to CI in pipelines/github/foundation-source.json and .github/workflows/foundation.yml
+- [x] T045 Admit the closed 006 targets `test:update-lane` and `test:release` to CI in pipelines/github/foundation-source.json and .github/workflows/foundation.yml — closed 2026-10-19, evidence: evidence/T045.md
   - Requirements: FR-022; ADRs: 0008, 0019. Depends on: T037, T038.
   - Verify: `task test:foundation-ci`: the source lists both targets, the workflow is regenerated with `generate:foundation-ci` and equals the rendering, and `ci-source` admits both because their creators are ticked; red before (`ci-source` refuses a target missing from the workflow, or with an open creator).
   - Evidence: `evidence/T045.md`; PR; initial status `not-run`.
