@@ -441,7 +441,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:runtime-image`: a test fails if either constant is raised above the power of two at or above 2× T050's largest peak, or below 2× that peak; it cites evidence/T050.md.
   - Evidence: `evidence/T054.md`; PR; initial status `not-run`.
 
-- [x] T055 Ratchet the foundation job's time: record each target's duration in pipelines/github/foundation-runs.json and fail `test:foundation-ci` when their sum plus one 240 s child deadline exceeds `timeout_minutes` (stage B round 1) — closed 2026-10-20, evidence: evidence/T055.md
+- [x] T055 Ratchet the foundation job's time: record each target's duration in pipelines/github/foundation-runs.json and fail the run judge `ci:foundation` (`lz-check ci-runs`) when their sum plus the time outside them plus one 240 s child deadline exceeds `timeout_minutes`, fixture-tested under `test:foundation-ci`; the committed record is not judged inside a foundation target, which would make a digest cycle (`judgeBudget` in tools/internal/checks/foundation_ci.go; evidence/T055.md *Decision request*) (stage B round 1) — closed 2026-10-20, evidence: evidence/T055.md
   - Requirements: FR-022; ADRs: 0008, 0019. Depends on: T045.
   - Verify: `task test:foundation-ci`: a record whose durations plus 240 s exceed 15 minutes is refused, a record under it passes; the capture script records durations; the current record is re-captured.
   - Evidence: `evidence/T055.md`; PR; initial status `not-run`.
@@ -456,7 +456,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:traceability`: a new function over 14, or a listed function whose score rises, fails; a lower score passes and the baseline is rewritten only downwards; the baseline lists today's functions over 14 with their scores.
   - Evidence: `evidence/T057.md`; PR; initial status `not-run`.
 
-- [ ] T058 Correct the wording of specs/006-harden-first-slice/spec.md after stage B: FR-018 on stamps ahead of their pin, P3 observed (r5, run 39249394208, entry steps scope-only), FR-009's accepted foreign-creator window (stage B round 1)
+- [x] T058 Correct the wording of specs/006-harden-first-slice/spec.md after stage B: FR-018 on stamps ahead of their pin, P3 observed (r5, run 39249394208, entry steps scope-only), FR-009's accepted foreign-creator window (stage B round 1) — closed 2026-10-20, evidence: evidence/T058.md
   - Requirements: FR-009, FR-018; ADRs: 0008, 0013, 0024. Depends on: T046.
   - Verify: `task docs:check` and `task test:live-lane`: each changed sentence cites its evidence; no requirement is weakened beyond what the code already does.
   - Evidence: `evidence/T058.md`; PR; initial status `not-run`.
