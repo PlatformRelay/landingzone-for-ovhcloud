@@ -90,6 +90,9 @@ authority, persistent states and dependencies; a passing suite does not erase op
     [AGENTS.md](../../AGENTS.md) ("Known deviation", "Bounded extension"); subagents and `bootstrap:*` stay excluded.
     After that, live targets are owner-only again. The protected-branch live lane remains the
     design and is still owed.
+  - Amendment (2026-10-18, *second account*): the same exception covers the fresh free-trial
+    account the maintainer sets up for a second environment, until that account's own voucher
+    expires or its credit falls below 20 €, whichever comes first.
 - **Progressive discovery**: the root `AGENTS.md` is a short router (scope, trust boundaries,
   commands, evidence requirements, where the decision map and the next guide are); per-kind guides
   (`tools/harness/guides/add-module.md`, `add-variant.md`, `add-profile.md`, `add-policy.md`,
