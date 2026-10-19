@@ -215,7 +215,7 @@ tasks:
   # end date and credit floor there). lz-live is built from this checkout and runs from its
   # root, where the host guard expects it, e.g.
   #   task live:probe -- --reviewed-sha <sha> tests/live/probes/<probe> [--plan-only]
-  #   task live:probe -- --reviewed-sha <sha> --cleanup <run-id>
+  #   task live:probe -- --reviewed-sha <sha> --cleanup <run-id> [--accept-lost-baseline]
   live:probe:
     desc: Run one probe root through the live run core, or resume its cleanup (host, owner; 005 R12)
     cmds:

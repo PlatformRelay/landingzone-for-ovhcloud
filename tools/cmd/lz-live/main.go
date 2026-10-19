@@ -4,7 +4,7 @@
 //	lz-live chain --reviewed-sha <sha> <instance|all> [--deadline <dur>]
 //	lz-live bootstrap --reviewed-sha <sha> [--fresh-account]
 //	lz-live probe --reviewed-sha <sha> <probe-root> [--plan-only] [--deadline <dur>]
-//	lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--deadline <dur>]
+//	lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--accept-lost-baseline] [--deadline <dur>]
 //
 // Every verb loads credentials, so every verb first runs the host guard: not inside lz-offline,
 // the working directory is the owner's main checkout named in ~/.config/ovh-lz/live.env, not a
@@ -41,7 +41,7 @@ const usage = `usage: lz-live <plan|apply|destroy> --reviewed-sha <sha> <instanc
        lz-live chain --reviewed-sha <sha> <instance|all> [--deadline <dur>]
        lz-live bootstrap --reviewed-sha <sha> [--fresh-account]
        lz-live probe --reviewed-sha <sha> <probe-root> [--plan-only] [--deadline <dur>]
-       lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--deadline <dur>]`
+       lz-live probe --reviewed-sha <sha> --cleanup <run-id> [--accept-lost-baseline] [--deadline <dur>]`
 
 // deps are the host facts lz-live reads; main fills them from the process, tests inject them.
 type deps struct {
@@ -55,8 +55,8 @@ type deps struct {
 	LookPath      func(string) (string, error)            // tofu on PATH, the pinned rule's last candidate (T093)
 	API           func(endpoint string) (live.API, error) // the OVHcloud API of an endpoint
 	Now           func() time.Time                        // run ids
-	// Terminal opens the operator's terminal (bootstrap --fresh-account only); production reads
-	// /dev/tty, tests inject a fake.
+	// Terminal opens the operator's terminal (bootstrap --fresh-account, probe
+	// --accept-lost-baseline); production reads /dev/tty, tests inject a fake.
 	Terminal func(ctx context.Context) (live.Terminal, error)
 	// Bootstrap runs the bootstrap phases; nil is live.Bootstrap (tests capture the options).
 	Bootstrap func(context.Context, live.BootstrapOptions) ([]live.PhaseResult, error)
@@ -80,6 +80,7 @@ func parse(verb string, args []string) (reviewed string, p probeArgs, fresh bool
 	if verb == "probe" {
 		flags.BoolVar(&p.planOnly, "plan-only", false, "plan and judge the probe, apply nothing")
 		flags.StringVar(&p.cleanup, "cleanup", "", "resume the cleanup of a probe run")
+		flags.BoolVar(&p.acceptLost, "accept-lost-baseline", false, "owner recovery of a run without a trustworthy baseline (terminal only)")
 	}
 	if verb == "probe" || verb == "chain" {
 		flags.DurationVar(&p.deadline, "deadline", 0, "run deadline (default 45m)")

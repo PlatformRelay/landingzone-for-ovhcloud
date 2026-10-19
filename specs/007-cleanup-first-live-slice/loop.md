@@ -50,6 +50,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T012 | CLOSED: 12 tests in `alerting/check_test.go` (sweep: delete only the non-baseline plan-matching alert in the `Sweep` argument's project and list again; still listed fails; foreign alert reported and kept, beside B too; untrusted 7 rows; recovery copy; lost create; pre-create sends nothing; gate 6 rows with controls; read-back and mismatches) and `TestProbeCheckBudgetAlert`, all red on the stubs; stubs `alerting.Options`/`Check`, `APIListAlerts`/`APIGetAlert`/`APIDeleteAlert`; `Options` gains `StateDir` and `Project` (coordinator decisions 2026-10-18, data-model row updated); scratch reference green, 38 mutants killed, 1 control survives | leg 1 and strong leg, rounds 1 and 2; round-2 test fixes (B beside a foreign alert, `get-no-id`) unreviewed by rule | for T015: `probeCheck` needs the run paths (`RunDir`, `StateDir`) and must assert them (the registration test cannot see them unwired; T013's entry cases partly do); add `tools/internal/probes/live/alerting` to `test:bootstrap`/`bootstrap:account` inputs with the import. For the coordinator: data-model's registration row still names `RunDir: …` only (proposed: `…, StateDir: …, Project: project`) |
 | T013 | CLOSED-WITH-GAPS: `probe_recovery_test.go`, `lz-live probe` as fresh processes of the test binary (`rcEntry`), fake API with alert routes and fake `tofu` (`rcTofu`: lost, create, block); 5 tests, 9 runs (lost create exit/kill, leftover failure, success path, 4 start-up kills, lost baseline with `--accept-lost-baseline` on a pty), all red on today's code for their stated reasons; harness probe on scratch reached the baseline-listing kill and the pty path; race 0; no mutation proof (G1) | leg 1 and strong leg, rounds 1 and 2; round-2 test fixes (failing-leftover pre-create cleanup, row 3 keeps its passphrase) unreviewed by rule | for the coordinator: DR-T013-a (task's "both copies deleted" is pre-create under FR-006; test uses unreadable copies; amend FR-006 or confirm), DR-T013-b (a stateless baseline-backed cleanup calls no `tofu`: confirm). For T014/T015: G27 mutants against these cases (G1); the record-copy-only entry path rests on T012's `TestSweepRecoveryCopy` |
 | T014 | CLOSED-WITH-GAPS: phases (claim, refusal, `probe.env`, passphrase, baseline under the run's context before any child), write-once synced copies, `LoadBaseline` precedence, `ClassifyRun`, cleanup by class (untrusted refused; no state: no passphrase, no `tofu`; baseline as `Before`), failed leftover check keeps any probe's files, a failed cleanup never retires; T011's 12 and T013's start-up rows green; 45 mutants (all G27), 44 killed, 1 equivalent | leg 1 and strong leg, rounds 1 and 2; round-2 fixes (credential-file and directory fsync, exclusive run-directory claim) unreviewed by rule | DR-T014-a for the coordinator: `Before` judges only the baseline's project (data-model row to amend, or a one-line revert). Before T019: check the maintainer's `state/probes/` for earlier run directories (a run with state and no baseline needs T015's `--accept-lost-baseline`). Deferred to stage B: no `summary.json` for a run ended at its baseline; `.json.tmp` left by a kill. Rejected: `Check` complexity 26 (lowered from 44) |
+| T015 | CLOSED-WITH-GAPS: `ListAlerts`/`GetAlert`/`DeleteAlert` and `GetMe`'s address (`apicheck.go`); `alerting.Check` (read-back, sweep by class against the baseline, plan-matching deletes, relist); registration with the run's paths; `--accept-lost-baseline` (terminal gate before credentials; untrusted runs only; destroy from state and the root's sweep, except `budget-alert`, which deletes nothing); T012's 12 + `TestProbeCheckBudgetAlert` and T013's 4 known-red rows green; 7 tests added; 36 mutants killed | leg 1 and strong leg, rounds 1 and 2; round-2 wording fix (owner prompt) unreviewed by rule | for the coordinator: DR-T015-a (alert ops gate the project as a path segment, not 32 hex, because the probe tests use `p1`); data-model "stdin is a terminal" vs the controlling terminal. G1: live recipient/id shapes UNVERIFIED until T019. Deferred to stage B: relist without retry; `stateFile`/`alertKind` duplicated. Owner command sheet for the 9 pre-baseline runs in evidence |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -100,24 +101,24 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | probe_baseline_test.go:TestLoadBaselineRecoveryCopy | US3 | T011 | T014 |
 | probe_baseline_test.go:TestProbeStartUnreconciledRun | US3 | T011 | T014 |
 | probe_baseline_test.go:TestUnreconciledRuns | US3 | T011 | T014 |
-| alerting/check_test.go:TestSweepDeletesOnlyNewAlert | US3 | T012 | |
-| alerting/check_test.go:TestSweepFailsWhenStillListed | US3 | T012 | |
-| alerting/check_test.go:TestSweepBaselineOnly | US3 | T012 | |
-| alerting/check_test.go:TestSweepLeavesForeignAlert (4 rows) | US3 | T012 | |
-| alerting/check_test.go:TestSweepDeletesBesideForeign (2 rows) | US3 | T012 | |
-| alerting/check_test.go:TestSweepUntrusted (7 rows) | US3 | T012 | |
-| alerting/check_test.go:TestSweepRecoveryCopy (2 rows) | US3 | T012 | |
-| alerting/check_test.go:TestSweepLostCreate (3 rows) | US3 | T012 | |
-| alerting/check_test.go:TestSweepPreCreate (2 rows) | US3 | T012 | |
-| alerting/check_test.go:TestAlertCallsGated (6 rows, red on their controls) | US3 | T012 | |
-| alerting/check_test.go:TestObserveReadsBack | US3 | T012 | |
-| alerting/check_test.go:TestObserveMismatch (3 rows) | US3 | T012 | |
-| probe_check_test.go:TestProbeCheckBudgetAlert | US3 | T012 | |
-| probe_recovery_test.go:TestProbeRecoveryLostCreate (exit, kill) | US3 | T013 | |
-| probe_recovery_test.go:TestProbeRecoveryCleanupLeftoverFails | US3 | T013 | |
-| probe_recovery_test.go:TestProbeRecoveryBudgetAlertPasses | US3 | T013 | |
+| alerting/check_test.go:TestSweepDeletesOnlyNewAlert | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepFailsWhenStillListed | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepBaselineOnly | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepLeavesForeignAlert (4 rows) | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepDeletesBesideForeign (2 rows) | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepUntrusted (7 rows) | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepRecoveryCopy (2 rows) | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepLostCreate (3 rows) | US3 | T012 | T015 |
+| alerting/check_test.go:TestSweepPreCreate (2 rows) | US3 | T012 | T015 |
+| alerting/check_test.go:TestAlertCallsGated (6 rows, red on their controls) | US3 | T012 | T015 |
+| alerting/check_test.go:TestObserveReadsBack | US3 | T012 | T015 |
+| alerting/check_test.go:TestObserveMismatch (3 rows) | US3 | T012 | T015 |
+| probe_check_test.go:TestProbeCheckBudgetAlert | US3 | T012 | T015 |
+| probe_recovery_test.go:TestProbeRecoveryLostCreate (exit, kill) | US3 | T013 | T015 |
+| probe_recovery_test.go:TestProbeRecoveryCleanupLeftoverFails | US3 | T013 | T015 |
+| probe_recovery_test.go:TestProbeRecoveryBudgetAlertPasses | US3 | T013 | T015 |
 | probe_recovery_test.go:TestProbeRecoveryStartUpKill (4 rows) | US3 | T013 | T014 |
-| probe_recovery_test.go:TestProbeRecoveryLostBaseline | US3 | T013 | |
+| probe_recovery_test.go:TestProbeRecoveryLostBaseline | US3 | T013 | T015 |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -128,6 +129,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | runner_test.go:TestProbeRerun, cmd/lz-live/main_test.go:TestProbeRerunEntry | spec 003 | T014 | FR-006: run 2 is refused beside unreconciled run 1; reordered to run 1, cleanup, run 2 |
 | chain_retry_budget_test.go:destroyClock (TestProbeListingRetryBudget, TestProbeListingRetryLine) | T004 | T014 | FR-006: the baseline listing reads the check's clock before the first child; a wait before any child is the error instead |
 | cmd/lz-live/probe_cleanup_record_test.go:TestProbeCleanupKeepsRecord | T005 | T014 | FR-006: the run writes its own `baseline.json`; the hand-written one (`listed: {}`) is invalid |
+| probe_check_test.go:TestProbeCheckBudgetAlert and every other `probeCheck` call (spec 003's swift-reach, token-residual, iam-urn, locked-recovery) | T012, spec 003 | T015 | FR-007: the Sweep loads the run's baseline from the record and state directories, so `probeCheck` takes the run's paths (`runPaths{}` added; assertions unchanged; T012's test text allowed it) |
 
 ## Live runs
 | Task | Run id | Reviewed SHA | Observation | Cost | Leftovers |
@@ -170,3 +172,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 - A filter keyed on ids from one scope (`Before`: one project's alerts) must carry that scope, or every resource of another scope the check lists is judged against the wrong list. (T014)
 - "Kept until reconciled" also means a cleanup that fails before its checks ran never retires the run: retire only on an affirmative pass. (T014)
 - A durability change in a shared writer (`credentialDir`) reorders another feature's pinned fsyncs (`TestFilesCredentialSetDurableSwitch`): make it local to the new caller. (T014)
+- A wiring case for a path pair needs one entry row per path where only that path holds the evidence (only the record copy, only the recovery copy): with both present a wrong path still reads the other and the mutant survives. (T015)
+- An owner-recovery flag that bypasses a safety class must say per root what it deletes, in the prompt the owner reads, not only in the how-to; and it must refuse runs whose class does not need it. (T015)

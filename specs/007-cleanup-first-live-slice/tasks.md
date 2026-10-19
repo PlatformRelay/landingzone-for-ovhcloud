@@ -197,7 +197,7 @@ T014–T016.
   - Verify: `task test:live-lane`: T011's cases and T013's recovery-file and start-up cases green; G27 mutants (baseline after apply, apply after a failed baseline, `Before` deciding a named kind, nil `Before` making every alert a candidate, start beside an unreconciled run, missing state alone classed pre-create, files removed before reconciliation) each turn a case red.
   - Evidence: `evidence/T014.md`; initial status `not-run`.
 
-- [ ] T015 [US3] Add the alert API operations to tools/internal/live/apicheck.go, the budget-alert probe check to tools/internal/probes/live/alerting/check.go, and its registration and `--accept-lost-baseline` to tools/cmd/lz-live/probe.go
+- [x] T015 [US3] Add the alert API operations to tools/internal/live/apicheck.go, the budget-alert probe check to tools/internal/probes/live/alerting/check.go, and its registration and `--accept-lost-baseline` to tools/cmd/lz-live/probe.go — closed 2026-10-19, evidence: evidence/T015.md
   - Requirements: FR-007, FR-008, SC-005; ADRs: 0006, 0024. Depends on: T012, T014.
   - Verify: `task test:live-lane`: T012's and T013's cases green; the G27 mutants deleting a baseline id, deleting a non-matching alert and accepting another run's baseline, and the G28 mutants, each turn a case red.
   - Evidence: `evidence/T015.md`; initial status `not-run`.

@@ -222,11 +222,11 @@ func TestProbeEntryCheck(t *testing.T) {
 // is read from probe.go, not asserted: the options are inside the check's closures.)
 func TestProbeCheckSwiftReach(t *testing.T) {
 	s3 := &http.Client{}
-	c := probeCheck("swift-reach", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil, nil, "")
+	c := probeCheck("swift-reach", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil, nil, "", runPaths{})
 	if c == nil || c.Output != "swift_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(swift-reach) = %+v, want the swift-reach check with a Sweep", c)
 	}
-	if c := probeCheck("swift-reach-x", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
+	if c := probeCheck("swift-reach-x", deps{S3HTTP: s3}, live.API{}, live.Credential{}, nil, nil, "", runPaths{}); c != nil {
 		t.Errorf("probeCheck(swift-reach-x) = %+v, want none", c)
 	}
 }
@@ -234,11 +234,11 @@ func TestProbeCheckSwiftReach(t *testing.T) {
 // TestProbeCheckTokenResidual (spec 003 T032): the token-residual root gets the token-residual
 // check with a Sweep; a root of another name still gets none.
 func TestProbeCheckTokenResidual(t *testing.T) {
-	c := probeCheck("token-residual", deps{}, live.API{}, live.Credential{}, nil, nil, "")
+	c := probeCheck("token-residual", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{})
 	if c == nil || c.Output != "residual_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(token-residual) = %+v, want the token-residual check with a Sweep", c)
 	}
-	if c := probeCheck("token-residual-x", deps{}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
+	if c := probeCheck("token-residual-x", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{}); c != nil {
 		t.Errorf("probeCheck(token-residual-x) = %+v, want none", c)
 	}
 }
@@ -248,23 +248,93 @@ func TestProbeCheckTokenResidual(t *testing.T) {
 // alert_id); a root of another name still gets none. The arguments are today's; T015 may add the
 // run's paths to probeCheck's parameters and adapt every call alike.
 func TestProbeCheckBudgetAlert(t *testing.T) {
-	c := probeCheck("budget-alert", deps{}, live.API{}, live.Credential{}, nil, nil, "0123456789abcdef0123456789abcdef")
+	c := probeCheck("budget-alert", deps{}, live.API{}, live.Credential{}, nil, nil, "0123456789abcdef0123456789abcdef", runPaths{})
 	if c == nil || c.Output != "budget_alert_check" || !slices.Equal(c.Public, []string{"alert_id"}) || c.Sweep == nil || c.Observe == nil {
 		t.Fatalf("probeCheck(budget-alert) = %+v, want the budget-alert check with a Sweep and output budget_alert_check", c)
 	}
-	if c := probeCheck("budget-alert-x", deps{}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
+	if c := probeCheck("budget-alert-x", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{}); c != nil {
 		t.Errorf("probeCheck(budget-alert-x) = %+v, want none", c)
+	}
+}
+
+// TestProbeCheckBudgetAlertPaths (spec 007 T015, T012's deferral): the budget-alert check finds
+// the run's files through the paths probeCheck hands it. A record copy under RunDir(<run-id>), a
+// recovery copy or state under StateDir, each unusable, makes its Sweep refuse before any request
+// (the API is unset); with the paths unwired the run would read as pre-create and pass. The
+// control: no file at all is pre-create and passes.
+func TestProbeCheckBudgetAlertPaths(t *testing.T) {
+	const id, project = "20261019T120000Z-ab12", "0123456789abcdef0123456789abcdef"
+	cases := []struct {
+		name, file, want string // file: relative to the run's record directory ("live/") or state directory ("state/")
+	}{
+		{"record-copy", "live/" + id + "/baseline.json", "BASELINE_INVALID"},
+		{"recovery-copy", "state/baselines/" + id + ".json", "BASELINE_INVALID"},
+		{"state", "state/probes/" + id + "/budget-alert.tfstate", "BASELINE_MISSING"},
+		{"nothing", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			paths := runPaths{RunDir: func(run string) string { return filepath.Join(base, "live", run) }, StateDir: filepath.Join(base, "state")}
+			if tc.file != "" {
+				writePrivate(t, filepath.Join(base, tc.file), `{"run_id":`)
+			}
+			c := probeCheck("budget-alert", deps{}, live.API{}, live.Credential{}, nil, nil, project, paths)
+			err := c.Sweep(context.Background(), id, project, io.Discard)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("Sweep with no run file: %v, want a pre-create pass", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Errorf("Sweep with %s: %v, want a refusal carrying %s", tc.file, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestProbeAcceptLostBaselineUsage (spec 007 T015): --accept-lost-baseline goes with --cleanup
+// only; with a probe root it is a usage error before the guard.
+func TestProbeAcceptLostBaselineUsage(t *testing.T) {
+	w := newWorld(t, true)
+	for _, args := range [][]string{
+		{"probe", "--reviewed-sha", fakeHead, "--accept-lost-baseline", "tests/live/probes/a"},
+		{"probe", "--reviewed-sha", fakeHead, "--accept-lost-baseline"},
+		{"chain", "--reviewed-sha", fakeHead, "--accept-lost-baseline", "all"},
+	} {
+		if code, stderr := w.run(args...); code != 2 || !strings.Contains(stderr, "usage") {
+			t.Errorf("lz-live %q: exit %d, stderr %q; want 2 with usage", args, code, stderr)
+		}
+	}
+	if n := w.gitCalls(t); n != 0 {
+		t.Errorf("a usage error ran the guard (%d git calls)", n)
+	}
+}
+
+// TestAcceptedCheck (spec 007 T015, FR-007 owner recovery): under --accept-lost-baseline the
+// budget-alert check runs without its Sweep (it judges by the lost baseline; the owner removed the
+// alerts by hand), and the check itself is left unchanged; every other root keeps its Sweep.
+func TestAcceptedCheck(t *testing.T) {
+	c := probeCheck("budget-alert", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{})
+	got := acceptedCheck("budget-alert", c)
+	if got == nil || got.Sweep != nil || got.Observe == nil || got.Output != c.Output || c.Sweep == nil {
+		t.Errorf("acceptedCheck(budget-alert) = %+v (original Sweep nil %v), want the check without its Sweep, the original untouched", got, c.Sweep == nil)
+	}
+	other := probeCheck("swift-reach", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{})
+	if got := acceptedCheck("swift-reach", other); got == nil || got.Sweep == nil {
+		t.Errorf("acceptedCheck(swift-reach) = %+v, want its Sweep kept", got)
+	}
+	if got := acceptedCheck("network", nil); got != nil {
+		t.Errorf("acceptedCheck(network, nil) = %+v, want nil", got)
 	}
 }
 
 // TestProbeCheckIamURN (spec 003 T034): the iam-urn root gets the iam-urn check with a Sweep; a
 // root of another name still gets none.
 func TestProbeCheckIamURN(t *testing.T) {
-	c := probeCheck("iam-urn", deps{}, live.API{}, live.Credential{}, nil, nil, "")
+	c := probeCheck("iam-urn", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{})
 	if c == nil || c.Output != "urn_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(iam-urn) = %+v, want the iam-urn check with a Sweep", c)
 	}
-	if c := probeCheck("iam-urn-x", deps{}, live.API{}, live.Credential{}, nil, nil, ""); c != nil {
+	if c := probeCheck("iam-urn-x", deps{}, live.API{}, live.Credential{}, nil, nil, "", runPaths{}); c != nil {
 		t.Errorf("probeCheck(iam-urn-x) = %+v, want none", c)
 	}
 }

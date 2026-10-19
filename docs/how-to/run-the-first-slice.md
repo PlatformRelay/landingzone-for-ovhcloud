@@ -1,7 +1,7 @@
 ---
 references:
   - path: tools/cmd/lz-live/main.go
-    blob: 806b7b39745efff0c4619cf89ac6c8c1e7e06cce
+    blob: d8f135726b97f45209049066bfe01672dc3a365a
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
@@ -20,7 +20,7 @@ references:
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
     blob: b34b198ff38ef36a2ef50ef757e5a9c0c47e0d0a
-last_verified: 52f9f9b2ea10319dc37176e3866c8c19cb99f14f
+last_verified: cfc17040e9ddc9c61ac610532df38723b82290fd
 ---
 
 # Run the first slice on an OVHcloud account
@@ -419,7 +419,15 @@ outcomes and the known deviations into the evidence or PR, never the record itse
 - If a probe's destroy failed, run
   `task live:probe -- --reviewed-sha "$S" --cleanup <run-id>`. Its state and passphrase under
   `accounts/<account>/state/probes/<run-id>/` are deleted only when the destroy and the
-  leftover check both pass. Never delete them by hand while a resource may exist.
+  leftover check both pass. Never delete them by hand while a resource may exist. A run with no
+  trustworthy baseline (spec 007 FR-007: a baseline copy unreadable or invalid, or none beside
+  state or an inventory entry, as for runs made before baselines existed) is refused
+  (`untrusted`, nothing deleted). Its owner recovery is
+  `task live:probe -- --reviewed-sha "$S" --cleanup <run-id> --accept-lost-baseline`, run at a
+  terminal: it asks for the run id to be typed back, destroys from the run's state if it has any
+  and runs the root's own sweep, then runs the leftover check and retires the run only if all
+  passed. For `budget-alert` it deletes nothing (no destroy, no sweep): first remove by hand only
+  the alerts matching the root's plan created at or after the run id's time.
 - A two-stage probe (`storage-iam`) whose companion could not be destroyed keeps its root, and
   with it the identity the companion's resources need; the run's error names the kept root and
   the `--cleanup <run-id>` to run, and the leftover check reports both as leftovers until then
