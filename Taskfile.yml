@@ -34,9 +34,9 @@ tasks:
       - go -C tools test -count=1 -run 'TestUpdateLane' ./internal/checks ./cmd/lz-check
 
   test:release:
-    desc: Release-train manifest on a fixture repository built with the runtime's git, against its golden output and schema (V008)
+    desc: Release-train manifest and the lz-release command on fixture repositories built with the runtime's git, against the golden output and schema (V008)
     cmds:
-      - go -C tools test -count=1 ./internal/release
+      - go -C tools test -count=1 ./internal/release ./cmd/lz-release
 
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
