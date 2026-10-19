@@ -1,7 +1,7 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: L — US6 (T039–T044), exit (T045, T046), stage B, foundation-runs.json refresh with a red control
+Next: L — exit T045 (admit test:update-lane, test:release to CI), T046 (V001–V010); refresh foundation-runs.json; stage B
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
@@ -92,6 +92,12 @@ Holistic run at B: not run yet.
 | L T037 | Renovate semantics believed, not verified (R8); acceptance seen only once the owner installs the app (C5); allowedVersions/schedule and case-only duplicate keys not judged | minor | both | defer | stage B / C5 owner install | no |
 | L T038 | Round-2 grafts fix unreviewed (two-round limit); SetEscapeHTML(false) unpinned; checks.DecodeStrict not used (schema test instead) | minor | review | defer | stage B | no |
 | L T038 | commit validation: full lowercase 40-hex answered by rev-parse <id>^{commit}, else RELEASE_COMMIT | — | task | decide accept | task decision, recorded in evidence | no |
+| L T041 | Round-2 strong leg BLOCK (pipelines input put foundation-runs.json into a foundation digest) verified, fixed with a registry assertion, no third review | major | strong | accept | Coordinator 2026-10-19: CLOSED-WITH-GAPS, not BLOCKED: the fix is machine-pinned by TestRegistryInputsCoverReads; stage B reads the whole change | no |
+| L T041 | Hand-written top-level read set; .gitignore negations; fixtures citing real ADR-0007 | minor | both | defer | stage B | no |
+| L T041 | foundation-runs.json stale again after the checks.yaml change | — | coordinator | carry | refresh once at the US6 PR | no |
+| L T042 | Admitted top-level names absent from the checkout not in the registry digest; trailing / kind unchecked; research.md cites lz-offline/main.go:197 | minor | both | defer | stage B | no |
+| L T043 | Repository is public and main unprotected: KI-001's reassessment trigger | major | review | carry | owner decision in INBOX (ruleset recommended) | no |
+| L T044 | Other 'main checkout' wording (tasks.md:13, spec.md:229,360, plan.md:27,40) outside T044's text | minor | review | defer | stage B | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
