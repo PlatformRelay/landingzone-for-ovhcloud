@@ -1,15 +1,15 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: B — stage B round 2 (fresh fan-out over the fixes T051–T058), then foundation-runs.json re-record and hand-off
+Next: hand-off — foundation-runs.json re-record (budget risk: see INBOX), then spec 006 done
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
 - [x] 0 orient — feature dir created by hand from the templates; spec, plan, research, data model, contracts, quickstart and tasks present; base origin/main
 - [x] P plan + tasks — generated with the repository's Spec Kit commands · spec set committed: the spec commit ":memo: docs(specs): specify spec 006"
 - [x] R spec-set review — round 1 on c604b97: review leg 1 REQUEST_CHANGES (10 major), the strong review leg CONCERNS (5 warnings, 4 notes); no CRITICAL. 13 verified findings fixed (462374a). Owner decisions D115 (Q4, Q5, Q7) applied (cb3a47e). A stage-R warning followed: the combined test-and-implementation tasks were split into test tasks ordered first (the spec commit ":memo: docs(specs): specify spec 006"). No second round: there was no accepted CRITICAL.
-- [ ] L task loop — see *Tasks*
-- [ ] B branch review — not started
+- [x] L task loop — T001–T058 closed (see *Tasks*); T051–T058 from stage B round 1
+- [x] B branch review — round 1 (2026-10-19): astra REQUEST_CHANGES, opus:spec and opus:fitness CONCERNS → T051–T058; round 2 (2026-10-20): astra REQUEST_CHANGES (B2-001 only), opus:spec CONCERNS, no CRITICAL; remaining findings accepted (two-round rule). Records: ~/.local/share/ovh-lz/review/loop-006/reviews/B/
 - [ ] Hand-off — not started
 
 ## Fitness functions
@@ -25,7 +25,7 @@ Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of
 | Mutation (security guards) | `~/.local/share/ovh-lz/review/mutate.py` / `mutate-entry.py` | sample | mutants named per guard in research G-rows | guard tasks |
 | Whole CI | all 18 `LZ_TARGETS` | holistic | all green at 234a88d (local r4-e2 run) | final tree of each code task; at B |
 
-Holistic run at B: not run yet.
+Holistic run at B: T046 (all 20 LZ_TARGETS on adf671f) and every fix task's FINAL (20/20) through r5; entry peaks re-measured (T050).
 
 ## Triage
 | Stage | Finding (one line) | Sev | Models | Disposition | Where it went / why | Needs user? |
@@ -109,6 +109,10 @@ Holistic run at B: not run yet.
 | chore runs-timed | Head run budget 843 s of 900 (targets 589 + outside 14 + 240); same targets took 365 s on 10-19; runner variance can trip RUN_OVER_BUDGET on the next re-record | major | coordinator | carry | stage B round 2: decide parallel job split (keeps budget) vs accepting re-record retries | no |
 | L T057 | Baseline raised or added in the same change passes (no trusted earlier baseline offline) | major | both | decide C | Coordinator 2026-10-20: review is the control; PRs list raised baseline lines. A (CODEOWNERS) is moot with 0-approval self-merge; B (CI merge-base compare) goes to Theme C | no |
 | L T057 | Package-level func literals unscored (gocognit parity); no else-if nesting row; dod scope not all of tools | minor | both | defer | stage B round 2 | no |
+| B r2 | astra REQUEST_CHANGES (B2-001 only); opus:spec CONCERNS; no CRITICAL; every other round-1 finding closed (records ~/.local/share/ovh-lz/review/loop-006/reviews/B/round-2/) | — | both | accept | last round per the two-round rule | no |
+| B r2 | B2-001: complexity baseline raised in the same change passes | major | both | accept | Coordinator 2026-10-20: review is the control (C); FR-012/T057 stay partial; merge-base compare in ci:foundation goes to Theme C | no |
+| B r2 | complexity check path-selected only for tools/internal/checks, tools/cmd/lz-check | minor | strong | accept | CI-only enforcement, stated in FR-012 (hand-off commit) | no |
+| B r2 | T054 peaks hard-coded; RUN_UNTIMED on a 0 s target; ci:foundation stale after T056/T057 | minor | strong | accept | re-measure edits both; GitHub timestamp resolution; re-record follows | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
