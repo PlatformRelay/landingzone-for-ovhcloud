@@ -144,6 +144,29 @@ func credentialDir(root, rel string) (string, string, error) {
 	return dir, parts[len(parts)-1], nil
 }
 
+// makePrivateDir creates dir (which must not exist) with mode 0700 and fsyncs its parent, so the
+// new entry survives a crash (spec 007 FR-006: each start-up phase synced before the next).
+func makePrivateDir(dir string) error {
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return err
+	}
+	// Mkdir applies the umask, which can only remove bits; Chmod pins the mode.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(dir))
+}
+
+// claimDir creates the directory <root>/<rel> (0700, its missing parents too, never through a
+// symlink) and fails when it already exists: one process owns a probe run's directory.
+func claimDir(root, rel string) error {
+	parent, name, err := credentialDir(root, rel)
+	if err != nil {
+		return err
+	}
+	return makePrivateDir(filepath.Join(parent, name))
+}
+
 // checkCredentialValues is what WriteCredentialFile requires of values: variable-name keys, values
 // without a line break, NUL or surrounding whitespace (a read would trim it). A caller writing
 // several files checks them all first, so none is replaced when a later one would be refused.
@@ -224,7 +247,7 @@ func WriteCredentialFile(root, rel string, values map[string]string) error {
 		return err
 	}
 	done = true
-	return nil
+	return syncDir(dir)
 }
 
 // SetStep names the steps of a credential-set write (FR-005, data-model *Credential set*), in
@@ -480,6 +503,40 @@ func currentGeneration(setDir string) (string, error) {
 		return "", fmt.Errorf("CREDENTIAL_POINTER_INVALID: %s names no generation directory beside it", cur)
 	}
 	return gen, nil
+}
+
+// writeOnce writes a probe baseline copy (spec 007 data-model *Probe baseline*): through
+// path.tmp (created with O_EXCL, 0600, fsynced), a hard link onto path, which fails when path
+// exists, so a baseline is never rewritten, then the temporary name's removal and an fsync of the
+// directory.
+func writeOnce(path string, raw []byte) error {
+	tmp := path + ".tmp"
+	if err := writeSynced(tmp, string(raw)); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err := os.Link(tmp, path); err != nil {
+		return fmt.Errorf("a baseline is never rewritten: %w", err)
+	}
+	if err := os.Remove(tmp); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// writeRecoveryCopy writes the baseline's recovery copy <root>/<rel> (accounts/<account>/state/
+// baselines/<run-id>.json) with writeOnce, its missing directories created 0700 and never through
+// a symlink (credentialDir).
+func writeRecoveryCopy(root, rel string, raw []byte) error {
+	dir, name, err := credentialDir(root, rel)
+	if err != nil {
+		return err
+	}
+	// state/baselines/ may be new: its entry in state/ is made durable too.
+	if err := syncDir(filepath.Dir(dir)); err != nil {
+		return err
+	}
+	return writeOnce(filepath.Join(dir, name), raw)
 }
 
 // writeSynced creates path (which must not exist), mode 0600, writes content and fsyncs it.

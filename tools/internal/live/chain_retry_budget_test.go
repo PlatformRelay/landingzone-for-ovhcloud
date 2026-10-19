@@ -170,7 +170,9 @@ func TestChainListingRetryBudgetLeft(t *testing.T) {
 // destroyClock is the probe case's waitClock: Now is left before the latest deadline a child of the
 // run started under (the destroy context's, DefaultDeadline from the destroy's start, after the
 // run's own 30 s), plus the waits After was asked for. A budget ending at that deadline admits a
-// wait exactly when left - wait is at least the reserve.
+// wait exactly when left - wait is at least the reserve. Before any child ran, Now is the wall
+// clock: the probe's baseline listing reads the check's clock before the first child (spec 007
+// FR-006, T014); a wait asked for then is an error, so the check's waits stay anchored.
 type destroyClock struct {
 	t     *testing.T
 	mu    sync.Mutex
@@ -197,7 +199,6 @@ func (c *destroyClock) Now() time.Time {
 
 func (c *destroyClock) nowLocked() time.Time {
 	if c.end.IsZero() {
-		c.t.Errorf("the check's clock was read before any child ran under a deadline")
 		return time.Now()
 	}
 	at := c.end.Add(-c.left)
@@ -210,6 +211,9 @@ func (c *destroyClock) nowLocked() time.Time {
 func (c *destroyClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.end.IsZero() {
+		c.t.Errorf("the check waited %v before any child ran under a deadline", d)
+	}
 	c.waits = append(c.waits, d)
 	ch := make(chan time.Time, 1)
 	ch <- c.nowLocked()

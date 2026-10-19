@@ -45,12 +45,12 @@ func (s *session) sweep(ctx context.Context, rootKept bool) error {
 	return nil
 }
 
-// reconciled marks a failed leftover check of a run whose check has a Sweep as unreconciled, so
-// its files stay (also without state) and its error names `--cleanup`; not in a plan-only run,
-// which applied nothing to sweep.
+// reconciled marks a failed leftover check of a probe run as unreconciled, so its files stay
+// (also without state) and its error names `--cleanup` (spec 007 FR-007: the recovery files stay
+// until the sweep and the leftover check both passed, whether or not the root has a Sweep, so no
+// later baseline can take in what the run left); not in a plan-only run, which applied nothing.
 func (s *session) reconciled(leftErr error) error {
-	c := s.r.check
-	if leftErr == nil || c == nil || c.Sweep == nil || s.r.PlanOnly {
+	if leftErr == nil || s.r.baseline == nil || s.r.PlanOnly {
 		return leftErr
 	}
 	return unreconciled{fmt.Errorf("%w; finish with --cleanup %s", leftErr, s.r.ID)}
