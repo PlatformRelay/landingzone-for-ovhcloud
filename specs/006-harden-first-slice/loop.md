@@ -1,7 +1,7 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: L — T049 (tofu/terramate from verified archives), then US5 (T035–T038), US6 (T039–T044), exit (T045, T046)
+Next: L — US6 (T039–T044), exit (T045, T046), stage B, foundation-runs.json refresh with a red control
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
@@ -87,6 +87,11 @@ Holistic run at B: not run yet.
 | L T033 | Pin-table reading: archive/image rows stay in checks.Artifacts/checks.Image, every prepare.py-only pin in checks.Packages | — | task | accept | coordinator 2026-10-18 | no |
 | L T033 | A real crane export is never projected; bundles written by prepare.py are refused (PIN_PACKAGE) | — | task | defer | the next entry build re-prepares with lz-pack prepare (publish task, D120) | no |
 | L T034 | -commit is the operator's word, not bound to the bundle; the provenance file is 0600 while the layout is 0644; no test pins the entry digest to the extracted layer | minor | both | defer | stage B (binding with the C6 signing decision; layout privacy) | no |
+| L T035 | Snapshot is one minified 910 KB line; a provider bump's diff is unreadable | minor | strong | defer | stage B / T037 (data-model fixes raw output; no pinned formatter in the runtime) | no |
+| L T035 | For T037: renovate.json ignores fixture pin files under tests/; walking lock files under stacks/ or tests/live/probes/ widens the registry inputs; re-confirm the control green before editing fixtures | — | task | carry | T037 dispatch | no |
+| L T037 | Renovate semantics believed, not verified (R8); acceptance seen only once the owner installs the app (C5); allowedVersions/schedule and case-only duplicate keys not judged | minor | both | defer | stage B / C5 owner install | no |
+| L T038 | Round-2 grafts fix unreviewed (two-round limit); SetEscapeHTML(false) unpinned; checks.DecodeStrict not used (schema test instead) | minor | review | defer | stage B | no |
+| L T038 | commit validation: full lowercase 40-hex answered by rev-parse <id>^{commit}, else RELEASE_COMMIT | — | task | decide accept | task decision, recorded in evidence | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
