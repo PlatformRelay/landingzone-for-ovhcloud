@@ -451,7 +451,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:live-lane`: the probe's child environment has a fresh private HOME, not `os.TempDir()` (red first); an unset trap mode reports and removes nothing (red first).
   - Evidence: `evidence/T056.md`; PR; initial status `not-run`.
 
-- [ ] T057 Add a cognitive-complexity baseline that may only shrink in tools/harness/complexity-baseline.txt, checked by tools/cmd/lz-check (stage B round 1)
+- [x] T057 Add a cognitive-complexity baseline that may only shrink in tools/harness/complexity-baseline.txt, checked by tools/cmd/lz-check (stage B round 1) — closed 2026-10-20, evidence: evidence/T057.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T053.
   - Verify: `task test:traceability`: a new function over 14, or a listed function whose score rises, fails; a lower score passes and the baseline is rewritten only downwards; the baseline lists today's functions over 14 with their scores.
   - Evidence: `evidence/T057.md`; PR; initial status `not-run`.

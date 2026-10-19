@@ -98,7 +98,7 @@
      "scope": ["tools/internal/report", "tools/cmd/json2junit", "tests/fixtures/tofu", "schemas/check-report.schema.json"],
      "inputs": ["Taskfile.yml", "tools/go.mod"]},
     {"id": "test:traceability", "requirements": ["FR-004", "SC-003", "005/FR-014", "006/FR-012", "006/FR-022", "007/FR-012"], "command": "task test:traceability", "creator": "T007", "kind": "behavioral",
-     "scope": ["tools/internal/checks", "tools/cmd/lz-check"],
+     "scope": ["tools/internal/checks", "tools/cmd/lz-check", "tools/harness/complexity-baseline.txt"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/report", "tools/harness/checks.yaml", "specs/001-offline-foundation/tasks.md", "specs/005-first-landing-zone-slice/tasks.md", "specs/006-harden-first-slice/tasks.md", "specs/007-cleanup-first-live-slice/tasks.md",
        "README.md", "mise.toml", "mise.live.toml", ".github/renovate.json", ".github/workflows", "pipelines/README.md", "pipelines/github/foundation-source.json",
        "components", "modules", "stages", "stacks", "schemas", "specs", "tests", "tools", "docs/adr", "docs/reference/repository-map.md"],
