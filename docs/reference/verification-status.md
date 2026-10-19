@@ -5,16 +5,16 @@ references:
   - path: tools/cmd/lz-offline/limits.go
     blob: 90ec35fdb1b1fd535e669e29280b92717d1debfb
   - path: tools/internal/live/apply.go
-    blob: 37a13cfb4292d39d98c5f8aefe3073adb5c84354
+    blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
   - path: tools/internal/live/chain.go
-    blob: 518aa41abaa33d8263da347b023c8cd28a418ac7
+    blob: c10e5cb1cbd24317bf1508e70bffeb990a7dc92a
   - path: tools/internal/live/deadline.go
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go
-    blob: 5203e71f8c2a9c3092d3873daab9d9be52fe94c9
-last_verified: e8ed211d606963b6e2b5286628958154a30c6343
+    blob: 7febdec79596d9781a5bec211fc7ca9840b35fc9
+last_verified: 34dff5ea7e0946853752335b99c4f59137f309f9
 ---
 
 # Verification status of the first slice
@@ -100,7 +100,8 @@ not by a live run, unless it says otherwise.
 - **Bounded live verbs (US2):** `lz-live plan`, `apply` and `destroy` run under
   `DefaultDeadline` (45 min; they take no `--deadline`), print the summary line, and `apply`
   appends to the run's inventory as each `apply_complete` event arrives (FR-001,
-  `tools/internal/live/apply.go`). Destroy-on-exit, in the chain and the probe core, gets
+  `tools/internal/live/apply.go`). A state-store request of these verbs ends at the run's deadline,
+  and no new write or record starts after it. Destroy-on-exit, in the chain and the probe core, gets
   max(`DefaultDeadline`, the run's deadline), detached from the run's cancellation; a destroy that
   runs out reports `fail` and leaves what it did not reach for `--cleanup` (FR-002,
   `tools/internal/live/deadline.go`). One leftover check shares one retry budget (FR-008); the

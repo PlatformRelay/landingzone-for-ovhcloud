@@ -178,10 +178,10 @@ func TestBootstrapEntryStateOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Put("lz-bkt-state", "account/x/outputs.json", []byte("{}")); err != nil {
+	if err := store.Put(context.Background(), "lz-bkt-state", "account/x/outputs.json", []byte("{}")); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if data, err := store.Get("lz-bkt-state", "account/x/outputs.json"); err != nil || string(data) != "{}" {
+	if data, err := store.Get(context.Background(), "lz-bkt-state", "account/x/outputs.json"); err != nil || string(data) != "{}" {
 		t.Errorf("Get = %q, %v", data, err)
 	}
 	for _, s := range s3.seen {

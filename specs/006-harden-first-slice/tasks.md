@@ -421,7 +421,7 @@ docs-only tasks T043–T044.
 
 ## Stage B fixes (round 1, 2026-10-19)
 
-- [ ] T051 [US2] Carry the run context through `ObjectStore` and every state-store HTTP request in tools/internal/live/objectstore.go and apply.go, test first (stage B round 1)
+- [x] T051 [US2] Carry the run context through `ObjectStore` and every state-store HTTP request in tools/internal/live/objectstore.go and apply.go, test first (stage B round 1) — closed 2026-10-19, evidence: evidence/T051.md
   - Requirements: FR-001; ADRs: 0008, 0024. Depends on: T022.
   - Verify: `task test:live-lane`: a fake store that blocks on a read and on a write is cancelled at the run deadline (no request outlives it, no later publication starts), red before the change; a control store under the deadline completes.
   - Evidence: `evidence/T051.md`; PR; initial status `not-run`.

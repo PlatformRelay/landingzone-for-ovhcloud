@@ -626,7 +626,7 @@ type Observer interface {
 // objectCreator writes an object only if none exists (S3 If-None-Match: *); the lock-contention
 // assertion creates its lock object through it.
 type objectCreator interface {
-	PutNew(bucket, key string, data []byte) error
+	PutNew(ctx context.Context, bucket, key string, data []byte) error
 }
 
 // lockWriter runs the second writer of the lock-contention assertion on one instance's root.
@@ -693,14 +693,14 @@ func (c *collector) Observe(ctx context.Context, run ObserveRun) ([]Observation,
 	var obs []Observation
 	obs = append(obs, c.buckets(ctx, state.ProjectID, region, buckets)...)
 	obs = append(obs, c.objectLocks(ctx, m, buckets)...)
-	obs = append(obs, c.stateObjects(m)...)
+	obs = append(obs, c.stateObjects(ctx, m)...)
 	obs = append(obs, c.lockContention(ctx, run, state.ProjectID, region)...)
 	obs = append(obs, c.projectTags(ctx, m)...)
-	obs = append(obs, c.outputs(m)...)
+	obs = append(obs, c.outputs(ctx, m)...)
 	obs = append(obs, c.bindings(ctx, m, platform, tenants, tenantNames)...)
 	for _, t := range tenantNames {
 		obs = append(obs, c.tenantIAMWrite(ctx, run, m, t, tenants[t]))
-		obs = append(obs, c.tenantS3Read(m, t, tenants[t], buckets)...)
+		obs = append(obs, c.tenantS3Read(ctx, m, t, tenants[t], buckets)...)
 	}
 	canary := CanaryOptions{API: c.API, Admin: c.Admin, Project: state.ProjectID, Region: region, Org: m.Org, RunID: run.RunID, Trap: run.Trap}
 	if len(tenantNames) == 0 {
@@ -847,14 +847,14 @@ func objectLockGap(l ObjectLock) string {
 // stateObjects observes each s3 row's state object with the row's own S3 keys: an OpenTofu
 // encryption envelope (`encrypted_data`, no `resources`: capture p4-encryption.txt, evidence/T007.md
 // P4) holds; anything else that decodes is plaintext.
-func (c *collector) stateObjects(m *stacks.Manifest) []Observation {
+func (c *collector) stateObjects(ctx context.Context, m *stacks.Manifest) []Observation {
 	var out []Observation
 	for _, in := range m.Instances {
 		if in.Backend != "s3" {
 			continue
 		}
 		subject := in.StateBucket + "/" + in.StateKey
-		raw, err := c.read(in.ID, in.StateBucket, in.StateKey)
+		raw, err := c.read(ctx, in.ID, in.StateBucket, in.StateKey)
 		if err != nil {
 			out = append(out, errorObs(aObjectEncrypted, subject, err))
 			continue
@@ -894,7 +894,7 @@ func StateObjectEncrypted(raw []byte) (bool, string) {
 }
 
 // read reads one object with instance id's authority's S3 keys.
-func (c *collector) read(id, bucket, key string) ([]byte, error) {
+func (c *collector) read(ctx context.Context, id, bucket, key string) ([]byte, error) {
 	creds, err := c.Creds(id)
 	if err != nil {
 		return nil, err
@@ -903,7 +903,7 @@ func (c *collector) read(id, bucket, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return st.Get(bucket, key)
+	return st.Get(ctx, bucket, key)
 }
 
 // lockInfo is the lock object OpenTofu's S3 backend writes at <key>.tflock with use_lockfile
@@ -964,7 +964,7 @@ func (c *collector) lockContention(ctx context.Context, run ObserveRun, project,
 		return fail(err)
 	}
 	release := func(ctx context.Context) error {
-		got, err := st.Get(in.StateBucket, key)
+		got, err := st.Get(ctx, in.StateBucket, key)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -1000,12 +1000,12 @@ func (c *collector) lockContention(ctx context.Context, run ObserveRun, project,
 	run.Trap.Add("lock "+subject, release)
 	// Created only if absent (If-None-Match: *, as OpenTofu's use_lockfile does): never another
 	// writer's lock overwritten, also when it locks between any check and this write.
-	if err := creator.PutNew(in.StateBucket, key, raw); statusOf(err) == http.StatusPreconditionFailed {
+	if err := creator.PutNew(ctx, in.StateBucket, key, raw); statusOf(err) == http.StatusPreconditionFailed {
 		return fail(fmt.Errorf("%s/%s exists: another writer holds the state", in.StateBucket, key))
 	} else if err != nil {
 		return fail(err)
 	}
-	if got, err := st.Get(in.StateBucket, key); err != nil || !bytes.Equal(got, raw) {
+	if got, err := st.Get(ctx, in.StateBucket, key); err != nil || !bytes.Equal(got, raw) {
 		return fail(fmt.Errorf("the lock object %s/%s is not listed as written", in.StateBucket, key))
 	}
 	text, perr := c.Writer.Plan(ctx, in.ID)
@@ -1064,7 +1064,7 @@ func (c *collector) projectTags(ctx context.Context, m *stacks.Manifest) []Obser
 
 // outputs observes each row's published artefact, read with the row's own S3 keys and validated as
 // its consumers validate it (stacks.ValidateEnvelope against its expectation).
-func (c *collector) outputs(m *stacks.Manifest) []Observation {
+func (c *collector) outputs(ctx context.Context, m *stacks.Manifest) []Observation {
 	var out []Observation
 	for _, in := range m.Instances {
 		want, err := stacks.ExpectationOf(m, in.ID, c.Account)
@@ -1072,7 +1072,7 @@ func (c *collector) outputs(m *stacks.Manifest) []Observation {
 		if err == nil {
 			var bucket string
 			if bucket, err = stacks.ArtifactBucket(m, in.ID); err == nil {
-				raw, err = c.read(in.ID, bucket, stacks.ArtifactKey(in.ID))
+				raw, err = c.read(ctx, in.ID, bucket, stacks.ArtifactKey(in.ID))
 			}
 		}
 		if err != nil {
@@ -1188,7 +1188,7 @@ func (c *collector) tenantIAMWrite(ctx context.Context, run ObserveRun, m *stack
 // tenantS3Read observes tenant t's S3 keys reading the account bucket (the account-bootstrap
 // artefact) and every other tenant's bucket (an object the tenant's own rows hold there): a 403
 // is denied, a read allowed, anything else (a 404 included: the read was not refused) an error.
-func (c *collector) tenantS3Read(m *stacks.Manifest, t, id string, buckets map[string]string) []Observation {
+func (c *collector) tenantS3Read(ctx context.Context, m *stacks.Manifest, t, id string, buckets map[string]string) []Observation {
 	targets := map[string]string{} // bucket -> key
 	for _, in := range m.Instances {
 		bucket, err := stacks.ArtifactBucket(m, in.ID)
@@ -1212,7 +1212,7 @@ func (c *collector) tenantS3Read(m *stacks.Manifest, t, id string, buckets map[s
 			out = append(out, errorObs(aTenantS3Read, subject, errors.New("no object of the bucket to read")))
 			continue
 		}
-		_, err := c.read(id, b, key)
+		_, err := c.read(ctx, id, b, key)
 		o := refusal(aTenantS3Read, subject, err, err == nil)
 		if o.Observed == observedAllowed {
 			o.Detail = "read " + b + "/" + key

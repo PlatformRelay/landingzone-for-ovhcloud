@@ -6,6 +6,8 @@ package live
 // request, option A):
 //
 //   - GET, PUT and HEAD only; any other method is refused before a request is built.
+//   - Every request carries the caller's context (spec 006 FR-001): it ends when the run's
+//     deadline or a signal ends that context, and none is sent under an ended one.
 //   - Path-style requests to https://s3.<region>.io.cloud.ovh.net/<bucket>/<key>, the endpoint
 //     derived from the Object Storage region and refused unless its host is that pattern (kb
 //     storage-and-backup/object-storage/s3-getting-started-with-object-storage.mdx, `endpoint_url`
@@ -20,6 +22,7 @@ package live
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -103,32 +106,32 @@ func NewS3Store(o S3Options) (*S3Store, error) {
 }
 
 // Get reads an object; a missing one (404) is an error matching fs.ErrNotExist.
-func (s *S3Store) Get(bucket, key string) ([]byte, error) {
-	return s.request(http.MethodGet, bucket, key, nil)
+func (s *S3Store) Get(ctx context.Context, bucket, key string) ([]byte, error) {
+	return s.request(ctx, http.MethodGet, bucket, key, nil)
 }
 
 // Put writes an object of at most maxObject bytes.
-func (s *S3Store) Put(bucket, key string, data []byte) error {
-	_, err := s.request(http.MethodPut, bucket, key, data)
+func (s *S3Store) Put(ctx context.Context, bucket, key string, data []byte) error {
+	_, err := s.request(ctx, http.MethodPut, bucket, key, data)
 	return err
 }
 
 // PutNew writes an object only if none exists (`If-None-Match: *`, the conditional write OpenTofu's
 // S3 backend locks with); an existing object answers 412, a typed error (statusOf). That OVHcloud
 // honours the condition is UNVERIFIED until T049.
-func (s *S3Store) PutNew(bucket, key string, data []byte) error {
-	_, err := s.requestWith(http.MethodPut, bucket, key, data, http.Header{"If-None-Match": {"*"}})
+func (s *S3Store) PutNew(ctx context.Context, bucket, key string, data []byte) error {
+	_, err := s.requestWith(ctx, http.MethodPut, bucket, key, data, http.Header{"If-None-Match": {"*"}})
 	return err
 }
 
 // request is the store's one way out: the method gate, the names, the signature, the size caps.
 // Only a 200 answer succeeds; a 404 to GET or HEAD is fs.ErrNotExist.
-func (s *S3Store) request(method, bucket, key string, body []byte) ([]byte, error) {
-	return s.requestWith(method, bucket, key, body, nil)
+func (s *S3Store) request(ctx context.Context, method, bucket, key string, body []byte) ([]byte, error) {
+	return s.requestWith(ctx, method, bucket, key, body, nil)
 }
 
 // requestWith is request with extra, unsigned request headers (a write condition).
-func (s *S3Store) requestWith(method, bucket, key string, body []byte, extra http.Header) ([]byte, error) {
+func (s *S3Store) requestWith(ctx context.Context, method, bucket, key string, body []byte, extra http.Header) ([]byte, error) {
 	switch method {
 	case http.MethodGet, http.MethodPut, http.MethodHead:
 	default:
@@ -146,7 +149,7 @@ func (s *S3Store) requestWith(method, bucket, key string, body []byte, extra htt
 	}
 	path := "/" + bucket + "/" + key
 	u := &url.URL{Scheme: "https", Host: s.host, Path: path, RawPath: escapePath(path)}
-	req, err := http.NewRequest(method, u.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%s: bad request", what)
 	}
