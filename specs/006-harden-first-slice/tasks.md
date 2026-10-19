@@ -421,7 +421,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:foundation-ci`: the source lists both targets, the workflow is regenerated with `generate:foundation-ci` and equals the rendering, and `ci-source` admits both because their creators are ticked; red before (`ci-source` refuses a target missing from the workflow, or with an open creator).
   - Evidence: `evidence/T045.md`; PR; initial status `not-run`.
 
-- [ ] T046 Run the exit checks V001–V010 through tools/harness/checks.yaml
+- [x] T046 Run the exit checks V001–V010 through tools/harness/checks.yaml — closed 2026-10-19, evidence: evidence/T046.md
   - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, FR-011, FR-012, FR-013, FR-014, FR-015, FR-016, FR-017, FR-018, FR-019, FR-020, FR-021, FR-022, SC-001, SC-002, SC-003, SC-004, SC-005, SC-006; ADRs: 0008, 0009, 0010, 0011, 0013, 0021. Depends on: T001–T045.
   - Verify: `task check:specs -- specs/006-harden-first-slice; task test:live-lane; task test:bootstrap; task test:stacks; task stacks:check; task test:traceability; task test:runtime-image; task test:update-lane; task test:release; task docs:check; task test:foundation-ci`: all green with discovery counts; the host limit test's record from T032 is present; every out-of-scope row still names its trigger; no Verify of this spec needs a credential, the network or the owner (SC-002).
   - Aggregate ADR rationale: 0008 test layers, live hygiene and traceability; 0009 credentials and state; 0010 release train; 0011 providers and the update lane; 0013 docs gates; 0021 supply chain and authorisation boundaries.
