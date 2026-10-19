@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -849,6 +850,61 @@ func TestObserveCanaryReadPresent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Spec 006 FR-009 (T056, stage B): the trap's mode fails safe. A mode nobody set (the zero value)
+// or one the trap does not know reports the bucket under the canary's name and removes nothing, as
+// for a name that existed before the create; only an explicit remove deletes, and an explicit
+// disarm makes no call. The remove row is the control that the seam reaches the bucket at all.
+func TestCanaryTrapModeFailsSafe(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		set     bool
+		mode    int32
+		kept    bool // the bucket and its object survive the trap
+		named   bool // the trap's error names the canary
+		noCalls bool // the trap makes no call at all
+	}{
+		{name: "unset", kept: true, named: true},
+		{name: "unknown", set: true, mode: 7, kept: true, named: true},
+		{name: "report", set: true, mode: trapReport, kept: true, named: true},
+		{name: "none", set: true, mode: trapNone, kept: true, noCalls: true},
+		{name: "remove", set: true, mode: trapRemove},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newCanaryAPI(t, nil)
+			f.buckets[canaryName] = map[string]string{"theirs": "an object under the canary's name"}
+			var mode atomic.Int32
+			if tc.set {
+				mode.Store(tc.mode)
+			}
+			err := canaryTrap(f.options(), storageBase(canaryProject, canaryRegion), canaryName, &mode)(context.Background())
+			objs, ok := f.buckets[canaryName]
+			if kept := ok && objs["theirs"] != ""; kept != tc.kept {
+				t.Errorf("bucket %s holds %v (exists %t) after the trap, want kept %t", canaryName, objs, ok, tc.kept)
+			}
+			if named := err != nil && strings.Contains(err.Error(), canaryName); named != tc.named {
+				t.Errorf("trap error %v, want one naming %s: %t", err, canaryName, tc.named)
+			}
+			wantTrapCalls(t, f.Calls(), tc.kept, tc.noCalls)
+		})
+	}
+}
+
+// wantTrapCalls: a disarmed trap makes no call, and a trap that keeps the bucket only reads.
+func wantTrapCalls(t *testing.T, calls []canaryCall, kept, none bool) {
+	t.Helper()
+	if none && len(calls) != 0 {
+		t.Errorf("%d calls by a disarmed trap, want none", len(calls))
+	}
+	for _, c := range calls {
+		if kept && c.Method != http.MethodGet {
+			t.Errorf("trap %s %s as %s: a trap that keeps the bucket only reads", c.Method, c.Path, c.Cred)
+		}
 	}
 }
 

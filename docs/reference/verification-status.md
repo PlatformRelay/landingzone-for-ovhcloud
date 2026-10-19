@@ -13,8 +13,8 @@ references:
   - path: tools/internal/live/deadline.go
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go
-    blob: 7febdec79596d9781a5bec211fc7ca9840b35fc9
-last_verified: ce82c1f8c29ca987709559c7786bcbeadde83ec0
+    blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
+last_verified: 749281eff0fa0f1342a6f6817e273a6fcd4c1a76
 ---
 
 # Verification status of the first slice

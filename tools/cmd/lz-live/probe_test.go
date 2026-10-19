@@ -43,7 +43,7 @@ func fakeTofu(args []string) int {
 	// T093: `version -json` answers the version in tofu.version next to the fake (the pin unless a
 	// test writes another), logged apart from the run's calls.
 	if len(args) > 0 && args[0] == "version" {
-		logChildIn(bin, "tofu-version.log", childCall{Args: args})
+		logChildIn(bin, "tofu-version.log", childCall{Args: args, HomeMode: homeMode()})
 		v, err := os.ReadFile(filepath.Join(bin, "tofu.version"))
 		if err != nil {
 			return 1
@@ -206,6 +206,17 @@ type childCall struct {
 	Env     []string `json:"env"`
 	DataDir string   `json:"data_dir,omitempty"` // tofu: its data directory, symlinks resolved
 	Destroy bool     `json:"destroy,omitempty"`  // tofu: `plan -destroy`, or a show/apply of its file (T047)
+	// HomeMode is the child's HOME as it found it: its permission bits, or the stat error (T056).
+	HomeMode string `json:"home_mode,omitempty"`
+}
+
+// homeMode is the permission bits of the child's HOME while it runs, or why it could not stat it.
+func homeMode() string {
+	fi, err := os.Stat(os.Getenv("HOME"))
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("%#o", fi.Mode().Perm())
 }
 
 // fakeDestroyPlan is what the fake's `plan -destroy` writes to its plan file.
