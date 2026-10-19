@@ -223,7 +223,7 @@ Independent test: V004.
 ## Phase 6: Live window (US3 live, US5)
 Independent test: V005. Every live task here is run by the coordinator under D118 (see *Commands*).
 
-- [ ] T018 Record the live-window plan in specs/007-cleanup-first-live-slice/evidence/window.md before the first live run
+- [x] T018 Record the live-window plan in specs/007-cleanup-first-live-slice/evidence/window.md before the first live run — closed 2026-10-19, evidence: evidence/window.md, evidence/T018.md
   - Requirements: FR-010; ADRs: 0019, 0024. Depends on: T001.
   - Scope: the planned runs, their order, the cut-offs (T019 not after 2026-10-21 23:00; T022 finished on 2026-10-22; 2026-10-23 verification and cleanup only), the credit floor and the ceiling, each marked "coordinator procedure, no sensor".
   - Verify: exempt — docs-only; the file states every limit of FR-010 and names who checks it.
