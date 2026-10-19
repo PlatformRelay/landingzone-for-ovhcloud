@@ -7,9 +7,9 @@ likelihood: low
 impact: high
 severity: medium
 verified:
-  at: 9f318ea
+  at: 804680b
   on: 2026-10-19
-  how: code read; repository settings read through the GitHub API (read-only)
+  how: code read; repository settings and ruleset 25423554 read through the GitHub API (read-only)
 issue:
 source: C2, offline-foundation CI source admission
 decision: "#decision"
@@ -22,13 +22,14 @@ references:
     blob: bc37c8a20d21fdadb3976d7652dd9344d95aee9c
   - path: tools/internal/checks/foundation_ci.go
     blob: 15bc8ff418177b5b1499289605d254bf86d45dd9
-last_verified: 2131f92c4b0b7a72413dd4300085052772608120
+last_verified: 804680b42428189b634e6d88de73b2d7e1ac3c9e
 ---
 
 ## What is true
 
-Observations at `9f318ea` and of the repository's settings on 2026-10-19. They are
-committed-source and settings observations, not runtime qualification:
+Code observations at `9f318ea`, re-read at `804680b`, and of the repository's settings on
+2026-10-19. They are committed-source and settings observations, not runtime
+qualification:
 
 - `specs/001-offline-foundation/spec.md:106` (C010.5) and `:51` (P4) require
   independently approved workflow/evaluator source before candidate publication or
@@ -43,10 +44,28 @@ committed-source and settings observations, not runtime qualification:
   them together passes its own check: a candidate-owned manifest approves itself. Which
   workflow file GitHub runs for a `pull_request` event is GitHub's documented behaviour,
   not tested here.
-- `main` has no ruleset and no branch protection (`GET .../rulesets` answered `[]`,
-  `GET .../branches/main` answered `protected: false`); required checks and a ruleset are
-  an owner setting (spec 006 out-of-scope row C3). No disposable-repository admission
-  experiment has run.
+- `main` now has a ruleset. The owner set it up on 2026-10-19 (spec 006 out-of-scope row
+  C3 left it to the owner). `GET .../rulesets/25423554` answered: ruleset `main`,
+  `enforcement: active`, target the default branch, no bypass actors, and these rules:
+  - required status checks `foundation` and `SonarCloud Code Analysis`, with no expected
+    source app on either and `strict_required_status_checks_policy: false` (the branch
+    need not be up to date with `main`);
+  - `non_fast_forward` and `deletion`: no force-push, no branch deletion;
+  - `pull_request`: a pull request is required, `allowed_merge_methods: ["rebase"]`,
+    `required_approving_review_count: 0`.
+- What the ruleset changes: a change reaches `main` only through a pull request, by
+  rebase-merge, after both checks pass (GitHub counts `success`, `neutral` and `skipped` as
+  passing, so a pass does not prove the evaluator ran), and `main` cannot be
+  force-pushed or deleted. The bypass list is empty, so this holds for the owner too; an
+  admin can still edit the ruleset itself.
+- What it does not change: the `foundation` check is still produced by the candidate's
+  own workflow, renderer and check, and no approval is required, so a candidate that
+  edits all three together can still pass its own check and merge. Neither required
+  check names an expected source app, so a passing check or status of that name from
+  any source counts; where several share the name, all must pass
+  ([GitHub: troubleshooting required status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
+  That path was not exercised here. Admission stays unqualified. No
+  disposable-repository admission experiment has run.
 - The repository is now public (`gh repo view`: `PUBLIC`). That is the reassessment
   trigger in *Decision*; the reassessment is the owner's (spec 006 out-of-scope row C2)
   and has not happened, so the decision below still stands.
@@ -79,12 +98,13 @@ keep the 2026-10-02 assessment.
 git grep -n -e 'C010.5' -e '^| P4 ' -- specs/001-offline-foundation/spec.md
 git ls-tree --name-only HEAD -- .github/workflows/foundation.yml pipelines/github tools/internal/checks/foundation_ci.go
 gh api repos/PlatformRelay/landingzone-for-ovhcloud/rulesets
+gh api repos/PlatformRelay/landingzone-for-ovhcloud/rulesets/25423554
 gh api repos/PlatformRelay/landingzone-for-ovhcloud/branches/main --jq .protected
 gh repo view PlatformRelay/landingzone-for-ovhcloud --json visibility
 ```
 
 The first command shows the deferred requirement, the second the CI files, the last
-three the settings above. Update `verified`, the citations and `references` together.
+four the settings above. Update `verified`, the citations and `references` together.
 Files and settings alone do not qualify admission; closure requires the behavioural
 evidence below.
 
