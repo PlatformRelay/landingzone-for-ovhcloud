@@ -404,7 +404,7 @@ docs-only tasks T043–T044.
   - Verify: `task docs:check`: T040's cases green and the target green; the map's reads join `docs:check`'s inputs with a `TestRegistryInputsCoverReads` row.
   - Evidence: `evidence/T042.md`; PR; initial status `not-run`.
 
-- [ ] T043 [US6] Update docs/reference/verification-status.md, docs/known-issues/KI-001-ci-source-admission-unqualified.md and docs/known-issues/KI-002-offline-entry-memory-process-limits.md to what is true
+- [x] T043 [US6] Update docs/reference/verification-status.md, docs/known-issues/KI-001-ci-source-admission-unqualified.md and docs/known-issues/KI-002-offline-entry-memory-process-limits.md to what is true — closed 2026-10-19, evidence: evidence/T043.md
   - Requirements: FR-020; ADRs: 0013. Depends on: T022, T023, T026, T032, T042.
   - Verify: exempt — docs-only; content review against T049 run 4 (`specs/005-first-landing-zone-slice/evidence/T049.md:16`, results table) and the code after T022, T023, T026 and T032: run-4 observations replace "UNVERIFIED until that run"; the plan/apply/destroy and destroy-budget lines describe FR-001/FR-002; KI-001 drops its claims that `.github/workflows`, `pipelines/github`, `tools/internal/checks` and `Taskfile.yml` are absent and lists its references; KI-002 records the limits, the unpublished-entry state and its new status. `task docs:check` stays green (blobs and `last_verified` updated).
   - Evidence: `evidence/T043.md`; PR; docs content review only.

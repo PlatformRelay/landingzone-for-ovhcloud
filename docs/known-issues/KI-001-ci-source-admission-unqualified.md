@@ -7,30 +7,55 @@ likelihood: low
 impact: high
 severity: medium
 verified:
-  at: 996b845
-  on: 2026-10-02
-  how: code read
+  at: 9f318ea
+  on: 2026-10-19
+  how: code read; repository settings read through the GitHub API (read-only)
 issue:
 source: C2, offline-foundation CI source admission
 decision: "#decision"
-references: []
-last_verified: c3c7e7adf8ed8aa588669817f16c58da7294a33c
+references:
+  - path: specs/001-offline-foundation/spec.md
+    blob: 5b18e1d04a145c62f2d840542b5fbf56563fabf7
+  - path: .github/workflows/foundation.yml
+    blob: 111a253fdbcf51e3f3013d06d403fdc6cc8e584b
+  - path: pipelines/github/foundation-source.json
+    blob: 4e3d3df8ff03689835e017e440afaff3eeffbb0e
+  - path: tools/internal/checks/foundation_ci.go
+    blob: be4b579b31b6d7e7619b14c5306c4f23d85a153b
+last_verified: 9f318eaf1e9694521a38458b81409adf19e672bd
 ---
 
 ## What is true
 
-These are committed-source observations at `996b845`, not runtime qualification:
+Observations at `9f318ea` and of the repository's settings on 2026-10-19. They are
+committed-source and settings observations, not runtime qualification:
 
-- `specs/001-offline-foundation/spec.md:92` requires reviewed source/image identities
-  bound to the candidate head; `:94` requires workflow/evaluator admission before
-  candidate publication or runner execution.
-- `specs/001-offline-foundation/tasks.md:203` leaves T023 unchecked and names its
-  planned workflow, source manifest, checker and Taskfile. The committed tree has
-  no files under `.github/workflows`, `pipelines/github` or `tools/internal/checks`,
-  and no `Taskfile.yml`; absence is a tree observation, not a line-level citation.
-- `specs/001-offline-foundation/tasks.md:207` specifies valid admission and malicious
-  workflow controls; `:210` gives a planned evidence destination with initial status
-  `not-run`. Neither establishes an executed proof.
+- `specs/001-offline-foundation/spec.md:106` (C010.5) and `:51` (P4) require
+  independently approved workflow/evaluator source before candidate publication or
+  runner execution, and defer that proof to this issue.
+- Minimal foundation CI exists (spec 001 T023, closed). `.github/workflows/foundation.yml`
+  is rendered from `pipelines/github/foundation-source.json` and judged by
+  `CheckFoundationCI` in `tools/internal/checks/foundation_ci.go`: no token permission, no
+  Action, no secret, a hosted runner, the head fetched as data, the runtime fetched by
+  digest and every target run through the offline entry.
+- None of that is admission. The workflow runs on `pull_request`, and the source file, the
+  renderer and the check all sit in the candidate's own tree, so a candidate that changes
+  them together passes its own check: a candidate-owned manifest approves itself. Which
+  workflow file GitHub runs for a `pull_request` event is GitHub's documented behaviour,
+  not tested here.
+- `main` has no ruleset and no branch protection (`GET .../rulesets` answered `[]`,
+  `GET .../branches/main` answered `protected: false`); required checks and a ruleset are
+  an owner setting (spec 006 out-of-scope row C3). No disposable-repository admission
+  experiment has run.
+- The repository is now public (`gh repo view`: `PUBLIC`). That is the reassessment
+  trigger in *Decision*; the reassessment is the owner's (spec 006 out-of-scope row C2)
+  and has not happened, so the decision below still stands.
+- Spec 006 did not change admission. Its CI changes were the CI source check tracing
+  spec 006 (FR-022) and the pin of runtime r5 (PR 135).
+
+The first version of this entry cited revision `996b845`, which is not in this
+repository's history (`git cat-file -t 996b845` fails); its citations are replaced by
+the ones above.
 
 ## Why it matters
 
@@ -38,33 +63,35 @@ A candidate-controlled workflow/evaluator could execute unreviewed code or repor
 success without enforcing the intended checks. Maintainers could then rely on
 results that do not establish the source and head actually evaluated.
 
-Likelihood is low for the currently accepted private-development scope with no
-public/contributor/privileged CI expansion. This is a scoped risk assessment, not
-an observed frequency or a preventive control: private visibility alone does not
-prevent malicious workflow execution. Impact is high because compromised evaluation
-can undermine the trust placed in CI results. Low likelihood × high impact gives
-medium severity. Expanded exposure or CI authority requires reassessment.
+Likelihood was assessed low for the private-development scope accepted on 2026-10-02.
+This is a scoped risk assessment, not an observed frequency or a preventive control:
+private visibility alone does not prevent malicious workflow execution. Impact is high
+because compromised evaluation can undermine the trust placed in CI results. Low
+likelihood × high impact gives medium severity. The repository has since become public,
+which the decision names as a reason to reassess; until the owner does, the fields above
+keep the 2026-10-02 assessment.
 
 ## How to re-check
 
 ```sh
-git show 996b845:specs/001-offline-foundation/spec.md | nl -ba | sed -n '89,95p'
-git show 996b845:specs/001-offline-foundation/tasks.md | nl -ba | sed -n '203,210p'
-git ls-tree -r --name-only 996b845 -- .github/workflows pipelines/github tools/internal/checks Taskfile.yml
+git grep -n -e 'C010.5' -e '^| P4 ' -- specs/001-offline-foundation/spec.md
+git ls-tree --name-only HEAD -- .github/workflows/foundation.yml pipelines/github tools/internal/checks/foundation_ci.go
+gh api repos/PlatformRelay/landingzone-for-ovhcloud/rulesets
+gh api repos/PlatformRelay/landingzone-for-ovhcloud/branches/main --jq .protected
+gh repo view PlatformRelay/landingzone-for-ovhcloud --json visibility
 ```
 
-The first two commands show requirements and the unchecked task; the last returns
-no paths. Repeat against the revision under review to assess changes, updating
-`verified` and citations together. Files appearing alone do not qualify admission;
-closure requires the behavioral evidence below.
+The first command shows the deferred requirement, the second the CI files, the last
+three the settings above. Update `verified`, the citations and `references` together.
+Files and settings alone do not qualify admission; closure requires the behavioural
+evidence below.
 
 ## Fix sketch
 
-KI-001 owns the deferred source-admission qualification. T023 at `996b845` is the
-original proposal, not the owner of this deferred proof; active T023 covers minimal
-CI. Derive a future implementation task from this item when scheduled, including
-the foundation evidence prerequisites. Future acceptance:
-
+KI-001 owns the deferred source-admission qualification. Spec 001 T023 delivered the
+minimal CI and does not own this deferred proof. Derive a future implementation task
+from this item when scheduled, including the foundation evidence prerequisites. Future
+acceptance:
 - Given a disposable-repository setup with Actions disabled and that state read
   back, when the independently approved source closure is initially published,
   then no candidate run is queued or started, and a no-bypass freeze of all workflow
@@ -113,6 +140,6 @@ disposition recorded by this decision.
 ## Open questions
 
 Actual remote admission enforcement and valid/negative runtime outcomes were not
-checked by this code read. The future implementation task derived from KI-001 must
-provide the bounded proof and exact source/head evidence before any hardened CI
-qualification claim; active T023 does not own that deferred proof.
+checked by this code and settings read. The future implementation task derived from
+KI-001 must provide the bounded proof and exact source/head evidence before any hardened
+CI qualification claim; spec 001 T023 does not own that deferred proof.
