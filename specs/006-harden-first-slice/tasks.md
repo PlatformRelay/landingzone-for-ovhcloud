@@ -374,7 +374,7 @@ Independent test: V006 (T034), V007, V008. Test tasks T035–T036, then implemen
 Independent test: V009, V010. Test tasks T039–T040, then implementation tasks T041–T042, then the
 docs-only tasks T043–T044.
 
-- [ ] T039 [US6] Write `verified_against` and superseded-ADR gate tests in tools/cmd/lz-check/docs_test.go
+- [x] T039 [US6] Write `verified_against` and superseded-ADR gate tests in tools/cmd/lz-check/docs_test.go — closed 2026-10-19, evidence: evidence/T039.md
   - Requirements: FR-018; ADRs: 0013. Depends on: T004.
   - Cases (given / when / then → defect exposed), through `lz-check -root <fixture> docs`:
     - given a page whose `verified_against` equals the pin, and one two minors behind / then pass → exposes a threshold stricter than ADR-0013.
