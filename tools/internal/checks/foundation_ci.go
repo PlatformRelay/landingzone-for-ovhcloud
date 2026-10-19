@@ -35,7 +35,7 @@ const (
 	FoundationSourcePath = "pipelines/github/foundation-source.json"
 	// foundationCreator is the task that creates the CI and its own checks.
 	foundationCreator = "T023"
-	maxTimeoutMinutes = 10
+	maxTimeoutMinutes = 15
 )
 
 // hostedRunners are the GitHub-hosted, ephemeral runner labels the workflow
