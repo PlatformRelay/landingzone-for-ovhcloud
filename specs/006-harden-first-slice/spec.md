@@ -163,7 +163,7 @@ ADR without a status line.
 | --- | --- | --- | --- | --- |
 | P1 | `go list -deps` on the tools module resolves in-module packages inside `lz-offline` with the vendored tree and no network | `tools/vendor/modules.txt` exists; Go toolchain behaviour with `-mod=vendor` | T003: run through the entry, record the command, its output for `./internal/live` and the exit code | UNVERIFIED; fallback: a committed dependency list per check, refreshed by a host-side test |
 | P2 | On the maintainer host, `systemd-run --user --scope -p MemoryMax=… -p TasksMax=…` places bwrap and its children in a cgroup v2 scope that enforces both limits; bwrap's `--die-with-parent` still ends the tree | KI-002 fix sketch (`docs/known-issues/KI-002-offline-entry-memory-process-limits.md:57-62`); no observation | T029: host-tagged test runs an allocating and a forking child under the scope and reads `memory.events` and `pids.events` | UNVERIFIED; fallback: a delegated cgroup created by the entry directly under the user's delegated subtree |
-| P3 | The same works on the GitHub-hosted `ubuntu-24.04` runner | none | a CI run of the revised entry after publication (out of scope, coordinator) | UNVERIFIED; until observed, the revised entry is not pinned in CI |
+| P3 | The same works on the GitHub-hosted `ubuntu-24.04` runner | none | a CI run of the revised entry after publication (out of scope, coordinator) | Observed for the scope (2026-10-19, `evidence/T043.md` rows on runs 39249394208 and 39252705025): the hosted-runner probe run 39249394208 passed `TestHostLimits` in a delegated scope, but its entry steps were refused `PIN_PACKAGE` (the bundle then published was r4-e2), so it observed the scope, not the entry; r5 was then pinned in CI (PR 135), and run 39252705025 on PR 135's head was the first green foundation run with the limits |
 | P4 | The peak memory and task count of every CI target fit well under the chosen limits | none | T032: per-target `memory.peak` and `pids.peak` from the scope, through the entry, recorded in the evidence | UNVERIFIED; limits are set at twice the observed peak (R5) |
 | P5 | OVHcloud S3 answers `GetObjectLockConfiguration` on a governance-locked state bucket in the AWS response shape | D104; T099 set the lock through the S3 API (`specs/005-first-landing-zone-slice/evidence/T099.md`); read path not observed | offline: fake S3 in T021/T026; live: the next owner chain run (out of scope) | UNVERIFIED live; offline controls only |
 | P6 | Renovate's `mise`, `gomod` and `terraform` managers cover `mise.toml`, `tools/go.mod` and the provider constraints and lock files | none read (research R8) | none offline: the check of T035/T037 judges only the repository's own rules and never manager names; observed when the owner installs the app (out of scope) | UNVERIFIED (believed, inventory Q5); no task depends on it |
@@ -220,7 +220,13 @@ premise; its offline part is a fake, and its live observation is postponed with 
 - **FR-009 Canary removal** — the KD-1 canary bucket is registered for removal before its create
   call, so a create that answers an error after the bucket exists still ends with the bucket
   removed or reported as a leftover; a canary name that already existed before the call is never
-  adopted or removed. [A11]
+  adopted or removed. The name is read first, and only a name read as absent (404) is removed
+  (`ObserveCanary` in `tools/internal/live/observe.go`, T025). Accepted limit: if another creator
+  takes the name between that 404 read and a create that answers 5xx or drops, the trap removes
+  their bucket, because T020's `TestObserveCanaryCreateError/500-after-create` requires removal
+  after an ambiguous create on a name read as absent; the name carries the run id, so such a
+  creator is not credible (coordinator decision 2026-10-16, loop.md triage row L T025;
+  `evidence/T025.md` *Harness gaps* 1). [A11]
 - **FR-010 Object Lock observed** — the chain's L7 assertions include `state-bucket-object-lock`:
   each deployed state bucket reports Object Lock enabled in governance mode with a default
   retention; missing, disabled or another mode is `fail`; a read error is `blocked`, never `pass`.
@@ -232,7 +238,19 @@ premise; its offline part is a fake, and its live observation is postponed with 
 - **FR-012 Registry reads** — for every registered check whose command runs Go tests or Go
   programs, the registry's scope and inputs cover every in-module package directory its packages
   depend on (from `go list -deps`), and `test:traceability` names `tools/harness/checks.yaml` as an
-  input. A missing directory is a test failure that names the check and the package. [A8]
+  input. A missing directory is a test failure that names the check and the package. Beyond Go
+  dependencies, `TestRegistryInputsCoverReads` (`tools/cmd/lz-check/main_test.go`) fails when a
+  listed non-Go file a check reads is outside its scope and inputs; the lists were traced through
+  the entry and are kept by hand, not derived (T053). A registry `presence` list digests the
+  admitted top-level names a check reads only when they exist, so their appearing changes its
+  digest (`TestRegistryDigestSeesAdmittedNames`, T053), and no foundation target's digest covers
+  `pipelines/github/foundation-runs.json` (T041, T053). `test:traceability` also holds every
+  function declaration under `tools/` to `tools/harness/complexity-baseline.txt` (`tools/vendor`
+  and `.go` files named with a leading `.` or `_` are skipped, and package-level function literals
+  are not scored, as in gocognit; `tools/cmd/lz-check/complexity.go`, `evidence/T057.md` review
+  note m): a new function over 14, or
+  a listed one whose score rises above its line, fails (`TestComplexityRealTree`, T057); a line
+  raised in the same change as the code passes (`evidence/T057.md` row 11, open). [A8]
 - **FR-013 Entry limits** — `lz-offline` runs each child inside a transient cgroup with a memory
   limit and a task limit. A child that exceeds either is stopped and the entry reports
   `RESOURCE_LIMIT <memory|tasks>` and exits non-zero. When the limits cannot be applied, the entry
@@ -267,8 +285,11 @@ premise; its offline part is a fake, and its live observation is postponed with 
   across the two reproducibility packs and is not signed (D115). [C6]
 - **FR-018 Docs anti-rot gates** — `docs:check` fails a page under `docs/` (ADRs and known-issue
   records excepted) whose front matter `verified_against` names a tool version more than two minor
-  versions behind its pin (two behind passes, three behind fails) (`mise.toml`, `mise.live.toml`, or the provider lock files for `ovh`) or
-  names a tool with no pin; fails a page under `docs/how-to/` or `docs/reference/` that names a
+  versions behind its pin (two behind passes, three behind fails), on an older major, or ahead of
+  its pin, patch level included (`mise.toml`, `mise.live.toml`, or the provider lock files for
+  `ovh`) (T041 readings 1–2: a stamp ahead names a version the repository does not run;
+  `staleness` in `tools/cmd/lz-check/docs.go`, rows `ahead of its pin`, `older major` and `ahead
+  only in the patch` of `TestDocsGateReadingsRejected`) or names a tool with no pin; fails a page under `docs/how-to/` or `docs/reference/` that names a
   `tofu`, `terramate`, `task` or `ovhcloud` command without `verified_against`; and fails every
   file the offline snapshot admits outside `docs/adr/` and `tools/vendor/` that links to or names
   an ADR whose status is `Superseded`, and prints `ADR_SCAN_UNJUDGED=<n>` with what it did not
@@ -360,7 +381,7 @@ the workstation without credentials. Controls in `contracts/checks.md`.
 | A17 resolved-project aliasing, A24 narrower run locks | prerequisites of a second tenant | spec 007 (its first tasks) |
 | A26 boundary case for a planted `stacks/Taskfile.yml` | closed by 06a8c21 | — |
 | A27 SonarCloud hotspots S4790 (MD5 for the S3 `Content-MD5` header, SHA-1 for the OVHcloud API v1 request signature; both dictated by the protocol, not chosen; whether OVHcloud requires `Content-MD5` is UNVERIFIED, `s3check.go:171-172`) and S2083 (test fake) | marking a hotspot reviewed is a SonarCloud action | owner, or a token for the coordinator |
-| C1 publication: pack, publish and pin the entry revision carrying FR-013; observe P3 on the runner | network and registry write | T032 closed (coordinator under D89; CI pin only after P3 is observed) |
+| C1 publication: pack, publish and pin the entry revision carrying FR-013; observe P3 on the runner | network and registry write | Done: r5 published and pinned in CI after P3's probe (PR 135, merged as `28caca6`; `evidence/T043.md`, `evidence/T046.md` stage-B note) |
 | C2 KI-001 reassessment now that the repository is public | owner decision (inventory Q6) | owner answer |
 | C3 required checks and ruleset on `main` | GitHub setting | owner |
 | C4 first train tag, committed `releases/<version>/`, `CONTRACT.yaml` and the breaking-change checker | owner decision on the release model (Q7) | owner answer, or the first library consumer |
@@ -378,4 +399,5 @@ Depends on spec 005's closed tasks (the live lane, run core and docs check exist
 r4-e2. No task needs the owner; the three owner choices are decided (D115, 2026-10-15). A
 refuted premise stops its dependent task and records the fallback in `research.md` (P1 → T003
 fallback; P2 → T032 fallback; P7 → T035 host capture). FR-013 must not be pinned in CI while P3 is
-unobserved: a refusal on the runner would block every PR.
+unobserved: a refusal on the runner would block every PR. P3 has since been observed and FR-013
+is pinned (PR 135; see P3).
