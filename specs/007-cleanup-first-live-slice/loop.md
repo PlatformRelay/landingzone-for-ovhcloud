@@ -2,7 +2,7 @@
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `lane-007` (worktree `003-probes`) · Base: `origin/main` · Started: 2026-10-16 · Reviewers: two-model (review leg 1 and, on triggers, the strong review leg); spec-loop-duo under D117
 Scope: D119. The live slice runs in this order: leftover-listing retry, A17, a disposable budget-alert run, the retained-resource list, then the final chain by 2026-10-22. 2026-10-23 is for verification and cleanup only. The narrowed locks (A24), the second project, KD-3, B1–B3 and AgentEx are out of scope.
-Next: L — US3 lands (PR); owner clears the 9 pre-baseline runs (terminal-gated); T019 live budget-alert run by 2026-10-21 23:00; then T017–T018, T020–T025
+Next: L — owner steps (owner-monday.sh), then T019 live budget alert by 2026-10-21 23:00; T020; T021 then T022 (final chain, Object Lock folded in) by 10-22; T023 on 10-23; T024, T025; stage B
 Budget (Claude review legs, D117 cap 120 across the goal): about 79 used before this loop; per task, 1 strong leg per triggered round (most of 007 is live lane), times about 2 rounds; stage B reserve 3. Spend: voucher ceiling about 5 €; 0 € card; no new live start below 20 € of credit or after 2026-10-23 23:00 (Europe/Berlin).
 
 ## Stages
@@ -32,6 +32,9 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | L T006 | The element-decode row takes the last page's attempt number | minor | review | defer | stage B (record only) | no |
 | L T009 | identify --fresh-account writes an aliased answer to account.env before state refuses it | minor | review | defer | stage B (an optional earlier check; FR-003 is met) | no |
 | L T008/T009 | TestObserveChainReported/kd1-without-flag corrected (TEST class, FR-003): STATE gets its own project | — | coordinator | accept | decided 2026-10-16 | no |
+| L T018 | 20 € floor read against the voucher's available credit alone | — | task | decide confirm | Coordinator 2026-10-19: the reading that trips first is the safe one | no |
+| L T018 | Object Lock chain is the same command as T022's final chain | — | task | decide fold | Coordinator 2026-10-19: fold into T022 (one chain, -- all); a separate run only if T022 cannot run | no |
+| L T018 | One chain's recovery fitting in 90 min is assumed | minor | review | accept | start T022 with margin, not at 21:30 | no |
 | L T010 | G1: the line `budget_alert = local.budget_alert` itself is not testable (a test cannot see a child module's resources) | minor | both | decide accept | Coordinator minor decision 2026-10-18: T016's review reads it and T019's live read-back checks the real alert; no plan-JSON check on the time-critical path | no |
 | L T010 | G2: a project declared outside module.project is not caught | minor | strong | defer | T016's review | no |
 | L T013 | DR-T013-a: lost create with both baseline copies deleted classifies pre-create, so its alert is retired, not swept | minor | strong | decide accept | Coordinator 2026-10-19: deleting both copies by hand is outside the threat model; a budget alert costs nothing and the leftover check still lists it; no FR-006 change on the time-critical path. Known gap for the hand-off | no |
