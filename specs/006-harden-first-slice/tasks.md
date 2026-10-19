@@ -365,7 +365,7 @@ Independent test: V006 (T034), V007, V008. Test tasks T035–T036, then implemen
   - Verify: `task test:update-lane`: T035's cases green and the committed configuration passes; T003's registry test stays green for `test:update-lane`.
   - Evidence: `evidence/T037.md`; PR; initial status `not-run`.
 
-- [ ] T038 [US5] Render the release-train manifest in tools/internal/release/manifest.go and tools/cmd/lz-release/main.go
+- [x] T038 [US5] Render the release-train manifest in tools/internal/release/manifest.go and tools/cmd/lz-release/main.go — closed 2026-10-19, evidence: evidence/T038.md
   - Requirements: FR-016, SC-006; ADRs: 0010, 0022. Depends on: T036.
   - Verify: `task test:release`: T036's cases green. Rendering the real repository is a read-only host step with no credentials (quickstart), not a control.
   - Evidence: `evidence/T038.md`; PR; initial status `not-run`.

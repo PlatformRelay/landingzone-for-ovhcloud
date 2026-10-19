@@ -10,6 +10,7 @@ zone. Most `task` targets in `Taskfile.yml` call one of them.
 | `cmd/lz-stacks` | Stack reconcile, generation, freshness check, offline plans and apply order. |
 | `cmd/lz-live` | The live lane to a real account. Host only, maintainer only; it refuses to run inside the entry. |
 | `cmd/lz-pack` | Packs the runtime bundle and launcher into a reproducible OCI image. |
+| `cmd/lz-release` | Renders the release-train manifest of a commit from its git objects. Host only, read-only: the entry carries no `.git`. |
 | `cmd/json2junit` | Renders a `tofu test -json` stream as JUnit XML. |
 | `internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`, `release`. |
 | `vendor/` | Vendored dependencies, so builds need no network. |
