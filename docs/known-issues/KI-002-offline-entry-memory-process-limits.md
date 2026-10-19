@@ -19,8 +19,8 @@ references:
   - path: tools/cmd/lz-offline/limits.go
     blob: 90ec35fdb1b1fd535e669e29280b92717d1debfb
   - path: .github/workflows/foundation.yml
-    blob: 4de88cbb716b8a61f8eb5762f37c8a1e08ca8b79
-last_verified: 74d47db61f9451c46972865598976dbffa62830b
+    blob: 445bac74c5390e57a0f844222ada15f8e64e69a6
+last_verified: 2131f92c4b0b7a72413dd4300085052772608120
 ---
 
 ## What is true

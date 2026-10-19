@@ -33,6 +33,9 @@ authority, persistent states and dependencies; a passing suite does not erase op
 - `task check` runs L0–L4 (ADR-0008) locally in under two minutes on a changed directory; PR
   feedback lands within ten minutes. Slower layers are opt-in by label, never silently skipped: the
   output says which layers ran.
+  - Amendment (2026-10-19, *PR feedback budget*, D125): the PR feedback budget is 15 minutes.
+    The foundation job runs 20 targets and took 9 min 47 s on PR #142 against a 10-minute
+    timeout; its timeout and the check's bound are now 15 minutes.
 - **Structured messages**: every check, policy and validation emits
   `LZ-<area>-<nnn>: <what is wrong> — <why it matters> — fix: <the change> — see: docs/<page>`.
   Rule ids are stable, documented one per page, and the same id appears in the guardrail spec, the

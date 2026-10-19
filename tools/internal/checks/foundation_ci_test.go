@@ -70,6 +70,22 @@ func TestFoundationCIValid(t *testing.T) {
 	}
 }
 
+// The job budget is 15 minutes (owner decision D125, 2026-10-19: 20 targets,
+// 9 min 47 s on PR #142 against the former 10). 15 is accepted and rendered.
+func TestFoundationTimeoutAtBudget(t *testing.T) {
+	registry, tasks := foundationRegistry()
+	value := foundationSource()
+	value["timeout_minutes"] = 15
+	source := encode(t, value)
+	workflow := renderSource(t, source)
+	if findings := CheckFoundationCI(source, workflow, registry, tasks); len(findings) != 0 {
+		t.Errorf("BEHAVIORAL_RED: 15-minute budget refused: %+v", findings)
+	}
+	if !strings.Contains(string(workflow), "\n    timeout-minutes: 15\n") {
+		t.Errorf("BEHAVIORAL_RED: rendered workflow lacks the 15-minute timeout")
+	}
+}
+
 // The rendered workflow is the only one accepted, so its properties are the
 // CI's properties: no Action, no token permission, no secret, main-only push
 // and pull-request triggers, the exact PR head, a bounded hosted job, the
@@ -198,7 +214,7 @@ func TestFoundationSourceRejected(t *testing.T) {
 			s["targets"] = []any{"test:a", "test:ci", "Test A"}
 		}, []string{"CHECK_NAME", "CHECK_UNKNOWN"}},
 		"self-hosted runner":        {func(s map[string]any) { s["runner"] = "self-hosted" }, []string{"SOURCE_PIN"}},
-		"timeout above budget":      {func(s map[string]any) { s["timeout_minutes"] = 11 }, []string{"SOURCE_PIN"}},
+		"timeout above budget":      {func(s map[string]any) { s["timeout_minutes"] = 16 }, []string{"SOURCE_PIN"}},
 		"no timeout":                {func(s map[string]any) { s["timeout_minutes"] = 0 }, []string{"SOURCE_PIN"}},
 		"layer not a digest":        {func(s map[string]any) { s["layer"] = "latest" }, []string{"SOURCE_PIN"}},
 		"manifest not a digest":     {func(s map[string]any) { s["manifest"] = "sha256:" + strings.Repeat("A", 64) }, []string{"SOURCE_PIN"}},

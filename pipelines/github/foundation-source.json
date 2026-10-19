@@ -1,6 +1,6 @@
 {
   "runner": "ubuntu-24.04",
-  "timeout_minutes": 10,
+  "timeout_minutes": 15,
   "manifest": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
   "layer": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
   "entry_sha256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
