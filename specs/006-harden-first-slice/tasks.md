@@ -409,7 +409,7 @@ docs-only tasks T043–T044.
   - Verify: exempt — docs-only; content review against T049 run 4 (`specs/005-first-landing-zone-slice/evidence/T049.md:16`, results table) and the code after T022, T023, T026 and T032: run-4 observations replace "UNVERIFIED until that run"; the plan/apply/destroy and destroy-budget lines describe FR-001/FR-002; KI-001 drops its claims that `.github/workflows`, `pipelines/github`, `tools/internal/checks` and `Taskfile.yml` are absent and lists its references; KI-002 records the limits, the unpublished-entry state and its new status. `task docs:check` stays green (blobs and `last_verified` updated).
   - Evidence: `evidence/T043.md`; PR; docs content review only.
 
-- [ ] T044 [US6] Apply the open spec 005 wording fixes in specs/005-first-landing-zone-slice/spec.md and specs/005-first-landing-zone-slice/tasks.md and re-pin docs/reference/verification-status.md
+- [x] T044 [US6] Apply the open spec 005 wording fixes in specs/005-first-landing-zone-slice/spec.md and specs/005-first-landing-zone-slice/tasks.md and re-pin docs/reference/verification-status.md — closed 2026-10-19, evidence: evidence/T044.md
   - Requirements: FR-021; ADRs: 0013. Depends on: T043.
   - Verify: exempt — docs-only; content review: FR-009 gains "a run lock is held only while its holder lives; runs on different workstations are serialised by the state lock only" (evidence T040.md:94, T041.md:89); P9's action list names `object/get` (T097.md:101); tasks.md line 78 says "dedicated owner clone" (T072.md:84; the T071 Verify stays as D92 history); `verification-status.md`'s blob for spec.md is updated in the same commit; `task check:specs` and `task docs:check` stay green.
   - Evidence: `evidence/T044.md`; PR; docs content review only.
