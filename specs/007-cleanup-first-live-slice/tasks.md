@@ -202,7 +202,7 @@ T014–T016.
   - Verify: `task test:live-lane`: T012's and T013's cases green; the G27 mutants deleting a baseline id, deleting a non-matching alert and accepting another run's baseline, and the G28 mutants, each turn a case red.
   - Evidence: `evidence/T015.md`; initial status `not-run`.
 
-- [ ] T016 [US3] Write the budget-alert root in tests/live/probes/budget-alert/main.tf and its run-sheet row in tests/live/probes/README.md
+- [x] T016 [US3] Write the budget-alert root in tests/live/probes/budget-alert/main.tf and its run-sheet row in tests/live/probes/README.md — closed 2026-10-19, evidence: evidence/T016.md
   - Requirements: FR-005; ADRs: 0006, 0024. Depends on: T010, T015.
   - Scope: `budget_alert` enabled as data-model.md fixes it; `alert_id` from `module.project.budget_alert_id` and `budget_alert_check = { alert_id = module.project.budget_alert_id }`; the run-sheet row also gives the owner recovery of FR-007; the run-sheet row (command, expected, refuted-if, cleanup) and the nameless-kind note pointing at the baseline and the sweep. No inline-resource variant.
   - Verify: `task test:live-lane; task docs:check`: T010's cases green; the run sheet passes the docs rules.
