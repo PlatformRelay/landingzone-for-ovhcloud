@@ -18,10 +18,11 @@ import (
 )
 
 // The entry's limits: twice the largest peak measured across the CI targets, rounded up to a
-// power of two (research R5, premise P4; the peaks are in specs/006-harden-first-slice/evidence/T032.md).
+// power of two (research R5, premise P4; the peaks are in specs/006-harden-first-slice/evidence/T050.md,
+// measured in the entry's own child scope; TestEntryLimitsFollowPeaks pins both).
 const (
-	entryMemoryMax int64 = 4 << 30 // largest peak 2060279808 (test:live-lane) × 2, rounded up
-	entryTasksMax        = 1024    // largest peak 335 (test:live-lane) × 2, rounded up
+	entryMemoryMax int64 = 4 << 30 // largest peak 1903194112 (test:live-lane) × 2, rounded up
+	entryTasksMax        = 1024    // largest peak 333 (test:live-lane) × 2, rounded up
 )
 
 // Host programs the limits rely on. Their digests are not pinned: they are host software, like
