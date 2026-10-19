@@ -385,7 +385,7 @@ docs-only tasks T043–T044.
   - Verify: `task docs:check`: every failing case fails on today's `docs.go`; existing `TestDocs` rows unchanged.
   - Evidence: `evidence/T039.md`; PR; initial status `not-run`.
 
-- [ ] T040 [US6] Write repository-map tests in tools/cmd/lz-check/docs_test.go
+- [x] T040 [US6] Write repository-map tests in tools/cmd/lz-check/docs_test.go — closed 2026-10-19, evidence: evidence/T040.md
   - Requirements: FR-019; ADRs: 0002, 0013. Depends on: T039.
   - Cases (given / when / then → defect exposed), through `lz-check -root <fixture> docs`:
     - given a map naming a deleted path under an admitted top-level name / then `MAP_PATH_GONE` → exposes a stale map.

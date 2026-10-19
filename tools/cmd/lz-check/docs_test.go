@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -465,6 +467,133 @@ func TestDocsSupersededADR(t *testing.T) {
 			code, out := lzCheck(docsSupersededRepo(t, r.files), "docs")
 			if code != 1 || !docsFindingLine(out, "SUPERSEDED_ADR", r.page, "0007") || !strings.Contains(out, "DOCS_FAIL") {
 				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with SUPERSEDED_ADR %s naming 0007 and DOCS_FAIL:\n%s", code, r.page, out)
+			}
+		})
+	}
+}
+
+// 006 T040, FR-019: the repository map in the shape of the real
+// docs/reference/repository-map.md: front matter, then tables whose first
+// column names paths in code spans (two in one cell where the real map
+// groups them), descriptions holding code spans that are not paths, and a
+// closing prose line naming `.local/`. Map paths are the first column.
+const docsMapPage = "docs/reference/repository-map.md"
+
+// The map's three tables. The fixture checkout (docsRepo plus .tflint.hcl)
+// has the admitted top-level directories .specify, docs, modules, specs,
+// stages, tests and tools, each mapped, and .local, which is not admitted;
+// .gitignore and .sonarcloud.properties lie outside the entry's admitted
+// names, sit in different tables, and are absent from the fixture as they are
+// inside the entry.
+const (
+	docsMapDeployed = "| `modules/` | Modules, layer 1. |\n| `modules/x/` | One module and its lock. |\n| `stages/` | Stages, layer 3 (`bootstrap`). |\n"
+	docsMapVerified = "| `tools/` | One Go module (`go.mod`). |\n| `tools/hello.txt` | A referenced file. |\n| `tests/` | Fixtures for the checks. |\n" +
+		"| `Taskfile.yml` | Every check and operation. |\n| `mise.toml`, `mise.live.toml` | Pinned tool versions. |\n" +
+		"| `.tflint.hcl`, `.sonarcloud.properties` | Linter and code-analysis configuration. |\n"
+	docsMapRecord = "| `docs/` | Design and user documentation. |\n| `docs/reference/` | Look-up pages. |\n| `specs/` | The delivery record. |\n| `.specify/` | Spec Kit templates. |\n" +
+		"| `README.md` | The front page. |\n| `.gitignore` | Keeps local files out of version control. |\n"
+)
+
+// docsMap is a map page holding the given tables.
+func docsMap(tables ...string) string {
+	page := header("references: []\n") + "# Repository map\n\nEvery top-level entry and its main subdirectories, one line each.\n"
+	for i, rows := range tables {
+		page += "\n## Part " + string(rune('A'+i)) + "\n\n| Path | What it holds |\n| --- | --- |\n" + rows
+	}
+	return page + "\nNot in the repository: `.local/` (built binaries and live run records).\n"
+}
+
+// docsMapRepo is docsRepo with a map of the given tables, .tflint.hcl, and
+// files replaced or added ("" removes one).
+func docsMapRepo(t *testing.T, files map[string]string, tables ...string) string {
+	t.Helper()
+	all := map[string]string{docsMapPage: docsMap(tables...), ".tflint.hcl": "config {}\n"}
+	for name, content := range files {
+		all[name] = content
+	}
+	return docsRepo(t, all)
+}
+
+// docsUnjudged reports whether out carries the count MAP_UNJUDGED=<n> as a
+// word of its own.
+func docsUnjudged(out string, n int) bool {
+	return regexp.MustCompile(`(?m)(^|\s)MAP_UNJUDGED=` + strconv.Itoa(n) + `(\s|$)`).MatchString(out)
+}
+
+// 006 T040, FR-019: a map whose paths under the entry's admitted top-level
+// names exist and which lists every admitted top-level directory passes;
+// map paths outside the admitted names are skipped, whether or not they exist
+// on the host, and counted, never failed (case 3).
+func TestDocsRepositoryMapAccepted(t *testing.T) {
+	all := []string{docsMapDeployed, docsMapVerified, docsMapRecord}
+	onlyAdmitted := []string{docsMapDeployed,
+		strings.Replace(docsMapVerified, ", `.sonarcloud.properties`", "", 1),
+		strings.Replace(docsMapRecord, "| `.gitignore` | Keeps local files out of version control. |\n", "", 1)}
+	unadmitted := []string{docsMapDeployed, docsMapVerified, docsMapRecord + "| `agent-context/` | Local coordination. |\n| `.local/bin/` | Built binaries. |\n"}
+	inbox := map[string]string{"agent-context/INBOX.md": "# Inbox\n"}
+	for name, r := range map[string]struct {
+		files    map[string]string
+		tables   []string
+		unjudged int
+	}{
+		"hidden files unjudged":         {nil, all, 2},
+		"hidden files on the host":      {map[string]string{".gitignore": ".local/\n", ".sonarcloud.properties": "sonar.projectKey=x\n"}, all, 2},
+		"only admitted paths":           {nil, onlyAdmitted, 0},
+		"unadmitted directories named":  {inbox, unadmitted, 4},
+		"unadmitted directory unmapped": {inbox, all, 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsMapRepo(t, r.files, r.tables...), "docs")
+			if code != 0 || !strings.Contains(out, "DOCS_OK") || !docsUnjudged(out, r.unjudged) {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with DOCS_OK and MAP_UNJUDGED=%d (FR-019: paths outside the admitted names are counted, never failed):\n%s", code, r.unjudged, out)
+			}
+		})
+	}
+}
+
+// 006 T040, FR-019: a map naming a path under an admitted top-level name that
+// does not exist fails with MAP_PATH_GONE (case 1), hidden admitted names
+// (.github, .tflint.hcl) included; an admitted top-level directory present in
+// the checkout and absent from the map fails with MAP_MISSING_DIR (case 2).
+// The unjudged paths of the base map never appear in a finding.
+func TestDocsRepositoryMapRejected(t *testing.T) {
+	gone, missing := "MAP_PATH_GONE", "MAP_MISSING_DIR"
+	withRow := func(i int, row string) []string {
+		tables := []string{docsMapDeployed, docsMapVerified, docsMapRecord}
+		tables[i] += row
+		return tables
+	}
+	without := func(i int, rows string) []string {
+		tables := []string{docsMapDeployed, docsMapVerified, docsMapRecord}
+		tables[i] = strings.Replace(tables[i], rows, "", 1)
+		return tables
+	}
+	firstRow := []string{"| `components/state-backend/` | A component since removed. |\n" + docsMapDeployed, docsMapVerified, docsMapRecord}
+	for name, r := range map[string]struct {
+		files        map[string]string
+		tables       []string
+		rule, detail string
+	}{
+		"deleted path under a directory":     {nil, withRow(1, "| `tools/cmd/lz-gone/` | A command since removed. |\n"), gone, "tools/cmd/lz-gone"},
+		"deleted path in the first row":      {nil, firstRow, gone, "components/state-backend"},
+		"deleted admitted directory":         {nil, withRow(2, "| `catalog/` | A catalogue never built. |\n"), gone, "catalog"},
+		"deleted admitted file":              {nil, withRow(0, "| `terramate.tm.hcl` | The Terramate project root. |\n"), gone, "terramate.tm.hcl"},
+		"deleted file under .github":         {nil, withRow(1, "| `.github/workflows/foundation.yml` | The one CI workflow. |\n"), gone, ".github/workflows/foundation.yml"},
+		"deleted hidden admitted file":       {map[string]string{".tflint.hcl": ""}, withRow(0, ""), gone, ".tflint.hcl"},
+		"deleted second path of a cell":      {map[string]string{"mise.live.toml": ""}, withRow(0, ""), gone, "mise.live.toml"},
+		"directory unmapped":                 {nil, without(0, "| `modules/` | Modules, layer 1. |\n| `modules/x/` | One module and its lock. |\n"), missing, "modules"},
+		"hidden admitted directory unmapped": {nil, without(2, "| `.specify/` | Spec Kit templates. |\n"), missing, ".specify"},
+		"new admitted directory unmapped":    {map[string]string{"components/state-backend/main.tf": "# a component\n"}, withRow(0, ""), missing, "components"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsMapRepo(t, r.files, r.tables...), "docs")
+			if code != 1 || !docsFindingLine(out, r.rule, docsMapPage, r.detail) || !strings.Contains(out, "DOCS_FAIL") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %s %s naming %q and DOCS_FAIL:\n%s", code, r.rule, docsMapPage, r.detail, out)
+			}
+			for _, unjudged := range []string{".gitignore", ".sonarcloud.properties"} {
+				if docsFindingLine(out, gone, docsMapPage, unjudged) || docsFindingLine(out, missing, docsMapPage, unjudged) {
+					t.Errorf("BEHAVIORAL_RED: %s is outside the admitted names and must stay unjudged (FR-019):\n%s", unjudged, out)
+				}
 			}
 		})
 	}
