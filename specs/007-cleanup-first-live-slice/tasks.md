@@ -211,7 +211,7 @@ T014–T016.
 ## Phase 5: User Story 4 — A second tenant, proven offline (P3)
 Independent test: V004.
 
-- [ ] T017 [US4] Write the two-tenant sandbox fixture tests/fixtures/manifests/sandbox-two-tenants/deployments.yaml and its tests in tools/internal/stacks/two_tenant_test.go
+- [x] T017 [US4] Write the two-tenant sandbox fixture tests/fixtures/manifests/sandbox-two-tenants/deployments.yaml and its tests in tools/internal/stacks/two_tenant_test.go — closed 2026-10-19, evidence: evidence/T017.md
   - Requirements: FR-009; ADRs: 0004, 0005. Depends on: T001, T009.
   - Cases (given / when / then → defect exposed), fixture as data-model.md fixes it:
     - given the fixture / when decoded, reconciled and generated into a temporary tree / then `lab`'s four stacks exist beside `demo`'s, each with its own state bucket and deployer authority → exposes a generator that assumes one tenant (*pin* if it already holds; recorded either way).
