@@ -1,7 +1,7 @@
 ---
 references:
   - path: specs/005-first-landing-zone-slice/spec.md
-    blob: 88d7443d103e6b517fe9e8b7809eda3f609b534f
+    blob: 65c077ab0062b7ec8fe0bb8fba842f0eed28c22c
   - path: tools/cmd/lz-offline/limits.go
     blob: 90ec35fdb1b1fd535e669e29280b92717d1debfb
   - path: tools/internal/live/apply.go
@@ -14,7 +14,7 @@ references:
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go
     blob: 5203e71f8c2a9c3092d3873daab9d9be52fe94c9
-last_verified: 9f318eaf1e9694521a38458b81409adf19e672bd
+last_verified: e8ed211d606963b6e2b5286628958154a30c6343
 ---
 
 # Verification status of the first slice
