@@ -419,6 +419,48 @@ docs-only tasks T043–T044.
   - Verify: `task test:runtime-image` stays green. Host step, no credentials: each of the 20 `LZ_TARGETS` runs through the installed entry on a tree at or after `adf671f` while a watcher reads `memory.peak` and `pids.peak` of the entry's own `lz-offline-<pid>-<random>.scope` (held until read), not of an outer scope; a control of known peak proves the watcher; `entryMemoryMax` (4 GiB) and `entryTasksMax` (1024) are each at least twice the largest peak (research R5, `contracts/checks.md` V005), else a finding for the owner, limits unchanged; `evidence/T032.md` points to the record.
   - Evidence: `evidence/T050.md`; PR; initial status `not-run`.
 
+## Stage B fixes (round 1, 2026-10-19)
+
+- [ ] T051 [US2] Carry the run context through `ObjectStore` and every state-store HTTP request in tools/internal/live/objectstore.go and apply.go, test first (stage B round 1)
+  - Requirements: FR-001; ADRs: 0008, 0024. Depends on: T022.
+  - Verify: `task test:live-lane`: a fake store that blocks on a read and on a write is cancelled at the run deadline (no request outlives it, no later publication starts), red before the change; a control store under the deadline completes.
+  - Evidence: `evidence/T051.md`; PR; initial status `not-run`.
+
+- [ ] T052 [US6] Make the superseded-ADR scan judge every tracked file or report what it did not judge in tools/cmd/lz-check/docs.go, and narrow FR-018 accordingly (stage B round 1)
+  - Requirements: FR-018; ADRs: 0013. Depends on: T041.
+  - Verify: `task docs:check`: a tracked file outside the snapshot or matching a `.gitignore` pattern that cites a superseded ADR is either refused or counted as unjudged in the output; the run record stays out of the docs digest (registry assertion unchanged).
+  - Evidence: `evidence/T052.md`; PR; initial status `not-run`.
+
+- [ ] T053 [US4] Sweep the non-Go reads of `test:traceability` and `docs:check` into their registry inputs and digest the presence of admitted top-level directories in tools/harness/checks.yaml, test first in tools/cmd/lz-check/main_test.go (stage B round 1)
+  - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T047, T042.
+  - Verify: `task test:traceability`: `TestRegistryInputsCoverReads` gains rows for `pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml` and READMEs read by `test:traceability`, and for an added admitted directory changing `docs:check`'s digest; each row red before the inputs change; `foundation-runs.json` never enters a foundation digest.
+  - Evidence: `evidence/T053.md`; PR; initial status `not-run`.
+
+- [ ] T054 [US3] Pin `entryMemoryMax` and `entryTasksMax` to twice the measured peaks in a test in tools/cmd/lz-offline/limits_test.go (stage B round 1)
+  - Requirements: FR-013, SC-003; ADRs: 0008, 0021. Depends on: T050.
+  - Verify: `task test:runtime-image`: a test fails if either constant is raised above the power of two at or above 2× T050's largest peak, or below 2× that peak; it cites evidence/T050.md.
+  - Evidence: `evidence/T054.md`; PR; initial status `not-run`.
+
+- [ ] T055 Ratchet the foundation job's time: record each target's duration in pipelines/github/foundation-runs.json and fail `test:foundation-ci` when their sum plus one 240 s child deadline exceeds `timeout_minutes` (stage B round 1)
+  - Requirements: FR-022; ADRs: 0008, 0019. Depends on: T045.
+  - Verify: `task test:foundation-ci`: a record whose durations plus 240 s exceed 15 minutes is refused, a record under it passes; the capture script records durations; the current record is re-captured.
+  - Evidence: `evidence/T055.md`; PR; initial status `not-run`.
+
+- [ ] T056 [US1] Give lz-live's `tofu version` probe a scratch home in tools/internal/stacks/plan.go and make the canary trap's zero mode report in tools/internal/live/observe.go, test first (stage B round 1)
+  - Requirements: FR-007, FR-009; ADRs: 0008, 0009, 0021, 0024. Depends on: T015, T025.
+  - Verify: `task test:live-lane`: the probe's child environment has a fresh private HOME, not `os.TempDir()` (red first); an unset trap mode reports and removes nothing (red first).
+  - Evidence: `evidence/T056.md`; PR; initial status `not-run`.
+
+- [ ] T057 Add a cognitive-complexity baseline that may only shrink in tools/harness/complexity-baseline.txt, checked by tools/cmd/lz-check (stage B round 1)
+  - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T053.
+  - Verify: `task test:traceability`: a new function over 14, or a listed function whose score rises, fails; a lower score passes and the baseline is rewritten only downwards; the baseline lists today's functions over 14 with their scores.
+  - Evidence: `evidence/T057.md`; PR; initial status `not-run`.
+
+- [ ] T058 Correct the wording of specs/006-harden-first-slice/spec.md after stage B: FR-018 on stamps ahead of their pin, P3 observed (r5, run 39249394208, entry steps scope-only), FR-009's accepted foreign-creator window (stage B round 1)
+  - Requirements: FR-009, FR-018; ADRs: 0008, 0013, 0024. Depends on: T046.
+  - Verify: `task docs:check` and `task test:live-lane`: each changed sentence cites its evidence; no requirement is weakened beyond what the code already does.
+  - Evidence: `evidence/T058.md`; PR; initial status `not-run`.
+
 ## Final phase: Exit
 
 - [x] T045 Admit the closed 006 targets `test:update-lane` and `test:release` to CI in pipelines/github/foundation-source.json and .github/workflows/foundation.yml — closed 2026-10-19, evidence: evidence/T045.md
