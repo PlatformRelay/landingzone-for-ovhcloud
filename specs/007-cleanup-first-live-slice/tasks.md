@@ -239,7 +239,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: `task docs:check`: green; the how-to shows the retry line, the `project-alias` and `unreconciled-run` refusals and their next actions; the status page records P10 through the module with T019's run id, or says it was not run, without a 32-hex id.
   - Evidence: `evidence/T020.md`; initial status `not-run`.
 
-- [ ] T021 [US5] Write the retained-infrastructure list specs/007-cleanup-first-live-slice/evidence/retained.md before the final chain
+- [x] T021 [US5] Write the retained-infrastructure list specs/007-cleanup-first-live-slice/evidence/retained.md before the final chain — closed 2026-10-19, evidence: evidence/retained.md, evidence/T021.md
   - Requirements: FR-011; ADRs: 0024. Depends on: T019 if it ran (else T018); T006, T007, T009 on `main`.
   - Scope: written by the coordinator from the latest run record's listings and retained states in the live clone, with no new API call: the approved retained infrastructure that stays after 2026-10-24 12:42, as data-model.md fixes it. A resource a probe or an ephemeral stack created is never a row: if one exists, the file names it at the top as a blocker, and T022 does not start until a clean leftover check shows it gone. A listing error in the record is written as "not clean", not as an empty kind.
   - Verify: `task check:specs -- specs/007-cleanup-first-live-slice`: `TRACE_OK`; every row is approved retained infrastructure with a removal path and a monthly cost with a source or UNVERIFIED; no blocker is open.
