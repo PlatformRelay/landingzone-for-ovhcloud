@@ -250,7 +250,7 @@ premise; its offline part is a fake, and its live observation is postponed with 
   are not scored, as in gocognit; `tools/cmd/lz-check/complexity.go`, `evidence/T057.md` review
   note m): a new function over 14, or
   a listed one whose score rises above its line, fails (`TestComplexityRealTree`, T057); a line
-  raised in the same change as the code passes (`evidence/T057.md` row 11, open). [A8]
+  raised in the same change as the code passes (`evidence/T057.md` row 11, open; review is the control until a merge-base comparison exists, stage B round 2). The complexity rule is selected by path only for `tools/internal/checks`, `tools/cmd/lz-check` and the baseline, so it is enforced on every change by the full CI run, not by a local selective run (stage B round 2). [A8]
 - **FR-013 Entry limits** — `lz-offline` runs each child inside a transient cgroup with a memory
   limit and a task limit. A child that exceeds either is stopped and the entry reports
   `RESOURCE_LIMIT <memory|tasks>` and exits non-zero. When the limits cannot be applied, the entry
