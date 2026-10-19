@@ -104,7 +104,9 @@ precision). Two minor versions behind the pin passes; three or more fails (ADR-0
 `terramate`, `task` or `ovhcloud` command. Rule ids: `VERIFIED_AGAINST_MISSING`,
 `VERIFIED_AGAINST_STALE`, `VERIFIED_AGAINST_UNKNOWN_TOOL`, `SUPERSEDED_ADR`, `MAP_MISSING_DIR`,
 `MAP_PATH_GONE`; the map check also prints `MAP_UNJUDGED=<n>` for map paths outside the entry's
-admitted top-level names.
+admitted top-level names, and the superseded-ADR scan prints `ADR_SCAN_UNJUDGED=<n>
+outside_snapshot=<n> skipped_names=<n> run_record=<n> not_regular=<n> binary=<n>` for the entries
+it did not judge (T052).
 
 ## Fixed signatures for the test tasks
 A test task writes its tests against these signatures, with a stub whose body returns "not
