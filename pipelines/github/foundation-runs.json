@@ -2,14 +2,14 @@
   "runs": [
     {
       "role": "head",
-      "candidate": "9f36f2450e70abfe7a37f34d8507e00fbc1e8147",
-      "run_id": 39306063817,
+      "candidate": "9b2a1bf9d603f0af8dbada74838bfb217d160326",
+      "run_id": 39334606847,
       "attempt": 1,
-      "check_run_id": 118243344173,
+      "check_run_id": 118340813753,
       "repository": "PlatformRelay/landingzone-for-ovhcloud",
       "head_repository": "PlatformRelay/landingzone-for-ovhcloud",
       "event": "push",
-      "head_sha": "9f36f2450e70abfe7a37f34d8507e00fbc1e8147",
+      "head_sha": "9b2a1bf9d603f0af8dbada74838bfb217d160326",
       "workflow_path": ".github/workflows/foundation.yml",
       "workflow_blob": "445bac74c5390e57a0f844222ada15f8e64e69a6",
       "source_blob": "bc37c8a20d21fdadb3976d7652dd9344d95aee9c",
@@ -58,178 +58,199 @@
         "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
         "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
         "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-        "LZ_HEAD": "9f36f2450e70abfe7a37f34d8507e00fbc1e8147",
+        "LZ_HEAD": "9b2a1bf9d603f0af8dbada74838bfb217d160326",
         "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
         "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
         "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
         "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
         "LZ_TARGETS": "verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap test:update-lane test:release docs:check stacks:check"
       },
-      "fetched_head": "9f36f2450e70abfe7a37f34d8507e00fbc1e8147",
+      "fetched_head": "9b2a1bf9d603f0af8dbada74838bfb217d160326",
       "targets": [
         {
           "name": "verify:toolchain",
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 2
         },
         {
           "name": "test:offline-boundary",
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 2
         },
         {
           "name": "test:reports",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 10
         },
         {
           "name": "test:traceability",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 15
         },
         {
           "name": "check:specs",
           "status": "ok",
           "discovered": 4,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 11
         },
         {
           "name": "test:dependencies",
           "status": "ok",
           "discovered": 3,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 14
         },
         {
           "name": "test:static",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 15
         },
         {
           "name": "test:runtime-image",
           "status": "ok",
           "discovered": 3,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 22
         },
         {
           "name": "test:foundation-ci",
           "status": "ok",
           "discovered": 3,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 15
         },
         {
           "name": "test:live-lane",
           "status": "ok",
           "discovered": 26,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 197
         },
         {
           "name": "test:slice",
           "status": "ok",
           "discovered": 3,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 73
         },
         {
           "name": "test:outputs",
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 14
         },
         {
           "name": "test:stacks",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 53
         },
         {
           "name": "test:stack-plans",
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 37
         },
         {
           "name": "test:exchange",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 31
         },
         {
           "name": "test:bootstrap",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 27
         },
         {
           "name": "test:update-lane",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 14
         },
         {
           "name": "test:release",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 12
         },
         {
           "name": "docs:check",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 14
         },
         {
           "name": "stacks:check",
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 11
         }
       ],
       "targets_done": 20,
+      "outside_seconds": 14,
       "check_digests": {
-        "check:specs": "sha256:9038f96bceadcf8bcfd5ab80a3de48341b6001ba258064ba289bc4c25dd7df4c",
-        "docs:check": "sha256:2e8159827bcecf18f6959437484080acc94cc8720e4d559ae88512434d2aa7de",
-        "stacks:check": "sha256:ba1cd9a784cae66f910aac8de74f9503c666845ac484d89fad4dba0eb852b6da",
-        "test:bootstrap": "sha256:4cc9fb25acd57ca5fc18fc7afc66a7b24385893a95e034be9df97363d60dfdc6",
-        "test:dependencies": "sha256:1a0006b750f190920de585a087d8c652dd57bd20e8567dd77627c96a78f14e9f",
-        "test:exchange": "sha256:e3145919eef63864cf4cba5930ffe392b7b57ef0eded9718ad64e00545a3d7ab",
-        "test:foundation-ci": "sha256:2e42000e8fd8ab7dc0c3f7668e2fed3db5e1ae0f167a1896c94fa331fe17e46c",
-        "test:live-lane": "sha256:50e8c56e1606f4b64b7cb94909f3b9cc80d58a4d2cc1abb969449c07a041c80c",
-        "test:offline-boundary": "sha256:3c185ea0b85d31df6f1b0ceed20fd8b51cecc207b50ddc613aba04effcd70826",
-        "test:outputs": "sha256:97aa26e24512c4e0ef84537d2cce8caaa591339ef996d30effb616d331a553de",
-        "test:release": "sha256:1d5376ba08c3af9646824f08b13bf118888c77ee160681b7c5ff1bb2ba0eac30",
+        "check:specs": "sha256:a21d1d0cb0c6d5a75c0e98a46de262f590d1dccbc30ef6364ceaa0b68c002a16",
+        "docs:check": "sha256:62ed8bcce440f53ce42c68de20709fb6eef7dc21fb54226e9a034811135492e4",
+        "stacks:check": "sha256:7e0c33b9f8821da9be832065cabe627c33e92bc853f2de25d08f766a391ffab4",
+        "test:bootstrap": "sha256:6bdaae2d658488c2568aeea3bcd66146727f91f649b4966de2b7bc44d73a8db0",
+        "test:dependencies": "sha256:707f6a017e8bfde8e513e5af24452bd5fbef3662d00b337e20a361021b664e07",
+        "test:exchange": "sha256:882b81e70ff5b395143f481651153634240b481cc4144b4bd588543766f0515d",
+        "test:foundation-ci": "sha256:e37243c18c098cbdec1fcc3807fddf2b8ce8dbe05c25aafeefffddaf6df04600",
+        "test:live-lane": "sha256:d1b812432b97688e4673ce94686a882dc5c18d209082a074ea086fcb65620841",
+        "test:offline-boundary": "sha256:b2654a919c740c0084131e938e59b718b99f543afec5e48940e4b199f21fb5b3",
+        "test:outputs": "sha256:6d0b530c0fa04b953e6a92a7db7dfe7ee47ba69da3c36f9c4f599787c47e9af5",
+        "test:release": "sha256:3f385ab90b51670d1f846783dee9b0627298f897873bb9cdee442a87d4090338",
         "test:reports": "sha256:ba4213c6b35acf690c7f443de6202b4753b3334f66b032674538f6f4c57fe4c1",
-        "test:runtime-image": "sha256:6bf8aa8db6a101b92ee9606aac95672d82ef909c66c15e54cda114fa6e7cb372",
-        "test:slice": "sha256:8b35b35aa79e0d8270e220280eb806be7a01c1ddcbbb1674ef0fd21fb8acac59",
-        "test:stack-plans": "sha256:75edb15209b71d9a6eb829a8ded2323b4f5fcc8105b6dd5ec757b875617beef0",
-        "test:stacks": "sha256:ea659a61347438852727d6f87fad93add4d668f4e04c1bbd9e7c748d945e64ad",
-        "test:static": "sha256:59fa9f31bcb25014819d71eba876179c059dfc0cfda7927fe62bb7d92603dc67",
-        "test:traceability": "sha256:d1afbdb3ef2999ab920fe601e55cb7da904a04d49ef7fa4a654f0c77091813b3",
-        "test:update-lane": "sha256:0ad369808db5cc15a4a5d41f099d82b9fe86c3e76889c51ab6160f5aee10789c",
-        "verify:toolchain": "sha256:2c4805357da81d7ea084377f6f9d13086d4fed950885be119d6a5e71319555fe"
+        "test:runtime-image": "sha256:ed4958cee9f6217c1eb9b4a0b904f3cb82df8726ac9def70dd2cc5f4cb8c8286",
+        "test:slice": "sha256:0c02b3f4cd94ff989af2c5859e465423406490e01523b510f018112074a3232e",
+        "test:stack-plans": "sha256:4d7f7d9a356778708b49bfca607f94abb27e2cc48421aa8d26a8850073e5c177",
+        "test:stacks": "sha256:efc5a02bf1fcfe31b37de33f6032ce649486a1c4d0be92836d25d1564278181b",
+        "test:static": "sha256:41cce8d0b2d8c7763d462a5f52ea79e23c3a5110c959b36592fa7d738222502d",
+        "test:traceability": "sha256:019117fb3caa1e8fe7d40e7d2dbdc9c9a6bf6be154473056c9d1e0f44aa4ade2",
+        "test:update-lane": "sha256:dc49b2968f0ce1f314d2eac572db3feca1e746b15f1e1cd0e3af1d3fd161fc3e",
+        "verify:toolchain": "sha256:cc0de5c32de785daaf5cfaf6e613755fd01aee5f7586ef0867c7087d18f50eea"
       }
     },
     {
@@ -304,31 +325,36 @@
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 2
         },
         {
           "name": "test:offline-boundary",
           "status": "ok",
           "discovered": 1,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 1
         },
         {
           "name": "test:reports",
           "status": "ok",
           "discovered": 2,
           "empty": 0,
-          "failures": 0
+          "failures": 0,
+          "seconds": 7
         },
         {
           "name": "test:traceability",
           "status": "failed",
           "discovered": 0,
           "empty": 0,
-          "failures": 23
+          "failures": 23,
+          "seconds": 10
         }
       ],
       "targets_done": -1,
+      "outside_seconds": 6,
       "check_digests": {
         "check:specs": "sha256:f0e68d0b2fb37fb85764a2fd2e36274c6f2e467ddca75dd96c54a9730e9fdbe7",
         "docs:check": "sha256:240d0bf76e31e81a1597798ccd0138140ff6d29ffd9a591fbbce371ee9f57a54",
