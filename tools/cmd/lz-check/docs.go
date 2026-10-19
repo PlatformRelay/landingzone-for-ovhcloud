@@ -37,7 +37,8 @@ import (
 //
 // 006 FR-018 adds two anti-rot gates (versionGate, supersededScan): a page's
 // verified_against is compared with the tool pins, and no file outside the
-// ADRs and vendored code names or links a Superseded ADR.
+// ADRs and vendored code names or links a Superseded ADR. FR-019 adds the
+// repository map check (repositoryMap).
 //
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
 // from the file on disk: on a clean checkout that is the id of HEAD:<path>,
@@ -146,6 +147,7 @@ func docs(out io.Writer, root string) int {
 		c.body(page, string(data), bodyRules{readme: true})
 	}
 	c.supersededScan()
+	unjudgedMap := c.repositoryMap()
 	rootState := fmt.Sprintf("absent unjudged_root_links=%d", c.unjudgedRoot)
 	if rootReadme {
 		rootState = "checked"
@@ -153,6 +155,8 @@ func docs(out io.Writer, root string) int {
 	for _, f := range c.findings {
 		fmt.Fprintf(out, "%s %s: %s\n", f.rule, f.page, f.detail)
 	}
+	// The map paths outside the entry's admitted names, skipped (FR-019).
+	fmt.Fprintf(out, "MAP_UNJUDGED=%d\n", unjudgedMap)
 	if len(c.findings) > 0 {
 		fmt.Fprintf(out, "DOCS_FAIL findings=%d\n", len(c.findings))
 		return 1
@@ -1039,4 +1043,136 @@ func (c *docChecker) citations(file, rel string, withdrawn map[string]bool) erro
 		}
 	}
 	return nil
+}
+
+// 006 FR-019, the repository map. Map paths are the code spans of each table
+// row's first cell in docs/reference/repository-map.md (a row may be indented
+// up to three spaces; descriptions, prose and fenced blocks are not read). A
+// map path that is not a clean relative path is MAP_PATH_GONE. The offline
+// entry sees only the top-level names its snapshot admits
+// (checks.EntryAdmitted), and under them only regular files and directories,
+// none through a link or a name it skips (checks.EntrySkipped): a map path
+// under an admitted name must be such an entry (MAP_PATH_GONE); a path under
+// any other name is counted in MAP_UNJUDGED, present or not. Every admitted top-level directory present in
+// the checkout needs a row of its own; a subpath row does not map it, and an
+// absent map omits them all (MAP_MISSING_DIR).
+
+const mapPage = "docs/reference/repository-map.md"
+
+var mapSpan = regexp.MustCompile("`([^`]+)`")
+
+// repositoryMap judges the map and returns how many map paths it skipped.
+func (c *docChecker) repositoryMap() int {
+	text, err := regularText(filepath.Join(c.root, mapPage))
+	if err != nil {
+		c.add("INPUT_UNREADABLE", mapPage, "%v", err)
+		return 0
+	}
+	admitted := map[string]bool{}
+	for _, name := range checks.EntryAdmitted() {
+		admitted[name] = true
+	}
+	unjudged, mapped := 0, map[string]bool{}
+	for _, p := range mapPaths(text) {
+		top, _, _ := strings.Cut(p, "/")
+		switch {
+		case !cleanMapPath(p):
+			c.add("MAP_PATH_GONE", mapPage, "%s is not a clean relative path; name the path itself", p)
+		case !admitted[top]:
+			unjudged++
+		case !entryVisible(c.root, p):
+			c.add("MAP_PATH_GONE", mapPage, "%s is not inside the entry (gone, behind a link, or skipped by the snapshot); remove or correct its row", p)
+		case p == top:
+			mapped[top] = true
+		}
+	}
+	c.unmappedDirs(admitted, mapped)
+	return unjudged
+}
+
+// unmappedDirs reports every admitted top-level directory without its own row.
+func (c *docChecker) unmappedDirs(admitted, mapped map[string]bool) {
+	entries, err := os.ReadDir(c.root)
+	if err != nil {
+		c.add("INPUT_UNREADABLE", ".", "%v", err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() && admitted[e.Name()] && !mapped[e.Name()] {
+			c.add("MAP_MISSING_DIR", mapPage, "%s/ is an admitted top-level directory without a row of its own", e.Name())
+		}
+	}
+}
+
+// regularText is the content of a regular file, "" when it is absent or not a
+// regular file (the pages walk skips a linked page the same way).
+func regularText(file string) (string, error) {
+	info, err := os.Lstat(file)
+	if errors.Is(err, fs.ErrNotExist) || err == nil && !info.Mode().IsRegular() {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(file)
+	return string(data), err
+}
+
+// mapPaths are the code spans of the first cell of each table body row (the
+// rows after the delimiter row), a trailing / removed; a row may be indented up
+// to three spaces and needs no leading pipe, and rows inside fenced blocks are
+// examples, not read.
+func mapPaths(text string) []string {
+	var paths []string
+	var code fenced
+	table := false
+	for _, line := range strings.Split(text, "\n") {
+		row := strings.TrimPrefix(line, strings.Repeat(" ", min(3, len(line)-len(strings.TrimLeft(line, " ")))))
+		piped := strings.Contains(row, "|") && !strings.HasPrefix(row, " ")
+		switch {
+		case code.step(line) || !piped:
+			table = false
+		case tableDelimiter.MatchString(row):
+			table = true
+		case table:
+			paths = append(paths, cellPaths(row)...)
+		}
+	}
+	return paths
+}
+
+// tableDelimiter is a table's delimiter row (| --- | :-: |); the rows after it,
+// up to a line without a pipe, are the table's body (review round 2: a body
+// row needs no leading pipe).
+var tableDelimiter = regexp.MustCompile(`^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$`)
+
+// cellPaths are the code spans of a body row's first cell, a trailing /
+// removed.
+func cellPaths(row string) []string {
+	first, _, _ := strings.Cut(strings.TrimPrefix(row, "|"), "|")
+	var paths []string
+	for _, m := range mapSpan.FindAllStringSubmatch(first, -1) {
+		paths = append(paths, strings.TrimSuffix(m[1], "/"))
+	}
+	return paths
+}
+
+// cleanMapPath says whether p is a clean path relative to the repository.
+func cleanMapPath(p string) bool {
+	return !path.IsAbs(p) && path.Clean(p) == p && p != ".." && !strings.HasPrefix(p, "../")
+}
+
+// entryVisible says whether every component of the clean path p is a
+// directory, or a regular file at its end, none a symbolic link and none a
+// name the snapshot skips: what the entry's snapshot copies.
+func entryVisible(root, p string) bool {
+	cur := root
+	for _, part := range strings.Split(p, "/") {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil || checks.EntrySkipped(part) || !info.IsDir() && !info.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
 }

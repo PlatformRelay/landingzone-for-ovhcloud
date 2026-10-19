@@ -102,6 +102,7 @@ func docsRepo(t *testing.T, files map[string]string) string {
 		"tools/vendor/example.com/lib/README.md": ignoredReadme,
 		".specify/templates/README.md":           ignoredReadme,
 		"modules/x/notes.md":                     ignoredReadme, // not a README: not read
+		docsMapPage:                              docsBaseMap,
 	}
 	var gone []string
 	for name, content := range files {
@@ -123,7 +124,7 @@ func docsRepo(t *testing.T, files map[string]string) string {
 
 func TestDocsAccepted(t *testing.T) {
 	code, out := lzCheck(docsRepo(t, nil), "docs")
-	if code != 0 || !strings.Contains(out, "DOCS_OK pages=6 headed=2 references=1 readmes=2 root_readme=checked\n") {
+	if code != 0 || !strings.Contains(out, "DOCS_OK pages=7 headed=3 references=1 readmes=2 root_readme=checked\n") {
 		t.Errorf("BEHAVIORAL_RED: valid docs refused: code=%d\n%s", code, out)
 	}
 }
@@ -135,12 +136,12 @@ func TestDocsAccepted(t *testing.T) {
 // the root README present they are judged (TestDocsRejected).
 func TestDocsRootReadmeAbsent(t *testing.T) {
 	code, out := lzCheck(docsRepo(t, map[string]string{"README.md": ""}), "docs")
-	if code != 0 || !strings.Contains(out, "DOCS_OK pages=6 headed=2 references=1 readmes=1 root_readme=absent unjudged_root_links=0\n") {
+	if code != 0 || !strings.Contains(out, "DOCS_OK pages=7 headed=3 references=1 readmes=1 root_readme=absent unjudged_root_links=0\n") {
 		t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with readmes=1 root_readme=absent unjudged_root_links=0:\n%s", code, out)
 	}
 	linked := map[string]string{"README.md": "", "modules/x/README.md": moduleReadme + "[top](../../README.md#landing-zone) and [root](/README.md)\n"}
 	code, out = lzCheck(docsRepo(t, linked), "docs")
-	if code != 0 || !strings.Contains(out, "DOCS_OK pages=6 headed=2 references=1 readmes=1 root_readme=absent unjudged_root_links=2\n") {
+	if code != 0 || !strings.Contains(out, "DOCS_OK pages=7 headed=3 references=1 readmes=1 root_readme=absent unjudged_root_links=2\n") {
 		t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with root_readme=absent unjudged_root_links=2:\n%s", code, out)
 	}
 }
@@ -189,7 +190,7 @@ func TestDocsRejected(t *testing.T) {
 		"32-hex id upper":          {map[string]string{"docs/reference/b.md": header("references: []\n") + pageB + "0123456789ABCDEF0123456789ABCDEF\n"}, "HEX_ID docs/reference/b.md"},
 		"link after long fence":    {map[string]string{a: header(helloRef) + guide + "~~~~\n~~~\n```sh\n~~~~\n[gone](c3.md)\n"}, "LINK_BROKEN docs/how-to/a.md: c3.md"},
 		"paren-titled link broken": {map[string]string{a: header(helloRef) + guide + "[gone](c4.md (Title))\n"}, "LINK_BROKEN docs/how-to/a.md: c4.md"},
-		"no pages":                 {map[string]string{a: "", "docs/reference/b.md": "", "docs/adr/0013-docs.md": "", "docs/adr/0011-opentofu.md": "", "docs/adr/README.md": "", "docs/adr/template-not-an-adr.md": ""}, "NO_PAGES"},
+		"no pages":                 {map[string]string{a: "", "docs/reference/b.md": "", "docs/adr/0013-docs.md": "", "docs/adr/0011-opentofu.md": "", "docs/adr/README.md": "", "docs/adr/template-not-an-adr.md": "", docsMapPage: ""}, "NO_PAGES"},
 		// T107: the link rules on the READMEs, one control per rule and README kind.
 		"readme link broken":         {map[string]string{"modules/x/README.md": moduleReadme + "[gone](../y/README.md)\n"}, "LINK_BROKEN modules/x/README.md: ../y/README.md"},
 		"readme link outside":        {map[string]string{"modules/x/README.md": moduleReadme + "[up](../../../x.md)\n"}, "LINK_BROKEN modules/x/README.md: ../../../x.md"},
@@ -533,7 +534,7 @@ func TestDocsGateReadingsAccepted(t *testing.T) {
 		"anchored rule":         {".gitignore": "/agent-context/\n", "agent-context/x.md": "ADR-0007\n"},
 		// review round 2: the generated CI run record is not read, so that it
 		// stays out of docs:check's digest (ci:foundation compares digests).
-		"ci run record":          {"pipelines/github/foundation-runs.json": "{\"note\": \"ADR-0007\"}\n"},
+		"ci run record":          {"pipelines/github/foundation-runs.json": "{\"note\": \"ADR-0007\"}\n", docsMapPage: docsBaseMap + "| `pipelines/` | CI runs. |\n"},
 		"wildcard contents rule": {".gitignore": ".claude/*\n", ".claude/x.md": "ADR-0007\n"},
 		// Lock files in fixtures and hidden directories pin nothing: a newer
 		// ovh there would make the page's 2.24 stale.
@@ -571,6 +572,13 @@ const (
 	docsMapRecord = "| `docs/` | Design and user documentation. |\n| `docs/reference/` | Look-up pages. |\n| `specs/` | The delivery record. |\n| `.specify/` | Spec Kit templates. |\n" +
 		"| `README.md` | The front page. |\n| `.gitignore` | Keeps local files out of version control. |\n"
 )
+
+// docsBaseMap is docsRepo's map (006 T042): an absent map omits every
+// admitted top-level directory (FR-019), so the base fixture maps each one it
+// has (.specify, docs, modules, specs, stages, tests, tools) and nothing else.
+var docsBaseMap = header("references: []\n") + "# Repository map\n\n| Path | What it holds |\n| --- | --- |\n" +
+	"| `docs/` | Documentation. |\n| `modules/` | Modules. |\n| `stages/` | Stages. |\n| `tests/` | Fixtures. |\n" +
+	"| `tools/` | Tools. |\n| `specs/` | The delivery record. |\n| `.specify/` | Templates. |\n"
 
 // docsMap is a map page holding the given tables.
 func docsMap(tables ...string) string {
@@ -619,6 +627,11 @@ func TestDocsRepositoryMapAccepted(t *testing.T) {
 		"only admitted paths":           {nil, onlyAdmitted, 0},
 		"unadmitted directories named":  {inbox, unadmitted, 4},
 		"unadmitted directory unmapped": {inbox, all, 2},
+		// Review round 1: a table inside a fenced block is an example.
+		"fenced example not read": {nil, []string{docsMapDeployed, docsMapVerified, docsMapRecord + "\n```\n| Path | What it holds |\n| --- | --- |\n| `tools/gone/` | An example row. |\n| `.gitignore` | Example. |\n```\n"}, 2},
+		// Review round 2: a body row without a leading pipe is read, a pipe
+		// line outside a table is not.
+		"row without a leading pipe counted": {inbox, []string{docsMapDeployed, docsMapVerified, docsMapRecord + "`agent-context/` | Local coordination. |\n\nProse naming `tools/gone/` | not a table.\n"}, 3},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := lzCheck(docsMapRepo(t, r.files, r.tables...), "docs")
@@ -662,6 +675,19 @@ func TestDocsRepositoryMapRejected(t *testing.T) {
 		"directory unmapped":                 {nil, without(0, "| `modules/` | Modules, layer 1. |\n| `modules/x/` | One module and its lock. |\n"), missing, "modules"},
 		"hidden admitted directory unmapped": {nil, without(2, "| `.specify/` | Spec Kit templates. |\n"), missing, ".specify"},
 		"new admitted directory unmapped":    {map[string]string{"components/state-backend/main.tf": "# a component\n"}, withRow(0, ""), missing, "components"},
+		// 006 T042: a directory is mapped by a row of its own, not by a
+		// subpath row (the page maps "every top-level entry and its main
+		// subdirectories, one line each"); an absent map omits every one.
+		"directory mapped only by a subpath": {nil, without(0, "| `modules/` | Modules, layer 1. |\n"), missing, "modules"},
+		"map absent":                         {map[string]string{docsMapPage: ""}, withRow(0, ""), missing, "tools"},
+		"path not clean":                     {nil, withRow(1, "| `tools/../docs` | Not a clean path. |\n"), gone, "tools/../docs"},
+		// Review round 1: an indented row is a row; a ./ path is judged, not
+		// counted; a path through a name the snapshot skips is not in the entry.
+		"deleted path in an indented row": {nil, withRow(1, "   | `tools/cmd/lz-gone/` | A command since removed. |\n"), gone, "tools/cmd/lz-gone"},
+		"dot-slash path":                  {nil, withRow(1, "| `./tools/hello.txt` | Not a clean path. |\n"), gone, "./tools/hello.txt"},
+		"path through a skipped name":     {map[string]string{"tools/.cache/x.txt": "cached\n"}, withRow(1, "| `tools/.cache/x.txt` | A cache file. |\n"), gone, "tools/.cache/x.txt"},
+		// Review round 2: a body row needs no leading pipe.
+		"deleted path in a row without a leading pipe": {nil, withRow(1, "`tools/cmd/lz-gone/` | A command since removed. |\n"), gone, "tools/cmd/lz-gone"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := lzCheck(docsMapRepo(t, r.files, r.tables...), "docs")
@@ -674,5 +700,20 @@ func TestDocsRepositoryMapRejected(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// 006 T042, FR-019: the entry's snapshot copies regular files and
+// directories only, so a map path reached through a symbolic link is not
+// there; it is MAP_PATH_GONE though the link resolves on the host.
+func TestDocsRepositoryMapLink(t *testing.T) {
+	tables := []string{docsMapDeployed, docsMapVerified + "| `tools/alias/hello.txt` | A file through a link. |\n", docsMapRecord}
+	root := docsMapRepo(t, nil, tables...)
+	if err := os.Symlink(filepath.Join(root, "tools"), filepath.Join(root, "tools", "alias")); err != nil {
+		t.Fatal(err)
+	}
+	code, out := lzCheck(root, "docs")
+	if code != 1 || !docsFindingLine(out, "MAP_PATH_GONE", docsMapPage, "tools/alias/hello.txt") {
+		t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with MAP_PATH_GONE naming tools/alias/hello.txt:\n%s", code, out)
 	}
 }

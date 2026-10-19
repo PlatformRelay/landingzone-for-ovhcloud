@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -716,6 +717,33 @@ func TestRegistryInputsCoverReads(t *testing.T) {
 			if !covered(entries, p) {
 				t.Errorf("BEHAVIORAL_RED: %s reads %s, but its registry scope and inputs do not name it", id, p)
 			}
+		}
+	}
+	mapReadsCovered(t, reads["docs:check"])
+}
+
+// 006 T042: the repository map check reads the map and whether each path it
+// names under an admitted top-level name exists. docs:check's reads cover
+// each such path, or a file below it whose digest binds its existence
+// (pipelines/github is bound through foundation-source.json, never through
+// the CI run record).
+func mapReadsCovered(t *testing.T, entries []string) {
+	t.Helper()
+	text, err := os.ReadFile(filepath.Join("..", "..", "..", filepath.FromSlash(mapPage)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !covered(entries, mapPage) {
+		t.Errorf("BEHAVIORAL_RED: docs:check reads %s, but its registry scope and inputs do not name it", mapPage)
+	}
+	admitted := map[string]bool{}
+	for _, name := range checks.EntryAdmitted() {
+		admitted[name] = true
+	}
+	for _, p := range mapPaths(string(text)) {
+		top, _, _ := strings.Cut(p, "/")
+		if admitted[top] && !covered(entries, p) && !slices.ContainsFunc(entries, func(e string) bool { return strings.HasPrefix(e, p+"/") }) {
+			t.Errorf("BEHAVIORAL_RED: docs:check judges the map path %s, but its registry scope and inputs cover neither it nor a file below it", p)
 		}
 	}
 }

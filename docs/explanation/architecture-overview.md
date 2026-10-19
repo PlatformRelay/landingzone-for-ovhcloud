@@ -13,10 +13,10 @@ references:
   - path: tools/harness/capabilities.yaml
     blob: ecbfcfbec8dac380494d8b930e40205e6113a05b
   - path: tools/cmd/lz-offline/main.go
-    blob: 1561dacadcec35f3bee515d7cc26363f4509ef4c
+    blob: 6b0916bca504d2a4c8c0b6a31577bb8ac3a03980
   - path: tools/internal/live/guard.go
     blob: 06380923b8f393674f1d00adec3533ddac3bebc1
-last_verified: 71c2de81d7bfd86776df728dc5ae87976e26836b
+last_verified: b09e28cf8a2c99fb7568d7e5b66b33d733bb77c0
 ---
 
 # Architecture overview

@@ -399,7 +399,7 @@ docs-only tasks T043–T044.
   - Verify: `task docs:check`: T039's cases green (T040's rows stay red until T042, named in the evidence); the real pages pass the gates; `docs:check`'s inputs gain `mise.toml`, `mise.live.toml` and the lock files the gate reads, with a `TestRegistryInputsCoverReads` row that fails when one is removed; every edited page has its `references` blobs and `last_verified` updated (D102).
   - Evidence: `evidence/T041.md`; PR; initial status `not-run`.
 
-- [ ] T042 [US6] Add the repository-map check to tools/cmd/lz-check/docs.go and bring docs/reference/repository-map.md in line with what the entry admits
+- [x] T042 [US6] Add the repository-map check to tools/cmd/lz-check/docs.go and bring docs/reference/repository-map.md in line with what the entry admits — closed 2026-10-19, evidence: evidence/T042.md
   - Requirements: FR-019; ADRs: 0002, 0013. Depends on: T041.
   - Verify: `task docs:check`: T040's cases green and the target green; the map's reads join `docs:check`'s inputs with a `TestRegistryInputsCoverReads` row.
   - Evidence: `evidence/T042.md`; PR; initial status `not-run`.
