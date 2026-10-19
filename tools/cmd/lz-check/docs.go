@@ -36,8 +36,9 @@ import (
 // (the offline entry's snapshot holds none).
 //
 // 006 FR-018 adds two anti-rot gates (versionGate, supersededScan): a page's
-// verified_against is compared with the tool pins, and no file outside the
-// ADRs and vendored code names or links a Superseded ADR. FR-019 adds the
+// verified_against is compared with the tool pins, and no file the entry's
+// snapshot admits outside the ADRs and vendored code names or links a
+// Superseded ADR (what it does not judge is counted). FR-019 adds the
 // repository map check (repositoryMap).
 //
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
@@ -85,6 +86,8 @@ type docChecker struct {
 	unjudgedRoot int
 	// pins are the tool pins verified_against is judged against (FR-018).
 	pins map[string]docPin
+	// adrUnjudged counts what the superseded-ADR scan did not judge (FR-018).
+	adrUnjudged adrUnjudged
 }
 
 func docs(out io.Writer, root string) int {
@@ -157,6 +160,8 @@ func docs(out io.Writer, root string) int {
 	}
 	// The map paths outside the entry's admitted names, skipped (FR-019).
 	fmt.Fprintf(out, "MAP_UNJUDGED=%d\n", unjudgedMap)
+	// The entries the superseded-ADR scan did not judge, by reason (FR-018).
+	fmt.Fprintln(out, c.adrUnjudged.line())
 	if len(c.findings) > 0 {
 		fmt.Fprintf(out, "DOCS_FAIL findings=%d\n", len(c.findings))
 		return 1
@@ -875,24 +880,32 @@ func lineCommand(line string, targets map[string]bool) string {
 
 // 006 FR-018, the superseded-ADR scan. An ADR is Superseded when the first
 // `- Status:` line of docs/adr/NNNN-*.md starts so (the ADR template,
-// docs/adr/README.md); an ADR without a status line is not. Every regular
-// text file outside docs/adr/ and tools/vendor/ that names `ADR-NNNN` or
-// links `adr/NNNN-` for such an ADR is SUPERSEDED_ADR, once per file and
-// ADR. "Tracked" is read without git (the entry's snapshot carries no .git):
-// .git and what the root .gitignore names by a plain or wildcard name
-// (`agent-context/`, `.terraform/`, `*.tfstate`) are skipped; a pattern with
-// an inner slash or a negation is not read, and `name/*` skips all of name/.
-// A file holding a NUL byte is binary and skipped.
+// docs/adr/README.md); an ADR without a status line is not. Every file the
+// offline entry's snapshot admits (checks.EntryAdmitted at the top level,
+// none through a name checks.EntrySkipped names at any depth), outside
+// docs/adr/ and tools/vendor/, that names `ADR-NNNN` or links `adr/NNNN-` for
+// such an ADR is SUPERSEDED_ADR, once per file and ADR. The check cannot ask
+// git which files are tracked (the snapshot carries no .git), so it judges
+// what the snapshot holds, .gitignore unread, and counts what it does not
+// judge in ADR_SCAN_UNJUDGED (T052): a top-level name outside the snapshot,
+// a skipped name below it, the CI run record (docs:check is a foundation
+// target, so reading the record would put it into the digest each recorded
+// run must match, ci:foundation), an entry that is not a regular file (the
+// snapshot refuses a link) and a binary file (one holding a NUL byte).
 
 var (
 	adrStatus = regexp.MustCompile(`^- Status:\s*(.*)$`)
 	adrCite   = regexp.MustCompile(`(?:\bADR-|\badr/)(\d{4})(?:[^0-9]|$)`)
 )
 
-// ignoreRule is one .gitignore pattern the scan honours.
-type ignoreRule struct {
-	pattern           string
-	dirOnly, anchored bool
+// adrUnjudged counts the entries the scan did not judge, by reason; a
+// directory counts once.
+type adrUnjudged struct{ outside, skipped, record, irregular, binary int }
+
+// line is the ADR_SCAN_UNJUDGED output line.
+func (u adrUnjudged) line() string {
+	return fmt.Sprintf("ADR_SCAN_UNJUDGED=%d outside_snapshot=%d skipped_names=%d run_record=%d not_regular=%d binary=%d",
+		u.outside+u.skipped+u.record+u.irregular+u.binary, u.outside, u.skipped, u.record, u.irregular, u.binary)
 }
 
 // supersededScan reports every citation of a Superseded ADR.
@@ -902,39 +915,60 @@ func (c *docChecker) supersededScan() {
 		c.add("INPUT_UNREADABLE", "docs/adr", "%v", err)
 		return
 	}
-	ignored, err := ignoreRules(c.root)
-	if err != nil {
-		c.add("INPUT_UNREADABLE", ".gitignore", "%v", err)
-		return
+	admitted := map[string]bool{}
+	for _, name := range checks.EntryAdmitted() {
+		admitted[name] = true
 	}
 	err = filepath.WalkDir(c.root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		return c.scanEntry(p, d, withdrawn, ignored)
+		return c.scanEntry(p, d, withdrawn, admitted)
 	})
 	if err != nil {
 		c.add("INPUT_UNREADABLE", ".", "%v", err)
 	}
 }
 
-// scanEntry skips docs/adr/, tools/vendor/ and ignored directories, and
-// judges a regular file that is not ignored, except the generated CI run
-// record: docs:check is a foundation target, so reading it would put the
-// record into the digest each recorded run must match (ci:foundation).
-func (c *docChecker) scanEntry(p string, d fs.DirEntry, withdrawn map[string]bool, ignored []ignoreRule) error {
+// scanEntry skips docs/adr/, tools/vendor/ and what the scan does not judge,
+// and judges every other regular file.
+func (c *docChecker) scanEntry(p string, d fs.DirEntry, withdrawn, admitted map[string]bool) error {
 	rel, err := filepath.Rel(c.root, p)
 	if err != nil || rel == "." {
 		return err
 	}
 	rel = filepath.ToSlash(rel)
-	if d.IsDir() && (rel == "docs/adr" || rel == "tools/vendor" || ignoredBy(ignored, rel, true)) {
-		return filepath.SkipDir
+	if c.notJudged(rel, d, admitted) {
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
 	}
-	if d.IsDir() || !d.Type().IsRegular() || rel == checks.FoundationRunsPath || ignoredBy(ignored, rel, false) {
+	if d.IsDir() {
+		if rel == "docs/adr" || rel == "tools/vendor" {
+			return filepath.SkipDir
+		}
 		return nil
 	}
 	return c.citations(p, rel, withdrawn)
+}
+
+// notJudged counts rel in adrUnjudged when the scan does not judge it.
+func (c *docChecker) notJudged(rel string, d fs.DirEntry, admitted map[string]bool) bool {
+	u := &c.adrUnjudged
+	switch {
+	case !strings.Contains(rel, "/") && !admitted[rel]:
+		u.outside++
+	case checks.EntrySkipped(path.Base(rel)):
+		u.skipped++
+	case rel == checks.FoundationRunsPath:
+		u.record++
+	case !d.IsDir() && !d.Type().IsRegular():
+		u.irregular++
+	default:
+		return false
+	}
+	return true
 }
 
 // supersededADRs are the numbers of the ADRs whose status is Superseded.
@@ -974,64 +1008,15 @@ func adrStatusOf(text string) string {
 	return ""
 }
 
-// ignoreRules reads the root .gitignore's plain and wildcard name patterns;
-// .git is always skipped. A missing .gitignore (the entry's snapshot) skips
-// nothing else.
-func ignoreRules(root string) ([]ignoreRule, error) {
-	rules := []ignoreRule{{pattern: ".git"}}
-	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return rules, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if r, ok := ignoreRuleOf(strings.TrimSpace(line)); ok {
-			rules = append(rules, r)
-		}
-	}
-	return rules, nil
-}
-
-// ignoreRuleOf reads one .gitignore line, false for a comment, a negation or
-// a pattern with an inner slash.
-func ignoreRuleOf(line string) (ignoreRule, bool) {
-	if line == "" || line[0] == '#' || line[0] == '!' {
-		return ignoreRule{}, false
-	}
-	r := ignoreRule{}
-	line, r.dirOnly = strings.CutSuffix(line, "/")
-	if trimmed, wild := strings.CutSuffix(line, "/*"); wild {
-		line, r.dirOnly = trimmed, true
-	}
-	line, r.anchored = strings.CutPrefix(line, "/")
-	r.pattern = line
-	return r, line != "" && !strings.Contains(line, "/")
-}
-
-// ignoredBy reports whether a rule skips rel (a directory when dir).
-func ignoredBy(rules []ignoreRule, rel string, dir bool) bool {
-	name := path.Base(rel)
-	for _, r := range rules {
-		if r.dirOnly && !dir || r.anchored && strings.Contains(rel, "/") {
-			continue
-		}
-		if ok, _ := path.Match(r.pattern, name); ok {
-			return true
-		}
-	}
-	return false
-}
-
 // citations adds a finding for each Superseded ADR the file names or links.
 func (c *docChecker) citations(file, rel string, withdrawn map[string]bool) error {
-	if len(withdrawn) == 0 {
-		return nil
-	}
 	data, err := os.ReadFile(file)
-	if err != nil || bytes.IndexByte(data, 0) >= 0 {
+	if err != nil {
 		return err
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		c.adrUnjudged.binary++
+		return nil
 	}
 	seen := map[string]bool{}
 	for _, m := range adrCite.FindAllSubmatchIndex(data, -1) {

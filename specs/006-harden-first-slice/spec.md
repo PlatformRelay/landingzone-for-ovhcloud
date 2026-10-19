@@ -269,9 +269,12 @@ premise; its offline part is a fake, and its live observation is postponed with 
   records excepted) whose front matter `verified_against` names a tool version more than two minor
   versions behind its pin (two behind passes, three behind fails) (`mise.toml`, `mise.live.toml`, or the provider lock files for `ovh`) or
   names a tool with no pin; fails a page under `docs/how-to/` or `docs/reference/` that names a
-  `tofu`, `terramate`, `task` or `ovhcloud` command without `verified_against`; and fails any
-  tracked file outside `docs/adr/` and `tools/vendor/` that links to or names an ADR whose status
-  is `Superseded`. [E4]
+  `tofu`, `terramate`, `task` or `ovhcloud` command without `verified_against`; and fails every
+  file the offline snapshot admits outside `docs/adr/` and `tools/vendor/` that links to or names
+  an ADR whose status is `Superseded`, and prints `ADR_SCAN_UNJUDGED=<n>` with what it did not
+  judge, by reason (a top-level name outside the snapshot, a name the snapshot skips, the CI run
+  record `pipelines/github/foundation-runs.json`, an entry that is not a regular file, a binary
+  file); `.gitignore` is not read (T052). [E4]
 - **FR-019 Repository map** — `docs:check` fails when `docs/reference/repository-map.md` names a
   path under one of the entry's admitted top-level names that does not exist, or omits an admitted
   top-level directory present in the checkout. Paths outside the admitted names (hidden files such as

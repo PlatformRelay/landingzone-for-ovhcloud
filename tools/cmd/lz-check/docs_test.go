@@ -497,7 +497,7 @@ func TestDocsGateReadingsRejected(t *testing.T) {
 		"older stage lock":        {map[string]string{"stages/demo/.terraform.lock.hcl": olderLock, a: docsStampedGuide(`task: "3.56", ovh: "2.20"`)}, stale, a, "ovh"},
 		"older module lock":       {map[string]string{"modules/x/.terraform.lock.hcl": olderLock, a: docsStampedGuide(`task: "3.56", ovh: "2.20"`)}, stale, a, "ovh"},
 		"hidden directory cites":  {map[string]string{".github/workflows/x.yml": "# ADR-0007\n"}, "SUPERSEDED_ADR", ".github/workflows/x.yml", "0007"},
-		"unignored sibling cites": {map[string]string{".gitignore": "agent-context/\n", "agent-contexts/x.md": "ADR-0007\n"}, "SUPERSEDED_ADR", "agent-contexts/x.md", "0007"},
+		"unignored sibling cites": {map[string]string{".gitignore": "agent-context/\n", "tools/agent-contexts/x.md": "ADR-0007\n"}, "SUPERSEDED_ADR", "tools/agent-contexts/x.md", "0007"},
 		"anchored rule at depth":  {map[string]string{".gitignore": "/notes/\n", "tools/notes/x.md": "ADR-0007\n"}, "SUPERSEDED_ADR", "tools/notes/x.md", "0007"},
 		// review round 1: a flag right after the tool is a command, and the
 		// key may carry a space before its colon (YAML reads it the same).
@@ -521,15 +521,17 @@ func TestDocsGateReadingsRejected(t *testing.T) {
 }
 
 // 006 T041: `task` in English prose is not a command; an ADR without a status
-// line is not Superseded, whatever its body says; .git and what .gitignore
-// names (a directory, a wildcard file name) are not scanned.
+// line is not Superseded, whatever its body says; .git and top-level names
+// outside the entry's snapshot are not scanned, whatever .gitignore says
+// (T052 narrowed FR-018: an ignored file under an admitted name is judged,
+// TestDocsSupersededUnjudged).
 func TestDocsGateReadingsAccepted(t *testing.T) {
 	for name, files := range map[string]map[string]string{
 		"task in English prose": {"docs/how-to/c.md": docsCommandPage("", "This task has no target; the task is done by hand.")},
 		"adr without a status": {"docs/adr/0008-draft.md": "# ADR-0008: Draft\n\nSuperseded by nothing yet.\n",
 			"docs/how-to/a.md": pageA + "See ADR-0008.\n"},
 		"git directory":         {".git/notes": "ADR-0007\n"},
-		"ignored directory":     {".gitignore": "# local\nagent-context/\n*.log\n", "agent-context/x.md": "ADR-0007\n", "tools/run.log": "ADR-0007\n"},
+		"ignored directory":     {".gitignore": "# local\nagent-context/\n*.log\n", "agent-context/x.md": "ADR-0007\n"},
 		"ignored nested target": {".gitignore": ".terraform/\n", "stages/demo/.terraform/x.md": "ADR-0007\n"},
 		"anchored rule":         {".gitignore": "/agent-context/\n", "agent-context/x.md": "ADR-0007\n"},
 		// review round 2: the generated CI run record is not read, so that it
@@ -548,6 +550,82 @@ func TestDocsGateReadingsAccepted(t *testing.T) {
 				t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with DOCS_OK:\n%s", code, out)
 			}
 		})
+	}
+}
+
+// docsLinkedRepo is docsSupersededRepo plus, when link is set, a symbolic
+// link at that path to target.
+func docsLinkedRepo(t *testing.T, files map[string]string, link, target string) string {
+	t.Helper()
+	root := docsSupersededRepo(t, files)
+	if link != "" {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// 006 T052, FR-018 as narrowed: the scan judges every file the offline
+// snapshot admits, whatever .gitignore says (negations included), and prints
+// ADR_SCAN_UNJUDGED with the entries it did not judge, by reason: a top-level
+// name outside the snapshot, a name the snapshot skips at depth, the CI run
+// record, an entry that is not a regular file, a binary file. The fixture
+// checkout's .local/ is outside the snapshot in every row.
+func TestDocsSupersededUnjudged(t *testing.T) {
+	const cite = "See ADR-0007.\n"
+	unjudged := func(outside, skipped, record, irregular, binary int) string {
+		return "ADR_SCAN_UNJUDGED=" + strconv.Itoa(outside+skipped+record+irregular+binary) +
+			" outside_snapshot=" + strconv.Itoa(outside) + " skipped_names=" + strconv.Itoa(skipped) +
+			" run_record=" + strconv.Itoa(record) + " not_regular=" + strconv.Itoa(irregular) + " binary=" + strconv.Itoa(binary)
+	}
+	outsideLink := filepath.Join(t.TempDir(), "cites.md")
+	if err := os.WriteFile(outsideLink, []byte(cite), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, r := range map[string]struct {
+		files map[string]string
+		link  string // a symbolic link at this path to a file outside the checkout that cites
+		code  int
+		page  string // the SUPERSEDED_ADR finding a refused row needs
+		line  string
+	}{
+		"base": {line: unjudged(1, 0, 0, 0, 0)},
+		"outside the snapshot": {files: map[string]string{".gitignore": "agent-context/\n.claude/*\n", "agent-context/x.md": cite, ".claude/x.md": cite},
+			line: unjudged(4, 0, 0, 0, 0)},
+		"skipped names": {files: map[string]string{"stages/demo/.terraform/x.md": cite, "tools/.cache/x.md": cite, "modules/x/.env": cite},
+			line: unjudged(1, 3, 0, 0, 0)},
+		"run record": {files: map[string]string{"pipelines/github/foundation-runs.json": "{\"note\": \"ADR-0007\"}\n", docsMapPage: docsBaseMap + "| `pipelines/` | CI runs. |\n"},
+			line: unjudged(1, 0, 1, 0, 0)},
+		"link":   {link: "tools/link.md", line: unjudged(1, 0, 0, 1, 0)},
+		"binary": {files: map[string]string{"tools/x.bin": "ADR-0007\x00\n", "tools/y.bin": "\x00ADR-0007\n"}, line: unjudged(1, 0, 0, 0, 2)},
+		"ignored file under an admitted name": {files: map[string]string{".gitignore": "*.log\n", "tools/run.log": cite},
+			code: 1, page: "tools/run.log", line: unjudged(2, 0, 0, 0, 0)},
+		"negated rule": {files: map[string]string{".gitignore": "notes/\n!notes/keep.md\n", "tools/notes/keep.md": cite},
+			code: 1, page: "tools/notes/keep.md", line: unjudged(2, 0, 0, 0, 0)},
+		"ignored page": {files: map[string]string{".gitignore": "*.md\n", "docs/how-to/a.md": pageA + cite},
+			code: 1, page: "docs/how-to/a.md", line: unjudged(2, 0, 0, 0, 0)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsLinkedRepo(t, r.files, r.link, outsideLink), "docs")
+			lines := strings.Split(out, "\n")
+			if code != r.code || !slices.Contains(lines, r.line) {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want %d with the line %q:\n%s", code, r.code, r.line, out)
+			}
+			if r.page != "" && !docsFindingLine(out, "SUPERSEDED_ADR", r.page, "0007") {
+				t.Errorf("BEHAVIORAL_RED: want SUPERSEDED_ADR %s naming 0007:\n%s", r.page, out)
+			}
+		})
+	}
+}
+
+// 006 T052: with no ADR Superseded the scan still reads what it judges, so a
+// binary file is counted whatever the ADR set (review round 1).
+func TestDocsSupersededUnjudgedNoneWithdrawn(t *testing.T) {
+	code, out := lzCheck(docsRepo(t, map[string]string{"tools/x.bin": "ADR-0007\x00\n"}), "docs")
+	want := "ADR_SCAN_UNJUDGED=2 outside_snapshot=1 skipped_names=0 run_record=0 not_regular=0 binary=1"
+	if code != 0 || !slices.Contains(strings.Split(out, "\n"), want) {
+		t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with the line %q:\n%s", code, want, out)
 	}
 }
 

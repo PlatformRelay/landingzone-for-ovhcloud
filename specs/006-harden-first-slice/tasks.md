@@ -426,7 +426,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:live-lane`: a fake store that blocks on a read and on a write is cancelled at the run deadline (no request outlives it, no later publication starts), red before the change; a control store under the deadline completes.
   - Evidence: `evidence/T051.md`; PR; initial status `not-run`.
 
-- [ ] T052 [US6] Make the superseded-ADR scan judge every tracked file or report what it did not judge in tools/cmd/lz-check/docs.go, and narrow FR-018 accordingly (stage B round 1)
+- [x] T052 [US6] Make the superseded-ADR scan judge every tracked file or report what it did not judge in tools/cmd/lz-check/docs.go, and narrow FR-018 accordingly (stage B round 1) — closed 2026-10-19, evidence: evidence/T052.md
   - Requirements: FR-018; ADRs: 0013. Depends on: T041.
   - Verify: `task docs:check`: a tracked file outside the snapshot or matching a `.gitignore` pattern that cites a superseded ADR is either refused or counted as unjudged in the output; the run record stays out of the docs digest (registry assertion unchanged).
   - Evidence: `evidence/T052.md`; PR; initial status `not-run`.
