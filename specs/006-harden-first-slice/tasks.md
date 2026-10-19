@@ -431,7 +431,7 @@ docs-only tasks T043–T044.
   - Verify: `task docs:check`: a tracked file outside the snapshot or matching a `.gitignore` pattern that cites a superseded ADR is either refused or counted as unjudged in the output; the run record stays out of the docs digest (registry assertion unchanged).
   - Evidence: `evidence/T052.md`; PR; initial status `not-run`.
 
-- [ ] T053 [US4] Sweep the non-Go reads of `test:traceability` and `docs:check` into their registry inputs and digest the presence of admitted top-level directories in tools/harness/checks.yaml, test first in tools/cmd/lz-check/main_test.go (stage B round 1)
+- [x] T053 [US4] Sweep the non-Go reads of `test:traceability` and `docs:check` into their registry inputs and digest the presence of admitted top-level directories in tools/harness/checks.yaml, test first in tools/cmd/lz-check/main_test.go (stage B round 1) — closed 2026-10-19, evidence: evidence/T053.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T047, T042.
   - Verify: `task test:traceability`: `TestRegistryInputsCoverReads` gains rows for `pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml` and READMEs read by `test:traceability`, and for an added admitted directory changing `docs:check`'s digest; each row red before the inputs change; `foundation-runs.json` never enters a foundation digest.
   - Evidence: `evidence/T053.md`; PR; initial status `not-run`.
