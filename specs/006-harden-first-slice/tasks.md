@@ -441,7 +441,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:runtime-image`: a test fails if either constant is raised above the power of two at or above 2× T050's largest peak, or below 2× that peak; it cites evidence/T050.md.
   - Evidence: `evidence/T054.md`; PR; initial status `not-run`.
 
-- [ ] T055 Ratchet the foundation job's time: record each target's duration in pipelines/github/foundation-runs.json and fail `test:foundation-ci` when their sum plus one 240 s child deadline exceeds `timeout_minutes` (stage B round 1)
+- [x] T055 Ratchet the foundation job's time: record each target's duration in pipelines/github/foundation-runs.json and fail `test:foundation-ci` when their sum plus one 240 s child deadline exceeds `timeout_minutes` (stage B round 1) — closed 2026-10-20, evidence: evidence/T055.md
   - Requirements: FR-022; ADRs: 0008, 0019. Depends on: T045.
   - Verify: `task test:foundation-ci`: a record whose durations plus 240 s exceed 15 minutes is refused, a record under it passes; the capture script records durations; the current record is re-captured.
   - Evidence: `evidence/T055.md`; PR; initial status `not-run`.

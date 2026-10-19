@@ -21,8 +21,8 @@ references:
   - path: pipelines/github/foundation-source.json
     blob: bc37c8a20d21fdadb3976d7652dd9344d95aee9c
   - path: tools/internal/checks/foundation_ci.go
-    blob: 15bc8ff418177b5b1499289605d254bf86d45dd9
-last_verified: 804680b42428189b634e6d88de73b2d7e1ac3c9e
+    blob: 8e5e5369bdf3a402e266a34f8d0e15f8b9ce2fcf
+last_verified: 3bbc505e10ebc7bce5e0721f0e740f784ed8b92b
 ---
 
 ## What is true
