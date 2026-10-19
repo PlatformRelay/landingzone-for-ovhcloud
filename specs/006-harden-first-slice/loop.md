@@ -1,7 +1,7 @@
 # Loop — 006-harden-first-slice
 
 Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `worktree-001-foundation-loop` · Base: `origin/main` · Started: 2026-10-15 · Reviewers: two-model (review leg 1 + the strong review leg), duo rules: one leg per task, a second only on the triggers
-Next: L — stage B fixes T051–T058, then stage B round 2
+Next: B — stage B round 2 (fresh fan-out over the fixes T051–T058), then foundation-runs.json re-record and hand-off
 Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of 20; B reserve 3) · active hours — · owner D116 (2026-10-15): cap 20; duo triggers only (secrets or credentials, CI, infrastructure or manifests, security posture, leg 1 BLOCK); a second round re-runs the strong leg only when it raised the defect. T002, T004 and T047 ran it on wider triggers carried over from spec 005.
 
 ## Stages
@@ -99,6 +99,16 @@ Holistic run at B: not run yet.
 | L T043 | Repository is public and main unprotected: KI-001's reassessment trigger | major | review | carry | owner decision in INBOX (ruleset recommended) | no |
 | L T044 | Other 'main checkout' wording (tasks.md:13, spec.md:229,360, plan.md:27,40) outside T044's text | minor | review | defer | stage B | no |
 | B r1 | astra REQUEST_CHANGES; opus:spec CONCERNS; opus:fitness CONCERNS (records ~/.local/share/ovh-lz/review/loop-006/reviews/B/) | — | both | accept | T051–T058 added; deferred: allowedVersions/schedule (C5), -commit binding (C6), plan.go:283 0644 provider lock | no |
+| L T051 | Chain selection reads (chain.go:264, apply.go:265) run before the chain's deadline exists | minor | review | defer | spec 005 design (deadline starts at the chain); stage B round 2 judges | no |
+| L T051 | Body cut by the deadline reports 'unreadable answer'; no cancellation test for L7 collector, bootstrap:account, destroy input read | minor | both | defer | stage B round 2 | no |
+| L T051 | Vet with -tags offlinetools in the inner check (tagged build broke while untagged passed) | — | task | carry | lesson; candidate for T053's sweep | no |
+| L T052 | ADR_SCAN_UNJUDGED reads files outside docs:check inputs (output only) | minor | review | accept | T053: output-only, never a finding | no |
+| L T053 | pipelines/ names read by test:traceability but not digested; test:update-lane reads .github/renovate.json5 unnamed; read sets copied by hand from a trace | minor | both | defer | stage B round 2 | no |
+| L T055 | Budget rule lives in ci:foundation's run judge (fixture-tested in test:foundation-ci), not enforced on the committed record inside a foundation target (digest cycle) | — | task | decide | Coordinator 2026-10-20: accept; T055's text reworded in T058 | no |
+| L T055 | Recorded seconds trusted as written; ~1 s before first log line | minor | both | defer/accept | record integrity hardening (later) | no |
+| chore runs-timed | Head run budget 843 s of 900 (targets 589 + outside 14 + 240); same targets took 365 s on 10-19; runner variance can trip RUN_OVER_BUDGET on the next re-record | major | coordinator | carry | stage B round 2: decide parallel job split (keeps budget) vs accepting re-record retries | no |
+| L T057 | Baseline raised or added in the same change passes (no trusted earlier baseline offline) | major | both | decide C | Coordinator 2026-10-20: review is the control; PRs list raised baseline lines. A (CODEOWNERS) is moot with 0-approval self-merge; B (CI merge-base compare) goes to Theme C | no |
+| L T057 | Package-level func literals unscored (gocognit parity); no else-if nesting row; dod scope not all of tools | minor | both | defer | stage B round 2 | no |
 | L T047 | `test:traceability`'s tests also read files not in its inputs (`pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml`, READMEs read by `docs_test.go`); stale `tasks.md` inputs are not flagged | minor | strong | defer | stage B: one sweep of non-Go reads for every check, instead of a task per discovery | no |
 
 ## Tasks
