@@ -44,7 +44,7 @@ ADR-0002 plans to generate it from the tree later. Counts are as of the first sl
 | --- | --- |
 | `tools/` | One Go module (`go.mod`) with the command-line tools and their libraries. |
 | `tools/cmd/` | Six commands: `lz-check` (checks), `lz-offline` (offline entry), `lz-stacks` (stack generation and order), `lz-live` (live lane), `lz-pack` (runtime packing), `json2junit` (report conversion). |
-| `tools/internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`. |
+| `tools/internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`, `release`. |
 | `tools/vendor/` | Vendored Go dependencies, so builds need no network. |
 | `tools/scripts/` | Host scripts: `fetch-offline-entry.sh` fetches, verifies and installs the offline entry. |
 | `tools/harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |

@@ -348,7 +348,7 @@ Independent test: V006 (T034), V007, V008. Test tasks T035–T036, then implemen
   - Verify: `task test:update-lane` (created here): every case fails against the stub, for its stated rule. The snapshot for `ovh/ovh` 2.21.0 is captured by the `capture:provider-schema` target through the entry against the mirror (premise P7; on refutation, on the host with the same pinned binaries, recorded as such), with its command record. Manager names are never judged (research R8). This task registers `test:update-lane` (creator 006/T035).
   - Evidence: `evidence/T035.md`; PR; initial status `not-run`.
 
-- [ ] T036 [US5] Write release-train manifest tests in tools/internal/release/manifest_test.go with schemas/release-manifest.schema.json behind a new `test:release` target in Taskfile.yml
+- [x] T036 [US5] Write release-train manifest tests in tools/internal/release/manifest_test.go with schemas/release-manifest.schema.json behind a new `test:release` target in Taskfile.yml — closed 2026-10-19, evidence: evidence/T036.md
   - Requirements: FR-016, SC-006; ADRs: 0010, 0022. Depends on: none.
   - Cases (given / when / then → defect exposed), on a fixture repository the test builds with the runtime's `git` (the entry's snapshot carries no `.git`), holding conforming and non-conforming subjects and one train tag:
     - given a known commit and version / when `Manifest` renders twice / then the bytes equal the golden output both times and validate against the schema → exposes non-determinism or schema drift.

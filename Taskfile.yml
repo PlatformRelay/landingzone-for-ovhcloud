@@ -33,6 +33,11 @@ tasks:
     cmds:
       - go -C tools test -count=1 -run 'TestUpdateLane' ./internal/checks
 
+  test:release:
+    desc: Release-train manifest on a fixture repository built with the runtime's git, against its golden output and schema (V008)
+    cmds:
+      - go -C tools test -count=1 ./internal/release
+
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
     cmds:

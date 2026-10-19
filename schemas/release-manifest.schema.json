@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlatformRelay/landingzone-for-ovhcloud/schemas/release-manifest.schema.json",
+  "title": "Release-train manifest",
+  "description": "The ADR-0022 release-train manifest of one source commit, as tools/internal/release renders it (006 FR-016): JSON-compatible flow-form YAML with sorted keys and no timestamps. Every object id is read from git objects at the source commit, never from a working tree.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "version", "source_commit", "closure", "schemas", "lockfiles", "toolchain", "tested", "changelog"],
+  "properties": {
+    "apiVersion": { "const": "lz.platformrelay.dev/v1alpha1" },
+    "kind": { "const": "ReleaseTrain" },
+    "version": { "type": "string", "pattern": "^[0-9]{4}\\.(0[1-9]|1[0-2])\\.[0-9]+$", "description": "The train version YYYY.MM.N; no existing tag carries it." },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "closure": {
+      "type": "array",
+      "description": "Each directory directly under modules/, components/ and stages/ at the source commit, sorted by path.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "tree"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(modules|components|stages)/[^/]+$" },
+          "tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        }
+      }
+    },
+    "schemas": {
+      "type": "array",
+      "description": "Each *.json file under schemas/ at the source commit, sorted by path.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "blob"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^schemas/([^/]+/)*[^/]+\\.json$" },
+          "blob": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        }
+      }
+    },
+    "lockfiles": {
+      "type": "array",
+      "description": "Each .terraform.lock.hcl inside the closure at the source commit, sorted by path.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "blob"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(modules|components|stages)/([^/]+/)+\\.terraform\\.lock\\.hcl$" },
+          "blob": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "description": "The [tools] table of mise.toml at the source commit: tool name to pinned version.",
+      "additionalProperties": { "type": "string", "pattern": "^\\S+$" }
+    },
+    "tested": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "Tested tuples. Always empty in v1alpha1: no tuple is claimed without live evidence."
+    },
+    "changelog": {
+      "type": "object",
+      "description": "Subjects of the commits since the previous train tag (or the root), oldest first, grouped by commit type; non-conforming subjects under unclassified, never dropped.",
+      "additionalProperties": false,
+      "required": ["build", "chore", "ci", "docs", "feat", "fix", "refactor", "style", "test", "unclassified"],
+      "properties": {
+        "build": { "$ref": "#/$defs/subjects" },
+        "chore": { "$ref": "#/$defs/subjects" },
+        "ci": { "$ref": "#/$defs/subjects" },
+        "docs": { "$ref": "#/$defs/subjects" },
+        "feat": { "$ref": "#/$defs/subjects" },
+        "fix": { "$ref": "#/$defs/subjects" },
+        "refactor": { "$ref": "#/$defs/subjects" },
+        "style": { "$ref": "#/$defs/subjects" },
+        "test": { "$ref": "#/$defs/subjects" },
+        "unclassified": { "$ref": "#/$defs/subjects" }
+      }
+    }
+  },
+  "$defs": {
+    "subjects": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "\\S" }
+    }
+  }
+}
