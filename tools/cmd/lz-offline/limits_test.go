@@ -260,3 +260,59 @@ func TestLimitTripped(t *testing.T) {
 		})
 	}
 }
+
+// The largest peaks across the CI targets, measured in the entry's own child scope
+// (specs/006-harden-first-slice/evidence/T050.md, "Limits against the largest peaks"; both from
+// test:live-lane, the task count with the watcher's pin included).
+const (
+	t050MemoryPeak int64 = 1903194112
+	t050TasksPeak  int64 = 333
+)
+
+// limitFromPeak is research R5's rule: the power of two at or above twice the largest peak.
+func limitFromPeak(peak int64) int64 {
+	limit := int64(1)
+	for limit < 2*peak {
+		limit <<= 1
+	}
+	return limit
+}
+
+// TestLimitFromPeak holds the rule at its edges: twice the peak already a power of two is the
+// limit itself ("at or above"), one more doubles it.
+func TestLimitFromPeak(t *testing.T) {
+	for _, row := range []struct{ peak, want int64 }{
+		{1, 2}, {512, 1024}, {513, 2048}, {1 << 30, 2 << 30}, {1<<30 + 1, 4 << 30},
+	} {
+		if got := limitFromPeak(row.peak); got != row.want {
+			t.Errorf("limitFromPeak(%d) = %d, want %d", row.peak, got, row.want)
+		}
+	}
+}
+
+// TestEntryLimitsFollowPeaks pins entryMemoryMax and entryTasksMax to R5's rule over T050's
+// peaks: a limit raised past that power of two, or lowered below it, fails until the peaks in
+// evidence/T050.md are re-measured and this test follows; one below twice the peak says so.
+func TestEntryLimitsFollowPeaks(t *testing.T) {
+	for _, row := range []struct {
+		name        string
+		peak, limit int64
+		want        int64 // R5's value written out, so a broken limitFromPeak cannot agree with a moved limit
+	}{
+		{"memory", t050MemoryPeak, entryMemoryMax, 4 << 30},
+		{"tasks", t050TasksPeak, entryTasksMax, 1024},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			if got := limitFromPeak(row.peak); got != row.want {
+				t.Fatalf("limitFromPeak(%d) = %d, want %d (research R5)", row.peak, got, row.want)
+			}
+			if row.limit < 2*row.peak {
+				t.Errorf("limit %d is below twice the peak %d of evidence/T050.md", row.limit, row.peak)
+			}
+			if row.limit != row.want {
+				t.Errorf("limit %d is not %d, the power of two at or above twice the peak %d of evidence/T050.md (research R5)",
+					row.limit, row.want, row.peak)
+			}
+		})
+	}
+}

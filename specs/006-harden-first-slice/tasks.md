@@ -436,7 +436,7 @@ docs-only tasks T043–T044.
   - Verify: `task test:traceability`: `TestRegistryInputsCoverReads` gains rows for `pipelines/github/foundation-source.json`, `.github/workflows/foundation.yml` and READMEs read by `test:traceability`, and for an added admitted directory changing `docs:check`'s digest; each row red before the inputs change; `foundation-runs.json` never enters a foundation digest.
   - Evidence: `evidence/T053.md`; PR; initial status `not-run`.
 
-- [ ] T054 [US3] Pin `entryMemoryMax` and `entryTasksMax` to twice the measured peaks in a test in tools/cmd/lz-offline/limits_test.go (stage B round 1)
+- [x] T054 [US3] Pin `entryMemoryMax` and `entryTasksMax` to twice the measured peaks in a test in tools/cmd/lz-offline/limits_test.go (stage B round 1) — closed 2026-10-19, evidence: evidence/T054.md
   - Requirements: FR-013, SC-003; ADRs: 0008, 0021. Depends on: T050.
   - Verify: `task test:runtime-image`: a test fails if either constant is raised above the power of two at or above 2× T050's largest peak, or below 2× that peak; it cites evidence/T050.md.
   - Evidence: `evidence/T054.md`; PR; initial status `not-run`.

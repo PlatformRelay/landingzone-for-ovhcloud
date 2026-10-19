@@ -17,10 +17,10 @@ references:
   - path: tools/cmd/lz-offline/main.go
     blob: 6b0916bca504d2a4c8c0b6a31577bb8ac3a03980
   - path: tools/cmd/lz-offline/limits.go
-    blob: 90ec35fdb1b1fd535e669e29280b92717d1debfb
+    blob: ca5bc42eb648870dc6776dc3e0b29b213cc8b33b
   - path: .github/workflows/foundation.yml
     blob: 445bac74c5390e57a0f844222ada15f8e64e69a6
-last_verified: 2131f92c4b0b7a72413dd4300085052772608120
+last_verified: ce82c1f8c29ca987709559c7786bcbeadde83ec0
 ---
 
 ## What is true
