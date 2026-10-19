@@ -414,6 +414,11 @@ docs-only tasks T043–T044.
   - Verify: exempt — docs-only; content review: FR-009 gains "a run lock is held only while its holder lives; runs on different workstations are serialised by the state lock only" (evidence T040.md:94, T041.md:89); P9's action list names `object/get` (T097.md:101); tasks.md line 78 says "dedicated owner clone" (T072.md:84; the T071 Verify stays as D92 history); `verification-status.md`'s blob for spec.md is updated in the same commit; `task check:specs` and `task docs:check` stay green.
   - Evidence: `evidence/T044.md`; PR; docs content review only.
 
+- [x] T050 [US3] Re-measure the entry's memory and task peaks for every CI target in the child's own scope and confirm the limits in tools/cmd/lz-offline/limits.go still hold (found in T046) — closed 2026-10-19, evidence: evidence/T050.md
+  - Requirements: FR-013, SC-003; ADRs: 0008, 0021. Depends on: T032, T045.
+  - Verify: `task test:runtime-image` stays green. Host step, no credentials: each of the 20 `LZ_TARGETS` runs through the installed entry on a tree at or after `adf671f` while a watcher reads `memory.peak` and `pids.peak` of the entry's own `lz-offline-<pid>-<random>.scope` (held until read), not of an outer scope; a control of known peak proves the watcher; `entryMemoryMax` (4 GiB) and `entryTasksMax` (1024) are each at least twice the largest peak (research R5, `contracts/checks.md` V005), else a finding for the owner, limits unchanged; `evidence/T032.md` points to the record.
+  - Evidence: `evidence/T050.md`; PR; initial status `not-run`.
+
 ## Final phase: Exit
 
 - [x] T045 Admit the closed 006 targets `test:update-lane` and `test:release` to CI in pipelines/github/foundation-source.json and .github/workflows/foundation.yml — closed 2026-10-19, evidence: evidence/T045.md
