@@ -55,7 +55,7 @@ counted as unjudged. Counts are as of the first slice
 | `tools/internal/` | Their libraries: `checks`, `stacks`, `live`, `probes`, `bundle`, `report`, `planjson`, `release`. |
 | `tools/vendor/` | Vendored Go dependencies, so builds need no network. |
 | `tools/scripts/` | Host scripts: `fetch-offline-entry.sh` fetches, verifies and installs the offline entry. |
-| `tools/harness/` | The check registry (`checks.yaml`) and what the offline entry may do (`capabilities.yaml`). |
+| `tools/harness/` | The check registry (`checks.yaml`), what the offline entry may do (`capabilities.yaml`), and the cognitive-complexity baseline that may only shrink (`complexity-baseline.txt`). |
 | `tests/` | Test data outside the Go packages: check fixtures, captured tool output, live probes and chain results. |
 | `tests/check/` | Fixtures for `lz-check`'s own tests. |
 | `tests/fixtures/` | Manifests, output envelopes, captured `tofu`, Terramate and `ovhcloud` output, probe captures. |

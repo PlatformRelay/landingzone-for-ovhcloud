@@ -14,6 +14,7 @@
 //	lz-check ci-observe (<role> <candidate> <capture-dir>)...
 //	lz-check [-root <repo>] docs
 //	lz-check [-root <repo>] update-lane
+//	lz-check [-root <repo>] complexity
 //
 // specs follows requirement → ADR → paths → check → evidence for every task in
 // <spec-dir>/tasks.md and exits 1 on any broken link. dod judges each registered
@@ -32,8 +33,10 @@
 // captured GitHub output. docs judges every Markdown page under docs/ by the
 // rules of ADR-0013 and exits 1 on any finding. update-lane judges the
 // dependency-update configuration against the pin sources and the provider
-// schema snapshot (006 FR-015) and exits 1 on any finding. Usage and input
-// errors exit 2.
+// schema snapshot (006 FR-015) and exits 1 on any finding. complexity judges
+// the cognitive complexity of the tools module's functions against
+// tools/harness/complexity-baseline.txt and exits 1 on a new function over 14
+// or a listed one whose score rose (006 T057). Usage and input errors exit 2.
 package main
 
 import (
@@ -64,6 +67,7 @@ var (
 // rootCommands take the repository root and no argument.
 var rootCommands = map[string]func(io.Writer, string) int{
 	"deps": deps, "ci-workflow": ciWorkflow, "docs": docs, "ci-runs": ciRuns, "update-lane": updateLane,
+	"complexity": complexity,
 }
 
 func run(args []string, out io.Writer) int {
@@ -94,7 +98,7 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() >= 2 && flags.Arg(0) == "ci-source":
 		// One or more spec dirs; judged with the registry below.
 	case flags.NArg() != 2 || flags.Arg(0) == "deps" || flags.Arg(0) == "update-lane":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs | update-lane")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs | update-lane | complexity")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
