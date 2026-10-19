@@ -1,5 +1,5 @@
 # Rendered by `lz-check ci-workflow` from pipelines/github/foundation-source.json; do not edit.
-# Runtime image: ghcr.io/platformrelay/landingzone-for-ovhcloud/runtime@sha256:a50de0d2167583c72358b82e2394d539ed8a1fbd0f10920658e338c5e57c598e
+# Runtime image: ghcr.io/platformrelay/landingzone-for-ovhcloud/runtime@sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9
 name: foundation
 on:
   pull_request:
@@ -14,9 +14,9 @@ jobs:
     env:
       LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime
-      LZ_MANIFEST: sha256:a50de0d2167583c72358b82e2394d539ed8a1fbd0f10920658e338c5e57c598e
-      LZ_LAYER: sha256:e9021795b7b0d3ec984ed9704cab5288e1382bcf58f801e037b51f774a24ecba
-      LZ_ENTRY_SHA256: 920d1e8ed9e788337ec2d17a50cbb798de8d7b1fcdb028315bb6ba6167114f0c
+      LZ_MANIFEST: sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9
+      LZ_LAYER: sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf
+      LZ_ENTRY_SHA256: ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91
       LZ_BWRAP_SHA256: 523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6
       LZ_TARGETS: verify:toolchain test:offline-boundary test:reports test:traceability check:specs test:dependencies test:static test:runtime-image test:foundation-ci test:live-lane test:slice test:outputs test:stacks test:stack-plans test:exchange test:bootstrap docs:check stacks:check
     steps:
