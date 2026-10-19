@@ -279,6 +279,10 @@ func TestChildDeadline(t *testing.T) {
 	if childDeadline != 240*time.Second {
 		t.Errorf("BEHAVIORAL_RED: childDeadline is %v, want 240s", childDeadline)
 	}
+	// The run judge keeps room in the job for one target to run into it (T055).
+	if childDeadline != checks.FoundationChildDeadline {
+		t.Errorf("BEHAVIORAL_RED: childDeadline is %v, the run judge budgets %v", childDeadline, checks.FoundationChildDeadline)
+	}
 }
 
 // The provider fixture goes into a new private directory each time, never a

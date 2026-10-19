@@ -3,6 +3,7 @@ package checks
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -785,5 +786,189 @@ func TestFoundationRunsSyntax(t *testing.T) {
 				t.Errorf("BEHAVIORAL_RED: %s gave %v, want %s", name, got, c.want)
 			}
 		})
+	}
+}
+
+// Each target's seconds are read from the job log's own timestamps: from the
+// checks step's first line, or the previous target's end, to the target's
+// LZ_TARGET_OK or Task failure line, rounded up. The values are an
+// independent reading of the captured logs (evidence/T055.md).
+func TestFoundationObserveSeconds(t *testing.T) {
+	for _, c := range []struct {
+		name, role, candidate string
+		seconds               []int
+		outside               int
+	}{
+		{"head", RoleHead, prHead, []int{2, 1, 10, 13, 10, 14, 14, 19, 13}, 11},
+		{"red", RoleRedControl, redHead, []int{2, 1, 10, 13}, 12},
+	} {
+		run := observeRun(t, c.role, c.candidate, c.name)
+		got := []int{}
+		for _, target := range run.Targets {
+			got = append(got, target.Seconds)
+		}
+		if !slices.Equal(got, c.seconds) {
+			t.Errorf("BEHAVIORAL_RED: %s run observed seconds %v, want %v", c.name, got, c.seconds)
+		}
+		// The job's time outside its targets: from the log's first line to the
+		// checks step's, and from the last target's end to the log's last line.
+		if run.OutsideSeconds != c.outside {
+			t.Errorf("BEHAVIORAL_RED: %s run observed %d s outside its targets, want %d", c.name, run.OutsideSeconds, c.outside)
+		}
+	}
+}
+
+// Time after the last target counts too: a job whose last line comes a
+// minute later has spent a minute more outside its targets.
+func TestFoundationObserveSecondsAfterTargets(t *testing.T) {
+	c := captureRun(t, "head")
+	c.Log = []byte(strings.Replace(string(c.Log), "2026-10-05T07:39:09.5009198Z Cleaning up", "2026-10-05T07:40:09.5009198Z Cleaning up", 1))
+	run, err := ObserveFoundationRun(RoleHead, prHead, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.OutsideSeconds != 71 {
+		t.Errorf("BEHAVIORAL_RED: %d s outside the targets, want 71 (11 + 60)", run.OutsideSeconds)
+	}
+}
+
+// A line whose time cannot be read, or a target that ends before it began,
+// is refused: a duration is observed, never guessed.
+func TestFoundationObserveSecondsRefused(t *testing.T) {
+	const reports = "2026-10-05T07:37:48.6844946Z LZ_TARGET_OK test:reports"
+	for name, log := range map[string]func(string) string{
+		"a target line without a time": func(l string) string {
+			return strings.Replace(l, reports, "2026-10-05 07:37:48 LZ_TARGET_OK test:reports", 1)
+		},
+		"a set-up line without a time": func(l string) string {
+			return strings.Replace(l, "Z Current runner version:", " Current runner version:", 1)
+		},
+		"a target ending before it began": func(l string) string {
+			return strings.Replace(l, reports, "2026-10-05T07:30:00.0000000Z LZ_TARGET_OK test:reports", 1)
+		},
+		"a last line before the last target's end": func(l string) string {
+			return strings.Replace(l, "2026-10-05T07:39:09.5009198Z Cleaning up", "2026-10-05T07:37:30.0000000Z Cleaning up", 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := captureRun(t, "head")
+			changed := log(string(c.Log))
+			if changed == string(c.Log) {
+				t.Fatal("fixture line not found")
+			}
+			c.Log = []byte(changed)
+			if _, err := ObserveFoundationRun(RoleHead, prHead, c); err == nil || !strings.HasPrefix(err.Error(), "CAPTURE_LOG: ") {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v, want CAPTURE_LOG", name, err)
+			}
+		})
+	}
+}
+
+// withTimeout is the recorded runs under a source whose job timeout is
+// minutes, each run moved to that source's blobs, so only the budget differs.
+func withTimeout(t *testing.T, minutes int) ([]byte, FoundationRuns) {
+	t.Helper()
+	source, runs := recordedRuns(t)
+	changed := strings.Replace(string(source), `"timeout_minutes": 10`, fmt.Sprintf(`"timeout_minutes": %d`, minutes), 1)
+	parsed, err := ParseFoundationSource([]byte(changed))
+	if err != nil || parsed.TimeoutMinutes != minutes {
+		t.Fatalf("timeout not set: %v", err)
+	}
+	for i := range runs.Runs {
+		runs.Runs[i].SourceBlob = gitBlob([]byte(changed))
+		runs.Runs[i].WorkflowBlob = gitBlob([]byte(RenderFoundationWorkflow(parsed)))
+	}
+	return []byte(changed), runs
+}
+
+// spend sets the head run's seconds so that they add up to total: the first
+// target takes what the others, one second each, leave, and no time is spent
+// outside the targets.
+func spend(r *FoundationRuns, total int) {
+	r.Runs[0].OutsideSeconds = 0
+	targets := r.Runs[0].Targets
+	for i := range targets {
+		targets[i].Seconds = 1
+	}
+	targets[0].Seconds = total - (len(targets) - 1)
+}
+
+// The head run's targets plus one child deadline (240 s) must fit the job's
+// timeout: at it the run passes, a second over it is refused, at 10 minutes
+// (the fixture's source) and at 15 (D125). A target with no time, or a
+// negative time that would hide another's, is refused; the red control stops
+// early by design and is not budgeted.
+func TestFoundationRunsBudget(t *testing.T) {
+	for name, c := range map[string]struct {
+		minutes int
+		change  func(*FoundationRuns)
+		want    []string
+	}{
+		"the captured run":           {10, func(*FoundationRuns) {}, nil},
+		"at 10 minutes":              {10, func(r *FoundationRuns) { spend(r, 600-240) }, nil},
+		"a second over 10 minutes":   {10, func(r *FoundationRuns) { spend(r, 600-240+1) }, []string{"RUN_OVER_BUDGET"}},
+		"at 15 minutes":              {15, func(r *FoundationRuns) { spend(r, 900-240) }, nil},
+		"a second over 15 minutes":   {15, func(r *FoundationRuns) { spend(r, 900-240+1) }, []string{"RUN_OVER_BUDGET"}},
+		"over 10 fits 15":            {15, func(r *FoundationRuns) { spend(r, 600-240+1) }, nil},
+		"one target over the budget": {15, func(r *FoundationRuns) { r.Runs[0].Targets[8].Seconds = 900 }, []string{"RUN_OVER_BUDGET"}},
+		"an untimed target":          {10, func(r *FoundationRuns) { r.Runs[0].Targets[2].Seconds = 0 }, []string{"RUN_UNTIMED"}},
+		"a negative time hides one": {10, func(r *FoundationRuns) {
+			spend(r, 360)
+			r.Runs[0].Targets[0].Seconds += 100
+			r.Runs[0].Targets[1].Seconds = -99
+		}, []string{"RUN_UNTIMED"}},
+		"a slow red control": {10, func(r *FoundationRuns) { r.Runs[1].Targets[0].Seconds = 10000; r.Runs[1].OutsideSeconds = 10000 }, nil},
+		// The timeout covers the whole job, not only its targets.
+		"time outside the targets counts": {10, func(r *FoundationRuns) {
+			spend(r, 600-240-2)
+			r.Runs[0].OutsideSeconds = 3
+		}, []string{"RUN_OVER_BUDGET"}},
+		"time outside the targets at the budget": {10, func(r *FoundationRuns) {
+			spend(r, 600-240-2)
+			r.Runs[0].OutsideSeconds = 2
+		}, nil},
+		"negative time outside the targets": {10, func(r *FoundationRuns) {
+			spend(r, 360)
+			r.Runs[0].Targets[0].Seconds += 50
+			r.Runs[0].OutsideSeconds = -50
+		}, []string{"RUN_UNTIMED"}},
+		// Two such times wrap an int sum to -2.
+		"times that would wrap the sum": {15, func(r *FoundationRuns) {
+			r.Runs[0].Targets[0].Seconds, r.Runs[0].Targets[1].Seconds = math.MaxInt, math.MaxInt
+		}, []string{"RUN_OVER_BUDGET"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source, runs := withTimeout(t, c.minutes)
+			c.change(&runs)
+			findings := JudgeFoundationRuns(source, encode(t, runs), treeDigests())
+			if got := ruleSet(findings); !slices.Equal(got, c.want) {
+				t.Errorf("BEHAVIORAL_RED: %s gave %v (%+v), want %v", name, got, findings, c.want)
+			}
+		})
+	}
+}
+
+// The refusal says what the job spent against what it has.
+func TestFoundationRunsBudgetDetail(t *testing.T) {
+	source, runs := withTimeout(t, 15)
+	spend(&runs, 700)
+	runs.Runs[0].OutsideSeconds = 12
+	findings := JudgeFoundationRuns(source, encode(t, runs), treeDigests())
+	want := "targets took 700 s and the job 12 s outside them; with one 240 s child deadline that is 952 s, over the 15-minute job timeout (900 s)"
+	if len(findings) != 1 || findings[0].Detail != want {
+		t.Errorf("BEHAVIORAL_RED: refusal %+v, want detail %q", findings, want)
+	}
+}
+
+// A record written before targets were timed does not decode: its runs are
+// no evidence of the job's time.
+func TestFoundationRunsUntimedRecord(t *testing.T) {
+	source, runs := recordedRuns(t)
+	record := regexp.MustCompile(`,"seconds":-?\d+`).ReplaceAllString(string(encode(t, runs)), "")
+	if strings.Contains(record, `"seconds"`) {
+		t.Fatal("seconds not removed")
+	}
+	if got := ruleSet(JudgeFoundationRuns(source, []byte(record), treeDigests())); !slices.Equal(got, []string{"RUNS_SYNTAX"}) {
+		t.Errorf("BEHAVIORAL_RED: untimed record gave %v, want [RUNS_SYNTAX]", got)
 	}
 }

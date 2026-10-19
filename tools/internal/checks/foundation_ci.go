@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FoundationSource is pipelines/github/foundation-source.json: the approved
@@ -36,6 +37,10 @@ const (
 	// foundationCreator is the task that creates the CI and its own checks.
 	foundationCreator = "T023"
 	maxTimeoutMinutes = 15
+	// FoundationChildDeadline is the offline entry's deadline for one target
+	// (lz-offline's childDeadline, which its TestChildDeadline binds to this).
+	// The job keeps room for one target to run into it (T055, D125).
+	FoundationChildDeadline = 240 * time.Second
 )
 
 // hostedRunners are the GitHub-hosted, ephemeral runner labels the workflow
@@ -296,7 +301,8 @@ type FoundationRuns struct {
 }
 
 // FoundationRun is what one run of the foundation workflow showed. Candidate
-// is the commit the run is evidence for; the rest is observed.
+// is the commit the run is evidence for; the rest is observed. OutsideSeconds
+// is the job's time outside its targets (timeTargets).
 type FoundationRun struct {
 	Role           string            `json:"role"`
 	Candidate      string            `json:"candidate"`
@@ -322,6 +328,7 @@ type FoundationRun struct {
 	FetchedHead    string            `json:"fetched_head"`
 	Targets        []RunTarget       `json:"targets"`
 	TargetsDone    int               `json:"targets_done"`
+	OutsideSeconds int               `json:"outside_seconds"`
 	CheckDigests   map[string]string `json:"check_digests"`
 }
 
@@ -337,13 +344,16 @@ type RunStep struct {
 // packages that ran no test in any of its lines (a target may split one
 // package's tests over concurrent `go test` processes, so one half printing
 // `[no tests to run]` is no finding when another ran tests there), Failures
-// the failed test assertions (`--- FAIL:` lines) of a failed target.
+// the failed test assertions (`--- FAIL:` lines) of a failed target, and
+// Seconds how long it ran: the time from the checks step's first log line, or
+// the previous target's end, to its own end line, rounded up to a second.
 type RunTarget struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Discovered int    `json:"discovered"`
 	Empty      int    `json:"empty"`
 	Failures   int    `json:"failures"`
+	Seconds    int    `json:"seconds"`
 }
 
 // RunCapture is GitHub's own output for one run, captured read-only: the run
@@ -482,9 +492,9 @@ const unknownStep = "UNKNOWN STEP"
 // step's first command line.
 const stepMarker = "##[group]Run "
 
-// logLine is one line of `gh run view --log` output: its step and its text
-// without the timestamp.
-type logLine struct{ step, text string }
+// logLine is one line of `gh run view --log` output: its step, its timestamp
+// and its text without the timestamp.
+type logLine struct{ step, stamp, text string }
 
 // splitLog reads `gh run view --log` output: job, step and a timestamped
 // line, tab-separated. When gh names no step, it attributes the lines from
@@ -505,12 +515,13 @@ func splitLog(log string, steps []RunStep) ([]logLine, error) {
 			continue
 		}
 		text := strings.TrimPrefix(fields[2], "\uFEFF")
-		if _, rest, ok := strings.Cut(text, " "); ok {
+		stamp, rest, ok := strings.Cut(text, " ")
+		if ok {
 			text = rest
 		} else {
 			text = ""
 		}
-		lines = append(lines, logLine{step: fields[1], text: strings.TrimRight(text, "\r")})
+		lines = append(lines, logLine{step: fields[1], stamp: stamp, text: strings.TrimRight(text, "\r")})
 		if fields[1] == unknownStep {
 			unknown++
 		}
@@ -555,7 +566,7 @@ func splitLog(log string, steps []RunStep) ([]logLine, error) {
 
 // observeLog takes the runner image and token permissions from the job
 // set-up, the fetched head, the checks step's environment and each target's
-// outcome and discovery from the job log (splitLog).
+// outcome, discovery and time from the job log (splitLog, timeTargets).
 func observeLog(o *FoundationRun, log string) error {
 	lines, err := splitLog(log, o.Steps)
 	if err != nil {
@@ -567,7 +578,10 @@ func observeLog(o *FoundationRun, log string) error {
 	// tested and idle are the current target's packages that ran tests and
 	// that printed `[no tests to run]`; Empty is what is idle and untested.
 	tested, idle := map[string]bool{}, map[string]bool{}
+	// ends are the lines each target closed on, in order.
+	at, ends := 0, []int{}
 	closeTarget := func(status string) {
+		ends = append(ends, at)
 		for pkg := range idle {
 			if !tested[pkg] {
 				current.Empty++
@@ -578,8 +592,8 @@ func observeLog(o *FoundationRun, log string) error {
 		current, tested, idle = RunTarget{}, map[string]bool{}, map[string]bool{}
 	}
 	fetched := map[string]bool{}
-	for _, l := range lines {
-		step, text := l.step, l.text
+	for at = range lines {
+		step, text := lines[at].step, lines[at].text
 		switch {
 		case strings.HasPrefix(text, "##[group]"):
 			group = strings.TrimPrefix(text, "##[group]")
@@ -644,7 +658,52 @@ func observeLog(o *FoundationRun, log string) error {
 			o.FetchedHead = head
 		}
 	}
+	return timeTargets(o, lines, ends)
+}
+
+// timeTargets sets each target's Seconds from the log's timestamps: the time
+// from the checks step's first line, or the previous target's end line, to
+// its own end line, rounded up to a second. The job's timeout covers the
+// whole job, so OutsideSeconds is the rest of the log: from its first line to
+// the checks step's first (the whole log if there is none), and from the last
+// target's end to its last line. A line without a time, or a span that ends
+// before it began, is refused rather than guessed at.
+func timeTargets(o *FoundationRun, lines []logLine, ends []int) error {
+	if len(lines) == 0 {
+		return nil
+	}
+	times := make([]time.Time, len(lines))
+	for i, l := range lines {
+		t, err := time.Parse(time.RFC3339Nano, l.stamp)
+		if err != nil {
+			return fmt.Errorf("CAPTURE_LOG: line %d has no time: %q", i+1, l.stamp)
+		}
+		times[i] = t
+	}
+	since := slices.IndexFunc(lines, func(l logLine) bool { return l.step == checksStep })
+	if since < 0 {
+		since = len(lines) - 1
+	}
+	before := times[since].Sub(times[0])
+	for k, end := range ends {
+		took := times[end].Sub(times[since])
+		if took < 0 {
+			return fmt.Errorf("CAPTURE_LOG: target %s ends at %s, before it began at %s", o.Targets[k].Name, lines[end].stamp, lines[since].stamp)
+		}
+		o.Targets[k].Seconds = ceilSeconds(took)
+		since = end
+	}
+	after := times[len(times)-1].Sub(times[since])
+	if before < 0 || after < 0 {
+		return fmt.Errorf("CAPTURE_LOG: the log's first or last line is not outside its targets (%s, %s)", lines[0].stamp, lines[len(lines)-1].stamp)
+	}
+	o.OutsideSeconds = ceilSeconds(before + after)
 	return nil
+}
+
+// ceilSeconds is d rounded up to a whole second.
+func ceilSeconds(d time.Duration) int {
+	return int((d + time.Second - 1) / time.Second)
 }
 
 // goPackage is the package of a passing `go test` package line,
@@ -868,6 +927,32 @@ func judgeGreen(run FoundationRun, s FoundationSource, add func(string, string, 
 	}
 	if !slices.Equal(names, s.Targets) || run.TargetsDone != len(s.Targets) {
 		add("RUN_COUNT", "ran %q and reported %d done, want %q", names, run.TargetsDone, s.Targets)
+	}
+	judgeBudget(run, s, add)
+}
+
+// judgeBudget requires the head run's targets and its time outside them,
+// plus one target running into the entry's deadline, to fit the job's
+// timeout, so that a suite slowing towards the timeout is refused before it
+// times the job out (T055, D125). Every target must carry a positive time and
+// the time outside them may not be negative, or a missing or negative one
+// would hide another's; the sum is a float so no value can wrap it.
+func judgeBudget(run FoundationRun, s FoundationSource, add func(string, string, ...any)) {
+	took := 0.0
+	for _, target := range run.Targets {
+		if target.Seconds <= 0 {
+			add("RUN_UNTIMED", "target %s took %d s", target.Name, target.Seconds)
+		}
+		took += float64(target.Seconds)
+	}
+	if run.OutsideSeconds < 0 {
+		add("RUN_UNTIMED", "the job took %d s outside its targets", run.OutsideSeconds)
+	}
+	outside := float64(run.OutsideSeconds)
+	deadline, budget := FoundationChildDeadline.Seconds(), float64(s.TimeoutMinutes*60)
+	if took+outside+deadline > budget {
+		add("RUN_OVER_BUDGET", "targets took %.0f s and the job %.0f s outside them; with one %.0f s child deadline that is %.0f s, over the %d-minute job timeout (%.0f s)",
+			took, outside, deadline, took+outside+deadline, s.TimeoutMinutes, budget)
 	}
 }
 
