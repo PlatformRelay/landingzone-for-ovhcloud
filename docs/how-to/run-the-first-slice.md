@@ -1,7 +1,7 @@
 ---
 references:
   - path: tools/cmd/lz-live/main.go
-    blob: 806b7b39745efff0c4619cf89ac6c8c1e7e06cce
+    blob: d8f135726b97f45209049066bfe01672dc3a365a
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
@@ -19,9 +19,9 @@ references:
   - path: mise.live.toml
     blob: 6198981ea0e23d5615a95b6192da14f182c42175
   - path: tests/live/probes/README.md
-    blob: b34b198ff38ef36a2ef50ef757e5a9c0c47e0d0a
+    blob: 65fdf99b2090b95e0c007010a9de857d88a27a7e
 verified_against: {task: "3.53", tofu: "1.13", ovhcloud: "0.15"}
-last_verified: 81461ebe946c0e29b8a7e79268995af055a920a9
+last_verified: e48983dd592c328ae39b78ddbf9d7ceec39479be
 ---
 
 # Run the first slice on an OVHcloud account

@@ -5,11 +5,11 @@ references:
   - path: tools/cmd/lz-live/bootstrap.go
     blob: feda64aa61134e79c189b1ece984ff607ae356a3
   - path: tools/internal/live/files.go
-    blob: 59eeeef425698a483e977a42353c530cc524aa48
+    blob: 7ef962a505c2f045ef3a681c8dbf3e01c3f05194
   - path: tools/internal/stacks/adapter.go
     blob: 353a4b6b62176345db1a9466df79988f980dd6a4
 verified_against: {task: "3.53"}
-last_verified: 81461ebe946c0e29b8a7e79268995af055a920a9
+last_verified: e48983dd592c328ae39b78ddbf9d7ceec39479be
 ---
 
 # Set up a fresh OVHcloud account
