@@ -28,6 +28,11 @@ tasks:
     cmds:
       - go -C tools test -count=1 ./cmd/lz-pack ./internal/bundle/... ./cmd/lz-offline
 
+  test:update-lane:
+    desc: Update-lane rules on their fixtures, then this repository's configuration and provider schema snapshot (V007)
+    cmds:
+      - go -C tools test -count=1 -run 'TestUpdateLane' ./internal/checks
+
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
     cmds:
@@ -493,6 +498,23 @@ tasks:
     cmds: [{task: capture-protect, vars: {CASE: moved-only}}]
   capture:protect-state-not-plan:
     cmds: [{task: capture-protect, vars: {CASE: state-not-plan}}]
+
+  # Provider schema snapshot (006 FR-015, T035); tests/fixtures/provider-schema/capture.sh records
+  # its stdout. Prints exactly the pinned `tofu providers schema -json` document of a scratch root
+  # that requires only ovh/ovh at the version stages/bootstrap's lock pins, installed from the
+  # runtime's mirror against that lock's hashes.
+  capture:provider-schema:
+    cmds:
+      - |
+        set -e
+        work=$(mktemp -d /tmp/lz-provider-schema.XXXXXX)
+        trap 'rm -rf "$work"' EXIT
+        version=$(sed -n '/^provider "registry.opentofu.org\/ovh\/ovh" {$/,/^}$/s/^  version *= "\([0-9][0-9.]*\)"$/\1/p' stages/bootstrap/.terraform.lock.hcl)
+        test -n "$version"
+        cp stages/bootstrap/.terraform.lock.hcl "$work/"
+        printf 'terraform {\n  required_providers {\n    ovh = {\n      source  = "ovh/ovh"\n      version = "%s"\n    }\n  }\n}\n' "$version" > "$work/main.tf"
+        /tcb/tofu -chdir="$work" init -backend=false -input=false -no-color > /dev/null
+        /tcb/tofu -chdir="$work" providers schema -json
 
   capture-validate:
     internal: true

@@ -1,0 +1,15 @@
+{
+  "automerge": false,
+  "customManagers": [
+    {"customType": "regex", "managerFilePatterns": ["/^mise\\.toml$/"],
+     "matchStrings": ["LZ_OFFLINE_IMAGE = \"(?<depName>[^@\"]+)@(?<currentDigest>sha256:[0-9a-f]{64})\""],
+     "datasourceTemplate": "docker", "currentValueTemplate": "latest"}
+  ],
+  "packageRules": [
+    {"groupName": "runtime-tools", "matchFileNames": ["mise.toml"], "labels": ["needs-entry-revision"]},
+    {"groupName": "provider-ovh", "matchFileNames": ["**/.terraform.lock.hcl", "**/*.tf"]},
+    {"groupName": "provider-schema", "matchFileNames": ["tests/fixtures/provider-schema/**"]},
+    {"groupName": "host-tools", "matchFileNames": ["mise.live.toml"]},
+    {"groupName": "go-modules", "matchFileNames": ["tools/go.mod"]}
+  ]
+}

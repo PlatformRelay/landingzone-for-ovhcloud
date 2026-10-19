@@ -1,0 +1,8 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "automerge": false,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^mise\\.toml$/"],
+      "matchStrings": ["LZ_OFFLINE_IMAGE = \"(?<depName>[^@\"]+)@(?<currentDigest>sha256:[0-9a-f]{64})\
