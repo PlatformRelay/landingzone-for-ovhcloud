@@ -75,6 +75,12 @@ Credentials never enter the repository, a worktree, a command line or any output
   The spend stop is a manual cost check (Control Panel or `ovhcloud`), not code. After the expiry,
   live targets are owner-only again.
 
+  **Second account (owner grant of 2026-10-18).** The same extension, with the same targets and
+  guards, covers the fresh free-trial account set up through
+  [Set up a fresh account](docs/how-to/set-up-a-fresh-account.md). For that account it runs until
+  its own trial voucher expires, or until its remaining credit falls below **20 €**, whichever
+  comes first. The first account's bound above is unchanged.
+
 ## Tools
 
 - **OpenTofu** — the design targets ≥ 1.13
