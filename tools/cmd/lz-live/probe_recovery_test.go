@@ -841,6 +841,133 @@ func TestProbeRecoveryLostBaseline(t *testing.T) {
 	w.retired(t, id)
 }
 
+// TestProbeRecoveryAcceptLostBaselineState (spec 007 T015, FR-007 owner recovery; the maintainer's
+// run directories from before baselines existed): given a run of a root whose sweep does not judge
+// by a baseline (tests/live/probes/net) that kept its state, passphrase, probe.env and inventory
+// but has no baseline in either place / when it is cleaned up / then a plain --cleanup is refused
+// BASELINE_MISSING with no tofu call and nothing removed, and a probe start beside it is refused;
+// --cleanup --accept-lost-baseline with the run id typed back destroys from the retained state,
+// runs the leftover check, retires the run, and the next start proceeds → exposes an owner
+// recovery that only finishes a stateless budget-alert run, or one that skips the destroy.
+func TestProbeRecoveryAcceptLostBaselineState(t *testing.T) {
+	w := newRCWorld(t, "create")
+	mustRemove(t, filepath.Join(w.bin, rcModeFile)) // the net root runs the plain fake tofu
+	id := w.failedProbe(t)
+	mustRemove(t, w.recordCopy(id))
+	mustRemove(t, w.recoveryCopy(id))
+	state := filepath.Join(w.probeDir(id), "net.tfstate")
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("premise: the failed net run kept no state: %v", err)
+	}
+	before := w.tofuCalls()
+	code, stdout, stderr := w.cleanup(t, id)
+	if code == 0 || !strings.Contains(stdout+stderr, "BASELINE_MISSING") || w.tofuCalls() != before {
+		t.Errorf("plain cleanup of a run with state and no baseline: exit %d, %d tofu calls; want refused BASELINE_MISSING with none\nstdout:\n%s\nstderr:\n%s",
+			code, w.tofuCalls()-before, stdout, stderr)
+	}
+	if _, err := os.Stat(state); err != nil {
+		t.Errorf("the refused cleanup removed the state: %v", err)
+	}
+	w.refusedBeside(t, id)
+	n := len(w.childCalls(t, "tofu.log"))
+	code, stdout, stderr = w.acceptOnTTY(t, id, id)
+	if code != 0 {
+		t.Errorf("--accept-lost-baseline with the run id typed back: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if calls := subcommands(w.childCalls(t, "tofu.log")[n:]); !slices.Contains(calls, "destroy") || slices.Contains(calls, "apply") {
+		t.Errorf("the accepted cleanup's tofu calls %v, want a destroy from the retained state and no forward apply", calls)
+	}
+	if !strings.Contains(stdout, "LZ-LIVE summary "+id+" pass") {
+		t.Errorf("stdout lacks the accepted cleanup's pass summary (leftover check):\n%s", stdout)
+	}
+	w.retired(t, id)
+	w.startProceeds(t, "an accepted cleanup")
+}
+
+// TestProbeRecoveryAcceptBudgetAlertState (spec 007 T015, FR-007 "deletes nothing"; review round
+// 1): given a budget-alert run whose destroy failed, so it kept its state, and whose two baseline
+// copies are gone / when the owner removed B by hand and runs --cleanup
+// --accept-lost-baseline with the run id typed back / then no tofu runs (no destroy), no DELETE is
+// sent, the leftover check passes and the run is retired, state included → exposes an owner
+// recovery that deletes through the state of a root only a baseline can judge.
+func TestProbeRecoveryAcceptBudgetAlertState(t *testing.T) {
+	w := newRCWorld(t, "create")
+	marker := filepath.Join(w.bin, "destroy-fails")
+	writePrivate(t, marker, "")
+	code, stdout, _ := w.probeStart(t)
+	if code == 0 {
+		t.Fatalf("premise: a probe whose destroy failed exited 0\nstdout:\n%s", stdout)
+	}
+	id := runIDOf(t, stdout)
+	mustRemove(t, marker)
+	mustRemove(t, w.recordCopy(id))
+	mustRemove(t, w.recoveryCopy(id))
+	state := filepath.Join(w.probeDir(id), "budget-alert.tfstate")
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("premise: the failed run kept no state: %v", err)
+	}
+	// The owner removed B by hand (the fake's failed destroy may already have).
+	w.removeByHand(rcAlertB)
+	before := w.tofuCalls()
+	code, stdout, stderr := w.acceptOnTTY(t, id, id)
+	if code != 0 {
+		t.Errorf("--accept-lost-baseline on a budget-alert run with state: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if n := w.tofuCalls() - before; n != 0 {
+		t.Errorf("the accepted budget-alert cleanup made %d tofu calls, want none (it deletes nothing)", n)
+	}
+	if d := w.deletes(); len(d) != 0 {
+		t.Errorf("the accepted budget-alert cleanup sent DELETEs %v, want none", d)
+	}
+	w.retired(t, id)
+	if _, err := os.Lstat(state); err == nil {
+		t.Errorf("the retired run kept its state %s", state)
+	}
+}
+
+// TestProbeRecoveryOneCopy (spec 007 T015, FR-007; T012's deferral, the run paths through the
+// entry): given a lost create with only one baseline copy left / when a fresh --cleanup runs /
+// then the budget-alert check finds that copy where lz-live keeps it (the record copy under the
+// checkout's .local/live/<run-id>/, the recovery copy under the account's state/baselines/),
+// deletes only B and retires the run → exposes a check handed another record or state directory,
+// which reads the run as pre-create and leaves B.
+func TestProbeRecoveryOneCopy(t *testing.T) {
+	for _, keep := range []string{"record", "recovery"} {
+		t.Run(keep, func(t *testing.T) {
+			w := newRCWorld(t, "lost")
+			id := w.lostCreate(t, true)
+			drop := map[string]string{"record": w.recoveryCopy(id), "recovery": w.recordCopy(id)}[keep]
+			mustRemove(t, drop)
+			code, stdout, stderr := w.cleanup(t, id)
+			if code != 0 {
+				t.Errorf("cleanup with only the %s copy: exit %d\nstdout:\n%s\nstderr:\n%s", keep, code, stdout, stderr)
+			}
+			w.sweptOnlyB(t)
+			w.retired(t, id)
+		})
+	}
+}
+
+// TestProbeAcceptNotUntrusted (spec 007 T015, FR-007): given a lost create whose baseline is
+// valid (baseline-backed) / when --accept-lost-baseline runs with the run id typed back / then it
+// is refused (accept-lost-baseline) with nothing deleted and the files kept, and the plain
+// --cleanup still finishes it → exposes an owner recovery that drops a trustworthy baseline sweep.
+func TestProbeAcceptNotUntrusted(t *testing.T) {
+	w := newRCWorld(t, "lost")
+	id := w.lostCreate(t, true)
+	code, stdout, stderr := w.acceptOnTTY(t, id, id)
+	if code != live.RefusalExit || !strings.Contains(stdout+stderr, live.CondAcceptLostBaseline) {
+		t.Errorf("--accept-lost-baseline on a baseline-backed run: exit %d, want %d refused %s\nstdout:\n%s\nstderr:\n%s",
+			code, live.RefusalExit, live.CondAcceptLostBaseline, stdout, stderr)
+	}
+	w.keptUnswept(t, id, "--accept-lost-baseline on a baseline-backed run")
+	if code, stdout, stderr := w.cleanup(t, id); code != 0 {
+		t.Errorf("the plain cleanup after it: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	w.sweptOnlyB(t)
+	w.retired(t, id)
+}
+
 // acceptOnTTY runs --cleanup <id> --accept-lost-baseline with a pseudo-terminal as its stdin and
 // controlling terminal, typing typed.
 func (w *rcWorld) acceptOnTTY(t *testing.T, id, typed string) (int, string, string) {

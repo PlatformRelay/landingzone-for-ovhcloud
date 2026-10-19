@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/live"
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/alerting"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/identity"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/state"
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/probes/live/storageiam"
@@ -29,8 +30,13 @@ import (
 // its tag key with the sandbox admin, and binds nothing (each identity is the admin's own client).
 // Spec 003 T036: the locked-recovery probe runs the pinned tofu on its backend root through
 // recoverySeam (tofu: its run method; unused by every other root) and sweeps with the sandbox admin.
-func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error, tofu func(context.Context, map[string]string, bool, ...string) (state.TofuRun, error), project string) *live.ProbeCheck {
+// Spec 007 T015: the budget-alert probe reads its alert back in the run's project and sweeps with
+// the sandbox admin against the run's baseline, which it finds through paths (the record
+// directory and the account's state directory).
+func probeCheck(root string, d deps, api live.API, admin live.Credential, bind func(context.Context, live.Credential) error, tofu func(context.Context, map[string]string, bool, ...string) (state.TofuRun, error), project string, paths runPaths) *live.ProbeCheck {
 	switch root {
+	case "budget-alert":
+		return alerting.Check(alerting.Options{API: api, Admin: admin, RunDir: paths.RunDir, StateDir: paths.StateDir, Project: project})
 	case "state-backend":
 		return state.Check(state.Options{HTTP: d.S3HTTP})
 	case "storage-iam":
@@ -43,6 +49,55 @@ func probeCheck(root string, d deps, api live.API, admin live.Credential, bind f
 		return identity.IamURN(identity.Options{API: api, Admin: admin})
 	case "locked-recovery":
 		return state.LockedRecovery(state.RecoveryOptions{HTTP: d.S3HTTP, Tofu: tofu, API: api, Admin: admin, Project: project})
+	}
+	return nil
+}
+
+// runPaths are where a probe run's files are: RunDir(<run-id>) is its record directory
+// (<checkout>/.local/live/<run-id>/), StateDir the account's state directory
+// (accounts/<account>/state, which holds probes/<run-id>/ and baselines/<run-id>.json).
+type runPaths struct {
+	RunDir   func(runID string) string
+	StateDir string
+}
+
+// baselineSweepRoots are the roots whose objects only the run's baseline tells apart (FR-007):
+// under --accept-lost-baseline there is no baseline to judge by and the owner has removed the
+// run's alerts by hand, so their recovery deletes nothing: no Sweep and no destroy, even from
+// state. Every other root is destroyed from its state and runs its Sweep (run-derived names).
+var baselineSweepRoots = map[string]bool{"budget-alert": true}
+
+// acceptedCheck is the check a --cleanup --accept-lost-baseline runs: c without its Sweep for a
+// root in baselineSweepRoots, else c.
+func acceptedCheck(root string, c *live.ProbeCheck) *live.ProbeCheck {
+	if c == nil || !baselineSweepRoots[root] {
+		return c
+	}
+	kept := *c
+	kept.Sweep = nil
+	return &kept
+}
+
+// acceptLostBaseline is FR-007's owner recovery gate: the owner, at the controlling terminal
+// (never a pipe, an argument or the environment), types the run id back. No terminal, a failed
+// read or another line refuses before any credential is read.
+func acceptLostBaseline(ctx context.Context, d deps, runID string) error {
+	refused := func(format string, a ...any) error {
+		return &live.Refusal{Condition: live.CondAcceptLostBaseline, Detail: fmt.Sprintf(format, a...) + "; nothing deleted, the run's files kept"}
+	}
+	if d.Terminal == nil {
+		return refused("--accept-lost-baseline needs the owner at a terminal")
+	}
+	term, err := d.Terminal(ctx)
+	if err != nil {
+		return refused("--accept-lost-baseline needs the owner at a terminal (%v)", err)
+	}
+	line, err := term.ReadLine("Owner recovery of probe run " + runID + " without a trustworthy baseline (FR-007): only after you checked the project and removed by hand what the run created that its state does not hold; for budget-alert, nothing is destroyed: remove every alert matching the root's plan created at or after the run's start, the one in its state included.\nType the run id to continue: ")
+	if err != nil {
+		return refused("no line read from the terminal (%v)", err)
+	}
+	if line != runID {
+		return refused("the line typed back is not the run id")
 	}
 	return nil
 }
@@ -80,6 +135,8 @@ type probeArgs struct {
 	deadline      time.Duration
 	deadlineGiven bool
 	cleanup       string // run id
+	// acceptLost: --accept-lost-baseline, with --cleanup only (FR-007 owner recovery).
+	acceptLost bool
 }
 
 // check completes p with the positional arguments: one probe root, or --cleanup <run-id>.
@@ -87,6 +144,8 @@ func (p probeArgs) check(positional []string) (probeArgs, error) {
 	switch {
 	case p.deadlineGiven && p.deadline <= 0:
 		return p, errors.New("--deadline must be positive")
+	case p.acceptLost && p.cleanup == "":
+		return p, errors.New("--accept-lost-baseline goes with --cleanup <run-id> only")
 	case p.cleanup != "":
 		if len(positional) != 0 || p.planOnly || !live.RunIDPattern.MatchString(p.cleanup) {
 			return p, errors.New("--cleanup takes a run id and no probe root or --plan-only")
@@ -139,24 +198,37 @@ func probeRoot(checkout, root string) (string, error) {
 	return real, nil
 }
 
+// beforeCredentials runs a probe's refusals that need no credential, before any credential is
+// read, any file written or any child started: a TMPDIR in the checkout, a start's root outside
+// the probe roots or plan-only without --plan-only (it returns the resolved root), and the
+// owner's confirmation of --accept-lost-baseline.
+func beforeCredentials(ctx context.Context, d deps, checkout string, p probeArgs) (root string, err error) {
+	// The children's scratch HOME and tofu data directories go under TMPDIR, which must not lie in
+	// the reviewed checkout (.local/ included).
+	if err := live.ScratchOutside(checkout); err != nil {
+		return "", err
+	}
+	if p.cleanup != "" {
+		if p.acceptLost {
+			return "", acceptLostBaseline(ctx, d, p.cleanup)
+		}
+		return "", nil
+	}
+	if root, err = probeRoot(checkout, p.root); err != nil {
+		return "", err
+	}
+	if planOnlyRoots[filepath.Base(root)] && !p.planOnly {
+		return "", &live.Refusal{Condition: condPlanOnly, Detail: fmt.Sprintf("probe root %s runs only with --plan-only", filepath.Base(root))}
+	}
+	return root, nil
+}
+
 // probe runs or cleans up one probe after the guard admitted the run, with the resolved pinned
 // OpenTofu (T093).
 func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs) error {
-	var root string
-	var err error
-	// Before any credential, file or child: the children's scratch HOME and tofu data directories
-	// go under TMPDIR, which must not lie in the reviewed checkout (.local/ included).
-	if err := live.ScratchOutside(checkout); err != nil {
+	root, err := beforeCredentials(ctx, d, checkout, p)
+	if err != nil {
 		return err
-	}
-	if p.cleanup == "" {
-		if root, err = probeRoot(checkout, p.root); err != nil {
-			return err
-		}
-		// Before any credential is read, any file written or any child started.
-		if planOnlyRoots[filepath.Base(root)] && !p.planOnly {
-			return &live.Refusal{Condition: condPlanOnly, Detail: fmt.Sprintf("probe root %s runs only with --plan-only", filepath.Base(root))}
-		}
 	}
 	sandbox, err := live.ReadCredentialFile(filepath.Join(cfg, "sandbox.env"))
 	if err != nil {
@@ -255,9 +327,15 @@ func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs)
 	// The locked-recovery check's tofu seam (T036): its scratch HOME lives as long as the run.
 	seam := newRecoverySeam(tofu, root)
 	defer seam.close()
-	pr.Check = probeCheck(filepath.Base(root), d, api, cred, pr.Bind, seam.run, projectID)
+	paths := runPaths{RunDir: func(id string) string { return filepath.Join(checkout, ".local", "live", id) }, StateDir: filepath.Join(accDir, "state")}
+	pr.Check = probeCheck(filepath.Base(root), d, api, cred, pr.Bind, seam.run, projectID, paths)
 	rel, _ := filepath.Rel(checkout, root)
 	if p.cleanup != "" {
+		if pr.AcceptLostBaseline = p.acceptLost; p.acceptLost {
+			pr.Check = acceptedCheck(filepath.Base(root), pr.Check)
+			pr.AcceptDeletesNothing = baselineSweepRoots[filepath.Base(root)]
+			rel += " (accept-lost-baseline)"
+		}
 		fmt.Fprintf(d.Stdout, "LZ-LIVE run %s start cleanup %s\n", runID, rel)
 		return pr.Cleanup(ctx)
 	}

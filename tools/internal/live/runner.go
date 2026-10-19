@@ -1207,7 +1207,21 @@ type Probe struct {
 	Bind func(context.Context, Credential) error
 	// Check is the root's check after its apply (T096); nil: none.
 	Check *ProbeCheck
+	// AcceptLostBaseline is FR-007's owner recovery (`--cleanup <run-id> --accept-lost-baseline`,
+	// after the owner typed the run id back on the terminal): Cleanup finishes an untrusted run
+	// without a baseline (destroy from its state if it has one, the check's Sweep, the leftover
+	// check with no Before) and retires it only when all passed; it refuses a run of any other
+	// class (CondAcceptLostBaseline). A Sweep that judges by the baseline is the caller's to drop.
+	AcceptLostBaseline bool
+	// AcceptDeletesNothing (with AcceptLostBaseline): no destroy either, even from state (FR-007:
+	// the owner recovery of a root whose objects only a baseline could tell apart deletes nothing;
+	// the owner removed them by hand). The run's state file is retired with its other files.
+	AcceptDeletesNothing bool
 }
+
+// CondAcceptLostBaseline refuses `--accept-lost-baseline`: no terminal, another line typed back,
+// or a run that is not untrusted.
+const CondAcceptLostBaseline = "accept-lost-baseline"
 
 // ProbeCheck is a probe root's check after its apply (T096: the state-backend probe observes its
 // S3 user's Deny statement). The root publishes the check's variables, credentials included, as
@@ -1659,7 +1673,8 @@ func refuseUnreconciled(probesDir, self string) error {
 
 // Cleanup is `lz-live probe --cleanup <run-id>` from a fresh process. It classes the run
 // (ClassifyRun, data-model *Start-up phases and run classes*): an untrusted run is refused before
-// anything is read or deleted, and its files stay; a run without state (pre-create, or
+// anything is read or deleted, and its files stay, unless the owner accepted its lost baseline
+// (AcceptLostBaseline); a run without state (pre-create, or
 // baseline-backed whose create left no state) runs no tofu and needs no passphrase; otherwise it
 // reads the retained passphrase and destroys the probe from its retained state (planning and
 // applying nothing). Then the check's Sweep and the leftover check run, with a baseline-backed
@@ -1701,7 +1716,7 @@ func (p Probe) Cleanup(ctx context.Context) error {
 }
 
 // classify classes the run a cleanup finishes: untrusted is refused (nothing deleted, the files
-// kept: FR-007's owner recovery); a baseline-backed run's leftover check gets its baseline as
+// kept: FR-007's owner recovery) unless its lost baseline was accepted (admit); a baseline-backed run's leftover check gets its baseline as
 // Before; a run without state is stateless. A state file that cannot be examined counts as state,
 // and an unreadable inventory refuses the cleanup.
 func (p *Probe) classify(state, project string) error {
@@ -1716,13 +1731,26 @@ func (p *Probe) classify(state, project string) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	switch ClassifyRun(hasState, len(inv) > 0, b, loadErr) {
-	case RunUntrusted:
-		return refuse(string(RunUntrusted), "cleanup of run %s: %v; nothing deleted and its files kept: owner recovery, then --cleanup %s --accept-lost-baseline",
-			p.Run.ID, loadErr, p.Run.ID)
-	case RunBaselineBacked:
+	class := ClassifyRun(hasState, len(inv) > 0, b, loadErr)
+	if err := p.admit(class, loadErr); err != nil {
+		return err
+	}
+	if class == RunBaselineBacked {
 		p.Run.Leftovers.Before, p.Run.Leftovers.beforeProject = b.Listed, project
 	}
-	p.Run.stateless = !hasState
+	p.Run.stateless = !hasState || p.AcceptLostBaseline && p.AcceptDeletesNothing
+	return nil
+}
+
+// admit refuses an untrusted run, unless the owner accepted its lost baseline; that acceptance is
+// refused for any other class, whose plain --cleanup finishes it with its baseline.
+func (p *Probe) admit(class RunClass, loadErr error) error {
+	switch {
+	case p.AcceptLostBaseline && class != RunUntrusted:
+		return refuse(CondAcceptLostBaseline, "run %s is %s, not untrusted: nothing deleted; finish it with --cleanup %s alone", p.Run.ID, class, p.Run.ID)
+	case class == RunUntrusted && !p.AcceptLostBaseline:
+		return refuse(string(RunUntrusted), "cleanup of run %s: %v; nothing deleted and its files kept: owner recovery, then --cleanup %s --accept-lost-baseline",
+			p.Run.ID, loadErr, p.Run.ID)
+	}
 	return nil
 }

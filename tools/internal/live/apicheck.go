@@ -75,8 +75,8 @@ const (
 	APIDeleteResourceTag APIOp = "DeleteResourceTag" // DELETE /iam/resource/{urn}/tag/{key}
 
 	// The budget-alert check (spec 007 FR-007), v1 under /cloud/project/{project}; ID is one path
-	// segment (kb api/v1/cloud.json: an alert id is a uuid). Stubs for T015 (spec 007 T012):
-	// apiGate refuses them until then.
+	// segment, a uuid (kb api/v1/cloud.json: GET …/alerting answers uuid[], GET …/alerting/{id}
+	// cloud.alerting.Alerting, DELETE …/alerting/{id} void).
 	APIListAlerts  APIOp = "ListAlerts"  // GET …/alerting
 	APIGetAlert    APIOp = "GetAlert"    // GET …/alerting/{id}
 	APIDeleteAlert APIOp = "DeleteAlert" // DELETE …/alerting/{id}
@@ -158,6 +158,23 @@ type APIAnswer struct {
 	Secret string
 	// Resources (a 2xx ListResources answer): the listed resources of the asked name, every page.
 	Resources []APIResource
+	// Email (a 2xx GetMe answer): the account's own address (nichandle.Nichandle email), which
+	// the budget-alert check compares an alert's recipients with; it is never printed.
+	Email string
+	// Alerts (a 2xx ListAlerts answer): the listed alert ids, each a uuid.
+	Alerts []string
+	// Alert (a 2xx GetAlert answer): the alert read.
+	Alert *APIAlert
+}
+
+// APIAlert is a budget alert as read (cloud.alerting.Alerting): its id, monthly threshold, delay
+// in seconds and recipients (email, deprecated, and emails).
+type APIAlert struct {
+	ID               string
+	MonthlyThreshold int64
+	Delay            int64
+	Email            string
+	Emails           []string
 }
 
 // maxPolicyBody bounds a CreatePolicy body: a probe's policy is a few hundred bytes.
@@ -168,8 +185,12 @@ const maxBulk = 1000
 
 var (
 	apiProject = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	apiRegion  = regexp.MustCompile(`^[A-Z]+[0-9]*$`)
-	apiUUID    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	// apiProjectSegment is the project of the budget-alert operations: one path segment of
+	// letters, digits and dashes (no dot, slash or escape), as the leftover check takes the
+	// project probe.env records (a live project id is 32 hex: apiProject).
+	apiProjectSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
+	apiRegion         = regexp.MustCompile(`^[A-Z]+[0-9]*$`)
+	apiUUID           = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	// apiRegionName is a region as a project's region listing names it, dashes included
 	// (RBX-ARCHIVE, evidence/T087.md of spec 005); the Sweep operations take it.
 	apiRegionName = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$`)
@@ -249,7 +270,7 @@ func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
 	case APIGetStorage:
 		a, _, err = c.send(ctx, http.MethodGet, "/cloud/project/"+call.Project+"/region/"+call.Region+"/storage/"+call.Name, nil, "", nil)
 	case APIGetMe:
-		a, _, err = c.send(ctx, http.MethodGet, "/me", nil, "", nil)
+		a, err = c.me(ctx)
 	case APICreatePolicy:
 		a, _, err = c.send(ctx, http.MethodPost, "/iam/policy", call.Body, "", nil)
 	case APIDeletePolicy:
@@ -269,6 +290,8 @@ func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
 		a, err = c.status(ctx, http.MethodPut, "/iam/resource/"+url.PathEscape(call.URN), body, "PUT /iam/resource/{urn}")
 	case APIDeleteResourceTag:
 		a, err = c.status(ctx, http.MethodDelete, "/iam/resource/"+url.PathEscape(call.URN)+"/tag/"+url.PathEscape(call.Key), nil, "DELETE /iam/resource/{urn}/tag/{key}")
+	case APIListAlerts, APIGetAlert, APIDeleteAlert:
+		a, err = c.alertOp(ctx, call)
 	default:
 		a, err = c.sweepOp(ctx, call)
 	}
@@ -372,6 +395,88 @@ func (c *APIChecker) sweepOp(ctx context.Context, call APICall) (APIAnswer, erro
 		}
 	}
 	return a, nil
+}
+
+// me sends GET /me and keeps, of a 2xx answer, the account's address (Email; "" when the answer
+// has none); a non-2xx answer keeps its status and the actions it names, as send does.
+func (c *APIChecker) me(ctx context.Context) (APIAnswer, error) {
+	status, _, raw, err := c.exchange(ctx, http.MethodGet, "/me", nil, "")
+	if err != nil {
+		return APIAnswer{}, err
+	}
+	a := APIAnswer{Status: status}
+	if status < 200 || status > 299 {
+		a.Actions = refusedActions(raw, c.b.tok, c.secret)
+		return a, nil
+	}
+	var me struct {
+		Email string `json:"email"`
+	}
+	if json.Unmarshal(raw, &me) == nil {
+		a.Email = me.Email
+	}
+	return a, nil
+}
+
+// alertOp sends one of the budget-alert operations (spec 007 FR-007) and reads its answer: a
+// listing keeps the alert ids, each a uuid (another shape is an error: it could be neither read
+// nor deleted); a read keeps the alert, whose id must be the asked one and whose threshold and
+// delay must be present; a delete keeps its status. A non-2xx answer keeps its status and the
+// actions it names.
+func (c *APIChecker) alertOp(ctx context.Context, call APICall) (APIAnswer, error) {
+	method, path := http.MethodGet, "/cloud/project/"+call.Project+"/alerting"
+	if call.ID != "" {
+		path += "/" + call.ID
+	}
+	if call.Op == APIDeleteAlert {
+		method = http.MethodDelete
+	}
+	status, _, raw, err := c.exchange(ctx, method, path, nil, "")
+	if err != nil {
+		return APIAnswer{}, err
+	}
+	a := APIAnswer{Status: status}
+	if status < 200 || status > 299 {
+		a.Actions = refusedActions(raw, c.b.tok, c.secret)
+		return a, nil
+	}
+	switch call.Op {
+	case APIListAlerts:
+		a.Alerts, err = alertIDs(raw)
+	case APIGetAlert:
+		a.Alert, err = alertRead(raw, call.ID)
+	}
+	if err != nil {
+		return APIAnswer{}, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	return a, nil
+}
+
+// alertIDs reads a GET …/alerting answer: a JSON array of uuids.
+func alertIDs(raw []byte) ([]string, error) {
+	var ids []string
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal(trimmed, &ids) != nil {
+		return nil, fmt.Errorf("the answer is not an alert listing")
+	}
+	if slices.ContainsFunc(ids, func(id string) bool { return !apiUUID.MatchString(id) }) {
+		return nil, fmt.Errorf("a listed alert id is not a uuid")
+	}
+	return ids, nil
+}
+
+// alertRead reads a GET …/alerting/{id} answer (cloud.alerting.Alerting).
+func alertRead(raw []byte, id string) (*APIAlert, error) {
+	var e struct {
+		ID               string   `json:"id"`
+		MonthlyThreshold *int64   `json:"monthlyThreshold"`
+		Delay            *int64   `json:"delay"`
+		Email            string   `json:"email"`
+		Emails           []string `json:"emails"`
+	}
+	if json.Unmarshal(raw, &e) != nil || e.ID != id || e.MonthlyThreshold == nil || e.Delay == nil {
+		return nil, fmt.Errorf("the answer is not the asked alert with its threshold and delay")
+	}
+	return &APIAlert{ID: e.ID, MonthlyThreshold: *e.MonthlyThreshold, Delay: *e.Delay, Email: e.Email, Emails: e.Emails}, nil
 }
 
 // clientPath is the path of the OAuth2 clients.
@@ -617,7 +722,7 @@ func (c *APIChecker) resources(ctx context.Context, name string) (APIAnswer, err
 	return APIAnswer{}, fmt.Errorf("%s: more than %d pages", what, maxPages)
 }
 
-// apiGate refuses an operation outside the named twenty-one, a part it does not take, or a part of the wrong
+// apiGate refuses an operation outside the named twenty-four, a part it does not take, or a part of the wrong
 // shape, before any request. A refusal names the operation and the part, never a value.
 func apiGate(call APICall) error {
 	type parts struct{ project, region, name, id, body, objects, urn, tags, key bool }
@@ -640,8 +745,10 @@ func apiGate(call APICall) error {
 		want = parts{project: true, region: true, name: true, objects: true}
 	case APIDeleteUser:
 		want = parts{project: true, id: true}
-	case APIGetProject:
+	case APIGetProject, APIListAlerts:
 		want = parts{project: true}
+	case APIGetAlert, APIDeleteAlert:
+		want = parts{project: true, id: true}
 	case APICreateClient, APIListClients:
 		want = parts{name: true}
 	case APIGetClient, APIDeleteClient, APIGetPolicy:
@@ -685,7 +792,7 @@ func apiGate(call APICall) error {
 		}
 	}
 	switch {
-	case want.project && !apiProject.MatchString(call.Project):
+	case want.project && !projectShape(call.Op).MatchString(call.Project):
 		return fmt.Errorf("API check: %s: the project is not a project id", call.Op)
 	case want.region && !region.MatchString(call.Region):
 		return fmt.Errorf("API check: %s: the region is not a region name", call.Op)
@@ -707,6 +814,15 @@ func apiGate(call APICall) error {
 		return fmt.Errorf("API check: %s: a tag key or value is not of iam.resource.AddTag's shape", call.Op)
 	}
 	return nil
+}
+
+// projectShape is the shape apiGate holds an operation's project to.
+func projectShape(op APIOp) *regexp.Regexp {
+	switch op {
+	case APIListAlerts, APIGetAlert, APIDeleteAlert:
+		return apiProjectSegment
+	}
+	return apiProject
 }
 
 // policyPage collects, over the pages of a listing, the policies named name or with an id in keep.

@@ -284,7 +284,7 @@ func TestProbeCheckLockedRecovery(t *testing.T) {
 		return state.TofuRun{Exit: 1}, nil
 	}
 	noNet := &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") })}
-	c := probeCheck("locked-recovery", deps{S3HTTP: noNet}, live.API{}, live.Credential{}, nil, seam, "")
+	c := probeCheck("locked-recovery", deps{S3HTTP: noNet}, live.API{}, live.Credential{}, nil, seam, "", runPaths{})
 	if c == nil || c.Output != "recovery_check" || c.Sweep == nil || c.Observe == nil || c.Undo == nil || c.Validate == nil {
 		t.Fatalf("probeCheck(locked-recovery) = %+v, want the locked-recovery check with a Sweep", c)
 	}
@@ -303,7 +303,7 @@ func TestProbeCheckLockedRecovery(t *testing.T) {
 			t.Errorf("seam got keys %q, want the state key pair only", slices.Sorted(maps.Keys(e)))
 		}
 	}
-	if c := probeCheck("locked-recovery-x", deps{}, live.API{}, live.Credential{}, nil, seam, ""); c != nil {
+	if c := probeCheck("locked-recovery-x", deps{}, live.API{}, live.Credential{}, nil, seam, "", runPaths{}); c != nil {
 		t.Errorf("probeCheck(locked-recovery-x) = %+v, want none", c)
 	}
 }
