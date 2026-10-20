@@ -32,6 +32,9 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
 - [Set up a fresh OVHcloud account](how-to/set-up-a-fresh-account.md) — the owner's command
   sheet from signup to a first chain, with the old account kept beside the new one. Maintainer
   only.
+- [Respond to an incident](how-to/respond-to-an-incident.md) — severity, who decides and the
+  first steps for a leaked credential, lost state, a failed run with leftovers, a cost spike and
+  break-glass use. Maintainer only.
 
 ## Reference (look things up)
 

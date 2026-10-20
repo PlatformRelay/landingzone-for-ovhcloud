@@ -88,10 +88,10 @@ An organisation that needs faster response adds paging through its own sink (`by
 does not promise it (ADR-0022).
 
 ### Incident runbook
-One page, `docs/how-to/respond-to-an-incident.md`, to be written when this ADR is accepted. It
+One page, [Respond to an incident](../how-to/respond-to-an-incident.md), written after acceptance. It
 covers five cases, each with first steps, who decides, and the `task` target where one exists:
 a leaked or suspected credential, lost or corrupt state, a failed run with leftovers, a cost
-spike, and break-glass use. Until then the procedures that exist are:
+spike, and break-glass use. It builds on these existing procedures:
 [read a run record](../how-to/run-the-first-slice.md#read-a-run-record),
 [clean up and check for leftovers](../how-to/run-the-first-slice.md#clean-up-and-check-for-leftovers),
 [reporting a vulnerability](../../.github/SECURITY.md), and stale-lock recovery in
