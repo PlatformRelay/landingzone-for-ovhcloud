@@ -10,7 +10,7 @@ permissions: {}
 jobs:
   foundation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       LZ_IMAGE: platformrelay/landingzone-for-ovhcloud/runtime

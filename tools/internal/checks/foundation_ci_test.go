@@ -71,19 +71,20 @@ func TestFoundationCIValid(t *testing.T) {
 	}
 }
 
-// The job budget is 15 minutes (owner decision D125, 2026-10-19: 20 targets,
-// 9 min 47 s on PR #142 against the former 10). 15 is accepted and rendered.
+// The job budget is 20 minutes, a bridge (owner decision D126, 2026-10-20:
+// head runs needed 843-850 s of the 900 s budget at 15, D125's raise from 10).
+// 20 is accepted and rendered; 21 is refused (TestFoundationSourceRejected).
 func TestFoundationTimeoutAtBudget(t *testing.T) {
 	registry, tasks := foundationRegistry()
 	value := foundationSource()
-	value["timeout_minutes"] = 15
+	value["timeout_minutes"] = 20
 	source := encode(t, value)
 	workflow := renderSource(t, source)
 	if findings := CheckFoundationCI(source, workflow, registry, tasks); len(findings) != 0 {
-		t.Errorf("BEHAVIORAL_RED: 15-minute budget refused: %+v", findings)
+		t.Errorf("BEHAVIORAL_RED: 20-minute budget refused: %+v", findings)
 	}
-	if !strings.Contains(string(workflow), "\n    timeout-minutes: 15\n") {
-		t.Errorf("BEHAVIORAL_RED: rendered workflow lacks the 15-minute timeout")
+	if !strings.Contains(string(workflow), "\n    timeout-minutes: 20\n") {
+		t.Errorf("BEHAVIORAL_RED: rendered workflow lacks the 20-minute timeout")
 	}
 }
 
@@ -215,7 +216,7 @@ func TestFoundationSourceRejected(t *testing.T) {
 			s["targets"] = []any{"test:a", "test:ci", "Test A"}
 		}, []string{"CHECK_NAME", "CHECK_UNKNOWN"}},
 		"self-hosted runner":        {func(s map[string]any) { s["runner"] = "self-hosted" }, []string{"SOURCE_PIN"}},
-		"timeout above budget":      {func(s map[string]any) { s["timeout_minutes"] = 16 }, []string{"SOURCE_PIN"}},
+		"timeout above budget":      {func(s map[string]any) { s["timeout_minutes"] = 21 }, []string{"SOURCE_PIN"}},
 		"no timeout":                {func(s map[string]any) { s["timeout_minutes"] = 0 }, []string{"SOURCE_PIN"}},
 		"layer not a digest":        {func(s map[string]any) { s["layer"] = "latest" }, []string{"SOURCE_PIN"}},
 		"manifest not a digest":     {func(s map[string]any) { s["manifest"] = "sha256:" + strings.Repeat("A", 64) }, []string{"SOURCE_PIN"}},
@@ -895,7 +896,7 @@ func spend(r *FoundationRuns, total int) {
 
 // The head run's targets plus one child deadline (240 s) must fit the job's
 // timeout: at it the run passes, a second over it is refused, at 10 minutes
-// (the fixture's source) and at 15 (D125). A target with no time, or a
+// (the fixture's source), at 15 (D125) and at 20 (D126). A target with no time, or a
 // negative time that would hide another's, is refused; the red control stops
 // early by design and is not budgeted.
 func TestFoundationRunsBudget(t *testing.T) {
@@ -910,6 +911,8 @@ func TestFoundationRunsBudget(t *testing.T) {
 		"at 15 minutes":              {15, func(r *FoundationRuns) { spend(r, 900-240) }, nil},
 		"a second over 15 minutes":   {15, func(r *FoundationRuns) { spend(r, 900-240+1) }, []string{"RUN_OVER_BUDGET"}},
 		"over 10 fits 15":            {15, func(r *FoundationRuns) { spend(r, 600-240+1) }, nil},
+		"at 20 minutes":              {20, func(r *FoundationRuns) { spend(r, 1200-240) }, nil},
+		"a second over 20 minutes":   {20, func(r *FoundationRuns) { spend(r, 1200-240+1) }, []string{"RUN_OVER_BUDGET"}},
 		"one target over the budget": {15, func(r *FoundationRuns) { r.Runs[0].Targets[8].Seconds = 900 }, []string{"RUN_OVER_BUDGET"}},
 		"an untimed target":          {10, func(r *FoundationRuns) { r.Runs[0].Targets[2].Seconds = 0 }, []string{"RUN_UNTIMED"}},
 		"a negative time hides one": {10, func(r *FoundationRuns) {

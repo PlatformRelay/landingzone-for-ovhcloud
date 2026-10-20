@@ -59,8 +59,9 @@ the constitution and ADRs are unchanged.
   Independently reviewed YAML uses full-SHA Actions and an approved digest-pinned
   launcher/image closure outside the candidate; no host checkout/build/source of
   candidate scripts. An ephemeral GitHub-hosted runner provides contents-read fetch,
-  isolated candidate commands and a 15-minute timeout (raised from 10 by owner decision
-  D125, 2026-10-19: 20 targets, 9 min 47 s on PR #142). Tokens remain outside the child.
+  isolated candidate commands and a 20-minute timeout (raised from 10 by owner decision
+  D125, 2026-10-19: 20 targets, 9 min 47 s on PR #142; then to 20 as a bridge by D126,
+  2026-10-20, until the job is split). Tokens remain outside the child.
   Actual reviewed source/head/image/publisher metadata binds the result.
   C2 source enforcement remains DEFERRED to [KI-001](../../docs/known-issues/KI-001-ci-source-admission-unqualified.md) under D60,
   not a prerequisite for current private maintainer publication/PR/merge. No workflow/

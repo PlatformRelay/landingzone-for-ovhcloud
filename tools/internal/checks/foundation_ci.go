@@ -36,7 +36,7 @@ const (
 	FoundationSourcePath = "pipelines/github/foundation-source.json"
 	// foundationCreator is the task that creates the CI and its own checks.
 	foundationCreator = "T023"
-	maxTimeoutMinutes = 15
+	maxTimeoutMinutes = 20
 	// FoundationChildDeadline is the offline entry's deadline for one target
 	// (lz-offline's childDeadline, which its TestChildDeadline binds to this).
 	// The job keeps room for one target to run into it (T055, D125).

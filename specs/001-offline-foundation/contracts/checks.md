@@ -97,8 +97,9 @@ the constitution and ADRs are unchanged.
 - `task test:foundation-ci`, `task ci:foundation` (T023): only after T001–T009 have evidenced
   completion, test/bootstrap the implemented foundation on GitHub. Exact Action pins,
   independently reviewed workflow/launcher and image digests, ephemeral hosted runner,
-  read-only outer fetch, network-isolated candidate execution and 15-minute timeout
-  (raised from 10 by owner decision D125, 2026-10-19: 20 targets, 9 min 47 s on PR #142).
+  read-only outer fetch, network-isolated candidate execution and 20-minute timeout
+  (raised from 10 by owner decision D125, 2026-10-19: 20 targets, 9 min 47 s on PR #142;
+  then to 20 as a bridge by D126, 2026-10-20, until the job is split).
   No cloud/deployment/secret-bearing environment. Require actual matching PR-head run/check
   evidence and behavioral red/green controls; missing/foreign/stale/cancelled/skipped/
   zero-discovery results block merge, not review PR creation. Candidate commands execute

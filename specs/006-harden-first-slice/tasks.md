@@ -443,7 +443,7 @@ docs-only tasks T043–T044.
 
 - [x] T055 Ratchet the foundation job's time: record each target's duration in pipelines/github/foundation-runs.json and fail the run judge `ci:foundation` (`lz-check ci-runs`) when their sum plus the time outside them plus one 240 s child deadline exceeds `timeout_minutes`, fixture-tested under `test:foundation-ci`; the committed record is not judged inside a foundation target, which would make a digest cycle (`judgeBudget` in tools/internal/checks/foundation_ci.go; evidence/T055.md *Decision request*) (stage B round 1) — closed 2026-10-20, evidence: evidence/T055.md
   - Requirements: FR-022; ADRs: 0008, 0019. Depends on: T045.
-  - Verify: `task test:foundation-ci`: a record whose durations plus 240 s exceed 15 minutes is refused, a record under it passes; the capture script records durations; the current record is re-captured.
+  - Verify: `task test:foundation-ci`: a record whose durations plus 240 s exceed `timeout_minutes` (15 at closure, 20 since D126) is refused, a record under it passes; the capture script records durations; the current record is re-captured.
   - Evidence: `evidence/T055.md`; PR; initial status `not-run`.
 
 - [x] T056 [US1] Give lz-live's `tofu version` probe a scratch home in tools/internal/stacks/plan.go and make the canary trap's zero mode report in tools/internal/live/observe.go, test first (stage B round 1) — closed 2026-10-20, evidence: evidence/T056.md
