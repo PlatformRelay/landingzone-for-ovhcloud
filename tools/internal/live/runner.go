@@ -1085,20 +1085,23 @@ func (r Runner) Execute(ctx context.Context) error {
 	if s.credFile != "" {
 		destroyErr = errors.Join(destroyErr, removeFiles(s.credFile))
 	}
-	destroyErr = errors.Join(destroyErr, s.sweep(dctx, rootKept))
+	// The token the check obtains goes to this run's redactor before its first listing (FR-004):
+	// the one every record below and the terminal go through, whatever Red the caller set. Its
+	// listing retries wait in a budget ending at the destroy context's deadline and print to the
+	// run's terminal (spec 007 FR-001). The Sweep's reads are lent that same retry (T027): one
+	// budget, one clock, and their attempts in leftovers.json. The Sweep spends first, so its
+	// waits leave the check's listings less to retry with (fail closed: a refused wait fails).
+	check := s.r.Leftovers // with the baseline's Before (probeBaseline)
+	check.Red, check.Term = red, term
+	end, _ := dctx.Deadline()
+	check.Budget = newRetryBudget(end, minRetryReserve)
+	check.lent = check.retry()
+	destroyErr = errors.Join(destroyErr, s.sweep(context.WithValue(dctx, readRetryKey{}, check.lent), rootKept))
 
 	entries, invErr := ReadInventory(r.Dir)
 	if errors.Is(invErr, os.ErrNotExist) {
 		invErr = nil
 	}
-	// The token the check obtains goes to this run's redactor before its first listing (FR-004):
-	// the one every record below and the terminal go through, whatever Red the caller set. Its
-	// listing retries wait in a budget ending at the destroy context's deadline and print to the
-	// run's terminal (spec 007 FR-001).
-	check := s.r.Leftovers // with the baseline's Before (probeBaseline)
-	check.Red, check.Term = red, term
-	end, _ := dctx.Deadline()
-	check.Budget = newRetryBudget(end, minRetryReserve)
 	rep := check.Check(dctx, entries)
 	// A call that ignores its context may still answer after the budget ran out: the context's own
 	// state fails the run too.
@@ -1600,14 +1603,54 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 
 // retire removes a reconciled run's files, probe.env (root, which a cleanup starts from) last, and
 // then its directory: a crash part-way leaves probe.env, so `--cleanup` can still finish the run.
+// The run's own `.write-*` temporaries (a kill inside WriteCredentialFile) go with its files; any
+// other entry refuses before anything is removed, so the run never leaves a directory that blocks
+// every start and that `--cleanup` cannot reach (spec 007 T027).
 func retire(dir, root string, files ...string) error {
-	if err := removeFiles(files...); err != nil {
+	temps, stray, err := runDirEntries(dir, append([]string{root}, files...)...)
+	if err != nil {
+		return err
+	}
+	if len(stray) > 0 {
+		return fmt.Errorf("run directory %s holds %s, which the run did not write: not retired, probe.env kept; check and remove it by hand, then run the cleanup again",
+			dir, strings.Join(stray, ", "))
+	}
+	if err := removeFiles(slices.Concat(files, temps)...); err != nil {
 		return err
 	}
 	if err := removeFiles(root); err != nil {
 		return err
 	}
 	return removeEmptyDir(dir)
+}
+
+// runDirEntries reads a run directory (spec 007 T027): temps are its WriteCredentialFile
+// temporaries (`.write-*` regular files, full paths), stray the names of its other entries that
+// are none of known (paths; those outside dir are ignored). A missing directory holds nothing.
+func runDirEntries(dir string, known ...string) (temps, stray []string, err error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	names := map[string]bool{}
+	for _, k := range known {
+		if filepath.Dir(k) == filepath.Clean(dir) {
+			names[filepath.Base(k)] = true
+		}
+	}
+	for _, e := range entries {
+		switch {
+		case names[e.Name()]:
+		case strings.HasPrefix(e.Name(), ".write-") && e.Type().IsRegular():
+			temps = append(temps, filepath.Join(dir, e.Name()))
+		default:
+			stray = append(stray, e.Name())
+		}
+	}
+	return temps, stray, nil
 }
 
 // Start refuses to run beside another unreconciled probe run, then runs the start-up phases in

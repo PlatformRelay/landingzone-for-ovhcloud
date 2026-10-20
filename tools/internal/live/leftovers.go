@@ -101,6 +101,10 @@ type LeftoverCheck struct {
 	// judges only that project's resources, and another project's keep the matching above, since
 	// a probe creates nothing outside its project. "" judges every project's (tests).
 	beforeProject string
+	// lent is the retry the runner lent the run's Sweep (spec 007 T027): when set, Check retries
+	// with it, so the Sweep's waits spent its budget and its attempts are in the report. nil: a
+	// retry of the check's own.
+	lent *listRetry
 }
 
 // namelessKinds are the kinds whose resources carry no run-derived name or tag, so a probe's
@@ -534,6 +538,26 @@ func (c LeftoverCheck) retry() *listRetry {
 	return t
 }
 
+// lentOrOwn is the retry the runner lent the run's Sweep (T027), else a retry of the check's own.
+func (c LeftoverCheck) lentOrOwn() *listRetry {
+	if c.lent != nil {
+		return c.lent
+	}
+	return c.retry()
+}
+
+// readRetryKey keys the retry a probe check's Sweep gets in its context (APIChecker.Read).
+type readRetryKey struct{}
+
+// ReadRetry is ctx carrying c's retry, with a budget ending at end (the run's reserve floor), for
+// APIChecker.Read (spec 007 T027): a Sweep's reads are retried as the check's listings are. The
+// runner lends a Sweep the leftover check's own retry instead (Execute's destroy), so both spend
+// one budget on one clock and leftovers.json records both; tests of a Sweep build theirs here.
+func (c LeftoverCheck) ReadRetry(ctx context.Context, end time.Time) context.Context {
+	c.Budget = newRetryBudget(end, minRetryReserve)
+	return context.WithValue(ctx, readRetryKey{}, c.retry())
+}
+
 // get is one request of the check, asked again after each transient failure the retry admits;
 // it returns the last attempt's number. A first page's 404 that absentOK admits, and the cached
 // token refusal (no request was sent), are returned unrecorded.
@@ -888,11 +912,13 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		fail("no project to list")
 	}
 	var items []*item
+	// The retry's attempts are reported also when no lister could be built: a Sweep lent this
+	// retry may have recorded some (T027).
+	try := c.lentOrOwn()
 	if src != nil {
-		l := lister{ctx: ctx, l: src, errs: &errs, rec: rep.Listings, try: c.retry()}
-		items = c.list(l)
-		rep.Attempts = l.try.attempts
+		items = c.list(lister{ctx: ctx, l: src, errs: &errs, rec: rep.Listings, try: try})
 	}
+	rep.Attempts = try.attempts
 	rep.Listed = map[string][]string{}
 	for _, it := range items {
 		rep.Listed[it.typ] = append(rep.Listed[it.typ], it.id)

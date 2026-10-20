@@ -124,9 +124,10 @@ func record(obs observation, err error) ([]byte, error) {
 	return raw, err
 }
 
-// accountEmail is the account's own address (GET /me), the plan's recipient.
+// accountEmail is the account's own address (GET /me), the plan's recipient; read through
+// APIChecker.Read, so a Sweep's retry covers it (T027) and Observe sends it once.
 func accountEmail(ctx context.Context, c *live.APIChecker) (string, error) {
-	me, err := c.Do(ctx, live.APICall{Op: live.APIGetMe})
+	me, err := c.Read(ctx, live.APICall{Op: live.APIGetMe})
 	switch {
 	case err != nil:
 		return "", fmt.Errorf("GET /me: %w", err)
@@ -191,7 +192,10 @@ func (o Options) classify(runID, project string) (live.Baseline, live.RunClass, 
 
 // sweepBacked lists the project's alerts, deletes each one absent from the baseline that matches
 // the plan, reports the others, and lists again: it fails while a deleted id is still listed, or
-// when a non-baseline alert was reported or could not be read or deleted.
+// when a non-baseline alert was reported or could not be read or deleted. Its reads (the listings,
+// GET /me, each alert read) go through APIChecker.Read, which retries them with the leftover
+// check's retry the runner lends the Sweep in ctx (spec 007 T027); a DELETE is sent once, a 404
+// counted as gone.
 func (o Options) sweepBacked(ctx context.Context, project string, before []string, term io.Writer) error {
 	c, err := live.NewAPIChecker(ctx, o.API, o.Admin)
 	if err != nil {
@@ -225,7 +229,7 @@ func (o Options) sweepBacked(ctx context.Context, project string, before []strin
 }
 
 func listAlerts(ctx context.Context, c *live.APIChecker, project string) ([]string, error) {
-	a, err := c.Do(ctx, live.APICall{Op: live.APIListAlerts, Project: project})
+	a, err := c.Read(ctx, live.APICall{Op: live.APIListAlerts, Project: project})
 	switch {
 	case err != nil:
 		return nil, fmt.Errorf("budget-alert sweep: %w", err)
@@ -238,7 +242,7 @@ func listAlerts(ctx context.Context, c *live.APIChecker, project string) ([]stri
 // deleteIfPlanned reads one non-baseline alert and deletes it if it matches the plan (gone true);
 // an alert gone before the read needs nothing; any other is reported, kept and an error.
 func deleteIfPlanned(ctx context.Context, c *live.APIChecker, project, id, email string, term io.Writer) (gone bool, err error) {
-	a, err := c.Do(ctx, live.APICall{Op: live.APIGetAlert, Project: project, ID: id})
+	a, err := c.Read(ctx, live.APICall{Op: live.APIGetAlert, Project: project, ID: id})
 	switch {
 	case err != nil:
 		return false, fmt.Errorf("budget-alert sweep: %w", err)
