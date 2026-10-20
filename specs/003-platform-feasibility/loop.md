@@ -81,6 +81,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | T026 | CLOSED | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | `refused-before-expiry`, OAuth2-client token refused within ~0.07 s of the delete; C007.6 not shown (no approved maximum; other types not probed) |
 | T027 | CLOSED-WITH-GAPS | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | `iam/policy/get` → account URN; `iam/resource/edit` blocked (no owned target); transient leftover error, `--cleanup` passed |
 | T028 | CLOSED | leg 1, 1 round (REQUEST_CHANGES: evidence wording, fixed; evidence-only diff, no strong leg) | `recovered`; conditional PUT honoured (412); transient leftover errors, `--cleanup` passed |
+| T040 | CLOSED-WITH-GAPS | leg 1 + strong leg, 2 rounds (r1 REQUEST_CHANGES/CLEAN, r2 APPROVE/CONCERNS; verified findings fixed) | round-2 fixes unreviewed (last round); the fakes' container answers (409 on a non-recursive delete, id shape, a tenant's reach to its own container) UNVERIFIED until T042; known red swiftreach_test.go (11 tests) for the coordinator's table |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -90,6 +91,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | tools/internal/probes/live/identity/urn_test.go: TestJudgeURN, TestURNObserve, TestURNUndo, TestURNSweep, TestURNValidate, TestURNLeak; `test:live-lane` red | US3 iam-urn | T033 |T034 |
 | tools/internal/probes/live/state/recovery_test.go: TestRecoveryLock, UnlockRefused, Blocked, TofuEnv, ConditionalPut, Restore, NoAnswer, Undo, Sweep, Validate, Leak; `test:live-lane` red | US2 locked-recovery | T035 | T036 |
 | tools/internal/live/sweep_test.go: TestSweepLostCreateAnswer, TestSweepAfterCrash, TestSweepKeepsRunFiles, TestSweepRemovesRunFiles, TestSweepWithUndo, TestSweepRedacted | US1 runner sweep | T037 | T038 |
+| tools/internal/probes/live/storageiam/swiftreach_test.go: TestSwiftNativeCreate, TestSwiftNotApplicable, TestSwiftNativeControlFails, TestSwiftNotApplicablePerStep, TestSwiftNativeOneDirection, TestSwiftNotApplicableOwnFails, TestSwiftNotApplicableTokenLost, TestSwiftNativeReach, TestSwiftContainerUndo, TestSwiftContainerSweep, TestSwiftLeftoverContainers; `test:live-lane` red | US2 swift-reach native control | T040 | |
 
 ## Test changes
 | Test (file:name) | Written in | Changed in | Evidence it was wrong |
@@ -97,6 +99,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 | tools/internal/probes/live/storageiam/swiftreach_test.go: swWorld (fake S3 and API) | T029 | T030 | not wrong, extended: the seed write the provider cannot do (tasks.md T030), 404/InvalidAccessKeyId after a Sweep and the API's object listing and bulk delete (coordinator decision 2026-10-16); no assertion changed |
 | tools/internal/probes/live/identity/urn_test.go: uuWorld (fake API) | T033 | T034 | not wrong, extended: the GRA bucket listing and delete a Sweep needs to remove a bucket a lost create answer left (data-model.md ProbeCheck.Sweep; spec-set review R2); empty by default; no assertion changed |
 | tools/internal/probes/live/state/recovery_test.go: rcWorld.tofu force-unlock | T035 | T036 | wrong: compared the given id with the id A took; OpenTofu compares it with the ID the lock object holds (internal/backend/remote-state/s3/client.go:524-557; spec C005.4, C005.8), so a condition-ignored PUT that replaced the object passed as `recovered`; no assertion changed |
+| tools/internal/probes/live/storageiam/swiftreach_test.go: swWorld (fake Swift and API), swiftOf, undoReqs, swRecord | T029, T030 | T040 | not wrong, extended for research.md *S3-API buckets are not on the Swift plane*: the API's Swift container calls, Swift-native containers, `s3Absent`; swiftOf skips the native containers and undoReqs the admin's container calls, so T029's sequences stay about the S3 names; no assertion changed |
 
 ## Live runs
 | Task | Run id | Reviewed SHA | Observation | Cost | Leftovers |
@@ -120,4 +123,5 @@ As spec 006's loop.md: test:dependencies, the default check:specs, test:traceabi
 - Validate server text for secrets after shape: a listed URN or key of the right shape can still hold a run's token, so filter it against every identity's token and secret; when dropping malformed listed text, keep the validated key (blank its value) so a cleanup still sees it. (T034)
 - A mock that fills every attribute hides one the real API leaves empty: when a root publishes a provider attribute, mock it as the live answer looked (or set the attributes the code must not read to empty or a decoy), and prefer the attribute the root already selects by (here `service_name`). (T039)
 - `--cleanup <run-id>` rewrites the run's `summary.json` and `leftovers.json`: quote the first leftover check's failure from the terminal log, whose error detail is otherwise lost; recompute a truncated bound (`upper_seconds: 0`) from the record's timestamps before reading it as "immediate". (T025–T028)
+- A rule with ordered clauses needs one case per clause that the next clause would accept, and a reference with a mutant per clause before review (a reference ignoring the lost-token clause passed every first-round case); a fake that checks a required flag by presence passes a wrong value: record and assert it. (T040)
 - See spec 006's loop.md *Lessons*; they apply here, especially the entry command shape, whole-checkout scratch copies for live-package mutants, and vacuity checks on harness runs.
