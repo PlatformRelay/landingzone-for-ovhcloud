@@ -795,3 +795,90 @@ func TestDocsRepositoryMapLink(t *testing.T) {
 		t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with MAP_PATH_GONE naming tools/alias/hello.txt:\n%s", code, out)
 	}
 }
+
+// ADR-0027 (accepted, D128): every page under docs/, ADRs included, keeps its
+// heading levels in order with one H1, links with text that says where it
+// goes, and gives every table a header row. b is the reference page; each
+// accepted row adds lines to it that hold the rules, the fenced ones lines
+// that would break them outside a code block.
+func docsA11yPage(extra string) map[string]string {
+	return map[string]string{"docs/reference/b.md": header("references: []\n") + pageB + extra}
+}
+
+func TestDocsAccessibilityAccepted(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"headings climb back":   docsA11yPage("\n### Deeper\n\n#### Deepest\n\n## Back up two\n"),
+		"links say where":       docsA11yPage("\nSee [the B page's X section](#x), [more on X](#x) and [here is B](#x).\n"),
+		"table with a header":   docsA11yPage("\n| Name | Value |\n| :--- | ---: |\n| a | 1 |\n\n| Second | Table |\n|---|---|\n"),
+		"fenced headings":       docsA11yPage("\n```md\n# A second H1\n\n#### A skip\n```\n\n~~~\n# Another\n~~~\n"),
+		"fenced vague link":     docsA11yPage("\n```md\n[here](#x) and [click here](#x)\n```\n"),
+		"fenced table":          docsA11yPage("\n```text\n| no | header |\n| at | all |\n```\n"),
+		"vague text in a span":  docsA11yPage("\nWrite `[here](#x)` never.\n"),
+		"image alt is not text": docsA11yPage("\n![more](b.md)\n"),
+		"double-backtick span":  docsA11yPage("\nWrite `` ` [here](#x) `` never.\n"),
+		"longer run inside":     docsA11yPage("\nWrite ` ``[here](#x)`` ` never.\n"),
+		"undefined reference":   docsA11yPage("\nThe words [here][missing] and [more] are text, not links.\n"),
+		"adr in order":          {"docs/adr/0013-docs.md": "# ADR-0013\n\n## Context\n\n### Detail\n\n## Decision\n"},
+		"front matter comment":  {"docs/how-to/c.md": header("references: []\n# A YAML comment, not an H1\n") + "# Steps\n\n## One\n"},
+		"readme not held":       {"modules/x/README.md": moduleReadme + "# Second H1\n\n#### Skip\n\n[here](#inputs)\n\n| a |\n| b |\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsRepo(t, files), "docs")
+			if code != 0 || !strings.Contains(out, "DOCS_OK") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with DOCS_OK (ADR-0027 control):\n%s", code, out)
+			}
+		})
+	}
+}
+
+// One row per clause of ADR-0027's three mechanical rules; each breaks
+// exactly one clause of the passing tree.
+func TestDocsAccessibilityRejected(t *testing.T) {
+	const b, adr = "docs/reference/b.md", "docs/adr/0013-docs.md"
+	skip, vague, table := "HEADING_SKIP", "LINK_TEXT_VAGUE", "TABLE_HEADER_MISSING"
+	for name, r := range map[string]struct {
+		files              map[string]string
+		rule, page, detail string
+	}{
+		"level jumps by two":        {docsA11yPage("\n#### Deep\n"), skip, b, "H2 to H4"},
+		"first heading jumps":       {map[string]string{adr: "# ADR\n\n### Deep\n"}, skip, adr, "H1 to H3"},
+		"second H1":                 {docsA11yPage("\n# Again\n"), skip, b, "second H1"},
+		"fenced heading no bridge":  {docsA11yPage("\n```md\n### Mid\n```\n\n#### Deep\n"), skip, b, "H2 to H4"},
+		"front matter not a page":   {map[string]string{"docs/how-to/c.md": header("references: []\n") + "## Steps\n\n#### Deep\n"}, skip, "docs/how-to/c.md", "H2 to H4"},
+		"vague here":                {docsA11yPage("\nSee [here](#x).\n"), vague, b, `"here"`},
+		"vague case and spaces":     {docsA11yPage("\nSee [ Click Here ](#x).\n"), vague, b, "Click Here"},
+		"vague reference link":      {docsA11yPage("\nSee [this link][r].\n\n[r]: #x\n"), vague, b, "this link"},
+		"vague after a long span":   {docsA11yPage("\nWrite `` ` `` then [here](#x).\n"), vague, b, `"here"`},
+		"vague between loose runs":  {docsA11yPage("\nWrite `` x ``` [here](#x) `.\n"), vague, b, `"here"`},
+		"vague shortcut reference":  {docsA11yPage("\nSee [here].\n\n[here]: #x\n"), vague, b, `"here"`},
+		"vague collapsed reference": {docsA11yPage("\nSee [Read More][].\n\n[read  more]: #x\n"), vague, b, "Read More"},
+		"vague after a span":        {docsA11yPage("\nRun `x`, then read [more](#x).\n"), vague, b, `"more"`},
+		"vague in an adr":           {map[string]string{adr: "# ADR\n\nSee [link](../reference/b.md).\n"}, vague, adr, `"link"`},
+		"table without delimiter":   {docsA11yPage("\n| a | b |\n| c | d |\n"), table, b, "line"},
+		"table starts at delimiter": {docsA11yPage("\n| --- | --- |\n| a | b |\n"), table, b, "line"},
+		"delimiter rows only":       {docsA11yPage("\n| --- |\n| --- |\n"), table, b, "line"},
+		"one-row table at the end":  {docsA11yPage("\n| a | b |"), table, b, "line"},
+		"table after a fence":       {docsA11yPage("\n| H |\n|---|\n```text\nx\n```\n| a |\n| b |\n"), table, b, "line"},
+		"table in an adr":           {map[string]string{adr: "# ADR\n\n| a |\n| b |\n"}, table, adr, "line"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsRepo(t, r.files), "docs")
+			if code != 1 || !docsFindingLine(out, r.rule, r.page, r.detail) || !strings.Contains(out, "DOCS_FAIL") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %s %s naming %q and DOCS_FAIL:\n%s", code, r.rule, r.page, r.detail, out)
+			}
+		})
+	}
+}
+
+// Every word on ADR-0027's vague list is refused, so a word dropped from the
+// list fails here; a longer text that only contains one passes (above).
+func TestDocsAccessibilityVagueWords(t *testing.T) {
+	for _, word := range []string{"here", "click here", "this link", "link", "this", "more", "read more"} {
+		t.Run(word, func(t *testing.T) {
+			code, out := lzCheck(docsRepo(t, docsA11yPage("\nSee ["+word+"](#x).\n")), "docs")
+			if code != 1 || !docsFindingLine(out, "LINK_TEXT_VAGUE", "docs/reference/b.md", strconv.Quote(word)) {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with LINK_TEXT_VAGUE naming %q:\n%s", code, word, out)
+			}
+		})
+	}
+}
