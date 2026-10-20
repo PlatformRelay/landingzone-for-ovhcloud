@@ -1,5 +1,5 @@
 {
- "_source": "synthetic, schema of kb/api v1 cloud.json/me.json and v2 iam.json (T054); qualified on captures by T065; region details (cloud.Region, kb/api/v1/cloud.json:67596) added by T065, every synthetic region offering Object Storage (service name UNVERIFIED)",
+ "_source": "synthetic, schema of kb/api v1 cloud.json/me.json and v2 iam.json (T054); qualified on captures by T065; region details (cloud.Region, kb/api/v1/cloud.json:67596) added by T065, every synthetic region offering Object Storage (service name UNVERIFIED); Swift containers (cloud.storage.Container, kb/api/v1/cloud.json \"Get SWIFT storage containers\") added by spec 003 T041",
  "projects": [
   {
    "id": "p1",
@@ -206,6 +206,19 @@
        "openstackId": "os-pn-111_7"
       }
      ]
+    }
+   ]
+  ],
+  "/cloud/project/p1/storage": [
+   [
+    {
+     "id": "R1JBMTE6b3BzLXN3aWZ0",
+     "name": "ops-swift",
+     "region": "GRA11",
+     "archive": false,
+     "containerType": "private",
+     "storedBytes": 0,
+     "storedObjects": 0
     }
    ]
   ],
@@ -509,6 +522,9 @@
    []
   ],
   "/cloud/project/p2/network/private": [
+   []
+  ],
+  "/cloud/project/p2/storage": [
    []
   ],
   "/cloud/project/p2/user": [

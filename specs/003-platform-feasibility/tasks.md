@@ -402,7 +402,7 @@ apply to T040.
   - Verify: `task test:live-lane`: each new case fails on the stub for its stated reason; T029's cases stay green.
   - Evidence: `specs/003-platform-feasibility/evidence/T040.md`; initial status `not-run`.
 
-- [ ] T041 [US2] Implement the Swift-native control in tools/internal/probes/live/storageiam/swiftreach.go, the container calls in tools/internal/live/apicheck.go and the Swift container kind of the leftover matrix
+- [x] T041 [US2] Implement the Swift-native control in tools/internal/probes/live/storageiam/swiftreach.go, the container calls in tools/internal/live/apicheck.go and the Swift container kind of the leftover matrix — closed 2026-10-20, evidence: evidence/T041.md
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T040.
   - Scope: the steps T040 fixes. The containers belong to the check, so the root does not change. Add the `swift container` row (`/cloud/project/<p>/storage`) to the leftover matrix and to tests/live/probes/README.md, and update the swift-reach run-sheet row (row 9) with the new outcomes. Cite the research decision in the check's comment.
   - Verify: `task test:live-lane`: T040's cases green; `task test:traceability` green; `task docs:check` green.

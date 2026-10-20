@@ -15,18 +15,22 @@ package storageiam
 //     pcs-curl-commands-memo.mdx:15-19) and, per route (list, read of the seed, write under
 //     lzprobe-swift-reach/), asks its own bucket (the control), the other bucket, and its own
 //     bucket again with the same token, on the catalog's public object-store endpoint of the
-//     published region. JudgeReach weighs the three. A reach is a finding; Observe fails on a
-//     finding, and when any step is blocked or not run (C005.1 is then not shown), always
-//     returning the record.
+//     published region. JudgeReach weighs the three, and judgeStep reads a 404 not-applicable
+//     after a working Swift-native control (T041, below). A reach is a finding; Observe fails on
+//     a finding, and when any step is blocked or not run (C005.1 is then not shown), always
+//     returning the record. Before all of it the sandbox admin creates the check's two
+//     Swift-native containers, and each tenant runs its control on its own one.
 //   - Undo lists each bucket with its own cleanup key over S3 and deletes every object under the
 //     prefix but the seed, then lists again; anything left fails it. A bucket already deleted (404)
 //     or a cleanup key already revoked (403 InvalidAccessKeyId) is undone (coordinator decision
 //     2026-10-16: --cleanup reruns Undo after a Sweep). A revoked key passes Undo whether or not
 //     its bucket still holds the check's objects; the destroy and Sweep, which empty the bucket
-//     through the API, are then the cleanup (review r1).
+//     through the API, are then the cleanup (review r1). Undo then removes the Swift-native
+//     containers with the sandbox admin.
 //   - Sweep finds, with the sandbox admin and by listing, the run's two buckets in every region and
 //     its four users by their exact descriptions, empties each bucket before deleting it (a bucket
-//     it cannot empty is kept and named), deletes the users, and lists again.
+//     it cannot empty is kept and named), deletes the users and the run's Swift-native
+//     containers, and lists again.
 //
 // Nothing here prints or records a password, a token, a key or the server's text: of a Keystone
 // answer the status, the token (in memory only), the catalog endpoint and role names of a set
@@ -90,21 +94,175 @@ func SwiftContainer(runID, side string) string {
 	return "lzprobe-swift-reach-" + strings.ToLower(runID) + "-swift-" + side
 }
 
-// The Swift-native control's steps, stubbed by T040 (no-ops); T041 implements them:
-//   - nativeCreate: the sandbox admin creates both containers (POST
-//     /cloud/project/{serviceName}/storage, in the published region) before any tenant call;
-//   - nativeUndo: the admin deletes both by listing (DELETE …/storage/{containerId}?recursive=true),
-//     lists again and fails on anything left;
-//   - nativeSweep: the same with only the run id and the project.
+// The Swift-native control (spec 003 T041; research.md *S3-API buckets are not on the Swift
+// plane*): T025 saw every Swift call on the S3 bucket names answer 404, own buckets included, and
+// the documentation puts S3-API buckets on another plane than Swift. So per tenant a Swift-native
+// container, created and deleted by the sandbox admin through the API (kb api/v1/cloud.json
+// /cloud/project/{serviceName}/storage), shows that the tenant's token and the catalog's endpoint
+// work. The containers belong to the check, not to the root:
+//   - nativeCreate: the admin creates both containers (POST …/storage, "archive": false, in the
+//     published region) before any tenant call;
+//   - control: each tenant lists its own container, writes an object and reads that object back,
+//     with the token of its S3-bucket steps, and lists the other tenant's container (swift_native:
+//     an observation for ADR-0018's route inventory, never a C005.1 verdict);
+//   - Undo and Sweep: the admin lists the project's containers, deletes the run's two by id with
+//     recursive=true, lists again and fails on either left (cleanContainers).
 //
-// The steps' judging (own container 2xx to list, write and read, per direction, before a 404 on
-// the S3 bucket names reads not-applicable; the cross steps under swift_native) is T041's too, and
-// so are these signatures: the stubs return nothing only so that T029's cases keep their results.
-func (o SwiftOptions) nativeCreate(context.Context, map[string]string, io.Writer) {}
+// A 404 on an S3 bucket name then reads not-applicable, per step and direction, only when the own
+// container answered 2xx to list, write and read and the own S3 name answered 404 before and after
+// the other's 404 with the same token (judgeStep). A reach is still a finding whatever the
+// control; a 5xx, a transport error or a lost token stays blocked.
+const swiftDecision = "research.md *S3-API buckets are not on the Swift plane*"
 
-func (o SwiftOptions) nativeUndo(context.Context, map[string]string, io.Writer) {}
+// notApplicable is a step's observed value when C005.1 does not apply on the Swift plane.
+const notApplicable = "not-applicable"
 
-func (o SwiftOptions) nativeSweep(context.Context, string, string, io.Writer) {}
+// nativeKey is the object a tenant's control writes to its own container and reads back.
+func nativeKey(side string) string { return SwiftPrefix + "native-" + side }
+
+// nativeCreate creates the run's two containers with the sandbox admin and says, per container,
+// how it went; a failed create is no error here: the tenants' controls show it.
+func (o SwiftOptions) nativeCreate(ctx context.Context, env map[string]string, term io.Writer) map[string]string {
+	out := map[string]string{}
+	admin, err := live.NewAPIChecker(ctx, o.API, o.Admin)
+	for _, side := range []string{"a", "b"} {
+		name := SwiftContainer(env["run_id"], side)
+		out[name] = "not created: admin identity: " + fmt.Sprint(err)
+		if err == nil {
+			out[name] = createAnswer(admin.Do(ctx, live.APICall{Op: live.APICreateContainer, Project: env["tenant_id"], Region: env["region"], Name: name}))
+		}
+		fmt.Fprintf(term, "LZ-LIVE observe container %s %s\n", name, out[name])
+	}
+	return out
+}
+
+// createAnswer says how a container create went, without answer text.
+func createAnswer(a live.APIAnswer, err error) string {
+	switch {
+	case err != nil:
+		return "not created: no answer"
+	case a.Status < 200 || a.Status > 299:
+		return strings.TrimSpace(fmt.Sprintf("refused %d %s", a.Status, strings.Join(a.Actions, ",")))
+	}
+	return fmt.Sprintf("created %d", a.Status)
+}
+
+// SwiftControl is one tenant's Swift-native control as observations.json keeps it: its own
+// container's answers to list, write and read (0: no answer or not asked), and whether all three
+// were 2xx.
+type SwiftControl struct {
+	Credential string `json:"credential"`
+	Container  string `json:"container"`
+	List       int    `json:"list_status"`
+	Write      int    `json:"write_status"`
+	Read       int    `json:"read_status"`
+	Works      bool   `json:"works"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// SwiftNativeObservation is one cross step on the other tenant's Swift-native container: reach
+// (2xx), denied (401 or 403 after a working control) or blocked, with the role names the tenant's
+// token carries.
+type SwiftNativeObservation struct {
+	Step       string   `json:"step"` // <user>-list-<other side>
+	Credential string   `json:"credential"`
+	Container  string   `json:"container"`
+	Observed   string   `json:"observed"`
+	Status     int      `json:"status"`
+	Roles      []string `json:"roles"`
+	Reason     string   `json:"reason,omitempty"`
+}
+
+// control runs one tenant's Swift-native control and its cross listing with the session's token.
+func (o SwiftOptions) control(ctx context.Context, env map[string]string, s side, ses session) (SwiftControl, SwiftNativeObservation) {
+	own, other := SwiftContainer(env["run_id"], s.name), SwiftContainer(env["run_id"], s.other)
+	c := SwiftControl{Credential: "user-" + s.name, Container: own}
+	nat := SwiftNativeObservation{Step: s.name + "-list-" + s.other, Credential: c.Credential, Container: other, Observed: blocked, Roles: ses.roles}
+	if ses.why != "" || ctx.Err() != nil {
+		c.Reason, nat.Observed, nat.Reason = "not run: no session", notRun, "not run: no session"
+		return c, nat
+	}
+	list := o.swiftCall(ctx, ses, http.MethodGet, own, "")
+	write := o.swiftCall(ctx, ses, http.MethodPut, own, nativeKey(s.name))
+	read := o.swiftCall(ctx, ses, http.MethodGet, own, nativeKey(s.name))
+	c.List, c.Write, c.Read = list.Status, write.Status, read.Status
+	c.Works = ok2xx(list) && ok2xx(write) && ok2xx(read)
+	if !c.Works {
+		c.Reason = fmt.Sprintf("the own Swift-native container answered list %d, write %d, read %d (0: no answer)", c.List, c.Write, c.Read)
+	}
+	cross := o.swiftCall(ctx, ses, http.MethodGet, other, "")
+	nat.Status = cross.Status
+	switch {
+	case ok2xx(cross):
+		nat.Observed = reach
+	case c.Works && cross.Err == nil && (cross.Status == http.StatusUnauthorized || cross.Status == http.StatusForbidden):
+		nat.Observed = denied
+	default:
+		nat.Reason = "no working control, or the other container answered neither 2xx nor a refusal"
+	}
+	return c, nat
+}
+
+// judgeStep judges one S3-bucket step: JudgeReach, then not-applicable when the own Swift-native
+// control works and the own S3 name, the other S3 name and the repeat all answered 404.
+func judgeStep(control, other, repeat SwiftAnswer, native SwiftControl) (observed, reason string) {
+	observed = JudgeReach(control, other, repeat)
+	if observed != blocked {
+		return observed, ""
+	}
+	is404 := func(a SwiftAnswer) bool { return a.Err == nil && a.Status == http.StatusNotFound }
+	all404 := is404(control) && is404(other) && is404(repeat)
+	switch {
+	case all404 && native.Works:
+		return notApplicable, "the own Swift-native container answered list, write and read with this token and endpoint, and both S3 bucket names answered 404: C005.1 does not apply on the Swift plane (" + swiftDecision + ")"
+	case all404:
+		return blocked, whyBlocked(control, other, repeat) + "; no working Swift-native control: " + native.Reason
+	}
+	return blocked, whyBlocked(control, other, repeat)
+}
+
+// cleanContainers deletes, with the sandbox admin, the run's two Swift-native containers that a
+// listing of the project shows (by id, recursively), then lists again; either left, or a listing
+// or delete that fails, is an error naming the container. None of the run's listed (the create
+// was refused, or a Sweep came first) is undone, not an error; a delete answered 404 is gone
+// already. Containers of other names are never touched.
+func cleanContainers(ctx context.Context, admin *live.APIChecker, project, runID string, term io.Writer, who string) (int, error) {
+	ours := []string{SwiftContainer(runID, "a"), SwiftContainer(runID, "b")}
+	list := func() ([]live.APIContainer, error) {
+		a, err := admin.Do(ctx, live.APICall{Op: live.APIListContainers, Project: project})
+		if err == nil && (a.Status < 200 || a.Status > 299) {
+			err = fmt.Errorf("%s answered %d %s", live.APIListContainers, a.Status, strings.Join(a.Actions, ","))
+		}
+		return slices.DeleteFunc(a.Containers, func(c live.APIContainer) bool { return !slices.Contains(ours, c.Name) }), err
+	}
+	found, err := list()
+	if err != nil {
+		return 0, fmt.Errorf("%s containers: %w", who, err)
+	}
+	var errs []error
+	removed := 0
+	for _, c := range found {
+		a, err := admin.Do(ctx, live.APICall{Op: live.APIDeleteContainer, Project: project, ID: c.ID})
+		switch {
+		case err != nil:
+			// The gate's or the transport's error names the operation, never the listed id.
+			errs = append(errs, fmt.Errorf("%s container %s: %w", who, c.Name, err))
+		case a.Status == http.StatusNotFound:
+		case a.Status < 200 || a.Status > 299:
+			errs = append(errs, fmt.Errorf("%s container %s: %s answered %d %s", who, c.Name, live.APIDeleteContainer, a.Status, strings.Join(a.Actions, ",")))
+		default:
+			removed++
+		}
+	}
+	left, err := list()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("%s containers, listed again: %w", who, err))
+	}
+	for _, c := range left {
+		errs = append(errs, fmt.Errorf("%s container %s still listed after the delete", who, c.Name))
+	}
+	return removed, errors.Join(errs...)
+}
 
 // SwiftUsers are the descriptions of the run's cloud project users: the tenant users under test
 // and the bucket-scoped cleanup users.
@@ -173,7 +331,7 @@ type SwiftObservation struct {
 	Credential string `json:"credential"` // user-a, user-b
 	Bucket     string `json:"bucket"`     // the other bucket
 	Expected   string `json:"expected"`
-	Observed   string `json:"observed"` // reach, denied, blocked, not-run
+	Observed   string `json:"observed"` // reach, denied, blocked, not-applicable (T041), not-run
 	Status     int    `json:"status"`   // the other bucket's; 0: no answer or not asked
 	Control    int    `json:"control_status"`
 	Repeat     int    `json:"repeat_status"`
@@ -191,6 +349,12 @@ type SwiftRecord struct {
 	Roles        map[string][]string `json:"roles"`
 	Observations []SwiftObservation  `json:"observations"`
 	Findings     []string            `json:"findings"`
+	// Containers: per Swift-native container, the admin's create answer ("created 200",
+	// "refused 403 …"); NativeControl: each tenant's control; SwiftNative: the cross steps on the
+	// other tenant's container (T041).
+	Containers    map[string]string        `json:"containers"`
+	NativeControl []SwiftControl           `json:"native_control"`
+	SwiftNative   []SwiftNativeObservation `json:"swift_native"`
 }
 
 // SwiftReach is the probe check lz-live runs on the swift-reach root.
@@ -282,6 +446,7 @@ type session struct {
 	token, swift string
 	roles        []string
 	why          string
+	control      SwiftControl // the user's Swift-native control (T041)
 }
 
 // maxKeystone bounds a Keystone token answer (its catalog) and what is read of a Swift answer.
@@ -391,11 +556,13 @@ type route struct{ name, method, key string }
 
 var swiftRoutes = []route{{"list", http.MethodGet, ""}, {"read", http.MethodGet, SwiftSeed}, {"write", http.MethodPut, ""}}
 
-// observe writes the seeds, logs both users in and observes the six steps; the record is
-// complete whatever fails.
+// observe creates the Swift-native containers, writes the seeds, logs both users in, runs their
+// Swift-native controls and observes the six steps; the record is complete whatever fails. A step
+// that is not-applicable is neither a finding nor unproven (research.md, the decision above).
 func (o SwiftOptions) observe(ctx context.Context, env map[string]string, term io.Writer) (SwiftRecord, error) {
-	rec := SwiftRecord{Check: "swift-reach", Seeds: map[string]string{}, Roles: map[string][]string{}, Observations: []SwiftObservation{}, Findings: []string{}}
-	o.nativeCreate(ctx, env, term)
+	rec := SwiftRecord{Check: "swift-reach", Seeds: map[string]string{}, Roles: map[string][]string{}, Observations: []SwiftObservation{}, Findings: []string{},
+		NativeControl: []SwiftControl{}, SwiftNative: []SwiftNativeObservation{}}
+	rec.Containers = o.nativeCreate(ctx, env, term)
 	for _, b := range []string{"a", "b"} {
 		rec.Seeds[env["bucket_"+b]] = o.seed(ctx, env, b)
 		fmt.Fprintf(term, "LZ-LIVE observe seed %s %s\n", env["bucket_"+b], rec.Seeds[env["bucket_"+b]])
@@ -404,35 +571,7 @@ func (o SwiftOptions) observe(ctx context.Context, env map[string]string, term i
 		{name: "a", other: "b", ownBucket: env["bucket_a"], otherBucket: env["bucket_b"], user: env["user_a_name"], password: env["user_a_password"]},
 		{name: "b", other: "a", ownBucket: env["bucket_b"], otherBucket: env["bucket_a"], user: env["user_b_name"], password: env["user_b_password"]},
 	}
-	sessions := map[string]session{}
-	for _, s := range sides {
-		ses := session{why: "not run: the run's context ended"}
-		if ctx.Err() == nil {
-			ses = o.login(ctx, env, s)
-		}
-		sessions[s.name] = ses
-	}
-	// A role name that holds or is held by a secret of the run (either token, a password, a
-	// cleanup key) is dropped: the tokens are not in the run's redactor (review r1, r2).
-	secrets := []string{sessions["a"].token, sessions["b"].token}
-	for _, k := range swiftKeys {
-		if !slices.Contains(swiftPublic, k) {
-			secrets = append(secrets, env[k])
-		}
-	}
-	for _, s := range sides {
-		ses := sessions[s.name]
-		ses.roles = slices.DeleteFunc(ses.roles, func(role string) bool {
-			return slices.ContainsFunc(secrets, func(x string) bool { return x != "" && (strings.Contains(role, x) || strings.Contains(x, role)) })
-		})
-		sessions[s.name] = ses
-		if ses.why == "" {
-			rec.Roles["user-"+s.name] = ses.roles
-			fmt.Fprintf(term, "LZ-LIVE observe user-%s roles %s\n", s.name, strings.Join(ses.roles, ","))
-		} else {
-			fmt.Fprintf(term, "LZ-LIVE observe user-%s %s\n", s.name, ses.why)
-		}
-	}
+	sessions := o.logins(ctx, env, sides, &rec, term)
 	nobody := sessions["a"].why != "" && sessions["b"].why != ""
 	var unproven []string
 	for _, s := range sides {
@@ -463,6 +602,47 @@ func (o SwiftOptions) observe(ctx context.Context, env map[string]string, term i
 	return rec, errors.Join(errs...)
 }
 
+// logins logs both users in, records their role names and runs their Swift-native controls with
+// the session each step then uses.
+func (o SwiftOptions) logins(ctx context.Context, env map[string]string, sides []side, rec *SwiftRecord, term io.Writer) map[string]session {
+	sessions := map[string]session{}
+	for _, s := range sides {
+		ses := session{why: "not run: the run's context ended"}
+		if ctx.Err() == nil {
+			ses = o.login(ctx, env, s)
+		}
+		sessions[s.name] = ses
+	}
+	// A role name that holds or is held by a secret of the run (either token, a password, a
+	// cleanup key) is dropped: the tokens are not in the run's redactor (review r1, r2).
+	secrets := []string{sessions["a"].token, sessions["b"].token}
+	for _, k := range swiftKeys {
+		if !slices.Contains(swiftPublic, k) {
+			secrets = append(secrets, env[k])
+		}
+	}
+	for _, s := range sides {
+		ses := sessions[s.name]
+		ses.roles = slices.DeleteFunc(ses.roles, func(role string) bool {
+			return slices.ContainsFunc(secrets, func(x string) bool { return x != "" && (strings.Contains(role, x) || strings.Contains(x, role)) })
+		})
+		if ses.why == "" {
+			rec.Roles["user-"+s.name] = ses.roles
+			fmt.Fprintf(term, "LZ-LIVE observe user-%s roles %s\n", s.name, strings.Join(ses.roles, ","))
+		} else {
+			fmt.Fprintf(term, "LZ-LIVE observe user-%s %s\n", s.name, ses.why)
+		}
+		var nat SwiftNativeObservation
+		ses.control, nat = o.control(ctx, env, s, ses)
+		sessions[s.name] = ses
+		rec.NativeControl = append(rec.NativeControl, ses.control)
+		rec.SwiftNative = append(rec.SwiftNative, nat)
+		fmt.Fprintf(term, "LZ-LIVE observe user-%s native control %s list %d write %d read %d works %v\n", s.name, ses.control.Container, ses.control.List, ses.control.Write, ses.control.Read, ses.control.Works)
+		fmt.Fprintf(term, "LZ-LIVE observe swift-native %s %s %d (an observation, not a C005.1 verdict)\n", nat.Step, nat.Observed, nat.Status)
+	}
+	return sessions
+}
+
 // step observes one route of one side: the own bucket's control, the other bucket and the
 // repeated control, with one token.
 func (o SwiftOptions) step(ctx context.Context, s side, ses session, r route, nobody bool, sessions map[string]session) SwiftObservation {
@@ -485,10 +665,7 @@ func (o SwiftOptions) step(ctx context.Context, s side, ses session, r route, no
 		other := o.swiftCall(ctx, ses, r.method, s.otherBucket, key("other"))
 		repeat := o.swiftCall(ctx, ses, r.method, s.ownBucket, key("repeat"))
 		ob.Control, ob.Status, ob.Repeat = control.Status, other.Status, repeat.Status
-		ob.Observed = JudgeReach(control, other, repeat)
-		if ob.Observed == blocked {
-			ob.Reason = whyBlocked(control, other, repeat)
-		}
+		ob.Observed, ob.Reason = judgeStep(control, other, repeat, ses.control)
 	}
 	ob.AsExpected = ob.Observed == denied
 	return ob
@@ -542,8 +719,22 @@ func (o SwiftOptions) undo(ctx context.Context, env map[string]string, term io.W
 	for _, b := range []string{"a", "b"} {
 		errs = append(errs, o.undoBucket(ctx, env, b, term))
 	}
-	o.nativeUndo(ctx, env, term)
+	errs = append(errs, o.nativeUndo(ctx, env, term))
 	return errors.Join(errs...)
+}
+
+// nativeUndo removes the run's Swift-native containers with the sandbox admin (cleanContainers);
+// the identity under test never takes part.
+func (o SwiftOptions) nativeUndo(ctx context.Context, env map[string]string, term io.Writer) error {
+	admin, err := live.NewAPIChecker(ctx, o.API, o.Admin)
+	if err != nil {
+		return fmt.Errorf("undo containers: admin identity: %w", err)
+	}
+	n, err := cleanContainers(ctx, admin, env["tenant_id"], env["run_id"], term, "undo")
+	if err == nil {
+		fmt.Fprintf(term, "LZ-LIVE undo removed %d Swift-native containers\n", n)
+	}
+	return err
 }
 
 func (o SwiftOptions) undoBucket(ctx context.Context, env map[string]string, b string, term io.Writer) error {
@@ -729,7 +920,8 @@ func (o SwiftOptions) sweep(ctx context.Context, runID, project string, term io.
 		}
 		removed++
 	}
-	o.nativeSweep(ctx, runID, project, term)
+	containers, cerr := cleanContainers(ctx, admin, project, runID, term, "sweep")
+	errs = append(errs, cerr)
 	found, people, lerrs := list()
 	errs = append(errs, lerrs...)
 	for _, r := range slices.Sorted(maps.Keys(found)) {
@@ -742,6 +934,7 @@ func (o SwiftOptions) sweep(ctx context.Context, runID, project string, term io.
 		return fmt.Errorf("sweep swift-reach %s: %w", runID, err)
 	}
 	fmt.Fprintf(term, "LZ-LIVE sweep swift-reach removed %d buckets and users of run %s\n", removed, runID)
+	fmt.Fprintf(term, "LZ-LIVE sweep swift-reach removed %d Swift-native containers of run %s\n", containers, runID)
 	return nil
 }
 
