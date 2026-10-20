@@ -83,7 +83,7 @@ Option A, with the resilience rules below.
 | A zone, in a 3-AZ region | Regional services (Object Storage, the network); zonal workloads only if the runtime spread them. |
 | A region | Nothing automatic. Planned: the state backup (layer 2 below, not built) lives in another region; rebuild elsewhere by re-applying the stacks. Until it exists, region loss loses state. |
 | A project (deleted, suspended or compromised) | `prevent_destroy` and `deletion_protection` on projects the landing zone manages or adopts (`modules/cloud-project/main.tf:8-32`). A referenced project is only read, so neither covers it; the sandbox project is referenced (KD-1). Planned: the state backup lives outside the state project (layer 2 below, not built). |
-| The account | Only a backup copy held outside the account (layer 3 below, not built) plus the escrow package and the resource-id manifest (ADR-0009); the bootstrap re-runs on a fresh account ([how-to](../how-to/set-up-a-fresh-account.md)). Until layer 3 exists, account loss loses state. |
+| The account | Only the escrow package and the resource-id manifest (ADR-0009); the bootstrap re-runs on a fresh account ([how-to](../how-to/set-up-a-fresh-account.md)). No copy outside the account is planned (layer 3 below, owner decision), so account loss loses the state history. |
 | A state writer killed mid-apply | The S3 lockfile, versioning and stale-lock recovery (ADR-0009). |
 
 ### State backup and restore
@@ -95,19 +95,19 @@ Three layers, from cheapest to strongest:
    snapshot, encrypted under the escrow method, to a bucket in **another region and another
    project**. Native replication cannot do this, because it stays inside one project (fact above);
    a same-project replica remains, at most, an optional extra, never the backup.
-3. **Out of the account (to build):** a periodic copy of the layer-2 backup to storage the
+3. **Out of the account (not planned):** a periodic copy of the layer-2 backup to storage the
    failed account cannot reach, such as a second OVHcloud account or another provider, with its
    own credentials. ADR-0009 already says independent decryption does not cover account
-   unavailability; this layer is what covers it. With the escrow package, it is enough to rebuild
-   the infrastructure and recover its state on a new account; it restores no workload data, which
-   state snapshots do not hold. Where it lives is an owner decision.
+   unavailability; only this layer would cover it. The owner chose to keep the backup inside the
+   account (2026-10-20): layer 2 is the strongest copy, and account loss is an accepted risk.
 
 Restore is a copy of an earlier version or a backup object into an **isolated** backend first,
 validated, then promoted by an explicit, logged step that fences the old writer (ADR-0009).
 This narrows ADR-0008's L10 drill, "DR restore of state from a replica", to a restore from the
 layer-2 backup: a same-project replica is not the backup.
-Proposed targets for the `solo` profile, still an open owner decision (below): lose at most one
-day of state changes, and be able to plan again within one working day.
+Targets for the `solo` profile (owner decision, below): lose at most one day of state changes
+(RPO 24 hours), and be able to plan again within one working day (RTO). They cover the landing
+zone's infrastructure and state, not workload data.
 
 ### What the first slice already does
 - One private network and one subnet in exactly one region, DHCP on, `no_gateway = true`, no
@@ -140,17 +140,16 @@ day of state changes, and be able to plan again within one working day.
 | `hub-vrack` variant and the `account-fabric` stage (inventory B10) | A consumer that needs cross-environment, cross-project or on-premises connectivity |
 | `3az` profile value | The first profile that pins it (`regulated`, ADR-0016) or an owner request |
 | Backup job to another region and project | A separate state project (lifts KD-1), or the first installation outside the sandbox |
-| Out-of-account copy (layer 3) and where it lives | The backup job exists, and the owner chooses the destination |
+| Out-of-account copy (layer 3) | Not planned; the owner revisits it with the first installation that holds customer or regulated data |
 | Restore and promotion drill (ADR-0008 L10) | The backup job exists |
-| Recovery targets (time and data loss) | The owner's decision (open, below) |
 
-### Open owner decisions
-Accepting this ADR does not decide these; each stays with the owner:
-- Recovery targets: RPO and RTO (the `solo` proposal above).
-- Where layer 3 lives.
-- The second region and project that hold the layer-2 backup.
-- Whether `1az` stays the default resilience value.
-- Paid gateways, and a hub (`hub-vrack`).
+### Owner decisions (2026-10-20)
+- Recovery targets for `solo`: RPO 24 hours, RTO one working day.
+- The backup stays in the account: layer 2 in another region and project of the same account; no
+  layer 3. The region is chosen when the backup job is built, and differs from the state's.
+- `1az` stays the default resilience value; `3az` is an opt-in.
+- Gateways and the hub (`hub-vrack`) are opt-in only: nothing billed is deployed unless the
+  manifest asks for it.
 
 ## Consequences
 - The default landing zone has no path out and no path in. A workload that needs one says so in
@@ -166,6 +165,9 @@ Accepting this ADR does not decide these; each stays with the owner:
   same-region copy. Which of the two costs less is UNVERIFIED.
 - Some readers expect a hub from the start, as in OVHcloud's own guide. Building it before a
   consumer exists would ship an untested routing owner and an east-west path the guardrails forbid.
+- A backup inside the account does not survive the account's suspension, closure or compromise,
+  and the escrow package alone rebuilds the infrastructure without its state history. The owner
+  accepted that risk for now; layer 3 is the remedy when it no longer fits.
 - A `3az` default would survive a zone loss for regional services, but it limits the regions a
   tenant can choose, and the runtime must spread its zonal resources. Whether it also costs more
   for the first slice's resources is UNVERIFIED; `1az` keeps the simplest path first.
@@ -182,3 +184,5 @@ Accepting this ADR does not decide these; each stays with the owner:
 - 2026-10-20: drafted; one independent review round, findings applied.
 - 2026-10-20: accepted (D128) after two further independent reviews; their changes applied. The
   owner decisions above stay open.
+- 2026-10-20: the owner decided the open items (recovery targets, backup inside the account,
+  `1az` default, gateways and hub opt-in only).

@@ -57,7 +57,7 @@ Option C.
 | CI health | Forge checks; recorded foundation runs | Forge notifications | Maintainer |
 | Drift and conformance | `lz-audit` SARIF and JSON (ADR-0006) | Forge code-scanning tab; the sink when one exists | Maintainer, weekly triage |
 | Scanner health: failed run, or last success older than its freshness bound (ADR-0020) | A failed run: the scanner job. A stale one: a separate scheduled watchdog that checks the last success, since a job that never starts cannot report itself | A forge issue, on every sink including `none`; no e-mail, because no SMTP credentials exist | Maintainer, next working day |
-| Account audit, activity, access-policy logs | OVHcloud log forwarding, set up by `account-fabric` | The account's audit sink (`ldp` or `byo`), required before break-glass or planned elevation (below) | Security recipient |
+| Account audit, activity, access-policy logs | OVHcloud log forwarding, set up by `account-fabric` | The account's audit sink: `ldp` with one-year retention (owner decision, below), or `byo` for an existing SIEM; required before break-glass or planned elevation (below) | Security recipient |
 | Break-glass use and planned elevation | Audit log entry | A sink alert to the security recipient (ADR-0006, ADR-0018) | Security recipient, same day |
 | Workload logs and metrics | The tenant's runtime | The tenant's choice; the landing zone only provides the sink | Tenant |
 
@@ -76,8 +76,10 @@ installation's observability status `blocked`, as ADR-0020 already requires for 
 
 ### On-call model for a small organisation
 No paging and no out-of-hours rota. Three severities:
-- **Sev 1, same working day:** a credential that may have leaked, break-glass use nobody
-  announced, state lost or corrupted, an unexplained resource in an account.
+- **Sev 1, best effort, next working day:** a credential that may have leaked, break-glass use
+  nobody announced, state lost or corrupted, an unexplained resource in an account. Whoever sees
+  a possibly leaked credential revokes it at once; the rest of the response follows the
+  commitment.
 - **Sev 2, next working day:** a failed apply or destroy, a leftover after a run, a budget
   threshold crossed.
 - **Sev 3, weekly triage:** drift findings, stale docs, a red CI check on a dependency update.
@@ -127,12 +129,14 @@ cause becomes a known-issue record (`docs/known-issues/`).
 | Incident runbook page | Owner acceptance of this ADR, or the first incident, whichever comes first |
 | Metrics | The first runtime with compute |
 
-### Open owner decisions
-Accepting this ADR does not decide these; each stays with the owner:
-- A paid sink: whether and when to run LDP.
-- Retention of logs and run records.
-- The recipients: accountable, backup and security.
-- The Sev-1 same-working-day commitment.
+### Owner decisions (2026-10-20)
+- The account audit sink is LDP, with one-year retention of the audit stream. It is built when its
+  trigger fires (postponed table), as a billed opt-in; the free tier and `solo` do not run it by
+  default.
+- Sev 1 is best effort, next working day; there is no out-of-hours cover.
+
+Still open: the recipients (accountable, backup and security, kept in private configuration) and
+the retention of run records.
 
 ## Consequences
 - The sandbox and `solo` cost nothing extra to observe, and see account audit events only when
@@ -145,6 +149,10 @@ Accepting this ADR does not decide these; each stays with the owner:
 ## Counterpoints (kept even if overruled)
 - LDP from day one would answer ADR-0018's audit-source spike sooner. It is deferred because it is
   billed and nothing consumes it yet; the spike can still run on its own.
+- A leaked credential handled next working day leaves an attacker most of a day. The immediate
+  revocation step above narrows that; a faster commitment needs paging through `byo`.
+- One-year LDP retention is a recurring cost after the trial credit, and no audit requirement
+  demands it yet. Its price is UNVERIFIED; the spike below records it.
 - Three severities may be too coarse for an organisation with many tenants. They fit one
   maintainer; a larger organisation brings its own on-call through `byo`.
 
@@ -160,3 +168,5 @@ Accepting this ADR does not decide these; each stays with the owner:
 - 2026-10-20: drafted; one independent review round, findings applied.
 - 2026-10-20: accepted (D128) after two further independent reviews; their changes applied. The
   owner decisions above stay open.
+- 2026-10-20: the owner decided the paid sink (LDP, one-year retention, opt-in) and the Sev-1
+  commitment (best effort, next working day).
