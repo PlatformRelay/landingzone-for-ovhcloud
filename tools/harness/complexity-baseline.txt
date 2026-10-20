@@ -406,7 +406,6 @@
 71 tools/internal/probes/live/storageiam/storageiam_test.go TestRecorded
 45 tools/internal/probes/live/storageiam/storageiam_test.go TestUndo
 17 tools/internal/probes/live/storageiam/swiftreach.go (SwiftOptions).login
-25 tools/internal/probes/live/storageiam/swiftreach.go (SwiftOptions).observe
 47 tools/internal/probes/live/storageiam/swiftreach.go (SwiftOptions).sweep
 23 tools/internal/probes/live/storageiam/swiftreach.go (SwiftOptions).undoBucket
 15 tools/internal/probes/live/storageiam/swiftreach.go validateSwift

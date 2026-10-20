@@ -319,6 +319,12 @@ const (
 	// tRegion records the project's region details (not a matrix kind): the evidence of which
 	// regions offer Object Storage (T065).
 	tRegion = "ovh_cloud_project_region"
+	// tSwift is the Swift container kind (spec 003 T041): the swift-reach check's control
+	// containers, which it creates with the sandbox admin through the API (research.md *S3-API
+	// buckets are not on the Swift plane*). The provider has no Swift container resource, so the
+	// kind is not a provider type, never in an inventory and not in matrix (research R12's provider
+	// types); it is listed with them, and a container named Prefix… is a leftover.
+	tSwift = "swift_container"
 )
 
 var matrix = []string{tStorage, tNetwork, tSubnet, tUser, tCred, tS3Pol, tClient, tPolicy, tGroup, tTags, tAlert, tQuota, tProject}
@@ -947,6 +953,32 @@ func (c LeftoverCheck) candidate(it *item, created map[string]bool) bool {
 	return it.parent != nil && c.candidate(it.parent, created)
 }
 
+// listContainers lists the project's Swift containers (GET /cloud/project/{serviceName}/storage,
+// cloud.storage.Container[], kb api/v1/cloud.json "Get SWIFT storage containers"; spec 003 T041).
+// An element without an id or a name is unparseable: the kind has no inventory entry, so only
+// its name can make it the run's (review r1).
+func listContainers(l lister, base, project string, add func(*item) *item) {
+	path := base + "/storage"
+	raw, ok := l.all(path)
+	if !ok {
+		return
+	}
+	l.record(tSwift, raw...)
+	cs, _ := decode(l, path, raw, func(c struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}) string {
+		if c.Name == "" {
+			return ""
+		}
+		return c.ID
+	})
+	for _, c := range cs {
+		// project: a container id is believed to be per region, not per project (review r1).
+		add(&item{typ: tSwift, id: c.ID, name: c.Name, project: project})
+	}
+}
+
 // list lists every kind. Buckets are listed in every region of each project; the storage
 // listing of a region without a bucket service answers 404 (compute regions, live run
 // 20261007T125154Z-14a6, evidence/T084.md; the Cold Archive region, run 20261007T133803Z-aeee,
@@ -1033,6 +1065,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 				}
 			}
 		}
+		listContainers(l, base, p.ID, add)
 		if raw, ok := l.all(base + "/user"); ok {
 			l.record(tUser, raw...)
 			users, _ := decode(l, base+"/user", raw, func(u struct {

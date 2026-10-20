@@ -753,6 +753,7 @@ func TestLeftoversCapturedSecondProject(t *testing.T) {
 		pr + "/region/GRA11":    {json.RawMessage(`{"name":"GRA11","services":[{"name":"instance","status":"UP"}]}`)},
 		pr + "/network/private": {json.RawMessage(`[]`)},
 		pr + "/user":            {json.RawMessage(`[]`)},
+		pr + "/storage":         {json.RawMessage(`[]`)}, // Swift containers (spec 003 T041)
 		pr + "/alerting":        {json.RawMessage(`[]`)},
 		"/iam/resource/" + urn:  {json.RawMessage(`{"urn":"` + urn + `"}`)},
 	}}

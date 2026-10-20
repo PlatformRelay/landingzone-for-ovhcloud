@@ -808,6 +808,38 @@
      "id": "6c1e5d0a-0b8e-4a55-9f0e-0therAdm1n99"
     }
    ]
+  },
+  "swift-container": {
+   "replace": {
+    "/cloud/project/p1/storage": [
+     [
+      {
+       "id": "R1JBMTE6b3BzLXN3aWZ0",
+       "name": "ops-swift",
+       "region": "GRA11",
+       "archive": false,
+       "containerType": "private",
+       "storedBytes": 0,
+       "storedObjects": 0
+      },
+      {
+       "id": "R1JBMTE6bHotZGVtby1zd2lmdA",
+       "name": "lz-demo-swift-probe",
+       "region": "GRA11",
+       "archive": false,
+       "containerType": "private",
+       "storedBytes": 0,
+       "storedObjects": 0
+      }
+     ]
+    ]
+   },
+   "expect": [
+    {
+     "type": "swift_container",
+     "id": "R1JBMTE6bHotZGVtby1zd2lmdA"
+    }
+   ]
   }
  },
  "broken": {

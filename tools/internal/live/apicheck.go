@@ -17,7 +17,9 @@ package live
 // iam-urn check needs (kb api/v2/iam.json): read a policy (its probed read,
 // account:apiovh:iam/policy/get), list IAM resources by name, replace a resource's tags (its
 // probed write, account:apiovh:iam/resource/edit) and delete one tag key (its cleanup); a listed
-// resource keeps its URN and tags, each of iam.resource.AddTag's shape. It never follows a redirect, caps every answer
+// resource keeps its URN and tags, each of iam.resource.AddTag's shape. Spec 003 T041 adds the
+// three the swift-reach check's Swift-native control needs: create, list and recursively delete a
+// Swift container (kb api/v1/cloud.json /cloud/project/{serviceName}/storage). It never follows a redirect, caps every answer
 // at maxBody, and keeps of an answer only the status, the IAM actions a refusal names (action-
 // shaped tokens of `details.unauthorizedActionsByIAM` and of the message "missing IAM
 // permissions: …"; kb manage-and-operate/iam/troubleshooting.mdx:21-31, T010 rows 10 and 14), a
@@ -80,6 +82,13 @@ const (
 	APIListAlerts  APIOp = "ListAlerts"  // GET …/alerting
 	APIGetAlert    APIOp = "GetAlert"    // GET …/alerting/{id}
 	APIDeleteAlert APIOp = "DeleteAlert" // DELETE …/alerting/{id}
+
+	// The swift-reach check's Swift-native control containers (spec 003 T041), v1 under
+	// /cloud/project/{project}: kb api/v1/cloud.json /cloud/project/{serviceName}/storage, "Create/
+	// Get/Delete SWIFT container" (actions publicCloudProject:apiovh:storage/create|get|delete).
+	APICreateContainer APIOp = "CreateContainer" // POST …/storage, cloud.ProjectStorageCreation with archive false
+	APIListContainers  APIOp = "ListContainers"  // GET …/storage, cloud.storage.Container[]
+	APIDeleteContainer APIOp = "DeleteContainer" // DELETE …/storage/{containerId}?recursive=true
 )
 
 // APICall is one operation; each takes only its own parts.
@@ -165,6 +174,16 @@ type APIAnswer struct {
 	Alerts []string
 	// Alert (a 2xx GetAlert answer): the alert read.
 	Alert *APIAlert
+	// Containers (a 2xx ListContainers answer): every listed Swift container, its id and name as
+	// listed (server text: a caller acts on, and names, only its own exact names).
+	Containers []APIContainer
+}
+
+// APIContainer is one Swift container of a listing (cloud.storage.Container): its id and name. A
+// non-string id or name makes the listing unreadable.
+type APIContainer struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // APIAlert is a budget alert as read (cloud.alerting.Alerting): its id, monthly threshold, delay
@@ -194,6 +213,10 @@ var (
 	// apiRegionName is a region as a project's region listing names it, dashes included
 	// (RBX-ARCHIVE, evidence/T087.md of spec 005); the Sweep operations take it.
 	apiRegionName = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$`)
+	// apiContainerID is a Swift container id (cloud.storage.Container id, a string whose form the
+	// schema leaves open; UNVERIFIED until spec 003 T042): base64-like text that does not start
+	// with a dot, sent as one escaped path segment. Another shape is refused, never sent.
+	apiContainerID = regexp.MustCompile(`^[A-Za-z0-9+/=_-][A-Za-z0-9+/=._-]{0,511}$`)
 	// apiUserID is a cloud project user id (cloud.user.User id, a long).
 	apiUserID = regexp.MustCompile(`^[0-9]{1,20}$`)
 	// apiPolicyName is the policy name a listing is asked for: printable ASCII, no space.
@@ -292,6 +315,8 @@ func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
 		a, err = c.status(ctx, http.MethodDelete, "/iam/resource/"+url.PathEscape(call.URN)+"/tag/"+url.PathEscape(call.Key), nil, "DELETE /iam/resource/{urn}/tag/{key}")
 	case APIListAlerts, APIGetAlert, APIDeleteAlert:
 		a, err = c.alertOp(ctx, call)
+	case APICreateContainer, APIListContainers, APIDeleteContainer:
+		a, err = c.containerOp(ctx, call)
 	default:
 		a, err = c.sweepOp(ctx, call)
 	}
@@ -448,6 +473,51 @@ func (c *APIChecker) alertOp(ctx context.Context, call APICall) (APIAnswer, erro
 	}
 	if err != nil {
 		return APIAnswer{}, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	return a, nil
+}
+
+// containerOp sends one of the Swift container operations (spec 003 T041). The create sends
+// cloud.ProjectStorageCreation with "archive": false (the flag is required; true makes a Cloud
+// Archive container, not a Swift-native one) and keeps the status; the delete is always recursive
+// (a container the check wrote to holds an object; how the API answers a non-recursive delete of a
+// non-empty one is UNVERIFIED) and keeps the status; a listing keeps each container's id and name,
+// and an element that is not an object with both is an error. A non-2xx answer keeps its status
+// and the actions it names. Errors name the route, never the id (a listed id is server text;
+// review r1).
+func (c *APIChecker) containerOp(ctx context.Context, call APICall) (APIAnswer, error) {
+	method, path := http.MethodGet, "/cloud/project/"+call.Project+"/storage"
+	what := method + " " + path
+	var body []byte
+	switch call.Op {
+	case APICreateContainer:
+		method = http.MethodPost
+		what = method + " " + path
+		body, _ = json.Marshal(map[string]any{"archive": false, "containerName": call.Name, "region": call.Region})
+	case APIDeleteContainer:
+		what = http.MethodDelete + " " + path + "/{containerId}"
+		method, path = http.MethodDelete, path+"/"+url.PathEscape(call.ID)+"?recursive=true"
+	}
+	status, _, raw, err := c.exchange(ctx, method, path, body, "")
+	if err != nil {
+		return APIAnswer{}, fmt.Errorf("%s: no answer", what)
+	}
+	a := APIAnswer{Status: status}
+	if status < 200 || status > 299 {
+		a.Actions = refusedActions(raw, c.b.tok, c.secret)
+		return a, nil
+	}
+	if call.Op != APIListContainers {
+		return a, nil
+	}
+	var entries []*APIContainer
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal(trimmed, &entries) != nil ||
+		slices.ContainsFunc(entries, func(e *APIContainer) bool { return e == nil || e.ID == "" || e.Name == "" }) {
+		return APIAnswer{}, fmt.Errorf("%s: the answer is not a container listing", what)
+	}
+	a.Containers = []APIContainer{}
+	for _, e := range entries {
+		a.Containers = append(a.Containers, *e)
 	}
 	return a, nil
 }
@@ -722,13 +792,13 @@ func (c *APIChecker) resources(ctx context.Context, name string) (APIAnswer, err
 	return APIAnswer{}, fmt.Errorf("%s: more than %d pages", what, maxPages)
 }
 
-// apiGate refuses an operation outside the named twenty-four, a part it does not take, or a part of the wrong
+// apiGate refuses an operation outside the named twenty-seven, a part it does not take, or a part of the wrong
 // shape, before any request. A refusal names the operation and the part, never a value.
 func apiGate(call APICall) error {
 	type parts struct{ project, region, name, id, body, objects, urn, tags, key bool }
 	var want parts
 	switch call.Op {
-	case APIGetStorage, APIListObjects, APIDeleteBucket:
+	case APIGetStorage, APIListObjects, APIDeleteBucket, APICreateContainer:
 		want = parts{project: true, region: true, name: true}
 	case APIGetMe:
 	case APIListPolicies:
@@ -743,9 +813,9 @@ func apiGate(call APICall) error {
 		want = parts{project: true, region: true}
 	case APIBulkDeleteObjects:
 		want = parts{project: true, region: true, name: true, objects: true}
-	case APIDeleteUser:
+	case APIDeleteUser, APIDeleteContainer:
 		want = parts{project: true, id: true}
-	case APIGetProject, APIListAlerts:
+	case APIGetProject, APIListAlerts, APIListContainers:
 		want = parts{project: true}
 	case APIGetAlert, APIDeleteAlert:
 		want = parts{project: true, id: true}
@@ -784,6 +854,8 @@ func apiGate(call APICall) error {
 		id, idKind = apiUserID, "user id"
 	case APIGetClient, APIDeleteClient:
 		id, idKind = apiClientID, "client id"
+	case APIDeleteContainer:
+		id, idKind = apiContainerID, "container id"
 	}
 	clientName := call.Op == APICreateClient || call.Op == APIListClients
 	for _, id := range call.Keep {

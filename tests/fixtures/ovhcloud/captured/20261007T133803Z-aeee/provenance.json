@@ -152,6 +152,12 @@
    "provenance": "captured",
    "from": "listings/ovh_cloud_project_user.json"
   },
+  "/cloud/project/{p}/storage": {
+   "provenance": "synthetic (spec 003 T041): the capture predates the Swift container listing; an empty cloud.storage.Container[] (kb api/v1/cloud.json \"Get SWIFT storage containers\"), the project having no Swift container (UNVERIFIED for the captured project)",
+   "pages": [
+    []
+   ]
+  },
   "/iam/policy": {
    "provenance": "captured",
    "from": "listings/ovh_iam_policy.json"
