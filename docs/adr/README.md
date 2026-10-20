@@ -45,12 +45,14 @@ with the first public release.
 | [0022](0022-support-release-upgrade-and-succession-policy.md) | Support, release, upgrade and succession policy | Accepted |
 | [0023](0023-guided-repository-preconfiguration.md) | Friendly, resumable repository preconfiguration | Accepted |
 | [0024](0024-cost-and-sandbox-operations.md) | Cost and sandbox operations | Accepted |
+| [0025](0025-network-and-resilience.md) | Network and resilience architecture | Proposed |
+| [0026](0026-observability-and-incident-response.md) | Observability and incident response | Proposed |
+| [0027](0027-documentation-accessibility.md) | Documentation accessibility | Proposed |
 
 ADR-0024 records the proposed operating contract; documentation-task closure does not
 approve its open numerical/setup choices or authorize live implementation.
 
-Still to be written: network and resilience architecture, observability
-and incident response, documentation accessibility.
+ADR-0025 to ADR-0027 are proposed; they await review and the operator's acceptance.
 
 Small patterns, guidelines, tools and techniques live in [`docs/reference/patterns-catalogue.md`](../reference/patterns-catalogue.md).
 
