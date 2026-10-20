@@ -386,7 +386,7 @@ The second needs no task: the action stays blocked by design (coordinator, 2026-
 above (no vacuous red, the leak guard, one owner per resource, cleanup without outputs, names)
 apply to T040.
 
-- [ ] T040 [US2] Write the swift-reach check's Swift-native control tests in tools/internal/probes/live/storageiam/swiftreach_test.go, with the stub of the new steps in tools/internal/probes/live/storageiam/swiftreach.go
+- [x] T040 [US2] Write the swift-reach check's Swift-native control tests in tools/internal/probes/live/storageiam/swiftreach_test.go, with the stub of the new steps in tools/internal/probes/live/storageiam/swiftreach.go — closed 2026-10-20, evidence: evidence/T040.md
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T025 (the 404 observation), research.md *S3-API buckets are not on the Swift plane*.
   - Cases (given / when / then → defect exposed), against the fake Keystone, Swift and S3 endpoints and a fake OVHcloud API (`live.API`) for the container calls; both directions:
     - given the check / when Observe starts / then the sandbox admin creates `lzprobe-swift-reach-<lower(run id)>-swift-a|b` with `POST /cloud/project/{serviceName}/storage` in the published region before any tenant call → exposes a control container created by the identity under test, or never created.

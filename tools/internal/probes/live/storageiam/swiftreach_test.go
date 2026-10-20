@@ -63,6 +63,10 @@ const (
 	swSwiftSBG = "storage.sbg.cloud.ovh.net"
 	swS3       = "s3.gra.io.cloud.ovh.net"
 	swAuthURL  = "https://" + swKeystone + "/v3"
+	// T040: the run's Swift-native control containers (research.md *S3-API buckets are not on
+	// the Swift plane*).
+	swContA = "lzprobe-swift-reach-" + swRunLower + "-swift-a"
+	swContB = "lzprobe-swift-reach-" + swRunLower + "-swift-b"
 )
 
 var (
@@ -143,6 +147,23 @@ type swWorld struct {
 	// answers an S3 listing 200 with an <Error> body (review r1).
 	roleEcho  bool
 	listWrong bool
+
+	// T040 knobs: containers are the project's Swift-native containers, by id (the API's
+	// /cloud/project/{serviceName}/storage, kb/api/v1/cloud.json; a created one answers Swift, one
+	// never created answers 404); s3Absent answers the S3 bucket names 404 on Swift (T025's
+	// observation); nativeAllow answers the other tenant's Swift-native container like the own
+	// one (default 403); createRefuse refuses a container create 403.
+	containers   map[string]swContainer
+	nextID       int
+	s3Absent     bool
+	nativeAllow  bool
+	createRefuse bool
+}
+
+// swContainer is one Swift-native container as the fake API keeps it (cloud.storage.Container).
+type swContainer struct {
+	ID, Name, Region string
+	Archive          bool // the create's archive flag (a Cloud Archive container, not the control)
 }
 
 type swAPIUser struct {
@@ -158,6 +179,7 @@ func newSwWorld(t *testing.T) *swWorld {
 		tokens:  map[string]string{}, dead: map[string]bool{},
 		loginRefuse: map[string]bool{}, replies: map[string][]swReply{}, killAfter: map[string]bool{}, cross: map[string][]string{},
 		buckets: map[string][]string{"GRA": {}, "SBG": {}}, goneKeys: map[string]bool{},
+		containers: map[string]swContainer{},
 	}
 	w.srv = httptest.NewTLSServer(http.HandlerFunc(w.serve))
 	t.Cleanup(w.srv.Close)
@@ -336,20 +358,11 @@ func (w *swWorld) swift(rw http.ResponseWriter, r *http.Request, body []byte) {
 		return
 	}
 	route := swRoute(r.Method, key)
-	own := map[string]string{"a": swBucketA, "b": swBucketB}[user]
 	other := map[string]string{"a": swBucketB, "b": swBucketA}[user]
 	if bucket == other && w.killAfter[user] {
 		defer func() { w.dead[tok] = true }()
 	}
-	rep := swReply{status: http.StatusForbidden}
-	if bucket == own || bucket == other && w.otherAllow {
-		switch route {
-		case "list", "read":
-			rep = swReply{status: http.StatusOK}
-		case "write":
-			rep = swReply{status: http.StatusCreated, store: true}
-		}
-	}
+	rep := w.swDefault(user, bucket, route)
 	k := user + " " + route + " " + bucket
 	if q := w.replies[k]; len(q) > 0 {
 		rep, w.replies[k] = q[0], q[1:]
@@ -389,6 +402,58 @@ func (w *swWorld) swift(rw http.ResponseWriter, r *http.Request, body []byte) {
 		fmt.Fprint(rw, "seed")
 	}
 	_ = body
+}
+
+// swDefault is a Swift request's unscripted answer: the own S3 bucket name, and the other's with
+// otherAllow, answer like a container (list and read 200, write 201 stored), unless s3Absent
+// answers both 404; a Swift-native container answers 404 until the API created it, then like a
+// container for its tenant and, with nativeAllow, for the other; anything else 403.
+func (w *swWorld) swDefault(user, bucket, route string) swReply {
+	ownC, otherC := swContA, swContB
+	own, other := swBucketA, swBucketB
+	if user == "b" {
+		ownC, otherC, own, other = otherC, ownC, other, own
+	}
+	var open bool
+	switch {
+	case bucket == ownC || bucket == otherC:
+		if !w.created(bucket) {
+			return swReply{status: http.StatusNotFound}
+		}
+		open = bucket == ownC || w.nativeAllow
+	case w.s3Absent && (bucket == own || bucket == other):
+		return swReply{status: http.StatusNotFound}
+	default:
+		open = bucket == own || bucket == other && w.otherAllow
+	}
+	switch {
+	case open && (route == "list" || route == "read"):
+		return swReply{status: http.StatusOK}
+	case open && route == "write":
+		return swReply{status: http.StatusCreated, store: true}
+	}
+	return swReply{status: http.StatusForbidden}
+}
+
+// swNativeName: a name of the run's Swift-native control containers.
+func swNativeName(bucket string) bool { return bucket == swContA || bucket == swContB }
+
+// exists is created for the tests, under the fakes' lock.
+func (w *swWorld) exists(name string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.created(name)
+}
+
+// created: the fake API created a container of that name and has not deleted it; the caller
+// holds w.mu.
+func (w *swWorld) created(name string) bool {
+	for _, c := range w.containers {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // s3 is the fake S3 endpoint: each cleanup key lists and deletes on its own bucket only.
@@ -495,6 +560,8 @@ func (w *swWorld) serveAPI(rw http.ResponseWriter, r *http.Request) {
 	}
 	parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
 	switch {
+	case parts[0] == "storage":
+		w.containerAPI(rw, r, parts, body)
 	case r.Method == http.MethodGet && rest == "/region":
 		json.NewEncoder(rw).Encode(slices.Sorted(maps.Keys(w.buckets)))
 	case r.Method == http.MethodGet && len(parts) == 2 && parts[0] == "region":
@@ -573,6 +640,83 @@ func (w *swWorld) serveAPI(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// containerAPI is the fake API's Swift container calls (T040; kb/api/v1/cloud.json "Create/Get/
+// Delete SWIFT container"): POST /storage with cloud.ProjectStorageCreation (containerName,
+// region, archive) answers a cloud.storage.Container; GET /storage lists them; DELETE
+// /storage/{containerId} removes one, a non-empty one only with recursive=true (409 otherwise; how
+// the API answers a non-recursive delete of a non-empty container is UNVERIFIED).
+func (w *swWorld) containerAPI(rw http.ResponseWriter, r *http.Request, parts []string, body []byte) {
+	switch {
+	case r.Method == http.MethodPost && len(parts) == 1:
+		w.createContainer(rw, body)
+	case r.Method == http.MethodGet && len(parts) == 1:
+		out := []map[string]any{}
+		for _, id := range slices.Sorted(maps.Keys(w.containers)) {
+			c := w.containers[id]
+			out = append(out, map[string]any{"id": c.ID, "name": c.Name, "region": c.Region, "archive": false,
+				"containerType": "private", "storedBytes": 0, "storedObjects": len(w.objects[c.Name])})
+		}
+		json.NewEncoder(rw).Encode(out)
+	case r.Method == http.MethodDelete && len(parts) == 2:
+		c, ok := w.containers[parts[1]]
+		switch {
+		case !ok:
+			rw.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(rw, `{"message":"not found"}`)
+		case len(w.objects[c.Name]) > 0 && r.URL.Query().Get("recursive") != "true":
+			rw.WriteHeader(http.StatusConflict)
+			fmt.Fprint(rw, `{"message":"container not empty"}`)
+		default:
+			if !w.apiKeep {
+				delete(w.containers, c.ID)
+				delete(w.objects, c.Name)
+			}
+			fmt.Fprint(rw, `null`)
+		}
+	default:
+		rw.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(rw, `{"message":"This call has not been granted"}`)
+	}
+}
+
+// createContainer is POST /storage: a body without a name, a region or the archive flag is a
+// 400; createRefuse answers 403.
+func (w *swWorld) createContainer(rw http.ResponseWriter, body []byte) {
+	var in struct {
+		Name    string `json:"containerName"`
+		Region  string `json:"region"`
+		Archive *bool  `json:"archive"`
+	}
+	switch {
+	case w.createRefuse:
+		rw.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(rw, `{"message":"This call has not been granted"}`)
+		return
+	case json.Unmarshal(body, &in) != nil || in.Name == "" || in.Region == "" || in.Archive == nil:
+		rw.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(rw, `{"message":"bad body"}`)
+		return
+	}
+	id := w.addContainer(in.Name, in.Region)
+	c := w.containers[id]
+	c.Archive = *in.Archive
+	w.containers[id] = c
+	json.NewEncoder(rw).Encode(map[string]any{"id": id, "name": in.Name, "region": in.Region, "archive": *in.Archive,
+		"containerType": "private", "storedBytes": 0, "storedObjects": 0})
+}
+
+// addContainer stores a container with the given objects; the caller holds w.mu.
+func (w *swWorld) addContainer(name, region string, keys ...string) string {
+	w.nextID++
+	c := swContainer{ID: fmt.Sprintf("Y29udGFpbmVy%04d", w.nextID), Name: name, Region: region}
+	w.containers[c.ID] = c
+	w.objects[name] = map[string]bool{}
+	for _, k := range keys {
+		w.objects[name][k] = true
+	}
+	return c.ID
+}
+
 // swObs and swRecord read observations.json as T030 writes it (the JSON names are the contract;
 // fields T030 adds are ignored).
 type swObs struct {
@@ -591,6 +735,18 @@ type swRecord struct {
 	Check        string   `json:"check"`
 	Observations []swObs  `json:"observations"`
 	Findings     []string `json:"findings"`
+	// SwiftNative: T040's cross steps on the other tenant's Swift-native container (observations,
+	// not a C005.1 verdict; research.md *S3-API buckets are not on the Swift plane*).
+	SwiftNative []swNativeObs `json:"swift_native"`
+}
+
+// swNativeObs is one Swift-native cross step as T040 fixes it: step <user>-<route>-<other side>,
+// the observed value, the other container's status and the role names the tenant's token carries.
+type swNativeObs struct {
+	Step     string   `json:"step"`
+	Observed string   `json:"observed"`
+	Status   int      `json:"status"`
+	Roles    []string `json:"roles"`
 }
 
 // swLeaks returns the secrets (whole, or an 8-character fragment of a password) and the issued
@@ -623,6 +779,9 @@ func swiftOf(reqs []swReq, user string) (steps []string, toks []string, keys []s
 			continue
 		}
 		bucket, key, _ := swSplit(r.path)
+		if swNativeName(bucket) {
+			continue // T040's Swift-native control and cross steps: swNativeOf reads them
+		}
 		steps = append(steps, swRoute(r.method, key)+" "+bucket)
 		toks = append(toks, r.token)
 		keys = append(keys, key)
@@ -942,6 +1101,9 @@ func undoReqs(t *testing.T, reqs []swReq) (deleted map[string][]string) {
 	deleted = map[string][]string{}
 	type span struct{ firstList, firstDel, lastDel, lastList int }
 	spans := map[string]*span{swBucketA: {-1, -1, -1, -1}, swBucketB: {-1, -1, -1, -1}}
+	// T040: the sandbox admin's container calls are Undo's too and not the identity under test;
+	// TestSwiftContainerUndo judges them.
+	reqs = slices.DeleteFunc(slices.Clone(reqs), swAdminContainerCall)
 	for i, r := range reqs {
 		if r.host != swS3 {
 			t.Errorf("undo sent %s: want S3 only, never the identity under test", r)
@@ -982,6 +1144,12 @@ func undoReqs(t *testing.T, reqs []swReq) (deleted map[string][]string) {
 		}
 	}
 	return deleted
+}
+
+// swAdminContainerCall: a request of the sandbox admin to the project's Swift container calls.
+func swAdminContainerCall(r swReq) bool {
+	p := "/v1/cloud/project/" + swTenant + "/storage"
+	return r.host == "api" && r.who == "admin" && (r.path == p || strings.HasPrefix(r.path, p+"/"))
 }
 
 // TestSwiftUndo: Undo lists and deletes what the check wrote under lzprobe-swift-reach/ in both
@@ -1719,5 +1887,621 @@ func TestSwiftValidateAuthURL(t *testing.T) {
 		if _, err := c.Observe(context.Background(), env, io.Discard); err == nil || len(w.seen()) != 0 {
 			t.Errorf("%s: Observe = %v after %v, want a refusal before any request", u, err, w.seen())
 		}
+	}
+}
+
+// T040: the Swift-native control (research.md *S3-API buckets are not on the Swift plane*; T041
+// implements it). T025 saw every Swift call on the S3 bucket names answer 404, own buckets
+// included. The documented split is that S3-API buckets are not on the Swift plane, so per tenant
+// a Swift-native container, created and deleted by the sandbox admin, shows that the token and the
+// catalog's endpoint work. Only then does a 404 on the S3 bucket names read not-applicable. Each
+// S3-bucket step is judged on its own, in this order: (1) a 2xx on the other S3 bucket name is
+// reach and a C005.1 finding; (2) a 5xx, a transport error or a lost token is blocked; (3) a 404
+// on the other name is not-applicable only when, in the same direction and with the same token
+// and endpoint, the own Swift-native container answered 2xx to list, write and read and the own
+// S3 bucket name answered 404; (4) anything else stays blocked. The cross steps on the other
+// tenant's Swift-native container are recorded under swift_native with the tenant's roles; they
+// are observations, not a C005.1 verdict.
+//
+// What these tests fix for T041, beyond the task text: the containers are named
+// lzprobe-swift-reach-<lower(run id)>-swift-a|b and created with `"archive": false` (the API
+// requires the flag; true makes a Cloud Archive container); the control writes an object and then
+// reads that object back (the admin's container starts empty); a not-applicable step keeps status and control_status (404) and its reason names
+// the decision; swift_native holds at least the list steps a-list-b and b-list-a; a Swift-native
+// reach fails nothing (Observe returns no error when every S3-bucket step is denied).
+
+const swDecision = "S3-API buckets are not on the Swift plane"
+
+// swOwnContainer is a tenant's own Swift-native container, and the other's.
+func swOwnContainer(user string) (own, other string) {
+	if user == "b" {
+		return swContB, swContA
+	}
+	return swContA, swContB
+}
+
+// swNativeOf returns one user's Swift requests on the Swift-native containers as "route
+// container", and the distinct tokens of all of that user's Swift requests.
+func swNativeOf(reqs []swReq, user string) (steps []string, tokens []string) {
+	for _, r := range reqs {
+		if r.who != user || r.host != swSwift && r.host != swSwiftSBG {
+			continue
+		}
+		if !slices.Contains(tokens, r.token) {
+			tokens = append(tokens, r.token)
+		}
+		if bucket, key, _ := swSplit(r.path); swNativeName(bucket) {
+			steps = append(steps, swRoute(r.method, key)+" "+bucket)
+		}
+	}
+	return steps, tokens
+}
+
+// wantNativeControl checks that user asked its own Swift-native container on each route, with the
+// one token its S3-bucket steps carried (the fake answers 404 off the GRA endpoint, so a control
+// sent elsewhere fails).
+func wantNativeControl(t *testing.T, reqs []swReq, user string, routes ...string) {
+	t.Helper()
+	own, _ := swOwnContainer(user)
+	steps, tokens := swNativeOf(reqs, user)
+	for _, rt := range routes {
+		if !slices.Contains(steps, rt+" "+own) {
+			t.Errorf("user %s's Swift-native requests %q lack %s %s: no positive control on that route", user, steps, rt, own)
+		}
+	}
+	if len(tokens) != 1 {
+		t.Errorf("user %s sent its Swift requests with %d tokens, want the one token of its S3-bucket steps", user, len(tokens))
+	}
+}
+
+// wantNotApplicable checks a step read not-applicable on a 404 for both S3 bucket names, citing
+// the research decision.
+func wantNotApplicable(t *testing.T, ob swObs) {
+	t.Helper()
+	if ob.Observed != "not-applicable" || ob.Status != 404 || ob.Control != 404 || !strings.Contains(ob.Reason, swDecision) {
+		t.Errorf("observation %+v, want not-applicable, status 404, control 404 and a reason citing %q", ob, swDecision)
+	}
+}
+
+// swObserveBoth runs Observe and checks both users still asked every S3-bucket step in full.
+func swObserveBoth(t *testing.T, w *swWorld) (swRecord, map[string]swObs, []swReq, error) {
+	t.Helper()
+	raw, _, err := swObserve(t, w, SwiftReach(w.options()))
+	reqs := w.seen()
+	wantSequence(t, reqs, "a", swFull(swBucketA, swBucketB), true)
+	wantSequence(t, reqs, "b", swFull(swBucketB, swBucketA), true)
+	rec := swParse(t, raw, err)
+	return rec, byStep(t, rec), reqs, err
+}
+
+// swCreates returns the indices of the container creates in reqs, and fails any container write
+// a tenant sends on Swift (a PUT, POST or DELETE without an object key; a GET or HEAD is a read).
+func swCreates(t *testing.T, reqs []swReq) []int {
+	t.Helper()
+	var creates []int
+	for i, r := range reqs {
+		if r.method == http.MethodPost && r.path == "/v1/cloud/project/"+swTenant+"/storage" {
+			creates = append(creates, i)
+		}
+		if bucket, key, ok := swSplit(r.path); ok && (r.who == "a" || r.who == "b") && key == "" && slices.Contains([]string{http.MethodPut, http.MethodPost, http.MethodDelete}, r.method) {
+			t.Errorf("user %s sent %s on %s: a tenant creates no container", r.who, r.method, bucket)
+		}
+	}
+	return creates
+}
+
+// TestSwiftNativeCreate: when Observe starts, the sandbox admin creates both Swift-native
+// containers through the API in the published region, before any tenant call.
+func TestSwiftNativeCreate(t *testing.T) {
+	// Exposes a control container created by the identity under test, or never created.
+	w := newSwWorld(t)
+	_, _, _ = swObserve(t, w, SwiftReach(w.options()))
+	reqs := w.seen()
+	tenant := slices.IndexFunc(reqs, func(r swReq) bool { return strings.HasPrefix(r.who, "keystone:") || r.who == "a" || r.who == "b" })
+	creates := swCreates(t, reqs)
+	if len(creates) != 2 {
+		t.Fatalf("container creates at %v, want two (POST /cloud/project/%s/storage): %v", creates, swTenant, reqs)
+	}
+	for _, i := range creates {
+		if reqs[i].who != "admin" || reqs[i].host != "api" || tenant >= 0 && i > tenant {
+			t.Errorf("create %s at %d, want the sandbox admin on the API before the first tenant call (%d)", reqs[i], i, tenant)
+		}
+	}
+	w.mu.Lock()
+	got := map[string]string{}
+	for _, c := range w.containers {
+		got[c.Name] = c.Region
+		if c.Archive {
+			t.Errorf("container %s created with archive true: a Cloud Archive container is not the Swift-native control", c.Name)
+		}
+	}
+	w.mu.Unlock()
+	if want := map[string]string{swContA: "GRA", swContB: "GRA"}; !maps.Equal(got, want) {
+		t.Errorf("containers created %v, want %v (the published region)", got, want)
+	}
+}
+
+// TestSwiftNotApplicable: the native control answers 2xx in both directions and both S3 bucket
+// names answer 404 (T025's world).
+func TestSwiftNotApplicable(t *testing.T) {
+	// Exposes a 404 left blocked after the route was shown to work, or read as denied.
+	w := newSwWorld(t)
+	w.s3Absent = true
+	rec, m, reqs, _ := swObserveBoth(t, w)
+	wantNativeControl(t, reqs, "a", "list", "write", "read")
+	wantNativeControl(t, reqs, "b", "list", "write", "read")
+	for _, s := range swSteps {
+		wantNotApplicable(t, m[s])
+	}
+	if len(rec.Findings) != 0 {
+		t.Errorf("findings %q, want none", rec.Findings)
+	}
+	nat := map[string]swNativeObs{}
+	for _, ob := range rec.SwiftNative {
+		nat[ob.Step] = ob
+	}
+	for _, s := range []string{"a-list-b", "b-list-a"} {
+		if ob := nat[s]; ob.Observed != "denied" || ob.Status != 403 || !slices.Equal(ob.Roles, []string{"objectstore_operator"}) {
+			t.Errorf("swift_native %s = %+v, want denied 403 with the tenant's roles (the other container answers 403)", s, ob)
+		}
+	}
+}
+
+// TestSwiftNativeControlFails: the native control refused, 404 or 5xx on one route, or the
+// container never created; a 404 step stays blocked while a 2xx step is still reach.
+func TestSwiftNativeControlFails(t *testing.T) {
+	// Exposes "not applicable" claimed without a positive control, or a failed control hiding a
+	// reach.
+	for _, st := range []int{403, 404, 500} {
+		for _, route := range []string{"list", "write", "read"} {
+			t.Run(fmt.Sprintf("%s-%d", route, st), func(t *testing.T) {
+				w := newSwWorld(t)
+				w.s3Absent = true
+				w.replies["a "+route+" "+swContA] = []swReply{{status: st}}
+				w.replies["b "+route+" "+swContB] = []swReply{{status: st}}
+				nativeFailed(t, w, func(reqs []swReq) {
+					wantNativeControl(t, reqs, "a", route)
+					wantNativeControl(t, reqs, "b", route)
+				})
+			})
+		}
+	}
+	t.Run("not-created", func(t *testing.T) {
+		w := newSwWorld(t)
+		w.s3Absent = true
+		w.createRefuse = true
+		nativeFailed(t, w, func(reqs []swReq) {
+			if !slices.ContainsFunc(reqs, func(r swReq) bool { return r.method == http.MethodPost && swAdminContainerCall(r) }) {
+				t.Errorf("no container create was tried: %v", reqs)
+			}
+		})
+	})
+}
+
+// nativeFailed runs Observe with a-list-b scripted 2xx and every other S3-bucket answer 404, then
+// checks the given control requests and that no step reads not-applicable.
+func nativeFailed(t *testing.T, w *swWorld, asked func([]swReq)) {
+	t.Helper()
+	w.replies["a list "+swBucketB] = []swReply{{status: 200}}
+	rec, m, reqs, err := swObserveBoth(t, w)
+	asked(reqs)
+	wantObs(t, m["a-list-b"], "reach", 200, 404, -1)
+	if !slices.Contains(rec.Findings, "a-list-b") || err == nil || !strings.Contains(err.Error(), "a-list-b") {
+		t.Errorf("findings %q, Observe = %v; want a-list-b a C005.1 finding whatever the controls say", rec.Findings, err)
+	}
+	for _, s := range swSteps[1:] {
+		wantObs(t, m[s], "blocked", 404, 404, -1)
+	}
+}
+
+// TestSwiftNotApplicablePerStep: the native control 2xx and, in direction a→b, the list step 404,
+// the read step 503 and the write step a transport error.
+func TestSwiftNotApplicablePerStep(t *testing.T) {
+	// Exposes one step's outcome applied to every step.
+	w := newSwWorld(t)
+	w.s3Absent = true
+	w.replies["a read "+swBucketB] = []swReply{{status: 503}}
+	w.replies["a write "+swBucketB] = []swReply{{status: 404, hangup: true}}
+	_, m, reqs, _ := swObserveBoth(t, w)
+	wantNativeControl(t, reqs, "a", "list", "write", "read")
+	wantNotApplicable(t, m["a-list-b"])
+	wantObs(t, m["a-read-b"], "blocked", 503, 404, -1)
+	wantObs(t, m["a-write-b"], "blocked", 0, 404, -1)
+	for _, s := range swSteps[3:] {
+		wantNotApplicable(t, m[s])
+	}
+}
+
+// TestSwiftNativeOneDirection: the native control 2xx in direction a→b only (b's own container
+// answers 500 to its listing).
+func TestSwiftNativeOneDirection(t *testing.T) {
+	// Exposes one direction's control reused for the other.
+	w := newSwWorld(t)
+	w.s3Absent = true
+	w.replies["b list "+swContB] = []swReply{{status: 500}}
+	_, m, reqs, _ := swObserveBoth(t, w)
+	wantNativeControl(t, reqs, "a", "list", "write", "read")
+	wantNativeControl(t, reqs, "b", "list")
+	for _, s := range swSteps[:3] {
+		wantNotApplicable(t, m[s])
+	}
+	for _, s := range swSteps[3:] {
+		wantObs(t, m[s], "blocked", 404, 404, -1)
+	}
+}
+
+// TestSwiftNotApplicableOwnFails: the native control 2xx and the other S3 name 404, but the own S3
+// name's control in a→b's list step refused, 5xx or without an answer (review r1).
+func TestSwiftNotApplicableOwnFails(t *testing.T) {
+	// Exposes not-applicable claimed when the own S3 name did not answer 404.
+	for _, c := range []struct {
+		name  string
+		reply swReply
+		want  int
+	}{{"own-403", swReply{status: 403}, 403}, {"own-503", swReply{status: 503}, 503}, {"own-transport", swReply{status: 404, hangup: true}, 0}} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newSwWorld(t)
+			w.s3Absent = true
+			w.replies["a list "+swBucketA] = []swReply{c.reply}
+			_, m, reqs, _ := swObserveBoth(t, w)
+			wantNativeControl(t, reqs, "a", "list", "write", "read")
+			wantObs(t, m["a-list-b"], "blocked", 404, c.want, -1)
+			for _, s := range swSteps[1:] {
+				wantNotApplicable(t, m[s])
+			}
+		})
+	}
+}
+
+// TestSwiftNotApplicableTokenLost: the native control 2xx and both S3 names 404, but user a's
+// token is lost after its first other-bucket request, so a-list-b's repeated control answers 401
+// (review r1).
+func TestSwiftNotApplicableTokenLost(t *testing.T) {
+	// Exposes a lost token read as not-applicable (rule 2 precedes rule 3).
+	w := newSwWorld(t)
+	w.s3Absent = true
+	w.killAfter["a"] = true
+	raw, _, err := swObserve(t, w, SwiftReach(w.options()))
+	reqs := w.seen()
+	wantSequence(t, reqs, "a", []string{"list " + swBucketA, "list " + swBucketB, "list " + swBucketA}, false)
+	wantNativeControl(t, reqs, "b", "list", "write", "read")
+	m := byStep(t, swParse(t, raw, err))
+	wantObs(t, m["a-list-b"], "blocked", 404, 404, 401)
+	for _, s := range swSteps[1:3] {
+		if m[s].Observed == "not-applicable" {
+			t.Errorf("%s not-applicable after user a's token was lost: %+v", s, m[s])
+		}
+	}
+	for _, s := range swSteps[3:] {
+		wantNotApplicable(t, m[s])
+	}
+}
+
+// TestSwiftNativeReach: the other tenant's Swift-native container answers 2xx; every S3-bucket
+// step is denied.
+func TestSwiftNativeReach(t *testing.T) {
+	// Exposes a Swift-only fact counted against S3 isolation, or dropped.
+	w := newSwWorld(t)
+	w.nativeAllow = true
+	rec, m, reqs, err := swObserveBoth(t, w)
+	for _, u := range []string{"a", "b"} {
+		_, other := swOwnContainer(u)
+		if steps, _ := swNativeOf(reqs, u); !slices.Contains(steps, "list "+other) {
+			t.Errorf("user %s never listed the other tenant's container %s: %q", u, other, steps)
+		}
+	}
+	for _, s := range swSteps {
+		wantObs(t, m[s], "denied", 403, -1, -1)
+	}
+	nat := map[string]swNativeObs{}
+	for _, ob := range rec.SwiftNative {
+		nat[ob.Step] = ob
+	}
+	for _, s := range []string{"a-list-b", "b-list-a"} {
+		if ob := nat[s]; ob.Observed != "reach" || ob.Status != 200 || !slices.Equal(ob.Roles, []string{"objectstore_operator"}) {
+			t.Errorf("swift_native %s = %+v (all: %+v), want reach 200 with the tenant's roles [objectstore_operator]", s, ob, rec.SwiftNative)
+		}
+	}
+	if len(rec.Findings) != 0 || err != nil {
+		t.Errorf("findings %q, Observe = %v; want no finding and no error: a Swift-native reach is not a C005.1 finding", rec.Findings, err)
+	}
+}
+
+// swContainerCalls reads the container calls of reqs: every one by the sandbox admin, the
+// deletes as "<id>?<query>", and whether a listing came before the first delete and after the
+// last.
+func swContainerCalls(t *testing.T, reqs []swReq) (deletes []string, listedAround bool) {
+	t.Helper()
+	p := "/v1/cloud/project/" + swTenant + "/storage"
+	var lists, dels []int
+	for i, r := range reqs {
+		if !strings.HasPrefix(r.path+"/", p+"/") {
+			continue
+		}
+		if !swAdminContainerCall(r) {
+			t.Errorf("container call %s: want the sandbox admin, never the identity under test", r)
+		}
+		switch {
+		case r.method == http.MethodGet && r.path == p:
+			lists = append(lists, i)
+		case r.method == http.MethodDelete:
+			dels = append(dels, i)
+			deletes = append(deletes, strings.TrimPrefix(r.path, p+"/")+"?"+r.query)
+		}
+	}
+	if len(lists) == 0 {
+		return deletes, false
+	}
+	return deletes, len(dels) == 0 || lists[0] < dels[0] && lists[len(lists)-1] > dels[len(dels)-1]
+}
+
+// swUndoContainers runs Undo in a fresh process and checks its requests: the S3 part as T029
+// fixes it, no Keystone or Swift request at all, the container calls by the sandbox admin with a
+// listing before the deletes and after; it returns the container deletes.
+func swUndoContainers(t *testing.T, w *swWorld) (deletes []string, err error) {
+	t.Helper()
+	var term bytes.Buffer
+	err = SwiftReach(w.options()).Undo(context.Background(), swEnv(), &term)
+	reqs := w.seen()
+	undoReqs(t, reqs)
+	deletes, around := swContainerCalls(t, reqs)
+	if !around {
+		t.Errorf("undo did not list the containers before its deletes and again after: %v", reqs)
+	}
+	if leaks := w.swLeaks(term.String(), fmt.Sprint(err)); len(leaks) > 0 {
+		t.Errorf("terminal or error carry %q", leaks)
+	}
+	return deletes, err
+}
+
+// TestSwiftContainerUndo: Undo, in a fresh process after each partial step, deletes the run's
+// containers with the sandbox admin, lists again and fails on anything left.
+func TestSwiftContainerUndo(t *testing.T) {
+	// Exposes cleanup by the identity under test, or an orphan container after Undo.
+	run := swUndoContainers
+	t.Run("none-created", func(t *testing.T) {
+		// The create was refused, or a Sweep removed both (Undo reruns after a Sweep, coordinator
+		// decision 2026-10-16): nothing to delete is undone, not an error (review r2).
+		w := newSwWorld(t)
+		if deletes, err := run(t, w); len(deletes) != 0 || err != nil {
+			t.Errorf("Undo = %v, deleted %q, want nil and no delete", err, deletes)
+		}
+	})
+	t.Run("one-created", func(t *testing.T) {
+		w := newSwWorld(t)
+		w.mu.Lock()
+		idA := w.addContainer(swContA, "GRA")
+		w.mu.Unlock()
+		deletes, err := run(t, w)
+		if want := []string{idA + "?recursive=true"}; !slices.Equal(deletes, want) || err != nil || w.exists(swContA) {
+			t.Errorf("Undo = %v, deleted %q, want nil and %q", err, deletes, want)
+		}
+	})
+	t.Run("after-control-writes", func(t *testing.T) {
+		w := newSwWorld(t)
+		w.mu.Lock()
+		idA := w.addContainer(swContA, "GRA", swPrefix+"native-a")
+		idB := w.addContainer(swContB, "GRA", swPrefix+"native-b")
+		foreign := []string{w.addContainer("lzprobe-swift-reach-"+swOtherRun+"-swift-a", "GRA"), w.addContainer("lzprobe-swift-reach-"+swRunLower+"-swift-c", "GRA")}
+		w.mu.Unlock()
+		deletes, err := run(t, w)
+		want := []string{idA + "?recursive=true", idB + "?recursive=true"}
+		if slices.Sort(deletes); !slices.Equal(deletes, want) || err != nil || w.exists(swContA) || w.exists(swContB) {
+			t.Errorf("Undo = %v, deleted %q, want nil and exactly %q", err, deletes, want)
+		}
+		swKept(t, w, "undo", foreign)
+	})
+	t.Run("still-listed", func(t *testing.T) {
+		w := newSwWorld(t)
+		w.apiKeep = true
+		w.mu.Lock()
+		w.addContainer(swContA, "GRA")
+		w.mu.Unlock()
+		if _, err := run(t, w); err == nil || !strings.Contains(err.Error(), swContA) {
+			t.Errorf("Undo = %v, want an error naming the container still listed (%s)", err, swContA)
+		}
+	})
+}
+
+// swSweepWorld is a project after container creates whose answers were lost: the run's two
+// containers (one holding the control's object) and three of other names; it returns their ids.
+func swSweepWorld(t *testing.T) (w *swWorld, ours, foreign []string) {
+	w = newSwWorld(t)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ours = []string{w.addContainer(swContA, "GRA", swPrefix+"native-a"), w.addContainer(swContB, "GRA")}
+	foreign = []string{
+		w.addContainer("lzprobe-swift-reach-"+swOtherRun+"-swift-a", "GRA"),
+		w.addContainer("lzprobe-swift-reach-"+swRunLower+"-swift-c", "GRA"),
+		w.addContainer("backups", "SBG"),
+	}
+	return w, ours, foreign
+}
+
+// swKept fails unless every container of ids is still there after who's cleanup.
+func swKept(t *testing.T, w *swWorld, who string, ids []string) {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, id := range ids {
+		if _, ok := w.containers[id]; !ok {
+			t.Errorf("%s deleted container %s of another name", who, id)
+		}
+	}
+}
+
+// swDeletedIDs is the sorted container ids of deletes ("<id>?<query>").
+func swDeletedIDs(deletes []string) []string {
+	var ids []string
+	for _, d := range deletes {
+		id, _, _ := strings.Cut(d, "?")
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// TestSwiftContainerSweep: Sweep in a fresh process, with the run id and the project only, after
+// container creates whose answers were lost.
+func TestSwiftContainerSweep(t *testing.T) {
+	// Exposes an orphan container.
+	setup := swSweepWorld
+	t.Run("lost-creates", func(t *testing.T) {
+		w, ours, foreign := setup(t)
+		var term bytes.Buffer
+		err := w.options().sweep(context.Background(), swRun, swTenant, &term)
+		deletes, around := swContainerCalls(t, w.seen())
+		if ids := swDeletedIDs(deletes); !slices.Equal(ids, ours) || !around || err != nil {
+			t.Errorf("sweep = %v, deleted %q (listed before and after: %v), want nil and exactly %q", err, deletes, around, ours)
+		}
+		swKept(t, w, "sweep", foreign)
+		if w.exists(swContA) || w.exists(swContB) {
+			t.Errorf("a run's container is still there after the sweep")
+		}
+		if leaks := w.swLeaks(term.String(), fmt.Sprint(err)); len(leaks) > 0 {
+			t.Errorf("terminal or error carry %q", leaks)
+		}
+	})
+	t.Run("still-listed", func(t *testing.T) {
+		w, _, _ := setup(t)
+		w.apiKeep = true
+		err := w.options().sweep(context.Background(), swRun, swTenant, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), swContA) {
+			t.Errorf("sweep = %v, want an error naming the container still listed (%s)", err, swContA)
+		}
+	})
+}
+
+// swLister is a minimal clean project for the leftover check: one region with a bucket service,
+// no bucket, no other resource, and the given Swift container listing.
+type swLister struct {
+	mu         sync.Mutex
+	asked      []string
+	containers string
+}
+
+func (l *swLister) Get(_ context.Context, path, cursor string) ([]byte, string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.asked = append(l.asked, path)
+	p := "/cloud/project/" + swTenant
+	switch {
+	case cursor != "":
+		return nil, "", errors.New("swLister: one page only")
+	case path == p+"/region":
+		return []byte(`["GRA"]`), "", nil
+	case path == p+"/region/GRA":
+		return []byte(`{"name":"GRA","status":"UP","services":[{"name":"storage-s3-standard","status":"UP"},{"name":"storage","status":"UP"}]}`), "", nil
+	case path == p+"/storage":
+		return []byte(l.containers), "", nil
+	case strings.HasPrefix(path, "/iam/resource/"):
+		return []byte(`{"tags":{}}`), "", nil
+	}
+	return []byte(`[]`), "", nil
+}
+
+// TestSwiftLeftoverContainers: the leftover check lists the project's Swift containers and reports
+// one named lzprobe-… as a leftover.
+func TestSwiftLeftoverContainers(t *testing.T) {
+	check := func(containers string) (live.Report, []string) {
+		l := &swLister{containers: containers}
+		c := live.LeftoverCheck{Lister: l, Prefix: "lzprobe-", RunID: swRun, Backoff: []time.Duration{},
+			Projects: []live.Project{{ID: swTenant, URN: "urn:v1:eu:resource:publicCloudProject:" + swTenant}}}
+		rep := c.Check(context.Background(), nil)
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		return rep, slices.Clone(l.asked)
+	}
+	// Fixture control (passes on the stub by design): the clean project passes, so a red below is
+	// the check's, not the fake's.
+	if rep, asked := check(`[]`); rep.Outcome != "pass" {
+		t.Fatalf("clean project: %+v (asked %q), want pass", rep, asked)
+	}
+	// Exposes a matrix that cannot see the new kind.
+	rep, asked := check(`[{"id":"Y29udGFpbmVy0001","name":"` + swContA + `","region":"GRA","archive":false,"containerType":"private","storedBytes":0,"storedObjects":1},` +
+		`{"id":"Y29udGFpbmVy0002","name":"backups","region":"GRA","archive":false,"containerType":"private","storedBytes":0,"storedObjects":0}]`)
+	if !slices.Contains(asked, "/cloud/project/"+swTenant+"/storage") {
+		t.Errorf("the leftover check never listed /cloud/project/%s/storage (asked %q)", swTenant, asked)
+	}
+	found := slices.ContainsFunc(rep.Leftovers, func(l live.Leftover) bool { return l.Name == swContA || l.ID == swContA })
+	if !found || rep.Outcome != "fail" {
+		t.Errorf("leftover check %+v, want fail with the Swift container %s as a leftover", rep, swContA)
+	}
+	if slices.ContainsFunc(rep.Leftovers, func(l live.Leftover) bool { return l.Name == "backups" || l.ID == "backups" }) {
+		t.Errorf("leftover check reported the container backups, which is not the run's: %+v", rep.Leftovers)
+	}
+}
+
+// swAdminDo sends one call to the fake API's project with the sandbox admin's token.
+func swAdminDo(t *testing.T, w *swWorld, method, path, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequestWithContext(context.Background(), method, w.api.URL+"/v1/cloud/project/"+swTenant+path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer tok-swadmin")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+// swSwiftDo sends one Swift request on the GRA endpoint with a token and returns its status.
+func swSwiftDo(t *testing.T, w *swWorld, method, path, tok string) int {
+	t.Helper()
+	req, _ := http.NewRequestWithContext(context.Background(), method, "https://"+swSwift+"/v1/AUTH_"+swTenant+"/"+path, strings.NewReader("x"))
+	req.Header.Set("X-Auth-Token", tok)
+	resp, err := w.options().HTTP.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestSwiftNativeFakes: the T040 parts of the fakes answer as the cases above say (a fixture
+// control: it passes on the stub by design).
+func TestSwiftNativeFakes(t *testing.T) {
+	if SwiftContainer(swRun, "a") != swContA || SwiftContainer(swRun, "b") != swContB {
+		t.Errorf("SwiftContainer = %s, %s; want %s, %s", SwiftContainer(swRun, "a"), SwiftContainer(swRun, "b"), swContA, swContB)
+	}
+	w := newSwWorld(t)
+	w.s3Absent = true
+	if st, b := swAdminDo(t, w, http.MethodPost, "/storage", `{"containerName":"`+swContA+`","region":"GRA"}`); st != 400 {
+		t.Errorf("create without the archive flag = %d %s, want 400", st, b)
+	}
+	st, b := swAdminDo(t, w, http.MethodPost, "/storage", `{"containerName":"`+swContA+`","region":"GRA","archive":false}`)
+	var c struct{ ID, Name string }
+	if json.Unmarshal([]byte(b), &c) != nil || st != 200 || c.Name != swContA || c.ID == "" {
+		t.Fatalf("create = %d %s, want 200 with the container", st, b)
+	}
+	w.mu.Lock()
+	w.tokens["tokA"], w.tokens["tokB"] = "a", "b"
+	w.mu.Unlock()
+	for _, r := range []struct {
+		method, path, tok string
+		want              int
+	}{
+		{http.MethodGet, swContA + "?format=json", "tokA", 200}, {http.MethodPut, swContA + "/" + swPrefix + "n", "tokA", 201},
+		{http.MethodGet, swContA + "/" + swPrefix + "n", "tokA", 200}, {http.MethodGet, swContA + "?format=json", "tokB", 403},
+		{http.MethodGet, swContB + "?format=json", "tokB", 404}, {http.MethodGet, swBucketA + "?format=json", "tokA", 404},
+		{http.MethodGet, swBucketB + "/" + swSeed, "tokA", 404},
+	} {
+		if got := swSwiftDo(t, w, r.method, r.path, r.tok); got != r.want {
+			t.Errorf("%s %s as %s = %d, want %d", r.method, r.path, r.tok, got, r.want)
+		}
+	}
+	w.nativeAllow = true
+	if got := swSwiftDo(t, w, http.MethodGet, swContA+"?format=json", "tokB"); got != 200 {
+		t.Errorf("other tenant's container with nativeAllow = %d, want 200", got)
+	}
+	if st, _ := swAdminDo(t, w, http.MethodDelete, "/storage/"+c.ID, ""); st != 409 {
+		t.Errorf("non-recursive delete of a non-empty container = %d, want 409", st)
+	}
+	if st, _ := swAdminDo(t, w, http.MethodDelete, "/storage/"+c.ID+"?recursive=true", ""); st != 200 || w.exists(swContA) {
+		t.Errorf("recursive delete = %d, still there %v", st, w.exists(swContA))
+	}
+	if st, b := swAdminDo(t, w, http.MethodGet, "/storage", ""); st != 200 || b != "[]\n" {
+		t.Errorf("listing after the delete = %d %q, want []", st, b)
 	}
 }

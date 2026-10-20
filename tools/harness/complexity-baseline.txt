@@ -412,7 +412,7 @@
 15 tools/internal/probes/live/storageiam/swiftreach.go validateSwift
 30 tools/internal/probes/live/storageiam/swiftreach_test.go (*swWorld).s3
 40 tools/internal/probes/live/storageiam/swiftreach_test.go (*swWorld).serveAPI
-29 tools/internal/probes/live/storageiam/swiftreach_test.go (*swWorld).swift
+24 tools/internal/probes/live/storageiam/swiftreach_test.go (*swWorld).swift
 41 tools/internal/probes/live/storageiam/swiftreach_test.go TestSwiftFakes
 66 tools/internal/probes/live/storageiam/swiftreach_test.go TestSwiftObserve
 19 tools/internal/probes/live/storageiam/swiftreach_test.go TestSwiftSeed

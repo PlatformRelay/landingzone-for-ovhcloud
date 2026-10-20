@@ -82,6 +82,30 @@ func SwiftBucket(runID, side string) string {
 	return "lzprobe-swift-reach-" + strings.ToLower(runID) + "-" + side
 }
 
+// SwiftContainer is the run's Swift-native control container of one side (a, b): the positive
+// control that shows the tenant's token and the catalog's Swift endpoint work, so that a 404 on
+// the S3 bucket names may read not-applicable (research.md *S3-API buckets are not on the Swift
+// plane*, T040, T041).
+func SwiftContainer(runID, side string) string {
+	return "lzprobe-swift-reach-" + strings.ToLower(runID) + "-swift-" + side
+}
+
+// The Swift-native control's steps, stubbed by T040 (no-ops); T041 implements them:
+//   - nativeCreate: the sandbox admin creates both containers (POST
+//     /cloud/project/{serviceName}/storage, in the published region) before any tenant call;
+//   - nativeUndo: the admin deletes both by listing (DELETE …/storage/{containerId}?recursive=true),
+//     lists again and fails on anything left;
+//   - nativeSweep: the same with only the run id and the project.
+//
+// The steps' judging (own container 2xx to list, write and read, per direction, before a 404 on
+// the S3 bucket names reads not-applicable; the cross steps under swift_native) is T041's too, and
+// so are these signatures: the stubs return nothing only so that T029's cases keep their results.
+func (o SwiftOptions) nativeCreate(context.Context, map[string]string, io.Writer) {}
+
+func (o SwiftOptions) nativeUndo(context.Context, map[string]string, io.Writer) {}
+
+func (o SwiftOptions) nativeSweep(context.Context, string, string, io.Writer) {}
+
 // SwiftUsers are the descriptions of the run's cloud project users: the tenant users under test
 // and the bucket-scoped cleanup users.
 func SwiftUsers(runID string) []string {
@@ -371,6 +395,7 @@ var swiftRoutes = []route{{"list", http.MethodGet, ""}, {"read", http.MethodGet,
 // complete whatever fails.
 func (o SwiftOptions) observe(ctx context.Context, env map[string]string, term io.Writer) (SwiftRecord, error) {
 	rec := SwiftRecord{Check: "swift-reach", Seeds: map[string]string{}, Roles: map[string][]string{}, Observations: []SwiftObservation{}, Findings: []string{}}
+	o.nativeCreate(ctx, env, term)
 	for _, b := range []string{"a", "b"} {
 		rec.Seeds[env["bucket_"+b]] = o.seed(ctx, env, b)
 		fmt.Fprintf(term, "LZ-LIVE observe seed %s %s\n", env["bucket_"+b], rec.Seeds[env["bucket_"+b]])
@@ -517,6 +542,7 @@ func (o SwiftOptions) undo(ctx context.Context, env map[string]string, term io.W
 	for _, b := range []string{"a", "b"} {
 		errs = append(errs, o.undoBucket(ctx, env, b, term))
 	}
+	o.nativeUndo(ctx, env, term)
 	return errors.Join(errs...)
 }
 
@@ -703,6 +729,7 @@ func (o SwiftOptions) sweep(ctx context.Context, runID, project string, term io.
 		}
 		removed++
 	}
+	o.nativeSweep(ctx, runID, project, term)
 	found, people, lerrs := list()
 	errs = append(errs, lerrs...)
 	for _, r := range slices.Sorted(maps.Keys(found)) {
