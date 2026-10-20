@@ -277,8 +277,9 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   the project's alerts in the Control Panel, removes by hand only alerts matching the root's plan
   that were created at or after the run's start (the run id's timestamp), and then runs
   `lz-live probe --cleanup <run-id> --accept-lost-baseline`, which deletes nothing, asks on the
-  terminal for the run id to be typed back (refused without a terminal, so no automated session can
-  run it), runs the leftover check and retires the files only if it passes.
+  terminal for the run id to be typed back (refused without a terminal; the gate needs a terminal,
+  it does not prove a human: what keeps automated sessions from using it is review and their
+  briefs), runs the leftover check and retires the files only if it passes.
 - **FR-008 Alert read-back** — the root publishes the scalar public output `alert_id` and the
   check output `budget_alert_check = { alert_id = module.project.budget_alert_id }`, a map of
   strings, which `ProbeCheck.Output` selects (the runner decodes the selected output as a map of
