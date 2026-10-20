@@ -45,7 +45,9 @@ Option B.
   works against the capabilities it needs and that an unsupported consumer fails early. An orphan
   runtime (not in any supported tuple) fails CI.
 - **Network family specifics:** an **IPAM ledger** (`ipam.yaml` in the tenant repo: CIDRs, VLAN ids,
-  routing ownership, reservations) is validated before any network change; ranges are never derived
+  routing ownership, reservations) is validated before any network change (amendment, 2026-10-20,
+  D128: until a second network shares a vRack, manifest validation stands in for `ipam.yaml`, see
+  [ADR-0025](0025-network-and-resilience.md#network-per-environment)); ranges are never derived
   from a tenant's position in a list; IPv6 is covered or explicitly disabled. OpenStack's default
   allow-all egress is unmanaged by `ovh_cloud_security_group`, and explicit allow rules **do not
   remove it**; "controlled egress" therefore requires the default rule to be removed or separately

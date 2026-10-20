@@ -1,5 +1,5 @@
 # ADR-0026: Observability and incident response
-- Status: Proposed
+- Status: Accepted (2026-10-20, D128)
 - Date: 2026-10-20
 - Related: ADR-0004, ADR-0006, ADR-0009, ADR-0017, ADR-0018, ADR-0020, ADR-0021, ADR-0022,
   ADR-0024, ADR-0025; spec 005, spec 007, spec 006 E5
@@ -52,14 +52,19 @@ Option C.
 ### Signals and where they go
 | Signal | Source | Destination | Who acts |
 | --- | --- | --- | --- |
-| Cost | Project budget alert | E-mail to the environment's accountable recipient | Recipient, next working day |
-| Run outcome | Run record: `summary.json`, `leftovers.json`, `errors.txt` | The run's PR or evidence (sanitised: run id, outcome, assertions, deviations) | Whoever started the run |
+| Cost | Project budget alert | E-mail to the one address the alert takes (`modules/cloud-project/main.tf:48`): a shared mailbox or alias that reaches both the accountable recipient and the backup | Recipient, next working day |
+| Run outcome | Run record: a `chain` writes `summary.json` and `leftovers.json`; `plan`, `apply` and `destroy` write `run.json` only | The run's PR or evidence (sanitised: run id, outcome, and for a chain its assertions and deviations) | Whoever started the run |
 | CI health | Forge checks; recorded foundation runs | Forge notifications | Maintainer |
 | Drift and conformance | `lz-audit` SARIF and JSON (ADR-0006) | Forge code-scanning tab; the sink when one exists | Maintainer, weekly triage |
-| Scanner health: failed run, or last success older than its freshness bound (ADR-0020) | The scheduled scanner job | A forge issue opened by the job and e-mail to the accountable recipient, on every sink including `none` | Maintainer, next working day |
-| Account audit, activity, access-policy logs | OVHcloud log forwarding, set up by `account-fabric` | The account's audit sink (`ldp` or `byo`); none on `none` | Security recipient |
-| Break-glass use | Audit log entry | A sink alert to the security recipient (ADR-0018) | Security recipient, same day |
+| Scanner health: failed run, or last success older than its freshness bound (ADR-0020) | A failed run: the scanner job. A stale one: a separate scheduled watchdog that checks the last success, since a job that never starts cannot report itself | A forge issue, on every sink including `none`; no e-mail, because no SMTP credentials exist | Maintainer, next working day |
+| Account audit, activity, access-policy logs | OVHcloud log forwarding, set up by `account-fabric` | The account's audit sink (`ldp` or `byo`), required before break-glass or planned elevation (below) | Security recipient |
+| Break-glass use and planned elevation | Audit log entry | A sink alert to the security recipient (ADR-0006, ADR-0018) | Security recipient, same day |
 | Workload logs and metrics | The tenant's runtime | The tenant's choice; the landing zone only provides the sink | Tenant |
+
+**An audit sink before elevation.** Break-glass and planned elevation stay unavailable until an
+operational account audit sink exists: forwarding in place and its alert seen to fire. This holds
+when the observability value is `none` too, because ADR-0006 and ADR-0018 require an alert for
+both routes and on `none` nothing would deliver it.
 
 **Who owns which sink.** Account-level audit forwarding and its stream belong to the
 `account-fabric` stage, because the account needs them before any project exists (ADR-0004). The
@@ -98,10 +103,12 @@ cause becomes a known-issue record (`docs/known-issues/`).
   (`stacks/deployments.yaml:36`). Spec 007 adds a disposable probe root for it
   (`tests/live/probes/budget-alert/`); its live run is still pending, and its recipient is the
   owner's, not committed ([spec 007](../../specs/007-cleanup-first-live-slice/spec.md)). The raw
-  resource was created and destroyed once on the trial project (spec 005 T010).
-- Run records: every live run writes a gitignored record with a pass, fail or blocked outcome
-  per assertion, the leftover report and the inventory
-  ([runbook](../how-to/run-the-first-slice.md#read-a-run-record));
+  resource was created and destroyed once on the trial project (spec 005 T010). ADR-0006's plan
+  policy that refuses a project without a budget alert is not built yet.
+- Run records: every live run writes a gitignored record, and what it holds depends on the verb. A
+  `chain` writes a pass, fail or blocked outcome per assertion and the leftover report; `plan`,
+  `apply` and `destroy` write `run.json` and no summary or leftover report, and only `apply` adds
+  the inventory ([runbook](../how-to/run-the-first-slice.md#read-a-run-record));
   every child stream passes through the redactor (`tools/internal/live/runner.go:40-43`,
   `tools/internal/live/redact.go:14-15`).
 - CI: one workflow, its runs recorded in `pipelines/github/foundation-runs.json`.
@@ -111,18 +118,26 @@ cause becomes a known-issue record (`docs/known-issues/`).
 ### Postponed, with triggers
 | Part | Trigger |
 | --- | --- |
-| Account audit-log forwarding and its stream alerts, in `account-fabric` (inventory B10) | A break-glass user, or a second human with console access |
+| Account audit-log forwarding and its stream alerts, in `account-fabric` (inventory B10) | A break-glass user, planned elevation, or a second human with console access |
 | `observability` stack with the `ldp` sink for environments (inventory B10) | A consumer that needs logs |
 | `byo` sink | A user with an existing SIEM asks for it |
 | CI failure and live-lane alerts for pipeline-run lanes (inventory B8) | Protected-branch CI holding sandbox credentials |
-| `lz-audit` scanner and its SARIF | The first reference environment (spec 005 postponed table) |
-| Budget alert on by default in every project (ADR-0006) | A project outside the sandbox, or the second slice's platform-owned `project` stack |
+| `lz-audit` scanner, its SARIF and the stale-scanner watchdog | The first reference environment (spec 005 postponed table) |
+| Budget alert on by default in every project, and ADR-0006's plan policy that refuses a project without one | A project outside the sandbox, or the second slice's platform-owned `project` stack |
 | Incident runbook page | Owner acceptance of this ADR, or the first incident, whichever comes first |
 | Metrics | The first runtime with compute |
 
+### Open owner decisions
+Accepting this ADR does not decide these; each stays with the owner:
+- A paid sink: whether and when to run LDP.
+- Retention of logs and run records.
+- The recipients: accountable, backup and security.
+- The Sev-1 same-working-day commitment.
+
 ## Consequences
 - The sandbox and `solo` cost nothing extra to observe, and see account audit events only when
-  they choose a sink. The honesty page states that gap.
+  they choose a sink; until then they have no break-glass or planned elevation. The honesty page
+  states that gap.
 - Every promised alert now has a destination and an owner, or a visible `blocked` status.
 - Running on e-mail and forge notifications means signals are only as good as the inbox behind
   them; the named backup recipient is the mitigation.
@@ -138,6 +153,10 @@ cause becomes a known-issue record (`docs/known-issues/`).
 - Spike (ADR-0018): forward audit logs to an LDP stream and see a test login arrive; record cost.
 - L10 drill (ADR-0008): a break-glass login produces an alert at the security recipient.
 - Offline control: an installation without a recipient reports observability `blocked`.
+- Offline control: the watchdog opens a forge issue when the scanner's last success is older than
+  its bound, including when the scanner has never run.
 
 ## Review log
-- 2026-10-20: drafted; one independent review round, findings applied. Operator acceptance outstanding.
+- 2026-10-20: drafted; one independent review round, findings applied.
+- 2026-10-20: accepted (D128) after two further independent reviews; their changes applied. The
+  owner decisions above stay open.

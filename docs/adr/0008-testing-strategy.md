@@ -63,6 +63,9 @@ configuration are behavioural work, including when their output is documentation
 | L9 | Drift and conformance | `tofu plan -detailed-exitcode` on a long-lived reference environment; `lz-audit` scan; **upgrade test** (apply release N, plan N+1: zero destroys of protected resources) | manual changes, provider default changes, breaking upgrades | API only | nightly; upgrade test on release candidates |
 | L10 | Drills and canaries | DR restore of state from a replica; chaos (delete a gateway by hand, expect a finding and an additive repair plan); break-glass login alert; credential rotation; **provider canary**: Renovate bumps of `ovh/ovh` run L3 + L5 + an L7 subset before merge, with a `tofu providers schema -json` snapshot diff | recovery procedures that rot, alerting that never fired, provider breaking changes | billed, scheduled | quarterly; canary on every bump |
 
+Amendment (2026-10-20, D128): L10's state restore runs from the layer-2 backup of
+[ADR-0025](0025-network-and-resilience.md#state-backup-and-restore), not from a same-project replica.
+
 **Test-the-tests.** Nightly **module mutation** with **defect-specific mutants** (drop a tag, swap a
 default, delete a `validation`, widen a permission, break an output, remove a deletion protection),
 deduplicated by behavioural failure and classified when equivalent — never a fixed count; a survivor

@@ -1,5 +1,5 @@
 # ADR-0027: Documentation accessibility
-- Status: Proposed
+- Status: Accepted (2026-10-20, D128)
 - Date: 2026-10-20
 - Related: ADR-0013, ADR-0019, ADR-0020, ADR-0023; spec 006 FR-018, FR-019, E4, E5
 
@@ -47,7 +47,8 @@ Option B.
 ### Diagrams and images
 - Diagrams stay text (Mermaid or D2, ADR-0013). Each diagram is followed by a **text equivalent**
   that carries the same facts: a sentence for a simple one, a table for anything with more than a
-  few edges. A Mermaid diagram also sets `accTitle` and `accDescr`.
+  few edges. A Mermaid diagram also sets `accTitle` and `accDescr`. That metadata is a separate
+  requirement and never stands in for the text equivalent.
 - Colour: keep the renderer's default theme. A diagram that sets its own colours meets WCAG 2.2
   contrast (4.5:1 for text, 3:1 for lines and shapes that carry meaning) and still does not use
   colour as the only cue.
@@ -56,15 +57,16 @@ Option B.
 
 ### Generated documentation (ADR-0020)
 The renderer applies the same rules to what it emits, and its tests assert them: each generated
-diagram has a generated table beside it (the network map as a table of networks, VLANs and
-ranges; the system map as a table of tenants, environments and projects), every status cell
+diagram has a generated table beside it (the network map as a table of networks, VLANs,
+ranges, connections, gateways and public entry points; the system map as a table of tenants, environments and projects), every status cell
 holds a word, and every table has a header row. The generated-at stamp and the source revision
 are text on the page.
 
 ### How `docs:check` can enforce it later
 Each rule is a finding with its own name, a failing fixture first, and the trigger below:
-`IMAGE_ALT_MISSING`, `DIAGRAM_TEXT_MISSING` (a Mermaid block without `accTitle` and `accDescr`),
-`HEADING_SKIP`, `LINK_TEXT_VAGUE` and `TABLE_HEADER_MISSING`. Prose rules (sentence length,
+`IMAGE_ALT_MISSING`, `DIAGRAM_ACC_MISSING` (a Mermaid block without `accTitle` and `accDescr`),
+`DIAGRAM_TEXT_MISSING` (a diagram with no text equivalent after it; the metadata does not satisfy
+it, and whether the text carries the same facts stays with review), `HEADING_SKIP`, `LINK_TEXT_VAGUE` and `TABLE_HEADER_MISSING`. Prose rules (sentence length,
 banned words such as LZ-DOC-004's) belong to the writing lint of ADR-0013, not to `docs:check`.
 Contrast and the full WCAG audit run on the built site once it exists.
 
@@ -84,7 +86,7 @@ Contrast and the full WCAG audit run on the built site once it exists.
 | Part | Trigger |
 | --- | --- |
 | `accTitle` and `accDescr` on the existing diagram | The next change to `architecture-overview.md` |
-| `DIAGRAM_TEXT_MISSING` | A second Mermaid diagram under `docs/` |
+| `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING` | A second Mermaid diagram under `docs/` |
 | `IMAGE_ALT_MISSING` | The first image under `docs/` |
 | `HEADING_SKIP`, `LINK_TEXT_VAGUE`, `TABLE_HEADER_MISSING` | A review finds the fault twice, or owner acceptance of this ADR |
 | Writing lint (Vale or similar, ADR-0013; spec 006 E4) | E4's trigger: the tool arrives in the offline entry |
@@ -114,4 +116,5 @@ Contrast and the full WCAG audit run on the built site once it exists.
   [runbook](../how-to/run-the-first-slice.md) to the first plan and notes where it fails them.
 
 ## Review log
-- 2026-10-20: drafted; one independent review round, findings applied. Operator acceptance outstanding.
+- 2026-10-20: drafted; one independent review round, findings applied.
+- 2026-10-20: accepted (D128) after two further independent reviews; their changes applied.
