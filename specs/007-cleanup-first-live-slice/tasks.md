@@ -247,7 +247,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
 
 - [ ] T022 [US5] Live: the final chain over stacks/deployments.yaml — run by the coordinator under D118
   - Requirements: FR-010, SC-002, SC-003; ADRs: 0024. Depends on: T021 with no open blocker; T006, T007 and T009 on `main` at a reviewed SHA. Finishes with its recovery on 2026-10-22.
-  - Verify: `mise exec -- task live:chain -- --reviewed-sha <sha> all` from the clean live clone: the sandbox's KD-1 binding admitted by FR-003; chain `pass`; leftover check `pass` with any retries quoted from the attempt record; the run's cost and the credit left.
+  - Verify: before the start, `state/probes/` holds no run directory and the chain's alert listing is compared with T019's baseline (stage B, recorded in `retained.md`); `mise exec -- task live:chain -- --reviewed-sha <sha> all` from the clean live clone: the sandbox's KD-1 binding admitted by FR-003; chain `pass`; leftover check `pass` with any retries quoted from the attempt record; the run's cost and the credit left.
   - Evidence: `evidence/T022.md`; initial status `not-run`.
 
 - [ ] T023 [US5] Verification and cleanup on 2026-10-23, against specs/007-cleanup-first-live-slice/evidence/retained.md — run by the coordinator under D118
@@ -260,6 +260,17 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Scope: the owner's live session of 2026-10-19 (8 runs in a shell loop): the prompt read lines already in the terminal's input (earlier keystrokes, an arrow key), so every later answer was read one run late. Flush the terminal's input before the prompt, then read one line; the refusal gives the read line's length (or that it was empty) and the run id it expected, never the line. No non-interactive bypass (no flag carrying the id, no environment variable).
   - Verify: `task test:live-lane`: a line in the pseudo-terminal before the prompt is ignored and the run id typed after it accepted; the wrong-line and no-terminal refusals still hold.
   - Evidence: `evidence/T026.md`; initial status `not-run`.
+
+- [ ] T027 [US3] Stage B fixes in the budget-alert sweep and probe retirement, before T019: tools/internal/probes/live/alerting/check.go, tools/internal/live/runner.go, tools/internal/live/apicheck.go
+  - Requirements: FR-001, FR-006, FR-007; ADRs: 0008, 0024. Depends on: T015, T016. Must be on `main`, independently reviewed, before T019 starts (2026-10-21 23:00).
+  - Scope: (a) the sweep's reads (alert listing, `GetMe`, alert read, the relist after delete) go through the leftover check's bounded retry (`listRetry`: same backoff, budget and clock); the DELETE stays single-shot, a 404 counted as gone; (b) `retire` removes the run's own `.write-*` temporaries, and refuses (keeping `probe.env`) when anything else is left, before it removes `probe.env`, so a retired run never leaves a directory `--cleanup` cannot reach; (c) the alert routes in errors name `{serviceName}` and `{id}` placeholders, as `containerOp` does, never the project or alert id.
+  - Verify: `task test:live-lane`: a transient 500 on each sweep read is retried and the sweep passes, a persistent one fails within the budget with every attempt recorded; a DELETE is sent once; a `.write-*` temporary is removed by retire and an unknown file keeps `probe.env` and fails; an alert decode error names no 32-hex id. Mutation proof on the changed lines.
+  - Evidence: `evidence/T027.md`; initial status `not-run`.
+
+- [ ] T028 Record spec 007's stage B in specs/007-cleanup-first-live-slice/loop.md and the accepted residuals in the how-to
+  - Requirements: FR-007, FR-011; ADRs: 0024. Depends on: T027.
+  - Verify: exempt — docs-only; `docs/how-to/run-the-first-slice.md` says plan-matching is the alert sweep's only ownership evidence (no name or tag on an alert) and that a cleanup must not run beside a live probe run; `task docs:check` green.
+  - Evidence: `evidence/T028.md`; initial status `not-run`.
 
 ## Final phase: Polish
 

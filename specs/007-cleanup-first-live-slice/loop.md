@@ -10,7 +10,7 @@ Budget (Claude review legs, D117 cap 120 across the goal): about 79 used before 
 - [x] P spec set — authored per D119 (2f8ec3e, 11797ee, 7006f80 on main, PR #125)
 - [x] R spec-set review — round 1 on cf35c65: both legs BLOCK (orphaned alert had no delete path; a baseline hid an earlier orphan; retained.md could accept a disposable resource; narrowed locks unworkable). Round 2 on d0e3cc5: both legs BLOCK (a run interrupted before its baseline blocked every later probe; baseline authority too weak). All verified findings were fixed (56036a2); no third round, per the two-round limit.
 - [ ] L task loop
-- [ ] B branch review
+- [ ] B branch review — round 1 on 460e0cf, run early (2026-10-20) because all of 007's code is on `main` and the remaining tasks are live runs and docs (coordinator minor decision); an addendum review of T019/T022 evidence follows. Legs: astra BLOCK (spec + security), strong leg CONCERNS (adversarial). Fixes T027, T028.
 - [ ] Hand-off
 
 ## Fitness functions
@@ -48,6 +48,14 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | L T015 | The 9 pre-baseline runs need the owner at a terminal (--accept-lost-baseline is terminal-gated by design) | major | coordinator | carry | owner sheet once US3 is on main; before T019 | no |
 | L T015 | relist after delete has no retry; alertKind/stateFile duplicate names | minor | both | defer | stage B | no |
 | L T016 | G2 (no ovh_cloud_project outside module.project) closed by grep and review, no machine guard | minor | strong | defer | stage B | no |
+| B1 | Alert sweep reads are single-shot; one transient 500 fails T019 | major | strong | fix | T027 (a) | no |
+| B1 | A stray `.write-*` makes retire leave a directory that blocks every start and that `--cleanup` cannot reach | major | both | fix | T027 (b) | no |
+| B1 | Alert routes put the project and alert id in errors | minor | strong | fix | T027 (c) | no |
+| B1 | Plan-matching is not ownership evidence: a matching alert made by someone else after the baseline is deleted | critical (astra) / held (strong) | astra | decide accept | Coordinator 2026-10-20 (D131): the legs disagree; single-actor sandbox, no retained alert enabled, alerts carry no name or tag; the how-to states it (T028); run-unique alert markers are an after-window follow-up | no |
+| B1 | Cleanup takes no lock against a live run of the same id | major | astra | decide accept | Runs are serial on one workstation (window.md); exclusion lock after the window, with B1 (chain cleanup by name) | no |
+| B1 | Kill between `claimDir` and `probe.env` leaves an empty directory that blocks starts | minor | astra | accept | Nothing exists in OVHcloud then; the refusal names the manual removal; after-window follow-up | no |
+| B1 | `--accept-lost-baseline` wording promised "no automated session" | minor | strong | fix | spec.md FR-007 reworded (needs a terminal, not a human) | no |
+| B1 | A chain does not see an orphaned alert | minor | strong | fix | T022 Verify: `state/probes/` empty and alert listing against T019's baseline first | no |
 
 ## Tasks
 | Task | Verdict | Review (legs, rounds, strong leg?) | Gaps / decision request |
