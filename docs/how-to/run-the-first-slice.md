@@ -457,6 +457,14 @@ outcomes and the known deviations into the evidence or PR, never the record itse
 - One kind of debris is known not to be cleaned up (evidence T062, gap 7): a delete marker and a
   noncurrent version of `<key>.tflock` in the versioned state bucket, left by every L7 run.
   Whether OVHcloud keeps them is UNVERIFIED.
+- The `budget-alert` probe's sweep deletes an alert that is not in the run's baseline only when it
+  matches the probe's plan (threshold, delay, the account's address, the run's project): a budget
+  alert carries no name or tag, so plan-matching is its only ownership evidence. An identical
+  alert someone else creates in the project after the baseline would be deleted too; do not
+  create budget alerts by hand in the sandbox project while a probe run is unreconciled (spec 007
+  stage B, D131). Its reads are retried like the listings above; its DELETE is sent once.
+- Never run `--cleanup <run-id>` while that run is still going in another terminal: a cleanup
+  takes no lock against a live run of the same id. Run live verbs one at a time.
 - The leftover check does not catch everything:
   - A resource created during a run without the `lz-` prefix, and missed by the inventory, is
     not found (evidence T047, gap 4).
