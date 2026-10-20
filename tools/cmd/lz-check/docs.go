@@ -41,6 +41,10 @@ import (
 // Superseded ADR (what it does not judge is counted). FR-019 adds the
 // repository map check (repositoryMap).
 //
+// ADR-0027 adds three mechanical accessibility rules on the same pages, ADRs
+// included (accessibility): headings in order with one H1, link text that
+// says where it goes, and a header row on every table.
+//
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
 // from the file on disk: on a clean checkout that is the id of HEAD:<path>,
 // and the check needs neither git nor a .git directory.
@@ -136,6 +140,7 @@ func docs(out io.Writer, root string) int {
 			references += c.header(page, text)
 		}
 		c.body(page, text, bodyRules{ids: true, targets: !adr})
+		c.accessibility(page, text)
 		c.versionGate(page, text)
 	}
 	if len(pages) == 0 {
@@ -448,6 +453,194 @@ func (c *docChecker) body(page, text string, rules bodyRules) {
 			c.link(page, m[1], rules.readme)
 		}
 	}
+}
+
+// vagueLinkText is ADR-0027's list of link texts that do not say where a link
+// goes, compared after trimming and lower-casing; the one place it is kept.
+var vagueLinkText = map[string]bool{
+	"here": true, "click here": true, "this link": true, "link": true,
+	"this": true, "more": true, "read more": true,
+}
+
+// linkText is a bracketed text and what follows it: ( for an inline link
+// ([text](…)), a label for a full or collapsed reference ([text][r],
+// [text][]), or nothing for a shortcut reference ([text]). A leading ! marks
+// an image, whose text is alt text, not link text.
+var linkText = regexp.MustCompile(`(!?)\[([^\[\]]*)\](\(|\[([^\[\]]*)\])?`)
+
+// refLabel is a reference definition's label; a footnote ([^1]:) is not one.
+var refLabel = regexp.MustCompile(`^ {0,3}\[([^\]^][^\]]*)\]:`)
+
+// headingOrder is the level of the last heading seen (0 before the first)
+// and the number of H1s.
+type headingOrder struct{ last, h1 int }
+
+// accessibility judges a page's body against ADR-0027's mechanical rules
+// (HEADING_SKIP, LINK_TEXT_VAGUE, TABLE_HEADER_MISSING). Front matter is not
+// body, and fenced code blocks are examples: neither is judged, and a heading
+// in a block does not count towards the order. Only ATX (#) headings are
+// read, as anchorsOf does. Like the link rules, a link is read within one
+// line: link text spanning lines is not judged.
+func (c *docChecker) accessibility(page, text string) {
+	lines := strings.Split(text, "\n")
+	start := 0
+	if lines[0] == "---" {
+		start = closingLine(lines) + 1
+	}
+	defs := refLabels(lines[start:])
+	var code fenced
+	var order headingOrder
+	table := false
+	for n := start; n < len(lines); n++ {
+		if code.step(lines[n]) {
+			table = false
+			continue
+		}
+		c.headingStep(page, n+1, lines[n], &order)
+		c.vagueLinks(page, n+1, lines[n], defs)
+		table = c.tableStep(page, lines, n, table)
+	}
+}
+
+// refLabels are the labels of a page's reference definitions outside fenced
+// blocks, normalised by refKey.
+func refLabels(lines []string) map[string]bool {
+	defs := map[string]bool{}
+	var code fenced
+	for _, line := range lines {
+		if code.step(line) {
+			continue
+		}
+		if m := refLabel.FindStringSubmatch(line); m != nil {
+			defs[refKey(m[1])] = true
+		}
+	}
+	return defs
+}
+
+// refKey is a reference label as CommonMark matches it: case-folded, inner
+// whitespace collapsed.
+func refKey(label string) string {
+	return strings.ToLower(strings.Join(strings.Fields(label), " "))
+}
+
+// headingStep judges one line as a heading: its level may rise by at most one
+// over the previous heading's, and only one H1 is allowed.
+func (c *docChecker) headingStep(page string, n int, line string, o *headingOrder) {
+	if !heading.MatchString(line) {
+		return
+	}
+	marks := strings.TrimLeft(line, " ")
+	level := len(marks) - len(strings.TrimLeft(marks, "#"))
+	if level == 1 {
+		o.h1++
+		if o.h1 > 1 {
+			c.add("HEADING_SKIP", page, "line %d is a second H1; a page has one", n)
+		}
+	}
+	if o.last > 0 && level > o.last+1 {
+		c.add("HEADING_SKIP", page, "line %d goes from H%d to H%d; headings do not skip a level", n, o.last, level)
+	}
+	o.last = level
+}
+
+// vagueLinks judges the link texts of one line outside code spans; defs are
+// the page's reference labels.
+func (c *docChecker) vagueLinks(page string, n int, line string, defs map[string]bool) {
+	prose := blankCodeSpans(line)
+	for _, m := range linkText.FindAllStringSubmatchIndex(prose, -1) {
+		text, ok := linkTextOf(prose, m, defs)
+		if ok && vagueLinkText[strings.ToLower(strings.TrimSpace(text))] {
+			c.add("LINK_TEXT_VAGUE", page, "line %d links the text %q; say where the link goes", n, strings.TrimSpace(text))
+		}
+	}
+}
+
+// linkTextOf is the text of the linkText match m in prose and whether it is a
+// link: an inline link always, a reference only when its label is defined;
+// an image is not a link and a definition ([r]: …) is not a use.
+func linkTextOf(prose string, m []int, defs map[string]bool) (string, bool) {
+	text := prose[m[4]:m[5]]
+	switch {
+	case m[3] > m[2]:
+		return "", false
+	case m[6] >= 0 && prose[m[6]] == '(':
+		return text, true
+	case m[8] >= 0 && strings.TrimSpace(prose[m[8]:m[9]]) != "":
+		return text, defs[refKey(prose[m[8]:m[9]])]
+	case m[6] < 0 && m[1] < len(prose) && prose[m[1]] == ':':
+		return "", false
+	}
+	return text, defs[refKey(text)]
+}
+
+// blankCodeSpans is line with each code span blanked: a run of backticks up
+// to the next run of the same length (CommonMark); a run with no match is
+// literal text.
+func blankCodeSpans(line string) string {
+	b := []byte(line)
+	for i := 0; i < len(b); {
+		if b[i] != '`' {
+			i++
+			continue
+		}
+		n := backtickRun(b, i)
+		end := closingRun(b, i+n, n)
+		if end < 0 {
+			i += n
+			continue
+		}
+		for j := i; j < end+n; j++ {
+			b[j] = ' '
+		}
+		i = end + n
+	}
+	return string(b)
+}
+
+// backtickRun is the length of the run of backticks starting at b[i].
+func backtickRun(b []byte, i int) int {
+	n := 0
+	for i+n < len(b) && b[i+n] == '`' {
+		n++
+	}
+	return n
+}
+
+// closingRun is the start of the first run of exactly n backticks at or after
+// from, or -1.
+func closingRun(b []byte, from, n int) int {
+	for j := from; j < len(b); {
+		if b[j] != '`' {
+			j++
+			continue
+		}
+		m := backtickRun(b, j)
+		if m == n {
+			return j
+		}
+		j += m
+	}
+	return -1
+}
+
+// tableStep judges lines[n] as part of a table and reports whether it is a
+// table row (a line whose first non-blank character is a pipe). The first row
+// of a table must be a header: a row that is not a delimiter, followed
+// directly by a delimiter row (| --- |).
+func (c *docChecker) tableStep(page string, lines []string, n int, inTable bool) bool {
+	row := strings.TrimSpace(lines[n])
+	if !strings.HasPrefix(row, "|") {
+		return false
+	}
+	if inTable {
+		return true
+	}
+	headed := !tableDelimiter.MatchString(row) && n+1 < len(lines) && tableDelimiter.MatchString(strings.TrimSpace(lines[n+1]))
+	if !headed {
+		c.add("TABLE_HEADER_MISSING", page, "line %d starts a table without a header row followed by a | --- | delimiter row", n+1)
+	}
+	return true
 }
 
 func (c *docChecker) taskTargets(page, text string, code bool) {
