@@ -83,7 +83,7 @@ verdict, because state never lives in Swift. A `reach` there is reported as a Sw
 ADR-0018's route inventory. Rejected: probing other host or account forms (`s3.<region>…`, other
 `AUTH_` spellings). No source documents them for S3-API buckets, and each costs a live run.
 
-## Decision: `iam/resource/edit` needs an IAM resource, and the only one in scope is the retained project (T042–T043)
+## Decision: `iam/resource/edit` stays blocked by design: no owned target
 Sources: kb `api/v2/iam.json` and `api/v1/cloud.json` (fetched 2026-10-06); kb mirror
 ovhcloud-docs 5c9f23e `docs/en/guides/account-and-service-management/account-information/iam-policies-api.mdx`.
 Read 2026-10-20.
@@ -110,31 +110,18 @@ Read 2026-10-20.
   reports what the caller may do on a URN the caller names (`iam.json` 928). The question is which
   URN the real PUT evaluates.
 
-Decision: retarget the write to the **retained project's URN** and limit it to the run's own tag
-key `lzprobe-iam-urn:run-id` (value: the run id). This reverses the guard the 2026-10-16 spec-set
-review added (loop.md *Triage* R2), so it needs the coordinator's or owner's approval before
-T043 lands. The safety bounds:
+Decision (coordinator, 2026-10-20): `iam/resource/edit` **stays blocked by design: no owned
+target**. T015 binds no floor denial for it. Tagging the retained project with a run-named key was
+considered and refused, for two reasons:
 
-- The PUT body is the project's tag set read just before, plus the run's key. Whether the PUT
-  replaces the whole set or merges is not documented (`iam.json` 916 says only which tag actions
-  it needs): UNVERIFIED. The check assumes replacement, the conservative case, because
-  account-governance's tags (D109) live on the same project.
-- The write is refused when the project already carries the run's tag key, with any value.
-- No other writer of project tags runs during the probe (the coordinator holds this). Without a
-  conditional PUT, which the schema does not offer, a lost update cannot be excluded, only
-  narrowed: the check reads the set a second time just before the PUT and compares the read-back
-  with that second read.
-- Both identities hold the same tag actions on both URNs (`account:` on the account URN,
-  `publicCloudProject:` on the project URN), so only `iam/resource/edit`'s URN differs.
-- After the write, the check reads the tag set again. Any change other than the run's key fails
-  the run.
-- Undo removes the key with the sandbox admin through `DELETE …/tag/{key}`, but only when the
-  value is the run id. Sweep does the same from probe.env alone.
+- it would undo the guard the 2026-10-16 spec-set review added (loop.md *Triage* R2);
+- the chain's `project-tags` assertion reads the same project's tags
+  (docs/reference/verification-status.md, D109). A probe writing them concurrently could break
+  that assertion. The PUT may also replace the whole set (UNVERIFIED; `iam.json` 916 names only
+  the tag actions it needs), and the schema offers no conditional PUT.
 
-Alternatives: (B) leave the action `blocked (no owned target)` and let T015 bind no floor denial
-for it. This is the current state, and it is safe but leaves FR-006 short. (C) wait for OKMS
-(D85) and tag a run-created service key. That target is owned, but it is postponed, and the cost
-is UNVERIFIED. If approval is refused, (B) stands, and T043 and T044's iam-urn run are withdrawn.
+The question stays open until an owned IAM resource exists in scope, for example an OKMS service
+key once OKMS is no longer postponed (D85; cost UNVERIFIED).
 
 ## Upstream input trace
 Pinned upstream inputs in ../../docs/reference/upstream-reference-map.md inform T009–T014 encryption/backend and T015–T020 IAM/issuer probes. Record source paths/revision with actual captures; do not copy broad actions or infer two-project proof from within-project fixtures.

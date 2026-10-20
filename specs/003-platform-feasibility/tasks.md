@@ -382,8 +382,9 @@ below 20 EUR of credit or after 2026-10-23 23:00 (D117).
 
 T025 left C005.1 "not shown" on the Keystone/Swift plane: every own-bucket control answered 404.
 T027 left `iam/resource/edit` `blocked (no owned target)`. research.md has one decision for each.
-The rules above (no vacuous red, the leak guard, one owner per resource, cleanup without outputs,
-names) apply to both test tasks.
+The second needs no task: the action stays blocked by design (coordinator, 2026-10-20). The rules
+above (no vacuous red, the leak guard, one owner per resource, cleanup without outputs, names)
+apply to T040.
 
 - [ ] T040 [US2] Write the swift-reach check's Swift-native control tests in tools/internal/probes/live/storageiam/swiftreach_test.go, with the stub of the new steps in tools/internal/probes/live/storageiam/swiftreach.go
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T025 (the 404 observation), research.md *S3-API buckets are not on the Swift plane*.
@@ -407,36 +408,16 @@ names) apply to both test tasks.
   - Verify: `task test:live-lane`: T040's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T041.md`; initial status `not-run`.
 
-- [ ] T042 [US3] Write the iam-urn check's owned-target tests in tools/internal/probes/live/identity/urn_test.go, with the stub of the retargeted write in tools/internal/probes/live/identity/urn.go
-  - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T027 (`no owned target`), research.md *`iam/resource/edit` needs an IAM resource*, and the coordinator's or owner's approval of that decision. The approval replaces T033's "the probe bucket only" case. Without it, this task and T043 are withdrawn.
-  - Cases (given / when / then → defect exposed), against a fake OVHcloud API:
-    - given each identity's policy / then it grants `iam/resource/edit` on its own URN only, and the same tag actions on both URNs (`account:apiovh:iam/resource/tag/add|remove` on the account URN, `publicCloudProject:apiovh:iam/resource/tag/add|remove` on the project URN) → exposes a verdict that a tag grant decides, not `iam/resource/edit`.
-    - given the project's tag set read just before / when the PUT is made / then its body is that set plus `lzprobe-iam-urn:run-id` = the run id, and nothing else → exposes a PUT that drops account-governance's tags (D109).
-    - given the project already carries `lzprobe-iam-urn:run-id` with any value / then the write is `blocked (key present)`, and no PUT is made → exposes one run overwriting another's key before the value-checked cleanup.
-    - given the fake changes another tag between the check's read and its PUT (a concurrent writer) / then the read-back, compared with a second read taken just before the PUT, shows the lost change; Observe fails, names the key, and the run reports the retained project damaged → exposes a lost governance update that passes because the read-back matches the probe's stale set.
-    - given a read-back after the PUT that differs from the expected set in any key other than the run's / then Observe fails and records the difference → exposes a damaged retained project reported as a URN result.
-    - given a target URN other than the project in probe.env, or a tag key or value not the run's / then Validate refuses before any call → exposes a write to any other resource.
-    - given the PUT refused 403 naming `account:apiovh:iam/resource/edit` for one identity and allowed for the other, both controls having succeeded / then the URN is the allowed identity's; a 403 naming a tag action is `blocked`, never a URN → exposes a tag denial read as the probed action's binding.
-    - given Undo, and given a fresh-process Sweep from probe.env alone / then the admin removes the key through `DELETE /iam/resource/{urn}/tag/{key}` only when its value is the run id, reads the set again and fails if the key is still there; another run's value is left in place → exposes a leftover tag, or one run deleting another's.
-  - Verify: `task test:live-lane`: each new case fails on the stub for its stated reason; T033's other cases stay green.
-  - Evidence: `specs/003-platform-feasibility/evidence/T042.md`; initial status `not-run`.
+- [ ] T042 [US2] Live run, by the coordinator (D117): the swift-reach probe with tests/live/probes/swift-reach/
+  - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T041 on `main` at a reviewed SHA.
+  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone at that SHA, within D117's bounds (credit, expiry): records the own Swift-native control, each S3-bucket step (`not-applicable` or `blocked`, with its reason) and the Swift-native cross steps. The run destroys in finally and sweeps; the leftover check is clean, Swift containers included.
+  - Evidence: `specs/003-platform-feasibility/evidence/T042.md`, which T043 writes from the run record under `.local/live/<run-id>/` in the live clone; initial status `not-run`.
 
-- [ ] T043 [US3] Implement the retargeted write in tools/internal/probes/live/identity/urn.go
-  - Requirements: FR-006 (C006.2, C006.5), FR-008 (C008.1); ADRs: 0006, 0018. Depends on: T042.
-  - Scope: the steps T042 fixes. The bucket listing that T027 found empty goes. Decide whether the root still needs the probe bucket, and say why in the evidence. Update the iam-urn run-sheet row in tests/live/probes/README.md: the project tag key, which Undo and Sweep remove.
-  - Verify: `task test:live-lane`: T042's cases green; `task test:traceability` green; `task docs:check` green.
-  - Evidence: `specs/003-platform-feasibility/evidence/T043.md`; initial status `not-run`.
-
-- [ ] T044 [US2] Live run, by the coordinator (D117): the swift-reach probe with tests/live/probes/swift-reach/, then the iam-urn probe with tests/live/probes/iam-urn/
-  - Requirements: FR-005 (C005.1), FR-006 (C006.2, C006.4, C006.5), FR-008 (C008.1); ADRs: 0004, 0006, 0009, 0018. Depends on: T041 for the swift-reach run; T043 for the iam-urn run, which is dropped if T042's approval is refused. Each runs from `main` at a reviewed SHA. During the iam-urn run, no other writer of project tags (for example an account-governance apply) may run; the coordinator holds that.
-  - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach`, then the same for `tests/live/probes/iam-urn`, one at a time from the clean live clone at that SHA, within D117's bounds (credit, expiry). For swift-reach, record the own Swift-native control, each S3-bucket step (`not-applicable` or `blocked`, with its reason) and the Swift-native cross steps. For iam-urn, record each identity's control and PUT, the named actions, the tag set before and after, and the URN result for `iam/resource/edit`. Destroy in finally, sweep, and get a clean leftover check (Swift containers included); after the iam-urn run, confirm the project carries no `lzprobe-iam-urn:run-id` key.
-  - Evidence: `specs/003-platform-feasibility/evidence/T044.md`, which T045 writes from the run records under `.local/live/<run-id>/` in the live clone; initial status `not-run`.
-
-- [ ] T045 [US2] Record T044's runs in specs/003-platform-feasibility/evidence/T044.md and docs/reference/verification-status.md (docs only)
-  - Requirements: FR-005 (C005.1), FR-006 (C006.2, C006.4, C006.5), FR-008 (C008.1); ADRs: 0004, 0006, 0009, 0018. Depends on: T044.
-  - Scope: run ids, observations, cost (or UNVERIFIED), the leftover checks, and what each result means for C005.1, C006.2, C006.4, C006.5 and C008.1. Lay it out as T025.md and T027.md do, with account and project ids replaced. Add a pointer from T025.md and T027.md to the new result. Write no code.
+- [ ] T043 [US2] Record T042's run in specs/003-platform-feasibility/evidence/T042.md and docs/reference/verification-status.md (docs only)
+  - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T042.
+  - Scope: run id, observation, cost (or UNVERIFIED), the leftover check, and what the result means for C005.1, C006.4 and C006.5. Lay it out as T025.md does, with account and project ids replaced. Add a pointer from T025.md to the new result. Write no code.
   - Verify: `task docs:check` green; `task test:traceability` green.
-  - Evidence: `specs/003-platform-feasibility/evidence/T045.md`; initial status `not-run`.
+  - Evidence: `specs/003-platform-feasibility/evidence/T043.md`; initial status `not-run`.
 
 ## Planned command creators
 
@@ -470,10 +451,8 @@ Within 003, state T011–T014 and the probes T029/T030/T025 and T035/T036/T028, 
 T015–T019 and the probes T031/T032/T026 and T033/T034/T027, branch after 005/T047 with distinct
 fixtures and no overlapping live writers. T037/T038 come first; then the four probes' offline
 tasks can run in parallel worktrees except T033 after T031 (the identity package) and T034 after T032 (its registry
-inputs); their live runs go one at a time. The follow-ups T040/T041 and T042/T043 can run in
-parallel. T042 waits for the approval its Depends on names. T044's swift-reach run needs only
-T041; its iam-urn run needs T043, and is dropped if the approval is refused. T045 follows T044
-and records a dropped run as withdrawn, with the reason.
+inputs); their live runs go one at a time. The follow-ups run in order: T040, T041, the
+live run T042, then T043.
 The offline oracle T021–T022 needs only its listed local prerequisites. No parallel
 flag bypasses ownership or cleanup gates.
 
