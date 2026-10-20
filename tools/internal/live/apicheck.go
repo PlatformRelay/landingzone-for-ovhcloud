@@ -30,6 +30,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -323,6 +324,91 @@ func (c *APIChecker) Do(ctx context.Context, call APICall) (APIAnswer, error) {
 	return a, err
 }
 
+// readRoutes are the reads Read retries (spec 007 T027: the budget-alert sweep's), each with the
+// route its attempts are recorded under: placeholders, never the project or the alert id.
+var readRoutes = map[APIOp]string{
+	APIGetMe:      "/me",
+	APIListAlerts: alertRoute,
+	APIGetAlert:   alertRoute + "/{id}",
+}
+
+// Read sends a read as Do does, through the leftover check's retry the runner lends a probe
+// check's Sweep in ctx (LeftoverCheck.ReadRetry, spec 007 T027): an answer of 429 or 500-599 and a
+// transport failure are asked again with that retry's backoff, budget and clock; any other non-2xx
+// answer (but a GetAlert 404, the alert gone) fails without a retry; every failed attempt is
+// recorded with the check's (FR-001, FR-002). Without a retry in ctx it sends once. Only the reads
+// of readRoutes are admitted; anything else is refused before a request.
+func (c *APIChecker) Read(ctx context.Context, call APICall) (APIAnswer, error) {
+	route, ok := readRoutes[call.Op]
+	if !ok {
+		return APIAnswer{}, fmt.Errorf("%s is not a retried read; not sent", call.Op)
+	}
+	t, _ := ctx.Value(readRetryKey{}).(*listRetry)
+	if t == nil {
+		return c.Do(ctx, call)
+	}
+	for attempt := 1; ; attempt++ {
+		start := t.clock.Now()
+		a, err := c.Do(ctx, call)
+		if t.budget != nil {
+			t.budget.keep(t.clock.Now().Sub(start))
+		}
+		if call.Op == APIGetAlert && answered(a, err) == http.StatusNotFound {
+			return APIAnswer{Status: http.StatusNotFound}, nil // the alert gone (FR-007), body or not
+		}
+		failure := readFailure(route, a, err)
+		if failure == nil {
+			return a, err
+		}
+		if _, err := t.failed(ctx, route, attempt, failure); err != nil {
+			return APIAnswer{}, err
+		}
+	}
+}
+
+// readFailure is a read's failure as the leftover check classifies it (transientListing), judged
+// by the status first (FR-001): a non-2xx answer is a *statusError, also when its body could not be
+// read, was over the bound or its redirect not parsed; a request without an answer, or a 2xx whose
+// body broke off, a *transportError; any other error stays as it is (not retried). nil for a 2xx
+// answer, which the caller judges (Read handles a GetAlert 404 before).
+func readFailure(route string, a APIAnswer, err error) error {
+	var sf *sendFailed
+	switch {
+	case errors.As(err, &sf) && sf.status != 0 && (sf.status < 200 || sf.status > 299):
+		return &statusError{path: route, code: sf.status}
+	case errors.As(err, &sf) && !sf.large:
+		return &transportError{path: route, err: sf.cause}
+	case err != nil:
+		return err
+	case a.Status >= 200 && a.Status <= 299:
+		return nil
+	}
+	return &statusError{path: route, code: a.Status}
+}
+
+// answered is the status a read got: the answer's, or the one a failed exchange saw (0: none).
+func answered(a APIAnswer, err error) int {
+	var sf *sendFailed
+	if errors.As(err, &sf) {
+		return sf.status
+	}
+	return a.Status
+}
+
+// sendFailed is a request that got no usable answer (exchange: the send or the body read failed,
+// or the answer was over maxBody, large): its text names the request only; cause is what failed,
+// for transportError's kind; status is the answer's status when one came (a body that broke off
+// or was too long, a redirect Go could not parse), else 0. It does not unwrap to cause, so a
+// caller sees what it saw before (quiet's text, nothing beneath it).
+type sendFailed struct {
+	text   string
+	cause  error
+	status int
+	large  bool
+}
+
+func (e *sendFailed) Error() string { return e.text }
+
 // sweepOp sends one of the Sweep operations (T030) and reads its answer: a listing keeps only the
 // names, object keys and version ids, or user ids and descriptions, and an answer of another shape
 // is an error; a delete keeps its status. A ListBuckets 404 asks the region's detail whether the
@@ -447,18 +533,28 @@ func (c *APIChecker) me(ctx context.Context) (APIAnswer, error) {
 // listing keeps the alert ids, each a uuid (another shape is an error: it could be neither read
 // nor deleted); a read keeps the alert, whose id must be the asked one and whose threshold and
 // delay must be present; a delete keeps its status. A non-2xx answer keeps its status and the
-// actions it names.
+// actions it names. Errors name the route (alertRoute, {id}), never the project or the alert id
+// (spec 007 T027, as containerOp).
 func (c *APIChecker) alertOp(ctx context.Context, call APICall) (APIAnswer, error) {
-	method, path := http.MethodGet, "/cloud/project/"+call.Project+"/alerting"
+	method, path, route := http.MethodGet, "/cloud/project/"+call.Project+"/alerting", alertRoute
 	if call.ID != "" {
-		path += "/" + call.ID
+		path, route = path+"/"+call.ID, route+"/{id}"
 	}
 	if call.Op == APIDeleteAlert {
 		method = http.MethodDelete
 	}
+	what := method + " " + route
 	status, _, raw, err := c.exchange(ctx, method, path, nil, "")
-	if err != nil {
-		return APIAnswer{}, err
+	var sf *sendFailed
+	switch {
+	case errors.As(err, &sf):
+		// exchange's failure with the route in place of the path ("timed out", "unreadable answer").
+		routed := *sf
+		routed.text = what + strings.TrimPrefix(sf.text, method+" "+path)
+		return APIAnswer{}, &routed
+	case err != nil:
+		// exchange's text with the route in place of the path ("bad request", "answer larger …").
+		return APIAnswer{}, fmt.Errorf("%s%s", what, strings.TrimPrefix(err.Error(), method+" "+path))
 	}
 	a := APIAnswer{Status: status}
 	if status < 200 || status > 299 {
@@ -472,7 +568,7 @@ func (c *APIChecker) alertOp(ctx context.Context, call APICall) (APIAnswer, erro
 		a.Alert, err = alertRead(raw, call.ID)
 	}
 	if err != nil {
-		return APIAnswer{}, fmt.Errorf("%s %s: %w", method, path, err)
+		return APIAnswer{}, fmt.Errorf("%s: %w", what, err)
 	}
 	return a, nil
 }
@@ -521,6 +617,9 @@ func (c *APIChecker) containerOp(ctx context.Context, call APICall) (APIAnswer, 
 	}
 	return a, nil
 }
+
+// alertRoute is the alert listing's route as errors and attempt records name it.
+const alertRoute = "/cloud/project/{serviceName}/alerting"
 
 // alertIDs reads a GET …/alerting answer: a JSON array of uuids.
 func alertIDs(raw []byte) ([]string, error) {
@@ -988,17 +1087,24 @@ func (c *APIChecker) exchange(ctx context.Context, method, path string, body []b
 	if cursor != "" {
 		req.Header.Set("X-Pagination-Cursor", cursor)
 	}
-	resp, err := c.b.api.client().Do(req)
+	cl := c.b.api.client()
+	rec := &statusRecorder{next: cl.Transport}
+	if rec.next == nil {
+		rec.next = http.DefaultTransport
+	}
+	cl.Transport = rec
+	resp, err := cl.Do(req)
 	if err != nil {
-		return 0, "", nil, quiet(what, err)
+		// A 3xx whose Location Go cannot parse fails Do after the answer came: rec has its status.
+		return 0, "", nil, &sendFailed{text: quiet(what, err).Error(), cause: err, status: rec.code}
 	}
 	defer resp.Body.Close()
 	raw, err = io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
-		return 0, "", nil, fmt.Errorf("%s: unreadable answer", what)
+		return 0, "", nil, &sendFailed{text: what + ": unreadable answer", cause: err, status: resp.StatusCode}
 	}
 	if len(raw) > maxBody {
-		return 0, "", nil, fmt.Errorf("%s: answer larger than %d bytes", what, maxBody)
+		return 0, "", nil, &sendFailed{text: fmt.Sprintf("%s: answer larger than %d bytes", what, maxBody), status: resp.StatusCode, large: true}
 	}
 	return resp.StatusCode, resp.Header.Get("X-Pagination-Cursor-Next"), raw, nil
 }
