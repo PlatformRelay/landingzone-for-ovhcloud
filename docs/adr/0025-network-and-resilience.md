@@ -1,5 +1,5 @@
 # ADR-0025: Network and resilience architecture
-- Status: Proposed
+- Status: Accepted (2026-10-20, D128)
 - Date: 2026-10-20
 - Related: ADR-0004, ADR-0006, ADR-0009, ADR-0016, ADR-0017, ADR-0021, ADR-0022, ADR-0024;
   spec 005 R9, spec 006 E5
@@ -57,9 +57,10 @@ Option A, with the resilience rules below.
 ### Network per environment
 - Each environment gets **one private network per region it uses**, in its own project, through
   `components/network/island`. ADR-0017's rule stands: ranges are validated before any network
-  change. Today the manifest plays the ledger's part for the one network (the checks listed below);
-  the separate `ipam.yaml` (ADR-0017) arrives with the second network that shares a vRack, because
-  only then can ranges collide across rows.
+  change. Deferring its `ipam.yaml` ledger is a **bounded amendment** to ADR-0017: until the
+  trigger below fires, manifest validation (the checks listed below) is the temporary substitute
+  for the one network. The separate `ipam.yaml` arrives with the second network that shares a
+  vRack, because only then can ranges collide across rows.
 - **No egress by default.** Outbound access is a per-environment opt-in that adds one gateway to
   that environment's network. "Controlled egress" also removes or neutralises OpenStack's default
   egress rule and is shown by IPv4 and IPv6 traffic probes (ADR-0017; patterns LZ-NET-002, LZ-NET-004).
@@ -80,8 +81,8 @@ Option A, with the resilience rules below.
 | Failure | What carries the landing zone through it |
 | --- | --- |
 | A zone, in a 3-AZ region | Regional services (Object Storage, the network); zonal workloads only if the runtime spread them. |
-| A region | Nothing automatic. The state backup (below) lives in another region; rebuild elsewhere by re-applying the stacks. |
-| A project (deleted, suspended or compromised) | `prevent_destroy` and `deletion_protection` on retained projects; the state backup lives outside the state project. |
+| A region | Nothing automatic. Planned: the state backup (layer 2 below, not built) lives in another region; rebuild elsewhere by re-applying the stacks. Until it exists, region loss loses state. |
+| A project (deleted, suspended or compromised) | `prevent_destroy` and `deletion_protection` on projects the landing zone manages or adopts (`modules/cloud-project/main.tf:8-32`). A referenced project is only read, so neither covers it; the sandbox project is referenced (KD-1). Planned: the state backup lives outside the state project (layer 2 below, not built). |
 | The account | Only a backup copy held outside the account (layer 3 below, not built) plus the escrow package and the resource-id manifest (ADR-0009); the bootstrap re-runs on a fresh account ([how-to](../how-to/set-up-a-fresh-account.md)). Until layer 3 exists, account loss loses state. |
 | A state writer killed mid-apply | The S3 lockfile, versioning and stale-lock recovery (ADR-0009). |
 
@@ -98,12 +99,15 @@ Three layers, from cheapest to strongest:
    failed account cannot reach, such as a second OVHcloud account or another provider, with its
    own credentials. ADR-0009 already says independent decryption does not cover account
    unavailability; this layer is what covers it. With the escrow package, it is enough to rebuild
-   on a new account. Where it lives is an owner decision.
+   the infrastructure and recover its state on a new account; it restores no workload data, which
+   state snapshots do not hold. Where it lives is an owner decision.
 
 Restore is a copy of an earlier version or a backup object into an **isolated** backend first,
 validated, then promoted by an explicit, logged step that fences the old writer (ADR-0009).
-Proposed targets for the `solo` profile, to be confirmed by the owner: lose at most one day of
-state changes, and be able to plan again within one working day.
+This narrows ADR-0008's L10 drill, "DR restore of state from a replica", to a restore from the
+layer-2 backup: a same-project replica is not the backup.
+Proposed targets for the `solo` profile, still an open owner decision (below): lose at most one
+day of state changes, and be able to plan again within one working day.
 
 ### What the first slice already does
 - One private network and one subnet in exactly one region, DHCP on, `no_gateway = true`, no
@@ -138,7 +142,15 @@ state changes, and be able to plan again within one working day.
 | Backup job to another region and project | A separate state project (lifts KD-1), or the first installation outside the sandbox |
 | Out-of-account copy (layer 3) and where it lives | The backup job exists, and the owner chooses the destination |
 | Restore and promotion drill (ADR-0008 L10) | The backup job exists |
-| Recovery targets (time and data loss) | Owner acceptance of this ADR |
+| Recovery targets (time and data loss) | The owner's decision (open, below) |
+
+### Open owner decisions
+Accepting this ADR does not decide these; each stays with the owner:
+- Recovery targets: RPO and RTO (the `solo` proposal above).
+- Where layer 3 lives.
+- The second region and project that hold the layer-2 backup.
+- Whether `1az` stays the default resilience value.
+- Paid gateways, and a hub (`hub-vrack`).
 
 ## Consequences
 - The default landing zone has no path out and no path in. A workload that needs one says so in
@@ -167,4 +179,6 @@ state changes, and be able to plan again within one working day.
 - A spike reads the catalogue's region classes from OVHcloud's region list and records the source.
 
 ## Review log
-- 2026-10-20: drafted; one independent review round, findings applied. Operator acceptance outstanding.
+- 2026-10-20: drafted; one independent review round, findings applied.
+- 2026-10-20: accepted (D128) after two further independent reviews; their changes applied. The
+  owner decisions above stay open.
