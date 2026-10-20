@@ -17,12 +17,12 @@ references:
   - path: specs/001-offline-foundation/spec.md
     blob: 5b18e1d04a145c62f2d840542b5fbf56563fabf7
   - path: .github/workflows/foundation.yml
-    blob: 445bac74c5390e57a0f844222ada15f8e64e69a6
+    blob: 51b2c4a7a9f510307ef094f420a7d3f0cb3fd78d
   - path: pipelines/github/foundation-source.json
-    blob: bc37c8a20d21fdadb3976d7652dd9344d95aee9c
+    blob: 0666ade9fcc848ec2e51d10b701731550781e77d
   - path: tools/internal/checks/foundation_ci.go
-    blob: 8e5e5369bdf3a402e266a34f8d0e15f8b9ce2fcf
-last_verified: 3bbc505e10ebc7bce5e0721f0e740f784ed8b92b
+    blob: bd002e3ed3d5fb05eb87ec1a4b2b0d56613d9ea0
+last_verified: dd48eca721d707804fc640c76f70570b3937dfa2
 ---
 
 ## What is true

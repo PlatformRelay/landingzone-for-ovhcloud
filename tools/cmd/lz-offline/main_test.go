@@ -271,8 +271,10 @@ func TestSnapshotHonoursDeadline(t *testing.T) {
 
 // One uniform deadline per target: 240 s is about 2.5 times the slowest
 // target seen in CI (test:live-lane, 94 s), and one hung target plus a normal
-// run (9 min 47 s on PR #142, so about 14 minutes) still ends inside the
-// 15-minute job (D125), with little to spare: two hung targets do not. It is also how
+// run (head runs of 365-594 s of targets, so at most about 14 minutes) still
+// ends inside the 20-minute job (the D126 bridge; 15 under D125 left under a
+// minute to spare). Two hung targets plus the slowest run still fit (about
+// 1090 s of 1200); three do not. It is also how
 // long KI-002's unbounded memory and process use can last, so a change here
 // changes that window.
 func TestChildDeadline(t *testing.T) {
