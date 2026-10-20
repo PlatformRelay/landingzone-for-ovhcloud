@@ -267,7 +267,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: `task test:live-lane`: a transient 500 on each sweep read is retried and the sweep passes, a persistent one fails within the budget with every attempt recorded; a DELETE is sent once; a `.write-*` temporary is removed by retire and an unknown file keeps `probe.env` and fails; an alert decode error names no 32-hex id. Mutation proof on the changed lines.
   - Evidence: `evidence/T027.md`; initial status `not-run`.
 
-- [ ] T028 Record spec 007's stage B in specs/007-cleanup-first-live-slice/loop.md and the accepted residuals in the how-to
+- [x] T028 Record spec 007's stage B in specs/007-cleanup-first-live-slice/loop.md and the accepted residuals in the how-to — closed 2026-10-20, evidence: evidence/T028.md
   - Requirements: FR-007, FR-011; ADRs: 0024. Depends on: T027.
   - Verify: exempt — docs-only; `docs/how-to/run-the-first-slice.md` says plan-matching is the alert sweep's only ownership evidence (no name or tag on an alert) and that a cleanup must not run beside a live probe run; `task docs:check` green.
   - Evidence: `evidence/T028.md`; initial status `not-run`.
