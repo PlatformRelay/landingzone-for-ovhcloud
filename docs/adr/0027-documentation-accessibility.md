@@ -75,6 +75,12 @@ Contrast and the full WCAG audit run on the built site once it exists.
   no 32-hex ids. Pages outside the ADRs also need front matter with fresh references and may name
   only existing `task` targets. The version gate, the superseded-ADR scan and the repository map
   come on top (`tools/cmd/lz-check/docs.go:23-41`; spec 006 FR-018, FR-019).
+- `HEADING_SKIP`, `LINK_TEXT_VAGUE` and `TABLE_HEADER_MISSING` hold on the same pages, ADRs
+  included, outside front matter and fenced code blocks: a heading may rise one level at a time
+  and a page has one H1, a link's text is not one of a fixed list of vague words, and a table's
+  first row is followed by a delimiter row (`tools/cmd/lz-check/docs.go:458-644`; passing and
+  failing fixtures in `tools/cmd/lz-check/docs_test.go:799-884`). Triggered by this ADR's
+  acceptance (D128).
 - One diagram exists (`docs/explanation/architecture-overview.md:32-41`); it is followed by a
   one-line reading of the arrows and a table of the layers (`:43-50`), which together are its text
   equivalent. It has no `accTitle` or `accDescr` yet.
@@ -88,7 +94,6 @@ Contrast and the full WCAG audit run on the built site once it exists.
 | `accTitle` and `accDescr` on the existing diagram | The next change to `architecture-overview.md` |
 | `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING` | A second Mermaid diagram under `docs/` |
 | `IMAGE_ALT_MISSING` | The first image under `docs/` |
-| `HEADING_SKIP`, `LINK_TEXT_VAGUE`, `TABLE_HEADER_MISSING` | A review finds the fault twice, or owner acceptance of this ADR |
 | Writing lint (Vale or similar, ADR-0013; spec 006 E4) | E4's trigger: the tool arrives in the offline entry |
 | Contrast and WCAG audit of the built site | The site tool is chosen (ADR-0013 spike) |
 | Renderer rules and their tests | `tools/lz-docs` exists (ADR-0020) |
