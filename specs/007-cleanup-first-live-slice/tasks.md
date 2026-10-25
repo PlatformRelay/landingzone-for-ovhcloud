@@ -234,7 +234,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` from the clean live clone: no unreconciled run refused it; `baseline.json` written before the apply; one alert created and read back (id, threshold 1, delay 3600, project); destroy and sweep removed it and the alert listing no longer holds it; leftover check `pass`, or `fail` followed by `--cleanup <run-id>` until clean, with the first record kept under `attempts/1/`; every retry line quoted; the run's cost and the credit left. P2 and P3 recorded as observed or refuted.
   - Evidence: `evidence/T019.md`; initial status `not-run`.
 
-- [ ] T020 [US3] Record the retry, the alias refusal and the budget-alert run in docs/how-to/run-the-first-slice.md and docs/reference/verification-status.md
+- [x] T020 [US3] Record the retry, the alias refusal and the budget-alert run in docs/how-to/run-the-first-slice.md and docs/reference/verification-status.md — closed 2026-10-25, evidence: evidence/T020.md
   - Requirements: FR-001, FR-003, FR-005; ADRs: 0009, 0024. Depends on: T019, or T019 recorded as dropped.
   - Verify: `task docs:check`: green; the how-to shows the retry line, the `project-alias` and `unreconciled-run` refusals and their next actions; the status page records P10 through the module with T019's run id, or says it was not run, without a 32-hex id.
   - Evidence: `evidence/T020.md`; initial status `not-run`.

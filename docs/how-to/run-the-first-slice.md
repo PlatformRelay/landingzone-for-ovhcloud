@@ -148,7 +148,10 @@ hold the same project id. The manifest allows that only with
 `spec.sandbox.shared_state_project: true` (KD-1). Any other pair of refs on one project id is
 refused before any child process, by the lane (plan, apply, destroy, chain) and by the
 bootstrap's `state` phase: `project-alias` (exit 3) names the two refs, never the id. Two tenant
-environments never share a project, with or without the flag.
+environments never share a project, with or without the flag. The refusal reads
+`refused (project-alias): project refs <A> and <B> resolve to one project in account.env; give
+each its own project or drop one row` (`tools/internal/stacks/adapter.go:54`). Next action: give
+each ref its own project id in `account.env`, or drop one of the two rows from the manifest.
 
 The lane writes each instance's credential files as a set: a new `gen-<run-id>/` directory, made
 current by one rename of `current`. Readers use the generation `current` names, so a crash leaves
@@ -423,6 +426,27 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   `task live:probe -- --reviewed-sha "$S" --cleanup <run-id>`. Its state and passphrase under
   `accounts/<account>/state/probes/<run-id>/` are deleted only when the destroy and the
   leftover check both pass. Never delete them by hand while a resource may exist.
+- A probe start is refused (exit 3) while another probe run is unreconciled, that is while its
+  directory under `state/probes/` exists: `refused (unreconciled-run): probe run <run-ids> is
+  unreconciled (its directory under state/probes/ exists); finish it first: task live:probe --
+  --reviewed-sha <sha> --cleanup <run-id>` (`tools/internal/live/runner.go:1711`). Next action:
+  run that `--cleanup` for each named run, then start again. A directory without `probe.env`
+  cannot be cleaned up: the owner checks the project and removes it by hand.
+- A `--cleanup` of a run with no trustworthy baseline, such as a probe run from before baselines
+  existed, is refused `untrusted` (exit 3) before anything is read or deleted: `cleanup of run
+  <run-id>: BASELINE_MISSING: …; nothing deleted and its files kept: owner recovery, then
+  --cleanup <run-id> --accept-lost-baseline` (`runner.go:1795`; `BASELINE_INVALID <reason>` for
+  a baseline that exists but fails validation). Next action, the owner's only: check the
+  project, remove by hand what the run created that its state does not hold, then run
+  `task live:probe -- --reviewed-sha "$S" --cleanup <run-id> --accept-lost-baseline` at a
+  terminal and type the run id back when asked (`tools/cmd/lz-live/probe.go:86-108`; the steps
+  for `budget-alert` are in the [probe run sheet](../../tests/live/probes/README.md#runs)).
+  Without a terminal, or with another line typed back, it is refused `accept-lost-baseline` and
+  nothing is deleted. It is refused too for a run that is not `untrusted`: a plain `--cleanup`
+  finishes that one (`runner.go:1793`). It destroys from the run's state if there is one and
+  runs the root's sweep, except for `budget-alert`, where it deletes nothing
+  (`probe.go:66-80`); then it runs the leftover check, and retires the run's files only if all
+  of it passed (`runner.go:1213-1223`).
 - A two-stage probe (`storage-iam`) whose companion could not be destroyed keeps its root, and
   with it the identity the companion's resources need; the run's error names the kept root and
   the `--cleanup <run-id>` to run, and the leftover check reports both as leftovers until then

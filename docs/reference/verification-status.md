@@ -84,6 +84,13 @@ Coded against fakes, recorded fixtures or provider docs, and not observed on OVH
   (T084).
 - **Everything spec 006 changed in the live lane** (below) runs against fakes only; no live run
   has used it yet.
+- **The budget alert through the module (P10, spec 007 FR-005):** not run. Spec 007's live run
+  (T019) was dropped at its cut-off of 2026-10-21 23:00, so FR-005 is not qualified. The raw
+  resource was created and destroyed once (T010); the path through `modules/cloud-project` is
+  tested offline only. The alert's read-back and recipient (spec 007 P2, P3) stay UNVERIFIED
+  ([spec 007 T019](../../specs/007-cleanup-first-live-slice/evidence/T019.md)).
+- **Everything spec 007 changed in the live lane** (below) runs against fakes only: no live run of
+  spec 007 took place.
 
 ## What spec 006 hardened
 
@@ -131,6 +138,24 @@ not by a live run, unless it says otherwise.
   two minor versions behind its pin, a how-to or reference page that names a tool command without
   that stamp, a link to a superseded ADR (FR-018), and a repository map that names a missing path
   or omits an admitted top-level directory (FR-019).
+
+## What spec 007 added
+
+Shown by offline tests through the entry (spec 007
+[V001–V004](../../specs/007-cleanup-first-live-slice/spec.md#acceptance-and-predefined-verification)),
+not by a live run.
+
+- **Listing retry (FR-001, FR-002):** a leftover listing that answers 429, 5xx or a transport
+  failure is retried at most twice, each retry printing one `LZ-LIVE retry listing …` line, and
+  every failed attempt is kept in `leftovers.json`; a later `--cleanup` keeps the first record.
+- **Project aliasing refused (FR-003):** two project refs on one project id are refused
+  `project-alias` before any child process. The only alias admitted is the state ref sharing a
+  tenant environment's project under KD-1 (`shared_state_project: true`).
+- **Probe baseline and sweep (FR-006, FR-007):** a probe lists the project's alerts before its
+  first apply (its baseline), refuses to start while another probe run is unreconciled (`unreconciled-run`), and
+  refuses to clean up a run without a trustworthy baseline unless the owner accepts its loss at a
+  terminal (`--accept-lost-baseline`). The [runbook](../how-to/run-the-first-slice.md#clean-up-and-check-for-leftovers)
+  gives each refusal's next action.
 
 ## Known deviations
 
