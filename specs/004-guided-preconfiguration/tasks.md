@@ -45,7 +45,7 @@ directory points at the PR and names the red and green commits.
 
 ## Phase 1: Setup
 
-- [ ] T015 Verify the trace of spec 004 in Taskfile.yml and tools/harness/checks.yaml (written in the spec-set commit)
+- [x] T015 Verify the trace of spec 004 in Taskfile.yml and tools/harness/checks.yaml (written in the spec-set commit) — closed 2026-10-25, evidence: evidence/T015.md
   - Requirements: FR-010; ADRs: 0008, 0019. Depends on: none.
   - Verify: `task test:traceability; task test:foundation-ci; task check:specs`: `TestTaskfileTracesEverySpec` green; `task check:specs` with no argument prints `TRACE_OK` for 001, 004, 005, 006 and 007; `ci-source` reads spec 004; `test:foundation-ci`'s and `test:traceability`'s inputs name `specs/004-guided-preconfiguration/tasks.md`. If `ci:foundation`'s recorded runs go stale because a target's inputs changed, record it; re-recording `pipelines/github/foundation-runs.json` is the owner's host step, not this task's.
   - Evidence: `evidence/T015.md`; initial status `not-run`.
