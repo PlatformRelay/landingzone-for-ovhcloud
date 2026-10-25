@@ -21,7 +21,7 @@ references:
   - path: pipelines/github/foundation-source.json
     blob: 4be7ce1703021a8266715577ffc159fbd289f8bd
   - path: tools/internal/checks/foundation_ci.go
-    blob: f95b0e9c9ef65d0f12343dfc2720f22128a6c887
+    blob: fae4afa68b5c56fb3a5b460c6a877226fcf5ae0c
 last_verified: 920060781388ee7f24df5384cfd17274012b2240
 ---
 
@@ -39,11 +39,15 @@ qualification:
   `CheckFoundationCI` in `tools/internal/checks/foundation_ci.go`: no token permission, no
   Action, no secret, a hosted runner, the head fetched as data, the runtime fetched by
   digest and every target run through the offline entry.
-- Since D126 part A (2026-10-25, re-read on this branch's base `9200607`) the targets run
-  in parallel jobs, and the check named `foundation` comes from a gate job that needs
-  them all. The gate runs whatever they concluded (`if: ${{ always() }}`), so it is never
-  skipped. It fails unless every job's result is `success`. `ci:foundation` requires that
-  gate to have seen every job succeed on a head run and to have failed on the red control.
+- Since D126 part A (2026-10-25, code read at `9200607`) the targets run in parallel
+  jobs, and the check named `foundation` comes from a gate job that needs them all. Its
+  condition is `if: ${{ always() }}`, which GitHub documents as running the job whatever
+  its needs concluded, cancellation included
+  ([GitHub: status check functions](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)),
+  so a failed or skipped job does not skip the gate. Its step fails unless every job's
+  result is `success`. That GitHub behaviour is cited, not yet observed on a run of this
+  workflow. `ci:foundation` requires the gate to have seen every job succeed on a head
+  run and to have failed on the red control.
   The ruleset still requires `foundation` and `SonarCloud Code Analysis` (re-read through
   the API on 2026-10-25). Admission is unchanged by the split.
 - None of that is admission. The workflow runs on `pull_request`, and the source file, the

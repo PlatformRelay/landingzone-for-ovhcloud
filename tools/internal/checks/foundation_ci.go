@@ -953,14 +953,14 @@ func gitBlob(data []byte) string {
 }
 
 // foundationExpectation is what every run of the approved source must show:
-// its jobs, by name in order, the steps of a job of the source and of the
-// gate, and the pinned workflow environment every step sees.
+// its jobs, by name in order, the rendered steps of each job of the source
+// and of the gate, and the pinned workflow environment every step sees.
 type foundationExpectation struct {
 	source       FoundationSource
 	workflowBlob string
 	sourceBlob   string
 	jobs         []string
-	targetSteps  []string
+	targetSteps  map[string][]string
 	gateSteps    []string
 	env          map[string]string
 	digests      map[string]string
@@ -1031,7 +1031,7 @@ func JudgeFoundationRuns(source, record []byte, current map[string]string) []Fin
 	workflow := RenderFoundationWorkflow(s)
 	want := foundationExpectation{
 		source: s, workflowBlob: gitBlob([]byte(workflow)), sourceBlob: gitBlob(source),
-		jobs: []string{FoundationCheck}, gateSteps: renderedSteps(workflow, FoundationCheck), digests: current,
+		jobs: []string{FoundationCheck}, targetSteps: map[string][]string{}, gateSteps: renderedSteps(workflow, FoundationCheck), digests: current,
 		env: map[string]string{
 			"LZ_IMAGE": RuntimeImage, "LZ_MANIFEST": s.Manifest, "LZ_LAYER": s.Layer,
 			"LZ_ENTRY_SHA256": s.EntrySHA256, "LZ_BWRAP_SHA256": s.BwrapSHA256,
@@ -1039,7 +1039,7 @@ func JudgeFoundationRuns(source, record []byte, current map[string]string) []Fin
 	}
 	for _, j := range s.Jobs {
 		want.jobs = append(want.jobs, j.Name)
-		want.targetSteps = renderedSteps(workflow, j.Name)
+		want.targetSteps[j.Name] = renderedSteps(workflow, j.Name)
 	}
 	slices.Sort(want.jobs)
 
@@ -1135,7 +1135,7 @@ func judgeJobs(want foundationExpectation, run FoundationRun, add func(string, s
 		}
 		pinned := maps.Clone(want.env)
 		pinned["LZ_TARGETS"] = strings.Join(want.source.Jobs[i].Targets, " ")
-		judgeJobIdentity(run, j, jobExpectation{runner: want.source.Runner, steps: want.targetSteps, pinned: pinned, own: runEnvKeys, required: runEnvKeys}, add)
+		judgeJobIdentity(run, j, jobExpectation{runner: want.source.Runner, steps: want.targetSteps[j.Name], pinned: pinned, own: runEnvKeys, required: runEnvKeys}, add)
 		if j.FetchedHead != run.HeadSHA {
 			add("RUN_STALE_HEAD", "job %s fetched %q, run head %q", j.Name, j.FetchedHead, run.HeadSHA)
 		}
