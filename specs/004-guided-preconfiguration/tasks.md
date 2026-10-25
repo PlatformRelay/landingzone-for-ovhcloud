@@ -97,7 +97,7 @@ Independent test: V003.
 ## Phase 4: User Story 3 — The maintainer sees what would change (P2)
 Independent test: V004.
 
-- [ ] T019 [US3] Print the dry-run diff and the consequence notes from tools/internal/configure/diff.go and tools/internal/configure/notes.go, tests in tools/internal/configure/diff_test.go and tools/internal/configure/notes_test.go
+- [x] T019 [US3] Print the dry-run diff and the consequence notes from tools/internal/configure/diff.go and tools/internal/configure/notes.go, tests in tools/internal/configure/diff_test.go and tools/internal/configure/notes_test.go — closed 2026-10-25, evidence: evidence/T019.md
   - Requirements: FR-005, FR-006; ADRs: 0013, 0023. Depends on: T018.
   - Cases (given / when / then → defect exposed):
     - given the sandbox manifest as current and the two-tenant export / then four `+ row` lines for `lab`, each `expected: created by stacks:reconcile`, then `diff: 4 added, 0 removed` and no warning line → exposes a row-blind diff.
