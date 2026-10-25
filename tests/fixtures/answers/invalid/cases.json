@@ -33,5 +33,12 @@
     "control": {"old": "{\"kind\": \"DeploymentAnswers\"}\n", "new": ""}},
   "trailing-comment.yaml": {"base": "sandbox.yaml", "code": "ANSWERS_SYNTAX", "detail": "line 9", "why": "a comment after a value on the same line",
     "control": {"old": "\"org\": \"lz\", # naming discriminator", "new": "\"org\": \"lz\","}},
-  "block-yaml.yaml": {"base": "sandbox.yaml", "code": "ANSWERS_SYNTAX", "detail": "line 2", "why": "block-style YAML; the control is the base, the same answers in flow form"}
+  "block-yaml.yaml": {"base": "sandbox.yaml", "code": "ANSWERS_SYNTAX", "detail": "line 2", "why": "block-style YAML; the control is the base, the same answers in flow form"},
+  "invalid-cidr-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].cidr", "why": "a CIDR without its prefix in the second tenant; the path carries its index",
+    "control": {"old": "\"10.40.0.0\"", "new": "\"10.40.0.0/24\""}},
+  "type-flag-string.yaml": {"base": "sandbox.yaml", "code": "INVALID_VALUE", "detail": "shared_state_project", "why": "a boolean written as a string",
+    "control": {"old": "\"true\"", "new": "true"}},
+  "type-vlan-string-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].vlan_id", "why": "`vlan_id` written as a string in the second tenant; a type mismatch's path carries its index",
+    "control": {"old": "\"5\"", "new": "5"}},
+  "type-top-level-array.yaml": {"base": "sandbox.yaml", "code": "INVALID_VALUE", "detail": "(document)", "why": "an array where the answers object belongs; the control is the base"}
 }

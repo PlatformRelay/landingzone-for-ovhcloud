@@ -23,7 +23,9 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -41,8 +43,9 @@ const (
 
 // Refusal codes of DecodeAnswers and ReadAnswers (data-model.md *Refusal message*). When a
 // document breaks several rules, the first in this order is reported: size, syntax and duplicate
-// keys (in document order), unknown, missing or null fields (keys in sorted order), a JSON type
-// mismatch, the header, value rules (keys in sorted order), then a VLAN id without a CIDR.
+// keys (in document order); then, object by object from the top, missing or null fields (in
+// field declaration order) before unknown keys (in sorted order); a JSON type mismatch (in
+// declaration order); the header; value rules (keys in sorted order); a VLAN id without a CIDR.
 const (
 	CodeAnswersSyntax      = "ANSWERS_SYNTAX"      // not one JSON-compatible document
 	CodeAnswersTooLarge    = "ANSWERS_TOO_LARGE"   // more than MaxAnswersBytes
@@ -204,13 +207,14 @@ func DecodeAnswers(data []byte) (Answers, error) {
 	return a, nil
 }
 
-// ReadAnswers reads the answers file at path: a regular file, never followed through a symlink,
-// of at most MaxAnswersBytes (FR-008). It does not decode it.
+// ReadAnswers reads the answers file at path: a regular file whose last path component is not a
+// symlink (parent directories are the caller's), of at most MaxAnswersBytes (FR-008). It does
+// not decode it.
 func ReadAnswers(path string) ([]byte, error) {
 	// O_NOFOLLOW refuses a symlink as the last component (ELOOP); O_NONBLOCK keeps a FIFO from
 	// blocking the open, and the mode check below refuses it.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
 		return nil, refuse(CodeAnswersNotRegular, "%s", path)
 	}
 	if err != nil {
@@ -331,7 +335,7 @@ func decodeError(data []byte, err error) error {
 	}
 	switch {
 	case errors.As(err, &typeErr):
-		return refuse(CodeInvalidValue, "%s", typeErr.Field)
+		return refuse(CodeInvalidValue, "%s", mismatchPath(data, typeErr))
 	case strings.HasPrefix(msg, CodeDuplicateKey): // the keyWalker reports these first, with their path
 		return refuse(CodeDuplicateKey, "%s", strings.TrimPrefix(msg, CodeDuplicateKey+": "))
 	case strings.HasSuffix(msg, ": unknown field"):
@@ -342,6 +346,76 @@ func decodeError(data []byte, err error) error {
 		return refuse(CodeMissingField, "%s", field(": null"))
 	}
 	return syntaxError(data, err)
+}
+
+// typeMismatch finds the first value of a decoded document whose JSON type differs from its
+// field's Go type, in field declaration order, and returns its indexed path ("" for the top
+// level): json.UnmarshalTypeError names the field without the form FR-004 prints.
+func typeMismatch(v any, t reflect.Type, path string) (string, bool) {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		return structMismatch(v, t, path)
+	case reflect.Slice:
+		return sliceMismatch(v, t, path)
+	case reflect.String:
+		_, ok := v.(string)
+		return path, !ok
+	case reflect.Bool:
+		_, ok := v.(bool)
+		return path, !ok
+	case reflect.Int:
+		f, ok := v.(float64)
+		return path, !ok || f != math.Trunc(f) || math.Abs(f) > math.MaxInt32
+	}
+	return "", false
+}
+
+func structMismatch(v any, t reflect.Type, path string) (string, bool) {
+	object, ok := v.(map[string]any)
+	if !ok {
+		return path, true
+	}
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if item, present := object[name]; present {
+			if p, bad := typeMismatch(item, t.Field(i).Type, joinPath(path, name)); bad {
+				return p, true
+			}
+		}
+	}
+	return "", false
+}
+
+func sliceMismatch(v any, t reflect.Type, path string) (string, bool) {
+	array, ok := v.([]any)
+	if !ok {
+		return path, true
+	}
+	for i, item := range array {
+		if p, bad := typeMismatch(item, t.Elem(), fmt.Sprintf("%s[%d]", path, i)); bad {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// mismatchPath is the indexed path of a type error, "(document)" for the top level.
+func mismatchPath(data []byte, typeErr *json.UnmarshalTypeError) string {
+	var generic any
+	if json.Unmarshal(data, &generic) != nil {
+		return typeErr.Field // unreachable: DecodeStrict parsed the document before the type error
+	}
+	path, found := typeMismatch(generic, reflect.TypeFor[Answers](), "")
+	switch {
+	case !found:
+		return typeErr.Field
+	case path == "":
+		return "(document)"
+	}
+	return path
 }
 
 // checkValues applies answerRules to every string and number of the decoded document, keys in
