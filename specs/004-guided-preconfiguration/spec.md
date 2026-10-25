@@ -1,10 +1,27 @@
 # Feature Specification: Answers file to deployments.yaml
-Feature: `004-guided-preconfiguration` · Created: 2026-10-01 · Refreshed: 2026-10-25 (D127) · Status: draft
+Feature: `004-guided-preconfiguration` · Created: 2026-10-01 · Refreshed: 2026-10-25 (D127) · Status: draft (state of 2026-10-25 below)
 ADRs: 0005, 0008, 0013, 0019, 0021, 0023 (also read: 0003 naming, 0004 instances)
 Input: D127 (the wizard gate opens on 2026-10-25 with a re-scoped spec 004) and its dissenting
 judge's counterpoints; the strict manifest decoder `tools/internal/stacks/manifest.go` behind
 `task stacks:check`; `schemas/deployments.schema.json` (v1alpha1); the two-tenant fixture
 `tests/fixtures/manifests/sandbox-two-tenants/` (spec 007 T017); constitution 1.3.0.
+
+## State (2026-10-25)
+- **Built and merged:** the strict answers decoder and the export through the manifest decoder (US1:
+  T016, T017; #171); the refusal catalogue, the dry-run row diff and the consequence notes (US2,
+  US3: T018, T019; #172). Every task closed with its evidence under `evidence/`.
+- **Built on `lane-004`, not yet merged:** the `lz-configure` command with its staging write and the
+  `configure:check` and `configure:export` targets (T020), and the second operator's how-to
+  `docs/how-to/prepare-deployments-from-answers.md` (T021).
+- **T022 is blocked:** no second reader has been named; only the owner names one
+  (`evidence/T022.md`). SC-004 is not met, and D-US4's first trigger (the answers file itself was
+  the obstacle) is undecided.
+- **Deferred stories:** none fired. D-US4 waits on T022; D-US5 needs D-US4; D-US7 needs D-US4 or a
+  reported missing-tool failure after a clean export, and none is recorded; D-US6 needs a second
+  profile in the manifest schema.
+- **CI:** `test:configure` is not yet a target of the CI workflow, so CI does not run this spec's
+  tests. It is added with the next re-record of `pipelines/github/foundation-runs.json`, after this
+  spec's burn-down; until then `ci:foundation` reports its recorded runs stale (`evidence/T023.md`).
 
 ## History
 - **D29 (2026-10-01):** a bounded renderer prototype and a written journey first; persistence and

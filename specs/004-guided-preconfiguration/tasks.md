@@ -142,7 +142,7 @@ Independent test: V004.
 
 ## Final phase: Polish
 
-- [ ] T023 Record spec 004's state in specs/README.md and specs/004-guided-preconfiguration/spec.md and run the exit checks
+- [x] T023 Record spec 004's state in specs/README.md and specs/004-guided-preconfiguration/spec.md and run the exit checks — closed 2026-10-25, evidence: evidence/T023.md
   - Requirements: FR-010; ADRs: 0008, 0019. Depends on: T022 closed or recorded `blocked`.
   - Verify: `task check:specs; task test:traceability; task test:foundation-ci`: green, with `TRACE_OK` for 004; the spec's status and the specs table row say what was built, what T022 found and which deferred story, if any, fired.
   - Evidence: `evidence/T023.md`; initial status `not-run`.

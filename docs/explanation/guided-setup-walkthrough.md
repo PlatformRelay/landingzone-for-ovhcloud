@@ -1,8 +1,8 @@
 ---
 references:
   - path: specs/004-guided-preconfiguration/spec.md
-    blob: 6b95831160af928205fa092356a7f238bc523be8
-last_verified: 8c5e3e2500d2a238586c8ae8284ecbbcb85a0438
+    blob: 901d053342e31299c95e5cc44c9febaf914ae723
+last_verified: 523d965edfb57dc698f61e0fa3b46b8236025972
 ---
 
 # Guided setup: a design walkthrough
