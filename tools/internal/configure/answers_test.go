@@ -57,7 +57,7 @@ func TestAnswersDecodeFixtures(t *testing.T) {
 	}})
 	all := Answers{
 		APIVersion: "lz.platformrelay.dev/v1alpha1", Kind: "DeploymentAnswers", Name: "acme-prod", Org: "acme",
-		Forge: "git.example.com/acme/landing-zone", StateRegion: "de", StateEndpoint: "https://s3.de.io.cloud.ovh.net",
+		Forge: "git.example.com/acme/landing-zone", StateRegion: "de", StateEndpoint: "https://s3.gra.io.cloud.ovh.net",
 		StateRef: "ACME_STATE", SharedStateProject: true,
 		Tenants: []Tenant{
 			{Name: "shop", Environments: []Environment{

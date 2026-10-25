@@ -7,7 +7,7 @@
   "org": "acme",
   "forge": "git.example.com/acme/landing-zone",
   "state_region": "de",
-  "state_endpoint": "https://s3.de.io.cloud.ovh.net",
+  "state_endpoint": "https://s3.gra.io.cloud.ovh.net",
   "state_ref": "ACME_STATE",
   "shared_state_project": true,
   "tenants": [
