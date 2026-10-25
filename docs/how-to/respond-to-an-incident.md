@@ -7,9 +7,9 @@ references:
   - path: tools/internal/live/apply.go
     blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
   - path: Taskfile.yml
-    blob: 515de014579c5a5399abbabad3f38288cfeaf371
+    blob: 8ce5ea0598855c9821fd40636e3e51ee05ea1f19
 verified_against: {task: "3.53", tofu: "1.13"}
-last_verified: ccd2634dbde6a4b7378d413cd181f76f94cafc0e
+last_verified: fb968189fcc70955232a704509663c595151aeeb
 ---
 
 # Respond to an incident

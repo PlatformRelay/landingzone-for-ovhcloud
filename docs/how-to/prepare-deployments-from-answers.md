@@ -17,9 +17,9 @@ references:
   - path: specs/004-guided-preconfiguration/spec.md
     blob: 901d053342e31299c95e5cc44c9febaf914ae723
   - path: Taskfile.yml
-    blob: 515de014579c5a5399abbabad3f38288cfeaf371
+    blob: 8ce5ea0598855c9821fd40636e3e51ee05ea1f19
 verified_against: {task: "3.53"}
-last_verified: ccd2634dbde6a4b7378d413cd181f76f94cafc0e
+last_verified: fb968189fcc70955232a704509663c595151aeeb
 ---
 
 # Prepare deployments.yaml from an answers file
