@@ -349,7 +349,7 @@ func TestExportFailureBeforeRename(t *testing.T) {
 	cases := map[string]func(*stagingOps){
 		"write":  func(o *stagingOps) { o.write = func(*os.File, []byte) error { return errInjected } },
 		"fsync":  func(o *stagingOps) { o.sync = func(*os.File) error { return errInjected } },
-		"rename": func(o *stagingOps) { o.rename = func(string, string) error { return errInjected } },
+		"rename": func(o *stagingOps) { o.rename = func(*os.Root, string, string) error { return errInjected } },
 		// a write that reaches the file before it fails: an in-place write would leave it partial
 		"partial write": func(o *stagingOps) {
 			o.write = func(f *os.File, data []byte) error {
@@ -402,29 +402,102 @@ func cfgOnlyStaging(t *testing.T, root string) {
 // TestExportDirectorySyncFailure: a directory fsync failure after the rename is
 // STAGING_NOT_DURABLE, exit 1, with the new file in place, no temporary file and no
 // `configure: ok` (G31: exposes a published file reported as unchanged, or a durability failure
-// reported as success). Control: the directory sync is called once, on .local/configure, after the
-// rename.
+// reported as success). Control: the operations run in data-model's order, write, file fsync,
+// rename onto deployments.yaml, then one fsync of .local/configure itself.
 func TestExportDirectorySyncFailure(t *testing.T) {
 	root := cfgRoot(t)
 	cfgWrite(t, filepath.Join(root, stagingRel), []byte("previous staging file\n"), 0o600)
-	var calls []string
-	ops := osStaging
-	ops.rename = func(oldpath, newpath string) error {
-		calls = append(calls, "rename "+filepath.Base(newpath))
-		return os.Rename(oldpath, newpath)
-	}
-	ops.syncDir = func(dir string) error {
-		calls = append(calls, "sync "+dir)
-		return errInjected
-	}
+	calls, ops := cfgRecorded(t, root)
 	code, lines := cfgRun(t, ops, "-root", root, "export", twoTenantAnswers)
 	cfgRefusal(t, code, lines, configure.CodeStagingNotDurable)
 	if !reflect.DeepEqual(cfgValue(t, cfgRead(t, filepath.Join(root, stagingRel))), cfgValue(t, cfgRead(t, twoTenantManifest))) {
 		t.Errorf("the new staging file is not in place")
 	}
 	cfgOnlyStaging(t, root)
-	if want := []string{"rename deployments.yaml", "sync " + filepath.Join(root, ".local/configure")}; !reflect.DeepEqual(calls, want) {
-		t.Errorf("calls %q; want %q", calls, want)
+	if want := []string{"write", "fsync", "rename deployments.yaml", "sync .local/configure"}; !reflect.DeepEqual(*calls, want) {
+		t.Errorf("calls %q; want %q", *calls, want)
+	}
+}
+
+// cfgRecorded is the real staging operations, each recording its call, with a directory fsync that
+// records whether it got .local/configure under root and then fails.
+func cfgRecorded(t *testing.T, root string) (*[]string, stagingOps) {
+	var calls []string
+	ops := osStaging
+	ops.write = func(f *os.File, data []byte) error {
+		calls = append(calls, "write")
+		return osStaging.write(f, data)
+	}
+	ops.sync = func(f *os.File) error {
+		calls = append(calls, "fsync")
+		return osStaging.sync(f)
+	}
+	ops.rename = func(dir *os.Root, oldname, newname string) error {
+		calls = append(calls, "rename "+newname)
+		return osStaging.rename(dir, oldname, newname)
+	}
+	ops.syncDir = func(dir *os.File) error {
+		got, err := dir.Stat()
+		want, lerr := os.Lstat(filepath.Join(root, ".local/configure"))
+		if err != nil || lerr != nil || !os.SameFile(got, want) {
+			calls = append(calls, "sync another directory")
+		} else {
+			calls = append(calls, "sync .local/configure")
+		}
+		return errInjected
+	}
+	return &calls, ops
+}
+
+// TestCheckRemovedRows: a current manifest with rows the answers drop prints the removed rows,
+// then the warning line, then the notes and `configure: ok`, exit 0 (FR-005: a predicted refusal
+// is a warning, not a refusal).
+func TestCheckRemovedRows(t *testing.T) {
+	root := cfgRoot(t)
+	cfgWrite(t, filepath.Join(root, "stacks/deployments.yaml"), cfgRead(t, twoTenantManifest), 0o644)
+	code, lines := cfgRun(t, osStaging, "-root", root, "check", sandboxAnswers)
+	want := cfgExpected(t, sandboxAnswers, cfgRead(t, twoTenantManifest))
+	warning := slices.Index(lines, "configure: warning: stacks:reconcile is expected to refuse this export (4 removed rows)")
+	if code != 0 || !reflect.DeepEqual(lines, want) || warning < 0 || !strings.HasPrefix(lines[warning+1], "note: ") || lines[len(lines)-1] != "configure: ok" {
+		t.Errorf("check: exit %d, got\n%s\nwant the four removed rows, the warning, the notes and configure: ok", code, strings.Join(lines, "\n"))
+	}
+}
+
+// TestOpenDirRefusesLink: openDir refuses a name that is a symlink (to a directory inside the
+// parent, which an os.Root would follow) as STAGING_SYMLINK and a regular file as STAGING_WRITE,
+// without the command's earlier check (exposes a link swapped in after it); control: a real
+// directory opens. Through the command, a regular file at .local is STAGING_WRITE with nothing
+// changed.
+func TestOpenDirRefusesLink(t *testing.T) {
+	base := t.TempDir()
+	cfgWrite(t, filepath.Join(base, "real/keep"), []byte("x"), 0o600)
+	cfgWrite(t, filepath.Join(base, "file"), []byte("x"), 0o600)
+	if err := os.Symlink("real", filepath.Join(base, "link")); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	for name, code := range map[string]string{"link": configure.CodeStagingSymlink, "file": configure.CodeStagingWrite} {
+		r, err := openDir(parent, name, name)
+		if e, ok := err.(*configure.AnswersError); !ok || e.Code != code || r != nil {
+			t.Errorf("%s: got %v, %v; want %s", name, r, err, code)
+		}
+	}
+	if r, err := openDir(parent, "real", "real"); err != nil {
+		t.Errorf("control: real directory: %v", err)
+	} else {
+		r.Close()
+	}
+	root := cfgRoot(t)
+	cfgWrite(t, filepath.Join(root, ".local"), []byte("a file\n"), 0o600)
+	before := cfgInventory(t, root)
+	code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers)
+	cfgRefusal(t, code, lines, configure.CodeStagingWrite)
+	if changed := cfgChanged(before, cfgInventory(t, root)); len(changed) > 0 {
+		t.Errorf(".local as a file: changed %v", changed)
 	}
 }
 
@@ -473,11 +546,11 @@ func TestRefusalsWriteNothing(t *testing.T) {
 }
 
 // TestUsage (pin): a missing argument, an unknown verb, an extra argument or an unknown flag
-// prints the usage line and exits 2.
+// prints the usage line, and only it, and exits 2.
 func TestUsage(t *testing.T) {
 	for _, args := range [][]string{nil, {"check"}, {"export"}, {"apply", "a.yaml"}, {"check", "a.yaml", "b.yaml"}, {"-x", "check", "a.yaml"}} {
 		code, lines := cfgRun(t, osStaging, args...)
-		if code != 2 || lines[len(lines)-1] != usageLine {
+		if code != 2 || !reflect.DeepEqual(lines, []string{usageLine}) {
 			t.Errorf("%q: exit %d, %q; want 2 and the usage line", args, code, lines)
 		}
 	}

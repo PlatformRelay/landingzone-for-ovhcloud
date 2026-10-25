@@ -17,6 +17,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -35,40 +36,27 @@ import (
 const stagingPath = ".local/configure/deployments.yaml"
 
 // stagingOps are the file operations of the staging write that a test replaces to inject a
-// failure: the temporary file's write and fsync, the rename onto the target and the directory
-// fsync.
+// failure: the temporary file's write and fsync, the rename onto the target inside the opened
+// .local/configure, and that directory's fsync.
 type stagingOps struct {
 	write   func(f *os.File, data []byte) error
 	sync    func(f *os.File) error
-	rename  func(oldpath, newpath string) error
-	syncDir func(dir string) error
+	rename  func(dir *os.Root, oldname, newname string) error
+	syncDir func(dir *os.File) error
 }
 
 var osStaging = stagingOps{
 	write:   func(f *os.File, data []byte) error { _, err := f.Write(data); return err },
 	sync:    func(f *os.File) error { return f.Sync() },
-	rename:  os.Rename,
-	syncDir: syncDir,
-}
-
-// syncDir fsyncs a directory, so a rename in it survives a crash.
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		d.Close()
-		return err
-	}
-	return d.Close()
+	rename:  func(dir *os.Root, oldname, newname string) error { return dir.Rename(oldname, newname) },
+	syncDir: func(dir *os.File) error { return dir.Sync() },
 }
 
 const usageLine = "usage: lz-configure [-root <repo>] check <answers> | export <answers>"
 
 func run(args []string, out io.Writer, ops stagingOps) int {
 	flags := flag.NewFlagSet("lz-configure", flag.ContinueOnError)
-	flags.SetOutput(out)
+	flags.SetOutput(io.Discard) // the usage line below is the one line printed
 	root := flags.String("root", ".", "repository root")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 2 || (flags.Arg(0) != "check" && flags.Arg(0) != "export") {
 		fmt.Fprintln(out, usageLine)
@@ -155,32 +143,48 @@ func stagingErr(code, detail string, err error) error {
 }
 
 // stage writes the staging file (data-model.md *Staging file*): refuse a symlinked .local,
-// .local/configure or target; create the directories (0700) and tighten a looser
-// .local/configure to 0700; write a temporary file in it, fsync, rename onto the target; fsync the
-// directory. The rename is the publication point: a failure before it removes the temporary file
-// and leaves the previous staging file as it was (STAGING_WRITE); a failed directory fsync after it
-// is STAGING_NOT_DURABLE.
+// .local/configure or target before anything is written; create the directories (0700), each
+// opened as an os.Root and checked to be the directory its name still holds, so a link swapped in
+// after the check is refused and every later step works on the opened directory, never on a path;
+// tighten a looser .local/configure to 0700; write a temporary file in it, fsync, rename onto the
+// target; fsync the directory. The rename is the publication point: a failure before it removes the
+// temporary file and leaves the previous staging file as it was (STAGING_WRITE); a failed directory
+// fsync after it is STAGING_NOT_DURABLE.
 func stage(root string, manifest []byte, ops stagingOps) error {
 	local := filepath.Join(root, ".local")
-	dir := filepath.Join(local, "configure")
-	target := filepath.Join(dir, "deployments.yaml")
-	if err := refuseSymlinks(root, local, dir, target); err != nil {
+	if err := refuseSymlinks(root, local, filepath.Join(local, "configure"), filepath.Join(root, stagingPath)); err != nil {
 		return err
 	}
-	for _, p := range []string{local, dir} {
-		if err := ensureDir(root, p); err != nil {
-			return err
-		}
-	}
-	tmp, err := publish(dir, target, manifest, ops)
+	repo, err := os.OpenRoot(root)
 	if err != nil {
+		return stagingErr(configure.CodeStagingWrite, ".", err)
+	}
+	defer repo.Close()
+	localDir, err := openDir(repo, ".local", ".local")
+	if err != nil {
+		return err
+	}
+	defer localDir.Close()
+	dir, err := openDir(localDir, "configure", ".local/configure")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	handle, err := tighten(dir)
+	if err != nil {
+		return stagingErr(configure.CodeStagingWrite, ".local/configure", err)
+	}
+	defer handle.Close()
+	if tmp, err := publish(dir, manifest, ops); err != nil {
 		if tmp != "" {
-			os.Remove(tmp)
+			if rerr := dir.Remove(tmp); rerr != nil {
+				err = fmt.Errorf("%w; temporary file .local/configure/%s not removed: %v", err, tmp, rerr)
+			}
 		}
 		return stagingErr(configure.CodeStagingWrite, stagingPath, err)
 	}
-	if err := ops.syncDir(dir); err != nil {
-		return stagingErr(configure.CodeStagingNotDurable, rel(root, dir), err)
+	if err := ops.syncDir(handle); err != nil {
+		return stagingErr(configure.CodeStagingNotDurable, ".local/configure", err)
 	}
 	return nil
 }
@@ -200,38 +204,72 @@ func refuseSymlinks(root string, paths ...string) error {
 	return nil
 }
 
-// ensureDir creates p (0700) when absent and checks that it is a directory, not a symlink;
-// .local/configure with any group or other bit is tightened to 0700.
-func ensureDir(root, p string) error {
-	if err := os.Mkdir(p, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		return stagingErr(configure.CodeStagingWrite, rel(root, p), err)
+// openDir creates name in parent (0700) when absent and opens it as a root of its own. After the
+// open, name must still be a directory, not a symlink, and the very directory opened: a link
+// swapped in between the check and the open is STAGING_SYMLINK; any other failure STAGING_WRITE.
+// shown is the path in the refusal's detail.
+func openDir(parent *os.Root, name, shown string) (*os.Root, error) {
+	if err := parent.Mkdir(name, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, stagingErr(configure.CodeStagingWrite, shown, err)
 	}
-	info, err := os.Lstat(p)
-	switch {
-	case err != nil:
-		return stagingErr(configure.CodeStagingWrite, rel(root, p), err)
-	case info.Mode()&fs.ModeSymlink != 0:
-		return stagingErr(configure.CodeStagingSymlink, rel(root, p), nil)
-	case !info.IsDir():
-		return stagingErr(configure.CodeStagingWrite, rel(root, p), errors.New("not a directory"))
-	}
-	if filepath.Base(p) == "configure" && info.Mode().Perm()&0o077 != 0 {
-		if err := os.Chmod(p, 0o700); err != nil {
-			return stagingErr(configure.CodeStagingWrite, rel(root, p), err)
+	r, err := parent.OpenRoot(name)
+	if err == nil {
+		if err = sameDir(parent, name, r); err != nil {
+			r.Close()
 		}
+	}
+	if err == nil {
+		return r, nil
+	}
+	if info, lerr := parent.Lstat(name); lerr == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return nil, stagingErr(configure.CodeStagingSymlink, shown, nil)
+	}
+	return nil, stagingErr(configure.CodeStagingWrite, shown, err)
+}
+
+// sameDir is nil when name in parent is a directory and the one r opened.
+func sameDir(parent *os.Root, name string, r *os.Root) error {
+	opened, err := r.Stat(".")
+	if err != nil {
+		return err
+	}
+	named, err := parent.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !named.IsDir() || !os.SameFile(opened, named) {
+		return errors.New("not the directory that was opened")
 	}
 	return nil
 }
 
-// publish writes data to a temporary file (0600) in dir, fsyncs and closes it and renames it onto
-// target. It returns the temporary file's path while that file still exists, for the caller to
-// remove on an error.
-func publish(dir, target string, data []byte, ops stagingOps) (string, error) {
-	f, err := os.CreateTemp(dir, ".deployments.yaml.tmp-*")
+// tighten opens the directory of dir and, when it has any group or other bit, sets it to 0700
+// through that handle. The handle is the one the directory fsync uses.
+func tighten(dir *os.Root) (*os.File, error) {
+	handle, err := dir.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	info, err := handle.Stat()
+	if err == nil && info.Mode().Perm()&0o077 != 0 {
+		err = handle.Chmod(0o700)
+	}
+	if err != nil {
+		handle.Close()
+		return nil, err
+	}
+	return handle, nil
+}
+
+// publish writes data to a new temporary file (0600) in dir, fsyncs and closes it and renames it
+// onto deployments.yaml. It returns the temporary file's name while that file still exists, for
+// the caller to remove on an error.
+func publish(dir *os.Root, data []byte, ops stagingOps) (string, error) {
+	tmp := ".deployments.yaml.tmp-" + rand.Text()
+	f, err := dir.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return "", err
 	}
-	tmp := f.Name()
 	if err := ops.write(f, data); err != nil {
 		f.Close()
 		return tmp, err
@@ -243,7 +281,7 @@ func publish(dir, target string, data []byte, ops stagingOps) (string, error) {
 	if err := f.Close(); err != nil {
 		return tmp, err
 	}
-	if err := ops.rename(tmp, target); err != nil {
+	if err := ops.rename(dir, tmp, "deployments.yaml"); err != nil {
 		return tmp, err
 	}
 	return "", nil
