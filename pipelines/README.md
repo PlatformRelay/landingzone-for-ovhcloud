@@ -4,7 +4,7 @@ The CI source and the record of CI runs. Today there is one forge, GitHub, and o
 
 | Path | What it holds |
 | --- | --- |
-| `github/foundation-source.json` | The approved source of `.github/workflows/foundation.yml`: runner, the offline entry's pinned digests, and the targets CI runs. |
+| `github/foundation-source.json` | The approved source of `.github/workflows/foundation.yml`: runner, per-job timeout, the offline entry's pinned digests, and the jobs CI runs in parallel, each with its targets. The rendered `foundation` job needs them all and is the required check. |
 | `github/foundation-runs.json` | Recorded GitHub runs of that workflow, judged by `task ci:foundation`. |
 
 **Rule: the workflow is generated; do not edit it by hand.** Edit the source, then on the host

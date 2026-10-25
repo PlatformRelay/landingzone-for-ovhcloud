@@ -456,7 +456,7 @@ func ciSource(out io.Writer, root string, dirs []string, registry checks.Registr
 		return 1
 	}
 	source, _ := checks.ParseFoundationSource(data)
-	fmt.Fprintf(out, "FOUNDATION_CI_OK targets=%d deferred=%d\n", len(source.Targets), len(source.Deferred))
+	fmt.Fprintf(out, "FOUNDATION_CI_OK targets=%d deferred=%d\n", len(source.Targets()), len(source.Deferred))
 	return 0
 }
 
@@ -517,7 +517,7 @@ func foundationDigests(root string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return checks.FoundationDigests(root, registry, source.Targets)
+	return checks.FoundationDigests(root, registry, source.Targets())
 }
 
 // ciRuns judges the committed run record against the committed source. An
@@ -550,14 +550,28 @@ func ciRuns(out io.Writer, root string) int {
 	var runs checks.FoundationRuns
 	_ = checks.DecodeStrict(record, &runs)
 	for _, r := range runs.Runs {
-		outcome := fmt.Sprintf("targets=%d", len(r.Targets))
-		if r.Role == checks.RoleRedControl {
-			outcome = "failed=" + r.Targets[len(r.Targets)-1].Name
-		}
-		fmt.Fprintf(out, "RUN_OK %s run=%d check=%d event=%s head=%s %s\n", r.Role, r.RunID, r.CheckRunID, r.Event, r.HeadSHA, outcome)
+		fmt.Fprintf(out, "RUN_OK %s run=%d check=%d event=%s head=%s jobs=%d %s\n", r.Role, r.RunID, r.CheckRunID, r.Event, r.HeadSHA, len(r.Jobs), runOutcome(r))
 	}
 	fmt.Fprintf(out, "FOUNDATION_RUNS_OK runs=%d\n", len(runs.Runs))
 	return 0
+}
+
+// runOutcome is what a judged run showed: a head run's target count over
+// its jobs, a red control's failed targets.
+func runOutcome(r checks.FoundationRun) string {
+	count, failed := 0, []string{}
+	for _, j := range r.Jobs {
+		count += len(j.Targets)
+		for _, target := range j.Targets {
+			if target.Status == "failed" {
+				failed = append(failed, target.Name)
+			}
+		}
+	}
+	if r.Role == checks.RoleRedControl {
+		return "failed=" + strings.Join(failed, ",")
+	}
+	return fmt.Sprintf("targets=%d", count)
 }
 
 // updateLane prints each update-lane finding, then the verdict.

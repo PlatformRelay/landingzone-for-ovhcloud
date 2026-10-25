@@ -7,7 +7,7 @@
 # It does what the "Fetch the runtime layer by digest" step of
 # .github/workflows/foundation.yml does, and reads the five pins (LZ_IMAGE,
 # LZ_MANIFEST, LZ_LAYER, LZ_ENTRY_SHA256, LZ_BWRAP_SHA256) from that file's
-# env block, so a new runtime revision needs no edit here. The workflow is
+# own env block, so a new runtime revision needs no edit here. The workflow is
 # rendered from pipelines/github/foundation-source.json, and
 # `task test:foundation-ci` keeps the two equal.
 #
@@ -69,12 +69,13 @@ repo=$(cd "$(dirname "$0")/../.." && pwd -P)
 workflow=$repo/.github/workflows/foundation.yml
 [ -f "$workflow" ] || fail 1 "PIN_INVALID: $workflow not found"
 
-# pin prints the value of one env line of the workflow. The line must occur
-# exactly once and its value must match the extended regular expression $2.
+# pin prints the value of one line of the workflow's own env block, which
+# every job shares. The line must occur exactly once and its value must match
+# the extended regular expression $2.
 pin() {
-	count=$(sed -n "/^      $1: /p" "$workflow" | wc -l | tr -d ' ')
+	count=$(sed -n "/^  $1: /p" "$workflow" | wc -l | tr -d ' ')
 	[ "$count" -eq 1 ] || fail 1 "PIN_INVALID: $1 occurs $count times in $workflow, want once"
-	value=$(sed -n "s/^      $1: //p" "$workflow")
+	value=$(sed -n "s/^  $1: //p" "$workflow")
 	printf '%s\n' "$value" | grep -Eqx "$2" || fail 1 "PIN_INVALID: $1 is not a well-formed value: $value"
 	printf '%s' "$value"
 }

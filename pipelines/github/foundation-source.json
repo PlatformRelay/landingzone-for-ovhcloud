@@ -1,11 +1,16 @@
 {
   "runner": "ubuntu-24.04",
-  "timeout_minutes": 20,
+  "timeout_minutes": 15,
   "manifest": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
   "layer": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
   "entry_sha256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
   "bwrap_sha256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
-  "targets": ["verify:toolchain", "test:offline-boundary", "test:reports", "test:traceability", "check:specs",
-              "test:dependencies", "test:static", "test:runtime-image", "test:foundation-ci", "test:live-lane", "test:slice", "test:outputs", "test:stacks", "test:stack-plans", "test:exchange", "test:bootstrap", "test:update-lane", "test:release", "docs:check", "stacks:check"],
+  "jobs": [
+    {"name": "foundation-1", "targets": ["verify:toolchain", "test:offline-boundary", "test:reports", "test:dependencies", "test:static",
+                                          "test:slice", "test:outputs", "test:stacks"]},
+    {"name": "foundation-2", "targets": ["test:live-lane"]},
+    {"name": "foundation-3", "targets": ["test:traceability", "check:specs", "test:runtime-image", "test:foundation-ci", "test:stack-plans",
+                                          "test:exchange", "test:bootstrap", "test:update-lane", "test:release", "docs:check", "stacks:check"]}
+  ],
   "deferred": {"ci:foundation": "judges this workflow's run evidence after the run completes"}
 }
