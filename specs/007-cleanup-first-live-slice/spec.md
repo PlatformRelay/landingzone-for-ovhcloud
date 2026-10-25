@@ -1,10 +1,29 @@
 # Feature Specification: Cleanup-first live slice
-Feature: `007-cleanup-first-live-slice` · Created: 2026-10-16 · Revised: 2026-10-16 (spec-set review rounds 1 and 2) · Status: draft
+Feature: `007-cleanup-first-live-slice` · Created: 2026-10-16 · Revised: 2026-10-16 (spec-set review rounds 1 and 2) · Status: draft (state of 2026-10-25 below)
 ADRs: 0004, 0005, 0006, 0008, 0009, 0019, 0021, 0024
 Input: decision D119 (spec 007 scope, 2026-10-16) with its brainstorm and three judges' notes; D117
 and D118 (live runs by the coordinating session until the credit expires); the unspecified-work
 inventory of 2026-10-15 (A17, A24, B4, B5); spec 005's out-of-scope table; spec 003's probe evidence
 T027 and T028; constitution 1.3.0.
+
+## State (2026-10-25)
+- **Ran live:** nothing. T019 (the budget alert through the module) was dropped at its cut-off of
+  2026-10-21 23:00, so FR-005 is not qualified (`evidence/T019.md`). The final chain T022 did not
+  run (`evidence/T022.md`). Both were blocked by three probe runs of spec 003 from before
+  baselines existed, which only the owner's terminal can clear. The chain of 2026-10-20 (run
+  `20261020T000733Z-773f`) ran spec 006's hardened code, before this spec's stage B fixes; it is
+  not this spec's run.
+- **Tested offline only:** the listing retry and kept records (V001), the alias refusal (V002), the probe
+  baseline, sweep and recovery (V003) and the two-tenant fixture (V004).
+- **T001:** A17 refuses two tenants on one project (`research.md` R2), so B5 stays offline and no
+  owner decision was needed (`evidence/T001.md`).
+- **Stays in the account:** only the approved retained infrastructure of `evidence/retained.md`
+  (R1–R20: the trial project, two state buckets with their S3 users, the governance IAM objects
+  and the sandbox admin), derived from the code and the manifest, not yet checked against the
+  account. Nothing disposable was created by this spec. The trial voucher expired
+  on 2026-10-24 12:42.
+- **Open:** T023 is the owner's session (`evidence/T023.md`): clear the three runs, record the
+  spend, and check `retained.md` against the account.
 
 ## Why and scope
 The free-trial credit expires on 2026-10-24 at 12:42. Live runs are the one thing it buys, and the
