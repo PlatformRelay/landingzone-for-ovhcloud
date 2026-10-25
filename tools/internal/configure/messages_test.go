@@ -188,15 +188,26 @@ func TestMessagesCheckRefusesEmptyParse(t *testing.T) {
 		generated string
 		configure []string
 	}{
-		"empty generated source":     {"", configure},
-		"generated without a code":   {"package stacks\n\nconst ManifestKind = \"Deployments\"\n", configure},
-		"generated code not literal": {"package stacks\n\nconst CodeX = prefix + \"X\"\n", configure},
-		"no configure source":        {generated, nil},
-		"configure without a code":   {generated, []string{"package configure\n"}},
+		"empty generated source":   {"", configure},
+		"generated without a code": {"package stacks\n\nconst ManifestKind = \"Deployments\"\n", configure},
+		"no configure source":      {generated, nil},
+		"configure without a code": {generated, []string{"package configure\n"}},
 	} {
 		if err := messagesCheck(catalogue, c.generated, c.configure); err == nil {
 			t.Errorf("%s: the check passed", name)
 		}
+	}
+	// no code parsed and no entry: nothing is missing and nothing stale, so only the zero count fails it
+	if err := messagesCheck(map[catalogueKey]catalogueEntry{}, "package stacks\n", []string{"package configure\n"}); err == nil {
+		t.Error("zero codes and an empty catalogue: the check passed")
+	}
+	// a Code constant that is not a string literal is a parse error, not a code skipped
+	const literal, computed = "package stacks\n\nconst CodeX = \"X\"\n", "package stacks\n\nconst CodeX = prefix + \"X\"\n"
+	if codes, err := messagesParseCodes(literal); err != nil || !slices.Equal(codes, []string{"X"}) {
+		t.Errorf("control: %v, %v", codes, err)
+	}
+	if codes, err := messagesParseCodes(computed); err == nil {
+		t.Errorf("a computed Code constant parsed as %v", codes)
 	}
 }
 
@@ -209,6 +220,11 @@ func TestMessagesCheckNamesMissingEntry(t *testing.T) {
 	}
 	if err := messagesCheck(map[catalogueKey]catalogueEntry{}, generated, configure); err == nil {
 		t.Error("an empty catalogue passed")
+	}
+	blank := maps.Clone(catalogue)
+	blank[catalogueKey{SourceConfigure, CodeDuplicateKey}] = catalogueEntry{sentence: "A key appears twice."}
+	if err := messagesCheck(blank, generated, configure); err == nil || !strings.Contains(err.Error(), "(configure, DUPLICATE_KEY)") {
+		t.Errorf("an entry without an action: %v", err)
 	}
 	want, err := messagesWantKeys(generated, configure)
 	if err != nil {
