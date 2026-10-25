@@ -8,7 +8,7 @@ Budget (review legs, D127 cap about 15): 2 spent on R1; plan.md *Complexity trac
 - [x] 0 orient — spec set refreshed for D127 (`463520a`)
 - [x] R spec-set review — round 1 on `463520a`: review leg 1 REQUEST_CHANGES, strong leg CONCERNS (verdict line REQUEST_CHANGES); no CRITICAL. Every finding was verified against the files and accepted; fixes in the commit after `463520a`. No round 2 unless the coordinator asks (reserve in plan.md).
 - [ ] L task loop (T015–T023) — started 2026-10-25 on `lane-004`
-- [ ] B branch review
+- [ ] B branch review — round 1 (2026-10-25) on the lane after T023: review leg 1 REQUEST_CHANGES, strong leg CONCERNS, no CRITICAL; fixes T024; no round 2 (no accepted CRITICAL)
 - [ ] Hand-off
 
 ## Triage
@@ -28,6 +28,15 @@ Budget (review legs, D127 cap about 15): 2 spent on R1; plan.md *Complexity trac
 | L T020 | Uncoded I/O errors (not a refusal of the answers) print `configure: error: <error>`, exit 1, with no catalogue entry | — | task | decide A (coordinator, 2026-10-25) | An I/O failure is not a mistake in the answers; the generic line is never mistaken for a refusal. contracts/checks.md states the line as the one exception to the catalogue (T021) | no |
 | L T020 | A current `stacks/deployments.yaml` that does not decode is refused (one line, exit 1) by `check` and `export` | — | task | decide A (coordinator, 2026-10-25) | Fail closed: the diff would be judged against a manifest nobody can reconcile. FR-005 amended to say so (T021) | no |
 | L T020 | `test:configure` is not in the CI workflow's targets, so CI never runs spec 004's tests | major | coordinator | fix | Added to the workflow with the one re-record of `foundation-runs.json` after the burn-down (coordinator PR, CI-triggered review) | no |
+| B1 | Current-manifest refusals can echo a value from the file; the file is read without a regular-file or size check | major | both | fix | T024 (a) | no |
+| B1 | The command's fallback prints a catalogue defect as an I/O error | minor | review leg 1 | fix | T024 (b) | no |
+| B1 | No-authority pins see only direct imports; `configure` could call an authority-bearing `stacks` function unseen | warning | strong | fix | T024 (c), an allow-list ratchet | no |
+| B1 | An out-of-range number is reported as `ANSWERS_SYNTAX` at the last line | note | strong | fix | T024 (d) | no |
+| B1 | The `configure:export` registry row, run host-side, overwrites an operator's staged export | note | strong | fix | T024 (e) | no |
+| B1 | How-to step 7: a line diff rewrites the whole file and drops the manifest's comments; the 0700 claim is stronger than the code | warning | both | fix | T024 (f) | no |
+| B1 | A process that can rename directories in the repository can move the opened staging directory | major (leg 1) | review leg 1 | decide accept | Coordinator 2026-10-25: such a process can already write `stacks/deployments.yaml` directly; the how-to states the trusted-repository assumption (T024 f) | no |
+| B1 | `configure:check` claims SC-004 while T022 is blocked | warning | strong | decide keep | Already rejected at R1 with reason: SC-004 is otherwise unchecked and `check:specs` fails (`UNCHECKED_REQUIREMENT SC-004`); spec.md and the specs table say SC-004 is not met | no |
+| B1 | CI does not run `test:configure` | warning | both | fix | Coordinator CI PR with the run-record re-record, after this spec | no |
 
 ## Fitness functions
 As spec 007's loop.md: test:dependencies, the default check:specs (001, 004, 005, 006, 007), test:traceability, test:foundation-ci, docs:check, the lz-check complexity gate, and every CI target on the final code tree. `ci:foundation` is re-recorded once after the burn-down (coordinator), not per task.
