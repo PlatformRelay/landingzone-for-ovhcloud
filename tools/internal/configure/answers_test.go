@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -248,9 +249,9 @@ func answersWantReadRefusal(t *testing.T, path, code string) {
 	}
 }
 
-// TestAnswersReaderRefusesNonRegular: a symlink to the sandbox answers, a directory and a missing
-// path are ANSWERS_NOT_REGULAR; the regular file (the control) is read (FR-008; G29: a followed
-// symlink).
+// TestAnswersReaderRefusesNonRegular: a symlink to the sandbox answers, a directory, a FIFO, a
+// missing path and a path under a regular file are ANSWERS_NOT_REGULAR; the regular file (the
+// control) is read (FR-008; G29: a followed symlink).
 func TestAnswersReaderRefusesNonRegular(t *testing.T) {
 	regular, err := filepath.Abs(filepath.Join(answersFixtureDir, "sandbox.yaml"))
 	if err != nil {
@@ -261,7 +262,11 @@ func TestAnswersReaderRefusesNonRegular(t *testing.T) {
 	if err := os.Symlink(regular, link); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{link, dir, filepath.Join(dir, "missing.yaml")} {
+	fifo := filepath.Join(dir, "answers.fifo") // without O_NONBLOCK the open would wait for a writer
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{link, dir, fifo, filepath.Join(dir, "missing.yaml"), filepath.Join(regular, "x")} {
 		answersWantReadRefusal(t, path, CodeAnswersNotRegular)
 	}
 	if got, err := ReadAnswers(regular); err != nil || string(got) != string(answersFixture(t, "sandbox.yaml")) {
@@ -362,11 +367,20 @@ func answersReadFile(t *testing.T, path string) []byte {
 }
 
 // answersForbidden are the imports and os functions that would give the package a path to the
-// network, a process or the environment (FR-008).
+// network, a process or the environment (FR-008): net and every package under it, os/exec, the
+// os functions that read or change the environment or start a process, and every syscall name
+// but the open flags and errno values ReadAnswers needs.
 var (
-	answersForbiddenImports = []string{"net", "net/http", "os/exec"}
-	answersForbiddenCalls   = []string{"Getenv", "LookupEnv", "Environ", "UserHomeDir"}
+	answersForbiddenImports = []string{"net", "os/exec", "golang.org/x/sys/unix"}
+	answersForbiddenCalls   = []string{"Getenv", "LookupEnv", "Environ", "UserHomeDir", "ExpandEnv",
+		"Setenv", "Unsetenv", "Clearenv", "StartProcess"}
+	answersAllowedSyscall = []string{"O_NOFOLLOW", "O_NONBLOCK", "ELOOP", "ENOTDIR"}
 )
+
+// answersForbiddenImport reports whether an import path is forbidden: one of the list or under it.
+func answersForbiddenImport(p string) bool {
+	return slices.ContainsFunc(answersForbiddenImports, func(f string) bool { return p == f || strings.HasPrefix(p, f+"/") })
+}
 
 // answersForbiddenUses parses the non-test Go files of dir and reports each forbidden import
 // and each use of a forbidden os function, under any import name. files counts the files read.
@@ -391,38 +405,58 @@ func answersForbiddenUses(dir string) (files int, uses []string, err error) {
 
 func answersFileUses(path string, f *ast.File) []string {
 	var uses []string
-	osName := ""
+	names := map[string]string{} // import name -> "os" or "syscall"
 	for _, imp := range f.Imports {
 		p, _ := strconv.Unquote(imp.Path.Value)
-		if slices.Contains(answersForbiddenImports, p) {
+		if answersForbiddenImport(p) {
 			uses = append(uses, path+": imports "+p)
 		}
-		if p == "os" {
-			osName = "os"
-			if imp.Name != nil {
-				osName = imp.Name.Name
-			}
+		if p != "os" && p != "syscall" {
+			continue
 		}
-	}
-	if osName == "." {
-		uses = append(uses, path+": dot-imports os, so its functions cannot be told apart")
+		name := p
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		if name == "." {
+			uses = append(uses, path+": dot-imports "+p+", so its names cannot be told apart")
+		}
+		names[name] = p
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
-		sel, ok := n.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		if id, ok := sel.X.(*ast.Ident); ok && osName != "" && id.Name == osName && slices.Contains(answersForbiddenCalls, sel.Sel.Name) {
-			uses = append(uses, path+": uses os."+sel.Sel.Name)
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			uses = append(uses, answersSelectorUse(path, names, sel)...)
 		}
 		return true
 	})
 	return uses
 }
 
-// TestAnswersSourceHasNoAuthority (pin): the package imports no net, net/http or os/exec and
-// uses no os.Getenv, os.LookupEnv, os.Environ or os.UserHomeDir (FR-008); controls: a planted
-// os.Getenv call under another import name and a planted net import in a scratch copy are found.
+// answersSelectorUse reports a forbidden os function or a syscall name off the allow-list.
+func answersSelectorUse(path string, names map[string]string, sel *ast.SelectorExpr) []string {
+	id, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	switch names[id.Name] {
+	case "os":
+		if slices.Contains(answersForbiddenCalls, sel.Sel.Name) {
+			return []string{path + ": uses os." + sel.Sel.Name}
+		}
+	case "syscall":
+		if !slices.Contains(answersAllowedSyscall, sel.Sel.Name) {
+			return []string{path + ": uses syscall." + sel.Sel.Name}
+		}
+	}
+	return nil
+}
+
+// TestAnswersSourceHasNoAuthority (pin): the package imports nothing under net, no os/exec and no
+// golang.org/x/sys/unix, uses no os function that reads or changes the environment or starts a
+// process (os.Getenv, os.LookupEnv, os.Environ, os.UserHomeDir among them) and no syscall name
+// but the open flags and errno values ReadAnswers needs (FR-008); controls: a planted os.Getenv
+// under another import name, a planted net/http import and a planted syscall.Getenv in a scratch
+// copy are each found.
 func TestAnswersSourceHasNoAuthority(t *testing.T) {
 	files, uses, err := answersForbiddenUses(".")
 	if err != nil || files == 0 || len(uses) > 0 {
@@ -430,14 +464,15 @@ func TestAnswersSourceHasNoAuthority(t *testing.T) {
 	}
 	scratch := t.TempDir()
 	for name, src := range map[string]string{
-		"env.go": "package configure\n\nimport sys \"os\"\n\nfunc home() string { return sys.Getenv(\"HOME\") }\n",
-		"net.go": "package configure\n\nimport _ \"net\"\n",
+		"env.go":     "package configure\n\nimport sys \"os\"\n\nfunc home() string { return sys.Getenv(\"HOME\") }\n",
+		"net.go":     "package configure\n\nimport _ \"net/http\"\n",
+		"syscall.go": "package configure\n\nimport \"syscall\"\n\nfunc user() (string, bool) { return syscall.Getenv(\"USER\") }\n",
 	} {
 		if err := os.WriteFile(filepath.Join(scratch, name), []byte(src), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, uses, err := answersForbiddenUses(scratch); err != nil || len(uses) != 2 {
-		t.Errorf("control: planted os.Getenv and net import: %v, uses %v; want both found", err, uses)
+	if _, uses, err := answersForbiddenUses(scratch); err != nil || len(uses) != 3 {
+		t.Errorf("control: planted os.Getenv, net/http import and syscall.Getenv: %v, uses %v; want all three found", err, uses)
 	}
 }
