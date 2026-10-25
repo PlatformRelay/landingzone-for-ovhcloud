@@ -38,12 +38,30 @@ tasks:
     cmds:
       - go -C tools test -count=1 ./internal/release ./cmd/lz-release
 
-  # Spec 004 (T016): the answers-file decoder and reader, strict, on the
-  # fixtures of tests/fixtures/answers. T020 adds ./cmd/lz-configure.
+  # Spec 004 (T016, T020): the answers-file decoder and reader, strict, on the
+  # fixtures of tests/fixtures/answers; the lz-configure command and its
+  # staging write in temporary roots.
   test:configure:
-    desc: Answers file decoded strictly, read only as a regular file, its patterns agreeing with schemas/deployments.schema.json (004 V001)
+    desc: Answers file decoded strictly, exported through the manifest decoder, explained, diffed; the command and its staging write (004 V001-V005)
     cmds:
-      - go -C tools test -count=1 ./internal/configure
+      - go -C tools test -count=1 ./internal/configure ./cmd/lz-configure
+
+  # Spec 004 (T020): credential-free and network-free (FR-008). Through the
+  # entry for an answers file under tests/; host-side for an operator's file
+  # under .local/, which the entry's snapshot skips. The answers path is
+  # relative to the repository root or absolute. Writes nothing.
+  configure:check:
+    desc: Decode, derive and gate an answers file, then print the row diff against stacks/deployments.yaml and the notes; writes nothing (004 FR-005, FR-006)
+    cmds:
+      - go -C tools run ./cmd/lz-configure -root .. check {{.CLI_ARGS}}
+
+  # Host-side (004 FR-007): the same as configure:check, then writes only
+  # .local/configure/deployments.yaml (0600 in a 0700 directory), through a
+  # temporary file, fsync, rename and a directory fsync. Copy it yourself.
+  configure:export:
+    desc: As configure:check, then write .local/configure/deployments.yaml and print the next steps (004 FR-007)
+    cmds:
+      - go -C tools run ./cmd/lz-configure -root .. export {{.CLI_ARGS}}
 
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
