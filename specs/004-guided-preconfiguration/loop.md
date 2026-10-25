@@ -1,13 +1,13 @@
 # Loop — 004-guided-preconfiguration
 
-Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `spec-004-refresh` · Base: `origin/main` · Started: 2026-10-25 · Reviewers: two-model (review leg 1 and the strong leg); spec-loop-duo
+Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `lane-004` (spec set merged in #169) · Base: `origin/main` · Started: 2026-10-25 · Reviewers: two-model (review leg 1 and the strong leg); spec-loop-duo
 Scope: D127. A non-interactive answers file exported to `deployments.yaml`, gated by the decoder behind `stacks:check`; the interactive journey, save/resume, presets and tool checks are deferred stories.
 Budget (review legs, D127 cap about 15): 2 spent on R1; plan.md *Complexity tracking* holds the count (10 planned, 5 reserve).
 
 ## Stages
 - [x] 0 orient — spec set refreshed for D127 (`463520a`)
 - [x] R spec-set review — round 1 on `463520a`: review leg 1 REQUEST_CHANGES, strong leg CONCERNS (verdict line REQUEST_CHANGES); no CRITICAL. Every finding was verified against the files and accepted; fixes in the commit after `463520a`. No round 2 unless the coordinator asks (reserve in plan.md).
-- [ ] L task loop (T015–T023)
+- [ ] L task loop (T015–T023) — started 2026-10-25 on `lane-004`
 - [ ] B branch review
 - [ ] Hand-off
 
@@ -25,3 +25,18 @@ Budget (review legs, D127 cap about 15): 2 spent on R1; plan.md *Complexity trac
 | R1 | `configure:check` claims `004/SC-004` (the second reader's record); `configure:export` prints a diff against `stacks/deployments.yaml` without listing it as an input | note | strong | fix in part | `configure:export` lists `stacks/deployments.yaml` as an input. `004/SC-004` stays on `configure:check`, rejected after verification: SC-004's machine part is that `configure:check` accepts the reader's file, T022's Verify runs exactly that, and with the key dropped `task check:specs` fails (`UNCHECKED_REQUIREMENT SC-004`, `UNRELATED_CHECK T022`); no other check verifies SC-004 | no |
 | R1 | The consequence notes omit A17: two refs on one project are refused at bind, so `configure: ok` plus a green `stacks:check` can still fail the bind | note | strong | fix | one-project note extended (FR-006, data-model, US1, T019, V004) | no |
 | R1 | The leg plan uses 10 of about 15 legs and keeps no slack for rework | note | both | fix | plan.md *Complexity tracking*: 2 spent, 8 planned, 5 reserve for one rework round | no |
+
+## Fitness functions
+As spec 007's loop.md: test:dependencies, the default check:specs (001, 004, 005, 006, 007), test:traceability, test:foundation-ci, docs:check, the lz-check complexity gate, and every CI target on the final code tree. `ci:foundation` is re-recorded once after the burn-down (coordinator), not per task.
+
+## Tasks
+| Task | Outcome | Review | Gaps |
+|---|---|---|---|
+| T015 | CLOSED-WITH-GAPS: the trace of 004 holds (`check:specs` TRACE_OK for 001, 004, 005, 006, 007; `test:traceability`, `test:foundation-ci`, `docs:check` green); `ci:foundation` stale as expected (RUN_STALE_HEAD, re-recorded after the burn-down) | review leg 1 REQUEST_CHANGES (one evidence error: row 5 claimed a machine check); fixed without a round 2; no strong leg (evidence only) | no check fails if `test:traceability`'s inputs drop the explicit `tasks.md` path, because `specs` is listed and `covered()` accepts a parent directory |
+
+## Known red
+| Test (file:name) | Story | Written in | Cleared in |
+|---|---|---|---|
+
+## Lessons
+- Before calling a "registry inputs name path X" clause machine-covered, check whether a parent directory is also listed: `covered()` accepts it (`tools/cmd/lz-check/main_test.go:668-675`). (T015)
