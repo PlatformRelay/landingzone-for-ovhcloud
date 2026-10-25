@@ -35,6 +35,9 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
 - [Respond to an incident](how-to/respond-to-an-incident.md) — severity, who decides and the
   first steps for a leaked credential, lost state, a failed run with leftovers, a cost spike and
   break-glass use. Maintainer only.
+- [Prepare deployments.yaml from an answers file](how-to/prepare-deployments-from-answers.md) —
+  write a short answers file, check and export it, then copy the manifest and run the three stack
+  commands. For a second operator; no credentials.
 
 ## Reference (look things up)
 
@@ -57,7 +60,7 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
 - [Naming and labelling design](explanation/naming-and-labelling-design.md) — how names and
   labels are built, and the options that were compared.
 - [Guided setup walkthrough](explanation/guided-setup-walkthrough.md) — a design walkthrough of
-  the planned setup helper; nothing to run yet.
+  the interactive setup helper, which is deferred; the answers file is what runs today.
 
 ## Decisions
 
