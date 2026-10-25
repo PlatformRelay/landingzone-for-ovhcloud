@@ -59,6 +59,11 @@ configurable. Operator decision (D12): default to Terramate, skip the custom gen
    definitions contain no logic beyond checkout, tool setup (mise), credentials and `task <target>`;
    `pipelines/github/` and `pipelines/gitlab/` ship reusable workflows and includes, tested on real
    repositories on both forges (`act` and `gitlab-ci-local` are a local convenience only).
+   Amendment (2026-10-25, D133): `task test`, `task docs` and `task check` exist; `task lint`
+   and `task dod` take one path. `task policy` waits for the plan policy gate (ADR-0006),
+   deferred by D133, and has no placeholder target. `task test` runs every offline test target
+   in sequence and needs more than the offline entry's 240 s for one target, so through the
+   entry its members run one per invocation, as the foundation CI does.
 5. **Tenant-repo pipeline** (ADR-0005): schema validation → `assent run` (policy-driven auto-merge,
    same on both forges) → reconcile and `terramate generate` freshness checks → affected-set
    computation → in dependency order: plan on the selected instances, post-plan policy gate on each

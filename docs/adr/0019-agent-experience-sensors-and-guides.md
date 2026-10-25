@@ -50,6 +50,16 @@ authority, persistent states and dependencies; a passing suite does not erase op
     recent one-job run (39490455107, 671 s of targets). On those times the heaviest job needs
     about 235 s of targets, a budget of about 490 s of 900. The run judge confirms each job's
     budget once runs of the split workflow are recorded. The PR feedback budget is 15 minutes.
+  - Amendment (2026-10-25, *task check*, D133): `task check -- <path>` exists, with two
+    deviations. The caller names the changed path; the check does not read git, and the offline
+    entry admits one path argument. It covers the layers that are built: lint and the mocked unit
+    tests (L0, L1, and the L2 contract runs of the components and stages) on the path's library
+    and stage directories and their consumers, then the dependency scan and the docs rules (L0).
+    L3 snapshots, L4 policy tests and the rest of L0 (trivy, terraform-docs, schema validation)
+    are not built; the output says which layers ran. A selected directory that is not a library
+    or a stage (a generated instance, a test root) is named as not run. Without a path every
+    library and stage runs. Through the entry it took 30 s on `modules/naming` and 47 s on
+    everything.
 - **Structured messages**: every check, policy and validation emits
   `LZ-<area>-<nnn>: <what is wrong> — <why it matters> — fix: <the change> — see: docs/<page>`.
   Rule ids are stable, documented one per page, and the same id appears in the guardrail spec, the
