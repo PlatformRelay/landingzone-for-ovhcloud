@@ -56,44 +56,86 @@ func unitModule(t *testing.T, name string) map[string]string {
 	return files
 }
 
-// With the pinned tools inside the offline entry, `lz-check check` (task
-// check, ADR-0019) runs lint and the unit tests on the changed library and
-// every directory that consumes it, then the dependency scan and the docs
-// rules, and says which layers ran: it passes only when all of them pass, and
-// a failing unit test or docs rule fails it. A consumer outside the libraries
-// and stages is named as not run. Without a path every library and stage runs.
-func TestUnitCheckWithTools(t *testing.T) {
+// consumerRoot is a root that passes name to the greeting module at source
+// and outputs its greeting; consumerTest asserts the greeting is want.
+func consumerRoot(source string) string {
+	return "terraform {\n  required_version = \">= 1.13.0\"\n}\n\nvariable \"name\" {\n  type        = string\n  description = \"Name to greet.\"\n}\n\n" +
+		"module \"x\" {\n  source = \"" + source + "\"\n  name   = var.name\n}\n\n" +
+		"output \"greeting\" {\n  description = \"The greeting.\"\n  value       = module.x.greeting\n}\n"
+}
+
+func consumerTest(want string) string {
+	return "run \"greets\" {\n  command = plan\n\n  variables {\n    name = \"lz\"\n  }\n\n  assert {\n    condition     = output.greeting == \"" + want +
+		"\"\n    error_message = \"unexpected greeting\"\n  }\n}\n"
+}
+
+// checkTree is a passing docs tree with the greeting module modules/x (the
+// unit fixture named), a component and a test root that consume it, and an
+// unrelated module modules/z.
+func checkTree(t *testing.T, fixture string, extra map[string]string) string {
+	t.Helper()
 	config, err := os.ReadFile("../../../.tflint.hcl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumer := "module \"x\" {\n  source = \"../../../../modules/x\"\n}\n"
+	files := unitModule(t, fixture)
+	for f, content := range unitModule(t, "pass") {
+		files[strings.Replace(f, "modules/x/", "modules/z/", 1)] = content
+	}
+	files[".tflint.hcl"] = string(config)
+	files["modules/x/.terraform.lock.hcl"] = ""
+	files["components/fam/y/main.tf"] = consumerRoot("../../../modules/x")
+	files["components/fam/y/main.tftest.hcl"] = consumerTest("hello lz")
+	files["tests/live/probes/p/main.tf"] = consumerRoot("../../../../modules/x")
+	files["tests/live/probes/p/main.tftest.hcl"] = consumerTest("hello lz")
+	files[docsMapPage] = docsBaseMap + "| `components/` | Components. |\n"
+	for k, v := range extra {
+		files[k] = v
+	}
+	return docsRepo(t, files)
+}
+
+// With the pinned tools inside the offline entry, `lz-check check` (task
+// check, ADR-0019) runs lint and the unit tests on the changed library and
+// every library, component and stage that consumes it, the unit tests on
+// every test root that does, and never an unrelated directory; then the
+// dependency scan and the docs rules. It passes only when all of them pass:
+// a failing consumer, test root or docs rule fails it. Without a path, or on
+// shared tooling or an unknown path, every library and stage runs. L2 is
+// claimed only when a component or stage ran.
+func TestUnitCheckWithTools(t *testing.T) {
 	for name, c := range map[string]struct {
 		fixture string
 		extra   map[string]string
 		args    []string
 		code    int
 		want    []string
+		absent  []string
 	}{
-		"changed library": {"pass", nil, []string{"modules/x/main.tf"}, 0, []string{"CHECK_SELECTION dirs=modules/x tests/live/probes/p",
-			"pass modules/x lint=pass tests=1 passed=1", "CHECK_NOT_RUN tests/live/probes/p layer=test", "DOCS_OK",
-			"CHECK_LAYERS ran=L0,L1,L2 not_built=L3,L4", "CHECK_PASS dirs=1 not_run=1"}},
-		"every library": {"pass", nil, nil, 0, []string{"CHECK_SELECTION full reason=ALL", "pass modules/x lint=pass", "CHECK_PASS dirs=1 not_run=0"}},
-		"shared tool":   {"pass", nil, []string{"Taskfile.yml"}, 0, []string{"CHECK_SELECTION full reason=SHARED_TOOL", "CHECK_PASS dirs=1"}},
-		"failing test":  {"fail", nil, []string{"modules/x"}, 1, []string{"fail modules/x lint=pass tests=1 passed=0 failed=1", "DOCS_OK", "CHECK_FAIL DIRS"}},
+		"changed library": {"pass", nil, []string{"modules/x/main.tf"}, 0, []string{"CHECK_SELECTION dirs=components/fam/y modules/x tests/live/probes/p",
+			"pass modules/x lint=pass tests=1 passed=1", "pass components/fam/y lint=pass tests=1 passed=1", "pass tests/live/probes/p unit tests=1 passed=1",
+			"DOCS_OK", "CHECK_LAYERS ran=L0-partial,L1,L2 not_built=L3,L4", "CHECK_PASS dirs=3 not_run=0"}, []string{"modules/z lint="}},
+		"library alone": {"pass", nil, []string{"modules/z"}, 0, []string{"CHECK_SELECTION dirs=modules/z", "pass modules/z lint=pass",
+			"CHECK_LAYERS ran=L0-partial,L1 not_built=L3,L4", "CHECK_PASS dirs=1"}, []string{"modules/x lint="}},
+		"every library": {"pass", nil, nil, 0, []string{"CHECK_SELECTION full reason=ALL", "pass modules/z lint=pass", "pass components/fam/y lint=pass", "CHECK_PASS dirs=3 not_run=0"}, nil},
+		"shared tool":   {"pass", nil, []string{"Taskfile.yml"}, 0, []string{"CHECK_SELECTION full reason=SHARED_TOOL", "pass modules/z lint=pass", "CHECK_PASS dirs=3"}, nil},
+		"unknown path":  {"pass", nil, []string{"nowhere/x.txt"}, 0, []string{"CHECK_SELECTION full reason=UNKNOWN_PATH", "pass modules/z lint=pass", "CHECK_PASS dirs=3"}, nil},
+		"failing test":  {"fail", nil, []string{"modules/x"}, 1, []string{"fail modules/x lint=pass tests=1 passed=0 failed=1", "DOCS_OK", "CHECK_LAYERS attempted=", "CHECK_FAIL DIRS"}, nil},
+		"failing consumer": {"pass", map[string]string{"components/fam/y/main.tftest.hcl": consumerTest("hello other")}, []string{"modules/x"}, 1,
+			[]string{"pass modules/x lint=pass", "fail components/fam/y lint=pass tests=1 passed=0 failed=1", "CHECK_FAIL DIRS"}, nil},
+		"failing test root": {"pass", map[string]string{"tests/live/probes/p/main.tftest.hcl": consumerTest("hello other")}, []string{"modules/x"}, 1,
+			[]string{"pass components/fam/y lint=pass", "fail tests/live/probes/p unit tests=1 passed=0 failed=1", "CHECK_FAIL DIRS"}, nil},
 		"failing docs": {"pass", map[string]string{"docs/how-to/a.md": pageA + "[gone](c.md)\n"}, []string{"modules/x"}, 1,
-			[]string{"pass modules/x lint=pass", "LINK_BROKEN docs/how-to/a.md", "CHECK_FAIL DOCS"}},
+			[]string{"pass modules/x lint=pass", "LINK_BROKEN docs/how-to/a.md", "CHECK_FAIL DOCS"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			files := unitModule(t, c.fixture)
-			files[".tflint.hcl"] = string(config)
-			files["modules/x/.terraform.lock.hcl"] = ""
-			files["tests/live/probes/p/main.tf"] = consumer
-			for k, v := range c.extra {
-				files[k] = v
-			}
-			code, out := lzCheck(docsRepo(t, files), append([]string{"check"}, c.args...)...)
+			code, out := lzCheck(checkTree(t, c.fixture, c.extra), append([]string{"check"}, c.args...)...)
 			judgeCheck(t, code, out, c.code, c.want)
+			for _, a := range c.absent {
+				if strings.Contains(out, a) {
+					t.Errorf("BEHAVIORAL_RED: %q ran, but the change does not select it:\n%s", a, out)
+				}
+			}
 		})
 	}
 }
