@@ -15,11 +15,11 @@ references:
   - path: tests/fixtures/answers/sandbox.yaml
     blob: 8f1488b84f0e509c9065a197c4c352b81bc8fc73
   - path: specs/004-guided-preconfiguration/spec.md
-    blob: 6b95831160af928205fa092356a7f238bc523be8
+    blob: 901d053342e31299c95e5cc44c9febaf914ae723
   - path: Taskfile.yml
     blob: 7f63fcd4c12db8be85537b62f49efbd11f368210
 verified_against: {task: "3.53"}
-last_verified: c1ab5a6d550df2f531633158ed0276bb63544a2f
+last_verified: 523d965edfb57dc698f61e0fa3b46b8236025972
 ---
 
 # Prepare deployments.yaml from an answers file
