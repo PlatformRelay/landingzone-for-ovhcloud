@@ -133,6 +133,8 @@ metadata on OpenStack resources, inventory records where an API carries none)
 
 **Spec**: a written module spec with numbered requirements (functional `LZFR`, non-functional `LZNFR`,
 AVM-style) in `docs/reference/module-spec.md`, each one checkable by CI or marked manual.
+Amendment (2026-10-25, D133): deferred. Writing checkable `LZFR`/`LZNFR` requirements is design
+work, not a summary of the modules that exist; `module-spec.md` does not exist yet.
 
 ## Consequences
 - Naming is testable and centralised. **Naming-algorithm changes are migrations**: existing names
