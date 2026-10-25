@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks"
 )
 
 // Controls of 004 T019 (FR-005, V004): the dry-run diff compares instance rows by id, removed rows
@@ -72,6 +74,28 @@ func TestDiffRowsRemoved(t *testing.T) {
 // exposes a diff that invents changes).
 func TestDiffNone(t *testing.T) {
 	diffWant(t, answersReadFile(t, exportSandboxManifest), diffExport(t, "sandbox.yaml"), []string{"diff: none"})
+}
+
+// TestDiffKeptIDs: a kept id whose stage changed (the network and runtime rows swap ids) and a
+// changed CIDR are value-level changes FR-005 does not list: `diff: none` (acceptance; exposes a
+// diff by whole row instead of by id).
+func TestDiffKeptIDs(t *testing.T) {
+	current := answersReadFile(t, exportSandboxManifest)
+	for _, edit := range [][2]string{
+		{`"id": "demo-dev-gra11-network"`, `"id": "swap-network"`},
+		{`"id": "demo-dev-gra11-runtime"`, `"id": "demo-dev-gra11-network"`},
+		{`"id": "swap-network"`, `"id": "demo-dev-gra11-runtime"`},
+		{`"cidr": "10.20.0.0/24"`, `"cidr": "10.30.0.0/24"`},
+	} {
+		if strings.Count(string(current), edit[0]) != 1 {
+			t.Fatalf("fixture: %s not found once", edit[0])
+		}
+		current = []byte(strings.Replace(string(current), edit[0], edit[1], 1))
+	}
+	if _, err := stacks.DecodeManifest(current); err != nil {
+		t.Fatalf("control: the edited manifest decodes: %v", err)
+	}
+	diffWant(t, current, diffExport(t, "sandbox.yaml"), []string{"diff: none"})
 }
 
 // TestDiffNoCurrentManifest: without a current manifest every row is added, in the generated
