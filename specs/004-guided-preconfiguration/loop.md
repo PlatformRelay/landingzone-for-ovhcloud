@@ -7,9 +7,9 @@ Budget (review legs, D127 cap about 15): 2 spent on R1; plan.md *Complexity trac
 ## Stages
 - [x] 0 orient — spec set refreshed for D127 (`463520a`)
 - [x] R spec-set review — round 1 on `463520a`: review leg 1 REQUEST_CHANGES, strong leg CONCERNS (verdict line REQUEST_CHANGES); no CRITICAL. Every finding was verified against the files and accepted; fixes in the commit after `463520a`. No round 2 unless the coordinator asks (reserve in plan.md).
-- [ ] L task loop (T015–T023) — started 2026-10-25 on `lane-004`
-- [ ] B branch review — round 1 (2026-10-25) on the lane after T023: review leg 1 REQUEST_CHANGES, strong leg CONCERNS, no CRITICAL; fixes T024; no round 2 (no accepted CRITICAL)
-- [ ] Hand-off
+- [x] L task loop (T015–T024) — 2026-10-25 on `lane-004`; T022 blocked (owner names a second reader)
+- [x] B branch review — round 1 (2026-10-25) on the lane after T023: review leg 1 REQUEST_CHANGES, strong leg CONCERNS, no CRITICAL; fixes T024; no round 2 (no accepted CRITICAL)
+- [x] Hand-off — 2026-10-25: US1–US3 merged (#171, #172); T020, T021, T023, T024 in the final PR; strong legs 10 of about 15; open: T022 (owner), `test:configure` in CI and the run-record re-record (coordinator)
 
 ## Triage
 | Stage | Finding (one line) | Sev | Legs | Disposition | Where it went / why | Needs user? |
