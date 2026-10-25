@@ -274,7 +274,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
 
 ## Final phase: Polish
 
-- [ ] T024 Record spec 007's state in specs/README.md and specs/007-cleanup-first-live-slice/spec.md
+- [x] T024 Record spec 007's state in specs/README.md and specs/007-cleanup-first-live-slice/spec.md — closed 2026-10-25 (T023 still the owner's), evidence: evidence/T024.md
   - Requirements: FR-004, FR-011; ADRs: 0021, 0024. Depends on: T023.
   - Verify: exempt — docs-only; the specs table row states what ran live, T001's outcome and what approved infrastructure stays; `task docs:check` green.
   - Evidence: `evidence/T024.md`; initial status `not-run`.
