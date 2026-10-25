@@ -477,3 +477,10 @@ func TestAnswersSourceHasNoAuthority(t *testing.T) {
 		t.Errorf("control: planted os.Getenv, net/http import and syscall.Getenv: %v, uses %v; want all three found", err, uses)
 	}
 }
+
+// TestAnswersNumberBeyondFloat64Document (T024 d): a whole document that is a number beyond
+// float64 is INVALID_VALUE at "(document)", the path a top-level type mismatch gets, not
+// ANSWERS_SYNTAX; the second-tenant case is in invalid/cases.json.
+func TestAnswersNumberBeyondFloat64Document(t *testing.T) {
+	answersWantRefusal(t, []byte("1e400\n"), CodeInvalidValue, "(document)", "a top-level number beyond float64")
+}

@@ -1,15 +1,15 @@
 ---
 references:
   - path: tools/cmd/lz-configure/main.go
-    blob: 1c7c17842d0badfd155a037e745041c289b938c6
+    blob: 5c2ba233e6167fef8912f0a52db1de0050bf304a
   - path: tools/internal/configure/answers.go
-    blob: 47b21c94ba559dc0ccde021c3c09623e86d8e79c
+    blob: ec0ba611bf5c87092ce8d55b103f5c0b5f0bb136
   - path: tools/internal/configure/export.go
     blob: 01c3a294cd586723d620f826019c60dd76426b2b
   - path: tools/internal/configure/diff.go
-    blob: f9b66733c983ac1d65593251cbd8004f0c6d5c68
+    blob: 24d9c307c8a0fd26b06267fe8c74e7548f986cca
   - path: tools/internal/configure/messages.go
-    blob: 8abb3161c2ec48b3e4343777083ca2a33b482ad1
+    blob: 5f050e0c74de792b31de31de20fa9f091ddf3b1e
   - path: tools/internal/configure/notes.go
     blob: 18b4a3a45d031b7c408f7fbd9832c1debc58cc6a
   - path: tests/fixtures/answers/sandbox.yaml
@@ -17,9 +17,9 @@ references:
   - path: specs/004-guided-preconfiguration/spec.md
     blob: 901d053342e31299c95e5cc44c9febaf914ae723
   - path: Taskfile.yml
-    blob: 7f63fcd4c12db8be85537b62f49efbd11f368210
+    blob: 3cbca03f2e7bc9cbe27df8c6e2f0ecf648ef12d9
 verified_against: {task: "3.53"}
-last_verified: 523d965edfb57dc698f61e0fa3b46b8236025972
+last_verified: ccd2634dbde6a4b7378d413cd181f76f94cafc0e
 ---
 
 # Prepare deployments.yaml from an answers file
@@ -161,13 +161,17 @@ The place counts from 0, so `tenants[1]` is the second tenant, `lab`. The table 
 [the answers file](#the-answers-file) says a CIDR needs its prefix. `task` then reports
 `task: Failed to run task "configure:check": exit status 1`. Nothing was written.
 
+A refusal of the file itself, such as `ANSWERS_NOT_REGULAR`, names the answers file by its
+absolute path, even when you gave a relative one: the command resolves it against the repository
+root first.
+
 Fix the value to `"10.40.0.0/24"` and run the check again.
 
 Some refusals name a manifest rule, not a field. For example, `DUPLICATE_VLAN` means two regions of
 one environment share a VLAN id, and `SHARED_STATE_PROJECT` means an environment uses the state
 project without `shared_state_project`. The sentence and the `Next:` action say what to change.
-A refusal that calls itself a defect of the tool is not your mistake: report it with the answers
-file, and edit `stacks/deployments.yaml` by hand meanwhile.
+A refusal that calls itself a defect of the tool, or a `configure: defect:` line, is not your
+mistake: report it with the answers file, and edit `stacks/deployments.yaml` by hand meanwhile.
 
 ## 4. Read the diff
 
@@ -227,7 +231,10 @@ mise exec -- task configure:export -- .local/configure/answers.yaml
 ```
 
 The export runs the same check, then writes `.local/configure/deployments.yaml` and nothing else.
-The directory ends with mode 0700 and the file with 0600. After `configure: ok` it prints:
+The file gets mode 0600. A `.local` or `.local/configure` the export creates gets 0700. An existing
+`.local/configure` loses only its group and other bits: 0755 ends 0700, but 0500 stays 0500 and the
+write then fails with `STAGING_WRITE`. An existing `.local` keeps its mode. After `configure: ok`
+it prints:
 
 ```text
 wrote .local/configure/deployments.yaml
@@ -242,12 +249,20 @@ staging file is unchanged. `STAGING_NOT_DURABLE` means the new file was written,
 bring the old one back: look at the file before you copy it, or export again. `STAGING_SYMLINK`
 means `.local`, `.local/configure` or the staging file is a symlink; remove it and export again.
 
+The export trusts your repository: it assumes no other process can rename directories in it while
+it runs. Such a process could move `.local/configure` after the export opened it, and the file
+would land where the directory went. A process with that access could also write
+`stacks/deployments.yaml` directly, so the export does not defend against it.
+
 ## 7. Review and copy
 
-The staging file is the complete manifest. Read it before you copy it. Compare it with the current
-one, for example with `diff stacks/deployments.yaml .local/configure/deployments.yaml`. Expect
-the new tenant, its environment and region, and the four instance rows from the diff. The export
-is equal in value to a hand-written manifest, not byte for byte: comments and layout may differ.
+The staging file is the complete manifest. Read it before you copy it. The export is equal in
+value to a hand-written manifest, not byte for byte: it writes one key per line and no comments.
+A line diff such as `diff stacks/deployments.yaml .local/configure/deployments.yaml` therefore
+shows nearly every line as changed, and the copy drops every comment of today's manifest, such as
+the rationale comments of the committed sandbox manifest. Review the rows with the check's row
+diff (step 4) instead: it lists the new tenant's four instance rows. If you want to keep the
+comments, carry them back into the copied file by hand.
 
 Then copy it. This is your step; the command never writes `stacks/`.
 
@@ -281,12 +296,13 @@ mise exec -- task stacks:check
 
 ## When a line is not a refusal of your answers
 
-Two lines stop the check without blaming the content of your answers:
+Three lines stop the check without blaming the content of your answers:
 
 | Line | Meaning | What to do |
 | --- | --- | --- |
-| `configure: CURRENT_MANIFEST_INVALID: …` | Today's `stacks/deployments.yaml` does not decode. The check and the export refuse, exit 1: no diff, no notes, nothing written. | Run `mise exec -- task stacks:check`; it names the problem. Fix the manifest first. |
+| `configure: CURRENT_MANIFEST_INVALID: stacks/deployments.yaml. …` | Today's `stacks/deployments.yaml` is a symlink, not a regular file, larger than 1 MiB, or does not decode. The line names the path only, never a value from the file. The check and the export refuse, exit 1: no diff, no notes, nothing written. | Make it a regular file if it is not one. Otherwise run `mise exec -- task stacks:check`; it names the decoding problem. Fix the manifest first. |
 | `configure: error: <error>` | An I/O failure, such as an answers file you may not read. It is not in the catalogue, and exit is 1. | Fix what the error names, often a permission, and run the command again. |
+| `configure: defect: <CODE> could not be explained. …` | The tool raised a refusal its own catalogue has no line for. It is a defect of the tool, exit 1. | Report it with the answers file; meanwhile edit `stacks/deployments.yaml` by hand. |
 
 A usage mistake, such as a missing path, prints the usage line and exits 2.
 

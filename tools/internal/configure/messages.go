@@ -1,6 +1,7 @@
 package configure
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,9 +34,12 @@ type catalogueKey struct{ source, code string }
 
 type catalogueEntry struct{ sentence, next string }
 
+// toolDefectBlame is the sentence of every line that blames the tool (toolDefect, DefectLine).
+const toolDefectBlame = "This is a defect of the tool, not of your answers."
+
 // toolDefect is the one entry of every generated code the derivation cannot reach.
 var toolDefect = catalogueEntry{
-	"Unreachable: the tool built a manifest the decoder refuses. This is a defect of the tool, not of your answers.",
+	"Unreachable: the tool built a manifest the decoder refuses. " + toolDefectBlame,
 	"Report it with the answers file; meanwhile edit `stacks/deployments.yaml` by hand.",
 }
 
@@ -67,8 +71,8 @@ var catalogue = map[catalogueKey]catalogueEntry{
 		"A value does not have the allowed form.",
 		"Use the form the how-to gives for that field."},
 	{SourceConfigure, CodeCurrentManifestInvalid}: {
-		"Today's `stacks/deployments.yaml` does not decode, so no diff can be shown.",
-		"Fix it first; `task stacks:check` names the problem."},
+		"Today's `stacks/deployments.yaml` is a symlink, not a regular file, larger than 1 MiB, or does not decode, so no diff can be shown.",
+		"Fix it first; `task stacks:check` names a decoding problem."},
 	{SourceConfigure, CodeStagingSymlink}: {
 		"`.local`, `.local/configure` or the staging file is a symlink; nothing was written.",
 		"Remove the symlink and run the export again."},
@@ -118,6 +122,31 @@ func Explain(source, code, detail string) (string, error) {
 		detail = strconv.Quote(detail) // a path with a newline must not break the one line
 	}
 	return "configure: " + code + ": " + detail + ". " + entry.sentence + " Next: " + entry.next, nil
+}
+
+// DefectLine is the one line of a refusal the catalogue cannot explain: an *AnswersError or a
+// *stacks.ManifestError, possibly wrapped, that ExplainError refuses (a code without an entry, or
+// a wrapped refusal). It names the code, never the detail, and blames the tool. Any other error,
+// and a refusal ExplainError explains, has no defect line (false).
+func DefectLine(err error) (string, bool) {
+	if _, xerr := ExplainError(err); xerr == nil {
+		return "", false
+	}
+	var answersErr *AnswersError
+	var manifestErr *stacks.ManifestError
+	var code string
+	switch {
+	case errors.As(err, &answersErr):
+		code = answersErr.Code
+	case errors.As(err, &manifestErr):
+		code = manifestErr.Code
+	default:
+		return "", false
+	}
+	if strings.ContainsFunc(code, unicode.IsControl) {
+		code = strconv.Quote(code)
+	}
+	return "configure: defect: " + code + " could not be explained. " + toolDefectBlame + " Next: " + toolDefect.next, true
 }
 
 // ExplainError is the refusal line of err, its source taken from its own type: *AnswersError is

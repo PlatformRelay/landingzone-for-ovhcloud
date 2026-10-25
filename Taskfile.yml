@@ -58,10 +58,15 @@ tasks:
   # Host-side (004 FR-007): the same as configure:check, then writes only
   # .local/configure/deployments.yaml (0600 in a 0700 directory), through a
   # temporary file, fsync, rename and a directory fsync. Copy it yourself.
+  # ROOT (absolute) exports under another root instead of this repository: the
+  # registry row uses a temporary one, so running it never replaces an
+  # operator's staged export. A relative answers path is read under ROOT.
   configure:export:
     desc: As configure:check, then write .local/configure/deployments.yaml and print the next steps (004 FR-007)
+    vars:
+      ROOT: '{{.ROOT | default ".."}}'
     cmds:
-      - go -C tools run ./cmd/lz-configure -root .. export {{.CLI_ARGS}}
+      - go -C tools run ./cmd/lz-configure -root {{shellQuote .ROOT}} export {{.CLI_ARGS}}
 
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)

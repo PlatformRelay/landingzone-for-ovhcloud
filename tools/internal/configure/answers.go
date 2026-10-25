@@ -42,8 +42,8 @@ const (
 )
 
 // Refusal codes of DecodeAnswers and ReadAnswers (data-model.md *Refusal message*). When a
-// document breaks several rules, the first in this order is reported: size, syntax and duplicate
-// keys (in document order); then checks.DecodeStrict's walk, depth first: an object's missing
+// document breaks several rules, the first in this order is reported: size, syntax, duplicate
+// keys and a number beyond float64, INVALID_VALUE at its path (in document order); then checks.DecodeStrict's walk, depth first: an object's missing
 // fields (in field declaration order), then its keys in sorted order, each refused as unknown
 // or null or descended into; then a JSON type mismatch (in declaration order); the header; value
 // rules (keys in sorted order); a VLAN id without a CIDR.
@@ -212,29 +212,51 @@ func DecodeAnswers(data []byte) (Answers, error) {
 // symlink (parent directories are the caller's), of at most MaxAnswersBytes (FR-008). It does
 // not decode it.
 func ReadAnswers(path string) ([]byte, error) {
+	data, err := readRegular(path, MaxAnswersBytes)
+	switch {
+	case errors.Is(err, fs.ErrNotExist) || errors.Is(err, errNotRegular):
+		return nil, refuse(CodeAnswersNotRegular, "%s", path)
+	case errors.Is(err, errTooLarge):
+		return nil, refuse(CodeAnswersTooLarge, "%s", path)
+	case err != nil:
+		return nil, fmt.Errorf("read answers file: %w", err)
+	}
+	return data, nil
+}
+
+// The reasons readRegular refuses a file it could open or name.
+var (
+	errNotRegular = errors.New("not a regular file")
+	errTooLarge   = errors.New("larger than the bound")
+)
+
+// readRegular reads path when it is a regular file whose last component is not a symlink, of at
+// most limit bytes: errNotRegular or errTooLarge otherwise, or the I/O error (fs.ErrNotExist for
+// an absent file). ReadAnswers and ReadCurrentManifest share it (FR-008).
+func readRegular(path string, limit int) ([]byte, error) {
 	// O_NOFOLLOW refuses a symlink as the last component (ELOOP); O_NONBLOCK keeps a FIFO from
 	// blocking the open, and the mode check below refuses it.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
-		return nil, refuse(CodeAnswersNotRegular, "%s", path)
+	if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, errNotRegular
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read answers file: %w", err)
+		return nil, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("read answers file: %w", err)
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, refuse(CodeAnswersNotRegular, "%s", path)
+		return nil, errNotRegular
 	}
-	data, err := io.ReadAll(io.LimitReader(f, MaxAnswersBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
 	if err != nil {
-		return nil, fmt.Errorf("read answers file: %w", err)
+		return nil, err
 	}
-	if len(data) > MaxAnswersBytes {
-		return nil, refuse(CodeAnswersTooLarge, "%s", path)
+	if len(data) > limit {
+		return nil, errTooLarge
 	}
 	return data, nil
 }
@@ -260,6 +282,13 @@ type keyWalker struct {
 
 func (w *keyWalker) value(path string) error {
 	token, err := w.dec.Token()
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) { // a number beyond float64 (1e400) in a well-formed document
+		if path == "" {
+			path = "(document)"
+		}
+		return refuse(CodeInvalidValue, "%s", path)
+	}
 	if err != nil {
 		return syntaxError(w.data, err)
 	}
