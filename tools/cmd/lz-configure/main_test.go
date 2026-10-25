@@ -26,12 +26,21 @@ import (
 
 const repoRoot = "../../.."
 
+// The fixtures are absolute: the command resolves a relative answers path against -root.
 var (
-	sandboxAnswers    = filepath.Join(repoRoot, "tests/fixtures/answers/sandbox.yaml")
-	twoTenantAnswers  = filepath.Join(repoRoot, "tests/fixtures/answers/sandbox-two-tenants.yaml")
-	twoTenantManifest = filepath.Join(repoRoot, "tests/fixtures/manifests/sandbox-two-tenants/deployments.yaml")
+	sandboxAnswers    = cfgAbs("tests/fixtures/answers/sandbox.yaml")
+	twoTenantAnswers  = cfgAbs("tests/fixtures/answers/sandbox-two-tenants.yaml")
+	twoTenantManifest = cfgAbs("tests/fixtures/manifests/sandbox-two-tenants/deployments.yaml")
 	stagingRel        = ".local/configure/deployments.yaml"
 )
+
+func cfgAbs(p string) string {
+	abs, err := filepath.Abs(filepath.Join(repoRoot, p))
+	if err != nil {
+		panic(err)
+	}
+	return abs
+}
 
 // cfgRead reads a file the test needs, failing the test when it cannot.
 func cfgRead(t *testing.T, path string) []byte {
@@ -253,24 +262,26 @@ func TestExportTwoTenants(t *testing.T) {
 // looser directory kept).
 func TestExportTightensLooseDirectory(t *testing.T) {
 	for _, perm := range []fs.FileMode{0o755, 0o750, 0o701, 0o700} {
-		t.Run(perm.String(), func(t *testing.T) {
-			root := cfgRoot(t)
-			dir := filepath.Join(root, ".local/configure")
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chmod(dir, perm); err != nil {
-				t.Fatal(err)
-			}
-			code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers)
-			info, err := os.Lstat(dir)
-			if err != nil || info.Mode().Perm() != 0o700 {
-				t.Errorf("directory at %v: ends %v, %v; want 0700", perm, info.Mode(), err)
-			}
-			if _, err := os.Lstat(filepath.Join(root, stagingRel)); code != 0 || err != nil {
-				t.Errorf("want the file written, exit 0; got exit %d, %v, %q", code, err, lines)
-			}
-		})
+		t.Run(perm.String(), func(t *testing.T) { cfgTightenRow(t, perm) })
+	}
+}
+
+func cfgTightenRow(t *testing.T, perm fs.FileMode) {
+	root := cfgRoot(t)
+	dir := filepath.Join(root, ".local/configure")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, perm); err != nil {
+		t.Fatal(err)
+	}
+	code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers)
+	info, err := os.Lstat(dir)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf("directory at %v: ends %v, %v; want 0700", perm, info.Mode(), err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, stagingRel)); code != 0 || err != nil {
+		t.Errorf("want the file written, exit 0; got exit %d, %v, %q", code, err, lines)
 	}
 }
 
@@ -279,44 +290,54 @@ func TestExportTightensLooseDirectory(t *testing.T) {
 // real directory or no target exports (G31: exposes a followed symlink).
 func TestExportRefusesSymlinks(t *testing.T) {
 	for _, link := range []string{".local", ".local/configure", stagingRel} {
-		t.Run(link, func(t *testing.T) {
-			root := cfgRoot(t)
-			elsewhere := t.TempDir()
-			dest := filepath.Join(elsewhere, "dest")
-			if link == stagingRel {
-				cfgWrite(t, dest, []byte("elsewhere\n"), 0o600)
-			} else if err := os.Mkdir(dest, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, link)), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(dest, filepath.Join(root, link)); err != nil {
-				t.Fatal(err)
-			}
-			before, beforeDest := cfgInventory(t, root), cfgInventory(t, elsewhere)
-			code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers)
-			cfgRefusal(t, code, lines, configure.CodeStagingSymlink)
-			if changed := cfgChanged(before, cfgInventory(t, root)); len(changed) > 0 {
-				t.Errorf("changed under the root: %v", changed)
-			}
-			if changed := cfgChanged(beforeDest, cfgInventory(t, elsewhere)); len(changed) > 0 {
-				t.Errorf("changed where the link points: %v", changed)
-			}
-			// control: the link removed (a real directory in its place, or no target)
-			if err := os.Remove(filepath.Join(root, link)); err != nil {
-				t.Fatal(err)
-			}
-			if link != stagingRel {
-				if err := os.Mkdir(filepath.Join(root, link), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers); code != 0 {
-				t.Errorf("control without the link: exit %d, %q", code, lines)
-			}
-		})
+		t.Run(link, func(t *testing.T) { cfgSymlinkRow(t, link) })
 	}
+}
+
+func cfgSymlinkRow(t *testing.T, link string) {
+	root := cfgRoot(t)
+	elsewhere := cfgPlantLink(t, root, link)
+	before, beforeDest := cfgInventory(t, root), cfgInventory(t, elsewhere)
+	code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers)
+	cfgRefusal(t, code, lines, configure.CodeStagingSymlink)
+	if changed := cfgChanged(before, cfgInventory(t, root)); len(changed) > 0 {
+		t.Errorf("changed under the root: %v", changed)
+	}
+	if changed := cfgChanged(beforeDest, cfgInventory(t, elsewhere)); len(changed) > 0 {
+		t.Errorf("changed where the link points: %v", changed)
+	}
+	// control: the link removed (a real directory in its place, or no target)
+	if err := os.Remove(filepath.Join(root, link)); err != nil {
+		t.Fatal(err)
+	}
+	if link != stagingRel {
+		if err := os.Mkdir(filepath.Join(root, link), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, lines := cfgRun(t, osStaging, "-root", root, "export", sandboxAnswers); code != 0 {
+		t.Errorf("control without the link: exit %d, %q", code, lines)
+	}
+}
+
+// cfgPlantLink makes link under root a symlink to a directory (for the target, a file) in a
+// temporary directory outside the root, and returns that directory.
+func cfgPlantLink(t *testing.T, root, link string) string {
+	t.Helper()
+	elsewhere := t.TempDir()
+	dest := filepath.Join(elsewhere, "dest")
+	if link == stagingRel {
+		cfgWrite(t, dest, []byte("elsewhere\n"), 0o600)
+	} else if err := os.Mkdir(dest, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, link)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dest, filepath.Join(root, link)); err != nil {
+		t.Fatal(err)
+	}
+	return elsewhere
 }
 
 var errInjected = errors.New("injected failure")
@@ -412,7 +433,7 @@ func TestExportDirectorySyncFailure(t *testing.T) {
 // without a code each print one refusal line, exit 1, for check and for export, with nothing
 // changed under the root (exposes output after a refusal). Control: the valid answers export.
 func TestRefusalsWriteNothing(t *testing.T) {
-	invalid := filepath.Join(repoRoot, "tests/fixtures/answers/invalid/unknown-field.yaml")
+	invalid := cfgAbs("tests/fixtures/answers/invalid/unknown-field.yaml")
 	dupName := strings.Replace(string(cfgRead(t, twoTenantAnswers)), `"name": "lab"`, `"name": "demo"`, 1)
 	cases := []struct {
 		name, answers, code string
@@ -486,23 +507,8 @@ func cfgForbiddenUses(dir string) (files int, uses []string, err error) {
 			return files, uses, err
 		}
 		files++
-		osNames := map[string]bool{}
-		for _, imp := range f.Imports {
-			p, _ := strconv.Unquote(imp.Path.Value)
-			if slices.ContainsFunc(cfgForbiddenImports, func(x string) bool { return p == x || strings.HasPrefix(p, x+"/") }) {
-				uses = append(uses, path+": imports "+p)
-			}
-			if p == "os" {
-				name := "os"
-				if imp.Name != nil {
-					name = imp.Name.Name
-				}
-				if name == "." {
-					uses = append(uses, path+": dot-imports os")
-				}
-				osNames[name] = true
-			}
-		}
+		osNames, importUses := cfgImportUses(path, f)
+		uses = append(uses, importUses...)
 		ast.Inspect(f, func(n ast.Node) bool {
 			if sel, ok := n.(*ast.SelectorExpr); ok {
 				if id, ok := sel.X.(*ast.Ident); ok && osNames[id.Name] && slices.Contains(cfgForbiddenCalls, sel.Sel.Name) {
@@ -513,6 +519,29 @@ func cfgForbiddenUses(dir string) (files int, uses []string, err error) {
 		})
 	}
 	return files, uses, nil
+}
+
+// cfgImportUses reports the forbidden imports of one file and the names it imports os under.
+func cfgImportUses(path string, f *ast.File) (osNames map[string]bool, uses []string) {
+	osNames = map[string]bool{}
+	for _, imp := range f.Imports {
+		p, _ := strconv.Unquote(imp.Path.Value)
+		if slices.ContainsFunc(cfgForbiddenImports, func(x string) bool { return p == x || strings.HasPrefix(p, x+"/") }) {
+			uses = append(uses, path+": imports "+p)
+		}
+		if p != "os" {
+			continue
+		}
+		name := "os"
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		if name == "." {
+			uses = append(uses, path+": dot-imports os")
+		}
+		osNames[name] = true
+	}
+	return osNames, uses
 }
 
 // TestSourceHasNoAuthority (pin): the command imports nothing under net, no os/exec, os/user or
