@@ -135,7 +135,7 @@ func newFetchFixture(t *testing.T) *fetchFixture {
 		Runner: "ubuntu-24.04", TimeoutMinutes: 10,
 		Manifest: "sha256:" + sha(manifest), Layer: layerDigest,
 		EntrySHA256: sha(f.entry), BwrapSHA256: sha(f.launcher),
-		Targets: []string{"test:a"},
+		Jobs: []FoundationJob{{Name: "foundation-1", Targets: []string{"test:a"}}, {Name: "foundation-2", Targets: []string{"test:b"}}},
 	}
 	script, err := os.ReadFile(fetchScript)
 	if err != nil {
@@ -298,14 +298,15 @@ func TestFoundationFetchReadsCommittedPins(t *testing.T) {
 }
 
 // A workflow without exactly one well-formed value for each pin is refused
-// before anything is fetched.
+// before anything is fetched. The pins are the workflow's own env, once,
+// however many jobs it runs.
 func TestFoundationFetchRefusesBadPins(t *testing.T) {
 	for name, edit := range map[string]func(string) string{
 		"missing entry pin": func(w string) string {
-			return strings.Replace(w, "      LZ_ENTRY_SHA256:", "      LZ_ENTRY_SHA:", 1)
+			return strings.Replace(w, "\n  LZ_ENTRY_SHA256:", "\n  LZ_ENTRY_SHA:", 1)
 		},
 		"repeated layer pin": func(w string) string {
-			i := strings.Index(w, "      LZ_LAYER:")
+			i := strings.Index(w, "\n  LZ_LAYER:") + 1
 			j := strings.Index(w[i:], "\n") + i + 1
 			return w[:j] + w[i:j] + w[j:]
 		},

@@ -405,7 +405,7 @@ const foundationSource = `{"runner": "ubuntu-24.04", "timeout_minutes": 10,
  "layer": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
  "entry_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
  "bwrap_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
- "targets": ["pins"], "deferred": {}}
+ "jobs": [{"name": "foundation-1", "targets": ["pins"]}], "deferred": {}}
 `
 
 // ci-workflow prints the workflow rendered from the source; ci-source accepts
@@ -520,7 +520,7 @@ func runTree(t *testing.T, source []byte) map[string]string {
 		t.Fatal(err)
 	}
 	var defs []string
-	for _, id := range parsed.Targets {
+	for _, id := range parsed.Targets() {
 		defs = append(defs, `{"id": "`+id+`", "requirements": ["FR-001"], "command": "task `+id+`", "creator": "T001", "kind": "behavioral", "scope": ["tools"]}`)
 	}
 	return map[string]string{
@@ -582,7 +582,7 @@ func TestFoundationRunCommands(t *testing.T) {
 	}
 	tree := runTree(t, source)
 	code, record := lzCheck(repo(t, nil), "ci-observe",
-		"head", prHead, capture(t, "head", tree), "red-control", redHead, capture(t, "red", tree))
+		"head", prHead, capture(t, "head-split", tree), "red-control", redHead, capture(t, "red-split", tree))
 	if code != 0 || !strings.Contains(record, `"run_id": 37278768943`) || !strings.Contains(record, `"run_id": 37279007980`) {
 		t.Fatalf("BEHAVIORAL_RED: ci-observe exit %d:\n%s", code, record)
 	}
@@ -593,8 +593,8 @@ func TestFoundationRunCommands(t *testing.T) {
 		return root
 	}
 	root := judged(map[string]string{"pipelines/github/foundation-runs.json": record})
-	want := "RUN_OK head run=37278768943 check=111661662616 event=pull_request head=" + prHead + " targets=9\n" +
-		"RUN_OK red-control run=37279007980 check=111662442027 event=pull_request head=" + redHead + " failed=test:traceability\n" +
+	want := "RUN_OK head run=37278768943 check=111661662617 event=pull_request head=" + prHead + " jobs=2 targets=9\n" +
+		"RUN_OK red-control run=37279007980 check=111662442028 event=pull_request head=" + redHead + " jobs=2 failed=test:traceability\n" +
 		"FOUNDATION_RUNS_OK runs=2\n"
 	if code, out := lzCheck(root, "ci-runs"); code != 0 || out != want {
 		t.Errorf("BEHAVIORAL_RED: recorded runs refused: exit %d\n%s", code, out)
@@ -844,10 +844,10 @@ func recordOutsideFoundation(t *testing.T, reads map[string][]string) {
 		t.Fatal(err)
 	}
 	source, err := checks.ParseFoundationSource(data)
-	if err != nil || len(source.Targets) == 0 {
-		t.Fatalf("foundation source: %v, targets %v", err, source.Targets)
+	if err != nil || len(source.Targets()) == 0 {
+		t.Fatalf("foundation source: %v, targets %v", err, source.Targets())
 	}
-	for _, id := range source.Targets {
+	for _, id := range source.Targets() {
 		if covered(reads[id], checks.FoundationRunsPath) {
 			t.Errorf("BEHAVIORAL_RED: the foundation target %s's registry reads cover %s", id, checks.FoundationRunsPath)
 		}
