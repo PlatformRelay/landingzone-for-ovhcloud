@@ -408,7 +408,7 @@ apply to T040.
   - Verify: `task test:live-lane`: T040's cases green; `task test:traceability` green; `task docs:check` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T041.md`; initial status `not-run`.
 
-- [x] T042 [US2] Live run, by the coordinator (D117): the swift-reach probe with tests/live/probes/swift-reach/ — closed 2026-10-25 as not run (probe starts blocked until the window ended), evidence: evidence/T042.md
+- [x] T042 [US2] Live run, by the coordinator (D117): the swift-reach probe with tests/live/probes/swift-reach/ — closed 2026-10-25 as not run (not started: unreconciled probe runs remained until the window ended), evidence: evidence/T042.md
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T041 on `main` at a reviewed SHA.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone at that SHA, within D117's bounds (credit, expiry): records the own Swift-native control, each S3-bucket step (`not-applicable` or `blocked`, with its reason) and the Swift-native cross steps. The run destroys in finally and sweeps; the leftover check is clean, Swift containers included.
   - Evidence: `specs/003-platform-feasibility/evidence/T042.md`, which T043 writes from the run record under `.local/live/<run-id>/` in the live clone; initial status `not-run`.
