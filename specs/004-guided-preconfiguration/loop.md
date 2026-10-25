@@ -33,6 +33,7 @@ As spec 007's loop.md: test:dependencies, the default check:specs (001, 004, 005
 | Task | Outcome | Review | Gaps |
 |---|---|---|---|
 | T015 | CLOSED-WITH-GAPS: the trace of 004 holds (`check:specs` TRACE_OK for 001, 004, 005, 006, 007; `test:traceability`, `test:foundation-ci`, `docs:check` green); `ci:foundation` stale as expected (RUN_STALE_HEAD, re-recorded after the burn-down) | review leg 1 REQUEST_CHANGES (one evidence error: row 5 claimed a machine check); fixed without a round 2; no strong leg (evidence only) | no check fails if `test:traceability`'s inputs drop the explicit `tasks.md` path, because `specs` is listed and `covered()` accepts a parent directory |
+| T016 | CLOSED-WITH-GAPS: strict answers decoding and the regular-file reader (`9bec251` red, `be332a9` green, fixes `ef9e797`, `8738e91`); 23 refusal cases with controls, 30/30 mutants killed; every CI target and `test:configure` green on `8738e91` | round 1: review leg 1 REQUEST_CHANGES, strong leg CONCERNS (type-error paths, FR-008 pin); round 2: review leg 1 REQUEST_CHANGES, strong leg CONCERNS (integer spellings, order comment); all verified ones fixed, 2 rejected; strong leg ran (checks.yaml) | `ReadAnswers`' plain error for other I/O failures (T018/T020); `configure:check`/`export` inputs lack `tools/internal/report` (T020) |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
@@ -40,3 +41,7 @@ As spec 007's loop.md: test:dependencies, the default check:specs (001, 004, 005
 
 ## Lessons
 - Before calling a "registry inputs name path X" clause machine-covered, check whether a parent directory is also listed: `covered()` accepts it (`tools/cmd/lz-check/main_test.go:668-675`). (T015)
+- A package importing `tools/internal/checks` depends on `tools/internal/report` (`checks/unit.go:6`): every registry row that runs it lists both, or `TestRegistryInputsCoverGoDeps` goes red. (T016)
+- A Taskfile change re-pins `docs/how-to/respond-to-an-incident.md` (it references `Taskfile.yml`); put the pin in the commit that changes the Taskfile, with `last_verified` an earlier commit. (T016)
+- Put refusal fixtures at a non-zero index and give a type-mismatch case a valid value of the same field earlier in declaration order, or path mutants that write `[0]` or blame the first such field survive. (T016)
+- `json.UnmarshalTypeError.Field` is dotted (`tenants.1.x`) and empty at the top level; `1.0` and `1e0` are type errors for an int but whole floats in a generic decode: locate type errors with `UseNumber`. (T016)
