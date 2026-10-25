@@ -36,7 +36,7 @@
 50 tools/cmd/lz-live/main_test.go TestProbeScratchOutsideCheckout
 24 tools/cmd/lz-live/main_test.go fakeGit
 17 tools/cmd/lz-live/opens_linux_test.go watchOpens
-28 tools/cmd/lz-live/probe.go probe
+26 tools/cmd/lz-live/probe.go probe
 43 tools/cmd/lz-live/probe_check_test.go TestProbeEntryCheck
 18 tools/cmd/lz-live/probe_identity_test.go (*probeWorld).noIdentitySecret
 42 tools/cmd/lz-live/probe_identity_test.go TestProbeIdentityBinding

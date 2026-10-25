@@ -239,6 +239,45 @@ func beforeCredentials(ctx context.Context, d deps, checkout string, p probeArgs
 	return root, nil
 }
 
+// retireClaim is a plain `--cleanup <run-id>` of a run directory holding only its claim (spec 007
+// T029: a start killed before probe.env, so nothing was created), before probe.env is read; it
+// reports whether it retired one. `--accept-lost-baseline` is never for such a run.
+func retireClaim(d deps, cfg, account string, p probeArgs) (bool, error) {
+	if p.acceptLost {
+		return false, nil
+	}
+	retired, err := live.RetireEmptyClaim(cfg, account, p.cleanup)
+	if retired {
+		fmt.Fprintf(d.Stdout, "LZ-LIVE run %s cleanup retired its empty claim (no probe.env: nothing was created)\n", p.cleanup)
+	}
+	return retired, err
+}
+
+// cleanupTarget is what a `--cleanup <run-id>` runs on: the root and the project its probe.env
+// recorded (that project added to the listed ones), unless the run was an empty claim, which it
+// retires (retired true).
+func cleanupTarget(d deps, cfg, account, checkout, endpoint string, p probeArgs, projects []live.Project) (root, projectID string, _ []live.Project, retired bool, err error) {
+	if retired, err := retireClaim(d, cfg, account, p); retired || err != nil {
+		return "", "", nil, retired, err
+	}
+	recorded, err := live.ProbeRoot(cfg, account, p.cleanup)
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	if root, err = probeRoot(checkout, recorded); err != nil {
+		return "", "", nil, false, err
+	}
+	// After the recorded root is confined (an outside root is the first refusal): the project
+	// the run ran against, not the one account.env names now; its leftovers are listed too.
+	if projectID, err = live.ProbeProject(cfg, account, p.cleanup); err != nil {
+		return "", "", nil, false, err
+	}
+	if !slices.ContainsFunc(projects, func(q live.Project) bool { return q.ID == projectID }) {
+		projects = append(projects, live.Project{ID: projectID, URN: projectURN(endpoint, projectID)})
+	}
+	return root, projectID, projects, false, nil
+}
+
 // probe runs or cleans up one probe after the guard admitted the run, with the resolved pinned
 // OpenTofu (T093).
 func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs) error {
@@ -303,20 +342,9 @@ func probe(ctx context.Context, d deps, checkout, cfg, tofu string, p probeArgs)
 			return err
 		}
 	} else {
-		recorded, err := live.ProbeRoot(cfg, account, runID)
-		if err != nil {
+		var retired bool
+		if root, projectID, projects, retired, err = cleanupTarget(d, cfg, account, checkout, cred.Endpoint, p, projects); retired || err != nil {
 			return err
-		}
-		if root, err = probeRoot(checkout, recorded); err != nil {
-			return err
-		}
-		// After the recorded root is confined (an outside root is the first refusal): the project
-		// the run ran against, not the one account.env names now; its leftovers are listed too.
-		if projectID, err = live.ProbeProject(cfg, account, runID); err != nil {
-			return err
-		}
-		if !slices.ContainsFunc(projects, func(q live.Project) bool { return q.ID == projectID }) {
-			projects = append(projects, live.Project{ID: projectID, URN: projectURN(cred.Endpoint, projectID)})
 		}
 	}
 	r := live.Runner{

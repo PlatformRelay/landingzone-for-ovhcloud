@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -165,6 +167,152 @@ func claimDir(root, rel string) error {
 		return err
 	}
 	return makePrivateDir(filepath.Join(parent, name))
+}
+
+// runLockName is a probe run's lock file in its run directory (spec 007 T029).
+const runLockName = "run.lock"
+
+// The lock file's lines: the holder's pid and its start time.
+const (
+	lockPIDKey   = "LZ_LOCK_PID"
+	lockStartKey = "LZ_LOCK_START"
+)
+
+// runLock is a held run lock: its path and the file this process linked there.
+type runLock struct {
+	path string
+	fi   os.FileInfo
+}
+
+// lockRun takes the run lock of dir, an existing directory (spec 007 T029): probe start and
+// `--cleanup` of one run id exclude each other. The lock file names its holder (pid and start
+// time) and is put in place whole, by a hard link of a written temporary, which fails while
+// another lock is there. A lock whose holder is gone (no such pid, or the pid now runs with
+// another start time) is stale and taken over, never one judged by its age; a lock held by a live
+// process, or one that cannot be read, refuses (CondRunLocked) naming the run. Every take, a
+// stale lock's removal included, runs under an flock(2) of the run directory, which the kernel
+// drops when its holder dies: two processes never both judge one stale lock and both take it.
+func lockRun(dir, runID string) (*runLock, error) {
+	d, err := os.OpenFile(dir, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	pid := os.Getpid()
+	tmp, err := os.CreateTemp(dir, ".write-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmp.Name())
+	_, werr := tmp.WriteString(credentialLines(map[string]string{lockPIDKey: strconv.Itoa(pid), lockStartKey: processStart(pid)}))
+	// Synced, so a lock that survives a power loss still names its holder.
+	serr := tmp.Sync()
+	if cerr := tmp.Close(); werr != nil || serr != nil || cerr != nil {
+		return nil, errors.Join(werr, serr, cerr)
+	}
+	// Never waited for: a holder stopped inside its take must not hang this process.
+	if err := syscall.Flock(int(d.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); errors.Is(err, syscall.EWOULDBLOCK) {
+		return nil, refuse(CondRunLocked, "run %s: another process is taking its lock; try again", runID)
+	} else if err != nil {
+		return nil, err
+	}
+	defer syscall.Flock(int(d.Fd()), syscall.LOCK_UN)
+	l := &runLock{path: filepath.Join(dir, runLockName)}
+	err = os.Link(tmp.Name(), l.path)
+	if errors.Is(err, fs.ErrExist) {
+		if err := removeStale(l.path, runID); err != nil {
+			return nil, err
+		}
+		err = os.Link(tmp.Name(), l.path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	l.fi, err = os.Lstat(l.path)
+	return l, err
+}
+
+// removeStale removes the lock at path when its holder is gone; it refuses when the holder is
+// alive or the lock cannot be read. The caller holds the run directory's flock.
+func removeStale(path, runID string) error {
+	holder, err := readLock(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // released in between: take it
+	}
+	if err != nil {
+		return refuse(CondRunLocked, "run %s: its lock %s cannot be read (%v); another process may hold it: check and remove it by hand", runID, path, err)
+	}
+	if holderAlive(holder) {
+		return refuse(CondRunLocked, "run %s is locked by process %s (a probe start or --cleanup of this run is running); try again when it has ended", runID, holder[lockPIDKey])
+	}
+	return removeFiles(path)
+}
+
+// readLock reads a lock file's holder; anything but a regular file (a symlink, a FIFO, which
+// O_NONBLOCK keeps from blocking the open) is refused.
+func readLock(path string) (map[string]string, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil {
+		return nil, err
+	} else if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	holder, err := parseEnv(io.LimitReader(f, 4096), path)
+	if err != nil {
+		return nil, err
+	}
+	if pid, err := strconv.Atoi(holder[lockPIDKey]); err != nil || pid <= 0 {
+		return nil, fmt.Errorf("no holder pid in %s", path)
+	}
+	return holder, nil
+}
+
+// holderAlive: the lock's pid exists (another user's process included) and, when both start times
+// are known, runs with the start time the lock recorded; a pid reused by a later process is not
+// the holder.
+func holderAlive(holder map[string]string) bool {
+	pid, _ := strconv.Atoi(holder[lockPIDKey])
+	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+		return false
+	}
+	recorded, now := holder[lockStartKey], processStart(pid)
+	return recorded == "" || now == "" || recorded == now
+}
+
+// processStart is pid's start time in clock ticks since boot (field 22 of /proc/<pid>/stat), ""
+// when it cannot be read.
+func processStart(pid int) string {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return ""
+	}
+	s := string(raw)
+	// The command name (field 2) is in parentheses and may hold spaces: count after its end.
+	fields := strings.Fields(s[strings.LastIndexByte(s, ')')+1:])
+	if len(fields) < 20 {
+		return ""
+	}
+	return fields[19]
+}
+
+// release removes the lock if it is still the file this process put there (retire may have
+// removed it with the run's directory); a missing lock is no error.
+func (l *runLock) release() error {
+	fi, err := os.Lstat(l.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(l.fi, fi) {
+		return nil
+	}
+	return removeFiles(l.path)
 }
 
 // checkCredentialValues is what WriteCredentialFile requires of values: variable-name keys, values
