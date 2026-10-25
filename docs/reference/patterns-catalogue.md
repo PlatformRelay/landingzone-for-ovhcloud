@@ -74,7 +74,7 @@ their summary. Naming uses a scalar interface with shared context (ADR-0003); fi
 | Id | Pattern | Why | Enforced by |
 |---|---|---|---|
 | LZ-POL-001 | Every rule has a stable id, severity, enforcing planes, a doc page and ≥1 fixture per plane | Honesty page is generated | id-reference test |
-| LZ-POL-002 | Unknown critical plan values block; never count as compliant | OPA unknowns are a known gap | Rego helper + test |
+| LZ-POL-002 | Unknown critical plan values block; never count as a pass | OPA unknowns are a known gap | Rego helper + test |
 | LZ-POL-003 | Waivers carry rule id, scope, reason, approver, expiry; expiry blocks new violating changes, never destroys | Safe exceptions | assent policy + scanner |
 | LZ-POL-004 | Mutants per policy (flip comparator, drop rule, widen regex) with a kill-rate threshold | Dead policies | mutation harness |
 | LZ-POL-005 | One control may have several projections under the same id: assent evaluates merge authority on data, Rego evaluates deployment effects on the plan; shared fixtures and differential cases prove they agree; contradictory semantics are forbidden, repeated defence is not | Two languages, one control | id-reference test + differential fixtures |
