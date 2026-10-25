@@ -479,7 +479,9 @@ func TestFoundationSpecScopedCreators(t *testing.T) {
 }
 
 // The committed source runs `stacks:check` in CI (005 T106), so the
-// generated stack files are compared with the manifest on every pull request;
+// generated stack files are compared with the manifest on every pull request,
+// and `test:configure` (004 T016), so a change to the stacks decoder, the
+// schema or the manifest cannot break spec 004's answers decoding unseen;
 // it runs its targets in parallel jobs at the 15-minute budget (D126 part A);
 // the committed workflow carries each job's list (its drift from the rendered
 // one is `ci-source`'s, under the same target).
@@ -492,8 +494,10 @@ func TestFoundationCommittedTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("committed source refused: %v", err)
 	}
-	if !slices.Contains(source.Targets(), "stacks:check") {
-		t.Errorf("BEHAVIORAL_RED: committed source targets %v lack stacks:check", source.Targets())
+	for _, id := range []string{"stacks:check", "test:configure"} {
+		if !slices.Contains(source.Targets(), id) {
+			t.Errorf("BEHAVIORAL_RED: committed source targets %v lack %s", source.Targets(), id)
+		}
 	}
 	if len(source.Jobs) < 2 || source.TimeoutMinutes != 15 {
 		t.Errorf("BEHAVIORAL_RED: committed source runs %d jobs at %d minutes, want parallel jobs at 15", len(source.Jobs), source.TimeoutMinutes)
