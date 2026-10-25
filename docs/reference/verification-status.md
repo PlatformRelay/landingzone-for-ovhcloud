@@ -74,16 +74,18 @@ Coded against fakes, recorded fixtures or provider docs, and not observed on OVH
     offline);
   - the lock's conditional create (`If-None-Match`): its effect, the refused second writer, was
     observed; the request itself was not captured;
-  - the Object Lock read the chain added in spec 006 (`state-bucket-object-lock`, T026:
-    `GetObjectLockConfiguration`, its answer and not-found code) and whether the state buckets'
-    S3 users may send it: no chain has run since.
+  - the Object Lock read the chain added in spec 006 (`state-bucket-object-lock`, T026): observed
+    `holds` on both state buckets (governance, 7 days) in the chain of 2026-10-20, so the state
+    buckets' S3 users may send it; its not-found code was not seen
+    ([live chain 2026-10-20](../../specs/006-harden-first-slice/evidence/live-chain-2026-10-20.md)).
 - **P13 and P14:** a bucket's cost, and the destroy of a bucket that still holds noncurrent
   versions, stay open: the T010 probes emptied the bucket first.
 - **Leftover listing:** v1 pagination is UNVERIFIED, and so are the kinds that a plan-only run
   did not list (subnets, S3 credentials and policies, alerts). Six kinds were captured live
   (T084).
-- **Everything spec 006 changed in the live lane** (below) runs against fakes only; no live run
-  has used it yet.
+- **Everything spec 006 changed in the live lane** (below) ran once against the account, in the
+  full chain of 2026-10-20 (`pass`, KD-1 only, leftover check clean); its failure paths run
+  against fakes only.
 - **The budget alert through the module (P10, spec 007 FR-005):** not run. Spec 007's live run
   (T019) was dropped at its cut-off of 2026-10-21 23:00, so FR-005 is not qualified. The raw
   resource was created and destroyed once (T010); the path through `modules/cloud-project` is
