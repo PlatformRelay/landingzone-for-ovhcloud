@@ -16,9 +16,20 @@
 package configure
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"maps"
+	"os"
 	"regexp"
+	"slices"
+	"strings"
+	"syscall"
+
+	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
 
 // The answers file's fixed header values and its size bound (FR-001).
@@ -161,15 +172,249 @@ func refuse(code, format string, a ...any) error {
 	return &AnswersError{Code: code, Detail: fmt.Sprintf(format, a...)}
 }
 
-var errNotImplemented = errors.New("not implemented")
-
 // DecodeAnswers decodes an answers file strictly. It applies no default.
 func DecodeAnswers(data []byte) (Answers, error) {
-	return Answers{}, errNotImplemented
+	if len(data) > MaxAnswersBytes {
+		return Answers{}, refuse(CodeAnswersTooLarge, "%d bytes", len(data))
+	}
+	doc := stripComments(data)
+	if err := (&keyWalker{data: doc, dec: json.NewDecoder(bytes.NewReader(doc))}).value(""); err != nil {
+		return Answers{}, err
+	}
+	var a Answers
+	if err := checks.DecodeStrict(doc, &a); err != nil {
+		return Answers{}, decodeError(doc, err)
+	}
+	if a.APIVersion != AnswersAPIVersion {
+		return Answers{}, refuse(CodeUnsupportedVersion, "apiVersion")
+	}
+	if a.Kind != AnswersKind {
+		return Answers{}, refuse(CodeUnsupportedVersion, "kind")
+	}
+	var generic any
+	if err := json.Unmarshal(doc, &generic); err != nil {
+		return Answers{}, syntaxError(doc, err) // unreachable: DecodeStrict accepted the document
+	}
+	if err := checkValues(generic, "", ""); err != nil {
+		return Answers{}, err
+	}
+	if err := vlanNeedsCIDR(a); err != nil {
+		return Answers{}, err
+	}
+	return a, nil
 }
 
 // ReadAnswers reads the answers file at path: a regular file, never followed through a symlink,
 // of at most MaxAnswersBytes (FR-008). It does not decode it.
 func ReadAnswers(path string) ([]byte, error) {
-	return nil, errNotImplemented
+	// O_NOFOLLOW refuses a symlink as the last component (ELOOP); O_NONBLOCK keeps a FIFO from
+	// blocking the open, and the mode check below refuses it.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
+		return nil, refuse(CodeAnswersNotRegular, "%s", path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read answers file: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read answers file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, refuse(CodeAnswersNotRegular, "%s", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxAnswersBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read answers file: %w", err)
+	}
+	if len(data) > MaxAnswersBytes {
+		return nil, refuse(CodeAnswersTooLarge, "%s", path)
+	}
+	return data, nil
+}
+
+// stripComments blanks whole-line `#` comments, keeping line numbers: a JSON string cannot span
+// lines, so a line whose first non-blank character is `#` is never inside a value.
+func stripComments(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			lines[i] = ""
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// keyWalker finds the first duplicate key of a document with its field path, which
+// checks.DecodeStrict reports by key alone, and the first syntax error with its line.
+type keyWalker struct {
+	data []byte
+	dec  *json.Decoder
+}
+
+func (w *keyWalker) value(path string) error {
+	token, err := w.dec.Token()
+	if err != nil {
+		return syntaxError(w.data, err)
+	}
+	switch token {
+	case json.Delim('{'):
+		return w.object(path)
+	case json.Delim('['):
+		return w.array(path)
+	}
+	return nil
+}
+
+func (w *keyWalker) object(path string) error {
+	seen := map[string]bool{}
+	for w.dec.More() {
+		token, err := w.dec.Token()
+		if err != nil {
+			return syntaxError(w.data, err)
+		}
+		key, _ := token.(string) // the decoder refuses a non-string key
+		sub := joinPath(path, key)
+		if seen[key] {
+			return refuse(CodeDuplicateKey, "%s", sub)
+		}
+		seen[key] = true
+		if err := w.value(sub); err != nil {
+			return err
+		}
+	}
+	return w.close()
+}
+
+func (w *keyWalker) array(path string) error {
+	for i := 0; w.dec.More(); i++ {
+		if err := w.value(fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			return err
+		}
+	}
+	return w.close()
+}
+
+func (w *keyWalker) close() error {
+	if _, err := w.dec.Token(); err != nil {
+		return syntaxError(w.data, err)
+	}
+	return nil
+}
+
+func joinPath(path, key string) string {
+	if path == "" {
+		return key
+	}
+	return path + "." + key
+}
+
+// syntaxError reports a syntax error at the line of the offending byte, or at the last line
+// with content when the document ends early.
+func syntaxError(data []byte, err error) error {
+	at := int64(len(data))
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) && syntaxErr.Offset < at {
+		at = syntaxErr.Offset
+	}
+	line := 1 + bytes.Count(bytes.TrimRight(data[:at], " \t\r\n"), []byte("\n"))
+	return refuse(CodeAnswersSyntax, "line %d", line)
+}
+
+// decodeError maps a checks.DecodeStrict error to its refusal code and field path.
+func decodeError(data []byte, err error) error {
+	var typeErr *json.UnmarshalTypeError
+	msg := err.Error()
+	field := func(suffix string) string {
+		return strings.TrimPrefix(strings.TrimPrefix(strings.TrimSuffix(msg, suffix), "$"), ".")
+	}
+	switch {
+	case errors.As(err, &typeErr):
+		return refuse(CodeInvalidValue, "%s", typeErr.Field)
+	case strings.HasPrefix(msg, CodeDuplicateKey): // the keyWalker reports these first, with their path
+		return refuse(CodeDuplicateKey, "%s", strings.TrimPrefix(msg, CodeDuplicateKey+": "))
+	case strings.HasSuffix(msg, ": unknown field"):
+		return refuse(CodeUnknownField, "%s", field(": unknown field"))
+	case strings.HasSuffix(msg, ": required"):
+		return refuse(CodeMissingField, "%s", field(": required"))
+	case strings.HasSuffix(msg, ": null"):
+		return refuse(CodeMissingField, "%s", field(": null"))
+	}
+	return syntaxError(data, err)
+}
+
+// checkValues applies answerRules to every string and number of the decoded document, keys in
+// sorted order. rulePath is the path with "[]" for array elements, path the one with indices.
+func checkValues(v any, rulePath, path string) error {
+	switch v := v.(type) {
+	case map[string]any:
+		return checkObject(v, rulePath, path)
+	case []any:
+		return checkArray(v, rulePath, path)
+	case string:
+		if path == "apiVersion" || path == "kind" {
+			return nil
+		}
+		return checkString(rulesByPath[rulePath], path, v)
+	case float64:
+		return checkNumber(rulesByPath[rulePath], path, v)
+	}
+	return nil
+}
+
+func checkObject(v map[string]any, rulePath, path string) error {
+	for _, k := range slices.Sorted(maps.Keys(v)) {
+		if err := checkValues(v[k], joinPath(rulePath, k), joinPath(path, k)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkArray(v []any, rulePath, path string) error {
+	for i, item := range v {
+		if err := checkValues(item, rulePath+"[]", fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkString(rule compiledRule, path, v string) error {
+	switch {
+	case rule.Enum != nil:
+		if !slices.Contains(rule.Enum, v) {
+			return refuse(CodeInvalidValue, "%s", path)
+		}
+	case rule.re != nil:
+		if !rule.re.MatchString(v) {
+			return refuse(CodeInvalidValue, "%s", path)
+		}
+	default: // a string without a rule: none crosses the boundary unchecked
+		return refuse(CodeInvalidValue, "%s", path)
+	}
+	return nil
+}
+
+func checkNumber(rule compiledRule, path string, v float64) error {
+	if len(rule.Range) != 2 || v < float64(rule.Range[0]) || v > float64(rule.Range[1]) {
+		return refuse(CodeInvalidValue, "%s", path)
+	}
+	return nil
+}
+
+// vlanNeedsCIDR refuses a vlan_id on a region without cidr: without a network the id would be
+// dropped silently.
+func vlanNeedsCIDR(a Answers) error {
+	for i, t := range a.Tenants {
+		for j, e := range t.Environments {
+			for k, r := range e.Regions {
+				if r.VlanID != nil && r.CIDR == "" {
+					return refuse(CodeInvalidValue, "tenants[%d].environments[%d].regions[%d].vlan_id", i, j, k)
+				}
+			}
+		}
+	}
+	return nil
 }
