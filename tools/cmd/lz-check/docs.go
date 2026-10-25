@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/checks"
 )
@@ -44,6 +45,10 @@ import (
 // ADR-0027 adds three mechanical accessibility rules on the same pages, ADRs
 // included (accessibility): headings in order with one H1, link text that
 // says where it goes, and a header row on every table.
+//
+// ADR-0012's wording rule holds on the same pages and on the READMEs
+// (wording): "compliant" and "certified" are not used outside quotation
+// marks, code spans and fenced blocks.
 //
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
 // from the file on disk: on a clean checkout that is the id of HEAD:<path>,
@@ -141,6 +146,7 @@ func docs(out io.Writer, root string) int {
 		}
 		c.body(page, text, bodyRules{ids: true, targets: !adr})
 		c.accessibility(page, text)
+		c.wording(page, text)
 		c.versionGate(page, text)
 	}
 	if len(pages) == 0 {
@@ -153,6 +159,7 @@ func docs(out io.Writer, root string) int {
 			return 2
 		}
 		c.body(page, string(data), bodyRules{readme: true})
+		c.wording(page, string(data))
 	}
 	c.supersededScan()
 	unjudgedMap := c.repositoryMap()
@@ -500,6 +507,48 @@ func (c *docChecker) accessibility(page, text string) {
 		c.vagueLinks(page, n+1, lines[n], defs)
 		table = c.tableStep(page, lines, n, table)
 	}
+}
+
+// bannedWord is a word ending in one of ADR-0012's banned words, compared
+// case-insensitively, so a prefix (uncertified) does not escape it; a hyphen
+// ends a word, so non-compliant is found as compliant.
+var bannedWord = regexp.MustCompile(`(?i)\b[a-z]*(?:compliant|certified)\b`)
+
+// wordQuotes are the quotation marks that make a banned word a mention of the
+// word rather than a claim.
+const wordQuotes = "\"'“”‘’"
+
+// wording judges a page's body against ADR-0012's wording rule
+// (WORDING_BANNED): the words "compliant" and "certified" are banned in
+// product docs. Front matter is not body; a fenced block, a code span and a
+// word between quotation marks name the word, they do not use it.
+func (c *docChecker) wording(page, text string) {
+	lines := strings.Split(text, "\n")
+	start := 0
+	if lines[0] == "---" {
+		start = closingLine(lines) + 1
+	}
+	var code fenced
+	for n := start; n < len(lines); n++ {
+		if code.step(lines[n]) {
+			continue
+		}
+		prose := blankCodeSpans(lines[n])
+		for _, m := range bannedWord.FindAllStringIndex(prose, -1) {
+			if quoted(prose, m[0], m[1]) {
+				continue
+			}
+			c.add("WORDING_BANNED", page, "line %d uses %q; write \"aligned with\" or \"supports controls …\" (ADR-0012)", n+1, prose[m[0]:m[1]])
+		}
+	}
+}
+
+// quoted reports whether prose[start:end] stands directly between two
+// quotation marks.
+func quoted(prose string, start, end int) bool {
+	before, _ := utf8.DecodeLastRuneInString(prose[:start])
+	after, _ := utf8.DecodeRuneInString(prose[end:])
+	return strings.ContainsRune(wordQuotes, before) && strings.ContainsRune(wordQuotes, after)
 }
 
 // refLabels are the labels of a page's reference definitions outside fenced
