@@ -17,12 +17,12 @@ references:
   - path: specs/001-offline-foundation/spec.md
     blob: 5b18e1d04a145c62f2d840542b5fbf56563fabf7
   - path: .github/workflows/foundation.yml
-    blob: 294f43357244e263499845dfa9061619774cb3d8
+    blob: b2c3d6d4f9b127743ccb0d08e8208fb0b996a5a8
   - path: pipelines/github/foundation-source.json
-    blob: 4be7ce1703021a8266715577ffc159fbd289f8bd
+    blob: 83d664d922c1e9cabbc6971b1633e9d808fa8988
   - path: tools/internal/checks/foundation_ci.go
     blob: fae4afa68b5c56fb3a5b460c6a877226fcf5ae0c
-last_verified: 920060781388ee7f24df5384cfd17274012b2240
+last_verified: c5a00702293eb09a2c66e27f122fc0046925244f
 ---
 
 ## What is true
@@ -83,7 +83,9 @@ qualification:
 - Spec 006 did not change admission. Its CI changes were the CI source check tracing
   spec 006 (FR-022) and the pin of runtime r5 (PR 135). Later than the `9f318ea`
   observation, spec 006 T045 added two targets the workflow runs, `test:update-lane`
-  and `test:release`; admission is unchanged by it.
+  and `test:release`; admission is unchanged by it. Spec 004's `test:configure` (creator
+  T016, closed) joined job `foundation-3` on 2026-10-25, admitted by the same rule; admission
+  is unchanged by it too.
 
 The first version of this entry cited revision `996b845`, which is not in this
 repository's history (`git cat-file -t 996b845` fails); its citations are replaced by
