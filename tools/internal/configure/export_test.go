@@ -225,7 +225,9 @@ type exportGateCase struct {
 // exportGateCases puts each defect in the second tenant, lab, of the two-tenant answers.
 var exportGateCases = []exportGateCase{
 	{"two regions with VLAN 0", stacks.CodeDuplicateVLAN,
-		func(a *Answers) { exportLab(a).Regions = append(exportLab(a).Regions, Region{Name: "DE1", CIDR: "10.41.0.0/24"}) },
+		func(a *Answers) {
+			exportLab(a).Regions = append(exportLab(a).Regions, Region{Name: "DE1", CIDR: "10.41.0.0/24"})
+		},
 		func(a *Answers) {
 			exportLab(a).Regions = append(exportLab(a).Regions, Region{Name: "DE1", CIDR: "10.41.0.0/24", VlanID: answersVlan(1)})
 		}},
