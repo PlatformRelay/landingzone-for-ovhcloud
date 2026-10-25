@@ -17,7 +17,7 @@ references:
   - path: specs/004-guided-preconfiguration/spec.md
     blob: 901d053342e31299c95e5cc44c9febaf914ae723
   - path: Taskfile.yml
-    blob: 58414aba54e3609446eafa49944e329a9d5954d7
+    blob: 515de014579c5a5399abbabad3f38288cfeaf371
 verified_against: {task: "3.53"}
 last_verified: ccd2634dbde6a4b7378d413cd181f76f94cafc0e
 ---

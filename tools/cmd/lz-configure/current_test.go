@@ -96,8 +96,9 @@ func TestRefuseToolDefect(t *testing.T) {
 }
 
 // TestExportRegistryRowIsScratch (pin, T024 e): the configure:export registry row runs the
-// target's scratch mode, and that mode stops when the temporary root cannot be made, so neither a
-// reverted row nor a failed mktemp exports into the repository's .local/configure.
+// target's scratch mode; that mode is on only for the value 1, stops when the temporary root cannot
+// be made or seeded, and removes it, so neither a reverted row nor a failed mktemp exports into the
+// repository's .local/configure.
 func TestExportRegistryRowIsScratch(t *testing.T) {
 	var row string
 	for _, l := range strings.Split(string(cfgRead(t, filepath.Join(repoRoot, "tools/harness/checks.yaml"))), "\n") {
@@ -109,7 +110,14 @@ func TestExportRegistryRowIsScratch(t *testing.T) {
 		t.Errorf("configure:export row %q; want its command in scratch mode", row)
 	}
 	taskfile := string(cfgRead(t, filepath.Join(repoRoot, "Taskfile.yml")))
-	if !strings.Contains(taskfile, `root=$(mktemp -d) || exit 1`) {
-		t.Errorf("Taskfile.yml configure:export: no scratch root that stops when mktemp fails")
+	for _, want := range []string{
+		`scratch={{if eq (print .LZ_EXPORT_SCRATCH) "1"}}1{{end}}`,
+		`root=$(mktemp -d) || exit 1`,
+		`cp stacks/deployments.yaml "$root/stacks/" || { rm -rf "$root"; exit 1; }`,
+		"if [ -n \"$scratch\" ]; then\n          rm -rf \"$root\"",
+	} {
+		if !strings.Contains(taskfile, want) {
+			t.Errorf("Taskfile.yml configure:export: scratch mode lacks %q (only 1 turns it on; stop on a failed mktemp or copy; remove the root)", want)
+		}
 	}
 }
