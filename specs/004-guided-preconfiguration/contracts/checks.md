@@ -20,8 +20,9 @@ behavioural failure against a compiling stub; a compile error or a missing symbo
   path alone as detail, never a value from the file (T024). Writes nothing.
 - `lz-configure [-root <repo>] export <answers>` (`task configure:export -- <answers>`, host-side):
   the same, then write the staging file (FR-007) and print `wrote .local/configure/deployments.yaml`
-  and the next steps. Usage errors exit 2. `ROOT=<absolute dir>` exports under another root; the
-  registry row runs with a temporary one, so it never replaces an operator's staged file (T024).
+  and the next steps. Usage errors exit 2. `LZ_EXPORT_SCRATCH=1` (the registry row) exports
+  under a temporary root holding a copy of `stacks/deployments.yaml`, removed afterwards, and runs
+  nothing when that root cannot be made, so the row never replaces an operator's staged file (T024).
 - `<answers>` is relative to the root or absolute; it must be a regular file (FR-008).
 
 ## V-checks

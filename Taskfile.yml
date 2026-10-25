@@ -58,15 +58,23 @@ tasks:
   # Host-side (004 FR-007): the same as configure:check, then writes only
   # .local/configure/deployments.yaml (0600 in a 0700 directory), through a
   # temporary file, fsync, rename and a directory fsync. Copy it yourself.
-  # ROOT (absolute) exports under another root instead of this repository: the
-  # registry row uses a temporary one, so running it never replaces an
-  # operator's staged export. A relative answers path is read under ROOT.
+  # LZ_EXPORT_SCRATCH=1 (the registry row) exports under a temporary root
+  # holding a copy of stacks/deployments.yaml, removed afterwards, so running
+  # the row never replaces an operator's staged export; give it an absolute
+  # answers path. If the temporary root cannot be made, nothing runs.
   configure:export:
     desc: As configure:check, then write .local/configure/deployments.yaml and print the next steps (004 FR-007)
-    vars:
-      ROOT: '{{.ROOT | default ".."}}'
     cmds:
-      - go -C tools run ./cmd/lz-configure -root {{shellQuote .ROOT}} export {{.CLI_ARGS}}
+      - |
+        root=..
+        if [ -n "{{.LZ_EXPORT_SCRATCH}}" ]; then
+          root=$(mktemp -d) || exit 1
+          mkdir "$root/stacks" && cp stacks/deployments.yaml "$root/stacks/" || { rm -rf "$root"; exit 1; }
+        fi
+        status=0
+        go -C tools run ./cmd/lz-configure -root "$root" export {{.CLI_ARGS}} || status=$?
+        if [ "$root" != .. ]; then rm -rf "$root"; fi
+        exit $status
 
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
