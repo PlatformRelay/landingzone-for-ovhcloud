@@ -17,7 +17,7 @@ lz-offline --candidate <checkout> -- task check:specs -- specs/004-guided-precon
 The entry does not see `.local/`, so run these on the host:
 
 ```sh
-mkdir -p .local/configure
+mkdir -p -m 0700 .local/configure                                       # export tightens it to 0700 anyway
 cp tests/fixtures/answers/sandbox.yaml .local/configure/answers.yaml   # then edit it
 mise exec -- task configure:check -- .local/configure/answers.yaml     # diff, notes, or a plain refusal; writes nothing
 mise exec -- task configure:export -- .local/configure/answers.yaml    # writes .local/configure/deployments.yaml only
@@ -27,8 +27,11 @@ mise exec -- task stacks:generate
 lz-offline --candidate <checkout> -- task stacks:check                  # STACKS_CHECK_OK
 ```
 
-A refusal reads `configure: <CODE>: <where>. <what it means>. Next: <what to do>`. The notes list
-the `LZ_PROJECT_ID_<REF>` names your `account.env` needs; the command never reads that file.
+A refusal reads `configure: <CODE>: <where>. <what it means>. Next: <what to do>`. The diff lists
+rows added and removed, with what `stacks:reconcile` is expected to do judged against the current
+manifest; a removed row adds a warning line. The notes list the `LZ_PROJECT_ID_<REF>` names your
+`account.env` needs (the command never reads that file) and say that two refs on one project are
+refused at bind, which `configure: ok` does not check.
 
 ## What changes for the owner
 One choice is open, with a default: the export writes only the staging file, not

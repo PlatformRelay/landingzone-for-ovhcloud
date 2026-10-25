@@ -10,10 +10,22 @@ All open boxes are planned. `test:configure` is created by T016, `configure:chec
 `configure:export` by T020; until then they are not in `Taskfile.yml`.
 
 **Red first.** Every code task (T016–T020) lands as two commits: a red commit with the task's tests
-and a compiling stub whose new functions return "not implemented", where each new test fails for
-its stated reason; then the green commit, which passes the same tests unchanged. A compile error, a
-missing symbol or a missing fixture is not that red. Cases marked *pin* hold from the start. A fresh
-session writes the tests from spec.md, data-model.md and the task text, not from plan.md's
+and a compiling stub whose new functions return "not implemented"; then the green commit, which
+passes the same tests unchanged. A compile error, a missing symbol or a missing fixture is not that
+red. Three kinds of case, each proven differently:
+- *Acceptance* cases (an input is accepted, a value derived, a line printed, a file written) fail on
+  the stub for their stated reason in the red commit.
+- *Rejection* cases (an input is refused with a code) are not proven by the stub: a "not
+  implemented" error fails them for the wrong reason, or passes a check that only wants an error.
+  Each rejection case has a positive control (a near-identical valid input that is accepted) and a
+  named mutant of the green code that accepts the refused input or returns another code; the
+  evidence shows the control passing and the mutant turning the case red with its real reason.
+- *Pin* cases hold from the start and are marked: the structural tests (forbidden imports and
+  calls, value and fixture counts, pattern agreement with `schemas/deployments.schema.json`) and the
+  usage errors. Each pin has a control that would make it fail (a planted import, a fixture with
+  one value more, a changed pattern, zero items compared).
+
+A fresh session writes the tests from spec.md, data-model.md and the task text, not from plan.md's
 rationale.
 
 **Commands.** The entry admits only `lz-offline --candidate <checkout> -- task <target> [-- <path>]`,
@@ -41,16 +53,16 @@ directory points at the PR and names the red and green commits.
 ## Phase 2: User Story 1 — A second operator exports a manifest from a short answers file (P1)
 Independent tests: V001, V002, V005. T016 → T017; T020 completes the story after US2 and US3.
 
-- [ ] T016 [US1] Decode answers files strictly in tools/internal/configure/answers.go with schemas/answers.schema.json, tests in tools/internal/configure/answers_test.go and tests/fixtures/answers/, and the `test:configure` target in Taskfile.yml
+- [ ] T016 [US1] Decode answers files strictly in tools/internal/configure/answers.go, tests in tools/internal/configure/answers_test.go and tests/fixtures/answers/, and the `test:configure` target in Taskfile.yml
   - Requirements: FR-001, FR-008; ADRs: 0005, 0021, 0023. Depends on: T015.
   - Cases (given / when / then → defect exposed), fixtures as data-model.md *Answers file* fixes them:
     - given `tests/fixtures/answers/sandbox.yaml` (11 values) and `sandbox-two-tenants.yaml` (15) / when decoded / then every field is read and defaults are not yet applied → exposes a decoder that drops or invents fields.
-    - given each case of `tests/fixtures/answers/invalid/cases.json` (duplicate key at top, row and nested level; case variant `Tenants`; unknown field; missing `org`; `null` `forge`; wrong `apiVersion`; wrong `kind`; tenant name with a capital; region `gra11`; CIDR without prefix; `vlan_id` 4001; `vlan_id` without `cidr`; `project_mode` `order`; a second document; a trailing comment; block YAML) / when decoded / then refused with exactly its code and field path → exposes a lenient decoder (G29).
-    - given 64 KiB of valid answers plus one byte / then `ANSWERS_TOO_LARGE`; given exactly 64 KiB / then decoded → exposes an off-by-one or a missing bound.
-    - given a symlink to the sandbox answers / when read through the package's file reader / then `ANSWERS_NOT_REGULAR` → exposes a followed symlink.
-    - given the schema file / when each valid and invalid fixture is checked against `schemas/answers.schema.json` in the test / then the schema and the decoder agree on accept or refuse for every fixture → exposes schema drift.
-    - given the package's source / when parsed / then it imports no `net`, `net/http` or `os/exec` and calls no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` → exposes a path to the network or the environment.
-  - Verify: `task test:configure` (creates the target: `go -C tools test -count=1 ./internal/configure ./cmd/lz-configure`, the second package added by T020): red commit with every case except the *pin* failing for its reason; green commit passes them; G29 mutants each turn a case red.
+    - given each case of `tests/fixtures/answers/invalid/cases.json` (duplicate key at top, row and nested level; case variant `Tenants`; unknown field; missing `org`; `null` `forge`; wrong `apiVersion`; wrong `kind`; tenant name with a capital; region `gra11`; CIDR without prefix; `vlan_id` 4001; `vlan_id` without `cidr`; `project_mode` `order`; a second document; a trailing comment; block YAML), each beside its positive control (the same file with the defect removed, accepted) / when decoded / then refused with exactly its code and field path → exposes a lenient decoder (G29: each mutant turns its case red).
+    - given 64 KiB of valid answers plus one byte / then `ANSWERS_TOO_LARGE`; given exactly 64 KiB (the control) / then decoded → exposes an off-by-one or a missing bound.
+    - given a symlink to the sandbox answers / when read through the package's file reader / then `ANSWERS_NOT_REGULAR`; given the regular file (the control) / then read → exposes a followed symlink.
+    - given the shared fields' patterns of `tools/internal/configure` / when each is compared with the pattern `schemas/deployments.schema.json` gives the manifest field it maps to (the schema read as JSON data, as `tools/internal/stacks/manifest_schema_test.go` does) / then equal, and more than zero fields compared → *pin*; exposes a copied pattern that drifted; controls: a changed pattern and an empty field list each fail the test.
+    - given the package's source / when parsed / then it imports no `net`, `net/http` or `os/exec` and calls no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` → *pin*; exposes a path to the network or the environment; control: a planted `os.Getenv` call in a scratch copy fails it.
+  - Verify: `task test:configure` (creates the target: `go -C tools test -count=1 ./internal/configure ./cmd/lz-configure`, the second package added by T020): red commit with the acceptance cases failing on the stub for their reason and the pins passing; green commit passes them; each rejection case's G29 mutant turns it red with its real reason while its positive control passes.
   - Evidence: `evidence/T016.md`; initial status `not-run`.
 
 - [ ] T017 [US1] Derive the manifest and gate it through the decoder in tools/internal/configure/export.go, tests in tools/internal/configure/export_test.go
@@ -63,8 +75,8 @@ Independent tests: V001, V002, V005. T016 → T017; T020 completes the story aft
     - given a region without `cidr` / then no `network` key and no network row, the runtime row kept → exposes a network row without a network.
     - given overrides of `state_endpoint`, `state_ref`, `project_ref`, `project_mode`, `vlan_id` and both toggles / then each appears in the manifest; given a key data-model marks fixed (`scope`, `stage_source`) / then `UNKNOWN_FIELD` from T016's decoder → *pin*; exposes a widened override set.
     - given answers whose derived manifest the decoder refuses (two regions with VLAN 0; `project_ref` `STATE` without the flag; two environments with one `project_ref`; a region name of 60 letters and a digit) / when exported / then a refusal with the decoder's code and no bytes returned → exposes output after a refusal (G30).
-    - given the value counts of R2 / when the fixtures and manifests are counted / then 11, 15, 41 and 67 → exposes a fixture that grew.
-  - Verify: `task test:configure`: red commit, then green; G30 mutants each turn a case red.
+    - given the value counts of R2 / when the fixtures and manifests are counted / then 11, 15, 41 and 67 → *pin*; exposes a fixture that grew; control: a fixture with one value more fails it.
+  - Verify: `task test:configure`: red commit, then green; the refused-derivation cases are rejection cases (positive control: the same answers with the defect removed export), and G30 mutants each turn a case red.
   - Evidence: `evidence/T017.md`; initial status `not-run`.
 
 ## Phase 3: User Story 2 — A mistake is explained in plain words (P1)
@@ -73,10 +85,12 @@ Independent test: V003.
 - [ ] T018 [US2] Explain every refusal through the catalogue in tools/internal/configure/messages.go, tests in tools/internal/configure/messages_test.go
   - Requirements: FR-004, SC-002; ADRs: 0013, 0019. Depends on: T017.
   - Cases (given / when / then → defect exposed):
-    - given the `Code*` constants parsed from `tools/internal/stacks/manifest.go` and the codes of `tools/internal/configure` / when the catalogue is checked / then each has a plain sentence and a `Next:` action → exposes a missing entry (G32).
-    - given each invalid answers fixture and each refused derivation of T017 / when formatted / then exactly one line `configure: <CODE>: <detail>. <sentence>. Next: <action>` with the expected code and detail → exposes a raw decoder error printed as is.
-    - given an unreachable decoder code / then its sentence says it is a defect of the tool → exposes a message that blames the answers.
-    - given a temporary copy of the catalogue with one entry removed / when the completeness check runs / then it fails naming that code → exposes a check that passes on an empty catalogue.
+    - given the `Code*` constants parsed from `tools/internal/stacks/manifest.go` (both the `const (…)` block and single `const` declarations; 18 today) under source `generated`, and the codes of `tools/internal/configure` under source `configure` / when the catalogue is checked / then each (source, code) pair has a plain sentence and a `Next:` action → exposes a missing entry (G32).
+    - given a parse that finds zero `Code*` constants (an empty source string) / when the completeness check runs / then it fails → exposes a check that passes vacuously when the file is renamed or its constants change form.
+    - given each invalid answers fixture and each refused derivation of T017 / when formatted / then exactly one line `configure: <CODE>: <detail>. <sentence>. Next: <action>` with the expected code, detail and the entry of its source → exposes a raw decoder error printed as is.
+    - given `UNKNOWN_FIELD` from the answers decoder and `UNKNOWN_FIELD` from the generated manifest / when formatted / then the first gets the spelling entry and the second the tool-defect entry → exposes a lookup by code alone (G32).
+    - given every `generated` code outside `INVALID_VALUE`, `DUPLICATE_NAME`, `DUPLICATE_VLAN` and `SHARED_STATE_PROJECT` / then its sentence says it is a defect of the tool → exposes a message that blames the answers.
+    - given a temporary copy of the catalogue with one entry removed / when the completeness check runs / then it fails naming that source and code → exposes a check that passes on an empty catalogue.
   - Verify: `task test:configure`: red commit, then green; G32 mutants each turn a case red.
   - Evidence: `evidence/T018.md`; initial status `not-run`.
 
@@ -86,12 +100,12 @@ Independent test: V004.
 - [ ] T019 [US3] Print the dry-run diff and the consequence notes from tools/internal/configure/diff.go and tools/internal/configure/notes.go, tests in tools/internal/configure/diff_test.go and tools/internal/configure/notes_test.go
   - Requirements: FR-005, FR-006; ADRs: 0013, 0023. Depends on: T018.
   - Cases (given / when / then → defect exposed):
-    - given the sandbox manifest as current and the two-tenant export / then four `+ row` lines for `lab`, each `created by stacks:reconcile`, then `diff: 4 added, 0 removed, 0 changed, …` → exposes a row-blind diff.
-    - given the reverse / then four `- row` lines, each `refused by stacks:reconcile (UNSUPPORTED_CHANGE)` → exposes removals presented as harmless.
-    - given a changed CIDR of `demo/dev/GRA11` / then one value line and no row line → exposes a value change shown as a row change.
+    - given the sandbox manifest as current and the two-tenant export / then four `+ row` lines for `lab`, each `expected: created by stacks:reconcile`, then `diff: 4 added, 0 removed` and no warning line → exposes a row-blind diff.
+    - given the reverse / then four `- row` lines, each `expected: refused by stacks:reconcile (UNSUPPORTED_CHANGE)`, `diff: 0 added, 4 removed`, then the warning line `configure: warning: stacks:reconcile is expected to refuse this export (4 removed rows)` → exposes removals presented as harmless.
+    - given the sandbox manifest as current and the sandbox export / then `diff: none` and no warning → exposes a diff that invents changes.
     - given no current manifest / then every row `+`; given a current manifest that does not decode / then `CURRENT_MANIFEST_INVALID` and no diff → exposes a diff against garbage.
     - given the same inputs twice / then identical output → exposes unordered output.
-    - given the two-tenant export / then the notes in data-model order: the `account.env` names `LZ_PROJECT_ID_STATE`, `LZ_PROJECT_ID_DEMO_DEV`, `LZ_PROJECT_ID_LAB_DEV`, no value; the one-project note; the KD-1 note; the mode note naming both environments `reference`; the VLAN note; the `org` note; the Object Lock note → exposes a missing or misordered note.
+    - given the two-tenant export / then the notes in data-model order: the `account.env` names `LZ_PROJECT_ID_STATE`, `LZ_PROJECT_ID_DEMO_DEV`, `LZ_PROJECT_ID_LAB_DEV`, no value; the one-project note, naming the bind refusal of two refs on one project (A17); the KD-1 note; the mode note naming both environments `reference`; the VLAN note; the `org` note; the Object Lock note → exposes a missing or misordered note.
     - given answers without the flag and without any `cidr` / then no KD-1 note and no VLAN note → exposes notes printed regardless of their trigger.
   - Verify: `task test:configure`: red commit, then green.
   - Evidence: `evidence/T019.md`; initial status `not-run`.
@@ -102,18 +116,20 @@ Independent test: V004.
   - Requirements: FR-005, FR-006, FR-007, FR-008, SC-003; ADRs: 0021, 0023. Depends on: T019.
   - Cases (given / when / then → defect exposed), each in a temporary root holding a copy of `stacks/deployments.yaml`, with an inventory of every path before and after:
     - given the two-tenant answers / when `check` runs / then the diff, the notes and `configure: ok`, exit 0, and the inventory unchanged → exposes a write during `check` (G31).
-    - given the same / when `export` runs / then only `.local/configure/deployments.yaml` is new (file 0600, directory 0700), value-equal to the two-tenant fixture, and the output ends with the copy step and `task stacks:reconcile`, `task stacks:generate`, `task stacks:check` → exposes a write elsewhere or missing next steps.
-    - given a symlinked `.local`, `.local/configure` or target / when `export` runs / then `STAGING_SYMLINK`, nothing written → exposes a followed symlink (G31).
-    - given an existing staging file and an injected rename failure / when `export` runs / then `STAGING_WRITE` and the old file byte-identical, no temporary file left → exposes an in-place write (G31).
+    - given the same and no `.local` / when `export` runs / then only `.local`, `.local/configure` (0700) and `.local/configure/deployments.yaml` (0600) are new, the file value-equal to the two-tenant fixture, and the output ends with the copy step and `task stacks:reconcile`, `task stacks:generate`, `task stacks:check` → exposes a write elsewhere or missing next steps.
+    - given an existing `.local/configure` at 0755 / when `export` runs / then the directory ends 0700 and the file is written; control: an existing 0700 directory is left as is → exposes a looser directory kept (G31).
+    - given a symlinked `.local`, `.local/configure` or target / when `export` runs / then `STAGING_SYMLINK`, nothing written; control: the same tree without the symlink exports → exposes a followed symlink (G31).
+    - given an existing staging file and an injected failure before the rename (temporary write, file `fsync`, rename) / when `export` runs / then `STAGING_WRITE`, exit 1, the old file byte-identical, no temporary file left → exposes an in-place write (G31).
+    - given an existing staging file and an injected directory `fsync` failure after the rename / when `export` runs / then `STAGING_NOT_DURABLE`, exit 1, the new file in place, no temporary file left → exposes a published file reported as unchanged, or a durability failure reported as success (G31).
     - given an invalid answers fixture / when `check` or `export` runs / then one refusal line, exit 1, the inventory unchanged → exposes output after a refusal.
     - given a missing argument or an unknown verb / then usage, exit 2 → *pin* once the stub parses flags.
-    - given the command's source / then it imports no `net`, `net/http` or `os/exec` and calls no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` → exposes a path to the network or the environment.
-  - Verify: `task test:configure; task configure:check -- tests/fixtures/answers/sandbox.yaml` through the entry (diff `none`, notes, `configure: ok`), then host-side `mise exec -- task configure:export -- tests/fixtures/answers/sandbox.yaml` (writes the staging file only; remove it after): red commit, then green; G31 mutants each turn a case red.
+    - given the command's source / then it imports no `net`, `net/http` or `os/exec` and calls no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` → *pin*; exposes a path to the network or the environment; control: a planted import in a scratch copy fails it.
+  - Verify: `task test:configure; task configure:check -- tests/fixtures/answers/sandbox.yaml` through the entry (diff `none`, notes, `configure: ok`), then host-side `mise exec -- task configure:export -- tests/fixtures/answers/sandbox.yaml` (writes the staging file only; remove it after): red commit, then green; the refusal and failure cases are rejection cases with the controls named above, and G31 mutants each turn a case red.
   - Evidence: `evidence/T020.md`; initial status `not-run`.
 
 ## Phase 6: Documentation and validation
 
-- [ ] T021 Write the second-operator how-to docs/how-to/prepare-deployments-from-answers.md and align docs/explanation/guided-setup-walkthrough.md, docs/README.md, schemas/README.md and specs/README.md
+- [ ] T021 Write the second-operator how-to docs/how-to/prepare-deployments-from-answers.md and align docs/explanation/guided-setup-walkthrough.md, docs/README.md and specs/README.md
   - Requirements: FR-009; ADRs: 0013, 0023. Depends on: T020.
   - Scope: the how-to starts from a commented copy of `tests/fixtures/answers/sandbox.yaml`, adds a tenant, shows a refusal and its fix, the diff, the notes, the export, the copy and the three stack commands, and ends in `task configure:check`. It carries spec.md's "makes easier" and "does not help" lists. The walkthrough states that the interactive journey is deferred (D-US4) and points to the how-to.
   - Verify: `task docs:check`: green, with the new page's header and references current.

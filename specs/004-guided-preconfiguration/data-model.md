@@ -6,8 +6,11 @@ are local; neither is committed.
 
 ## Answers file (FR-001)
 YAML in its JSON-compatible flow form, whole-line `#` comments allowed, at most 64 KiB, decoded
-strictly (`checks.DecodeStrict`). Mirrored by `schemas/answers.schema.json`. Patterns marked
-"manifest" are the ones of `schemas/deployments.schema.json` for the field it maps to.
+strictly (`checks.DecodeStrict`). No JSON Schema is published for it: this table and the Go types
+are the definition (spec *Out of scope*). Patterns marked "manifest" are the ones of
+`schemas/deployments.schema.json` for the field it maps to; `tools/internal/configure` keeps its
+own copies, and T016 checks each copy against that schema file. Duplicate keys, the size bound and
+symlinks are controls of the decoder and the file reader, tested there.
 
 | Field | Type and rule | Required | Maps to | Default (overridable) |
 | --- | --- | --- | --- | --- |
@@ -70,34 +73,41 @@ written. A refusal is a *Refusal message*; the bytes are dropped.
 ## Refusal message (FR-004)
 One line on standard output, exit status 1:
 `configure: <CODE>: <detail>. <plain sentence>. Next: <action>`
-- `<CODE>`: a refusal code of `tools/internal/configure` or a `Code*` constant of
-  `tools/internal/stacks/manifest.go`.
+- `<CODE>`: a refusal code of `tools/internal/configure` (source `configure`) or a `Code*` constant
+  of `tools/internal/stacks/manifest.go` returned for the generated manifest (source `generated`).
+  The two decoders share some code strings, so the catalogue entry is chosen by (source, code); the
+  printed line shows the code only.
 - `<detail>`: the field path for an answers decode error (`tenants[1].environments[0].regions[0].cidr`);
   the decoder's detail for a refusal of the generated manifest; the path for a file error.
 - `<plain sentence>` and `<action>`: from the catalogue in contracts/checks.md.
 
 Codes of `tools/internal/configure`: `ANSWERS_SYNTAX`, `ANSWERS_TOO_LARGE`, `ANSWERS_NOT_REGULAR`,
 `DUPLICATE_KEY`, `UNKNOWN_FIELD`, `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_VALUE`,
-`CURRENT_MANIFEST_INVALID`, `STAGING_SYMLINK`, `STAGING_WRITE`.
+`CURRENT_MANIFEST_INVALID`, `STAGING_SYMLINK`, `STAGING_WRITE`, `STAGING_NOT_DURABLE`.
 
 ## Dry-run diff entry (FR-005)
-One line per difference, sorted by the manifest path of the value, then:
-| Kind | Line | Reconcile mark |
+Rows are compared by id between the current manifest and the generated one. One line per row added
+or removed, removed rows first, each group in the order of the manifest that holds the row:
+| Kind | Line | Mark (expected, judged against the current manifest) |
 | --- | --- | --- |
-| row added | `+ row <id> (<stage> <tenant>/<env>/<region>)` | `created by stacks:reconcile` |
-| row removed | `- row <id> (…)` | `refused by stacks:reconcile (UNSUPPORTED_CHANGE)` |
-| row changed (id kept, dimension or stage changed) | `~ row <id>: <field> <old> -> <new>` | `refused by stacks:reconcile (UNSUPPORTED_CHANGE)` |
-| value changed | `~ <path>: <old> -> <new>` | none |
-| value added or removed | `+ <path>: <new>` / `- <path>: <old>` | none |
-Then one count line `diff: <a> added, <r> removed, <c> changed, <v> values`, or `diff: none`.
-Without a current manifest every row is `+`.
+| row added | `+ row <id> (<stage> <tenant>/<env>/<region>)` | `expected: created by stacks:reconcile` |
+| row removed | `- row <id> (…)` | `expected: refused by stacks:reconcile (UNSUPPORTED_CHANGE)` |
+Then one count line `diff: <a> added, <r> removed`, or `diff: none`. Without a current manifest
+every row is `+`. When at least one row is removed, one line
+`configure: warning: stacks:reconcile is expected to refuse this export (<r> removed rows)` follows
+the count line; `configure: ok` and exit 0 still follow.
+
+The marks assume the stack tree matches the current manifest; `stacks:reconcile` judges the tree
+(directories, ids, tags, dependencies; `reconcile.go:25-29`), so an unreconciled edit of the current
+manifest can make a mark wrong. Not compared: header and spec values, CIDRs, VLAN ids, toggles, and
+a changed stage or dimension of a row whose id is kept (spec *Out of scope*).
 
 ## Consequence notes (FR-006)
 Printed after a successful check or export, in this order, each only when its trigger holds:
 | Note | Trigger | Source |
 | --- | --- | --- |
 | `account.env needs LZ_PROJECT_ID_<REF> for: <refs>` (names only) | always | D113; `tools/internal/live/publish.go` binding |
-| one project per tenant and environment is the only isolation boundary; tags do not scope bucket access | at least one environment | D107, 005 P25 |
+| one project per tenant and environment is the only isolation boundary; tags do not scope bucket access; two refs whose `LZ_PROJECT_ID_<REF>` name one project are refused at bind (except KD-1's `STATE`), so `configure: ok` and a green `stacks:check` do not mean the bind passes | at least one environment | D107, 005 P25, A17 (spec 007 US2) |
 | KD-1: state shares the project of `<ref>`; tenant state isolation is not claimed | `shared_state_project` true | D88, D105 |
 | reference mode references the existing project; `adopt` plans a replacement (P5 refuted) | always (names the mode of each environment) | D94 |
 | each private network in a project needs its own VLAN id | at least one `cidr` | 005 T098 |
@@ -106,9 +116,18 @@ Printed after a successful check or export, in this order, each only when its tr
 
 ## Staging file (FR-007)
 `.local/configure/deployments.yaml` under the repository root given by `-root`. Directory 0700,
-file 0600. Written to a temporary file in that directory, `fsync`, rename, directory `fsync`. Refused
-with `STAGING_SYMLINK` when `.local`, `.local/configure` or the target is a symlink. On any failure
-the temporary file is removed and the previous staging file is unchanged.
+file 0600. Steps, in order:
+1. Refuse with `STAGING_SYMLINK` when `.local`, `.local/configure` or the target is a symlink.
+2. Create `.local` and `.local/configure` when absent (`.local/configure` 0700); an existing
+   `.local/configure` with any group or other bit is tightened to 0700 (chmod), never refused.
+3. Write a temporary file (0600) in `.local/configure`, `fsync` it, rename it onto the target.
+4. `fsync` the directory.
+
+The rename is the publication point. A failure in steps 2–3 (chmod, create, write, file `fsync`,
+rename) removes the temporary file, leaves the previous staging file byte-identical (or absent) and
+reports `STAGING_WRITE`, exit 1. A failure in step 4 leaves the new file in place and reports
+`STAGING_NOT_DURABLE` (written; after a crash the previous file may come back), exit 1, with no
+temporary file left.
 
 ## Not modelled (deferred)
 Session, step, progress, use-case preset and tool-check records of the earlier plan belong to

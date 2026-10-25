@@ -18,6 +18,9 @@ judge's counterpoints; the strict manifest decoder `tools/internal/stacks/manife
   interactive terminal and save/resume layers are later, optional slices. Burn-down capped at about
   15 strong review legs. This refresh replaces the 13-task terminal/save/resume plan: task ids
   T001–T013 are retired unstarted, T014 stays closed, new tasks start at T015.
+- **Spec-set review round 1 (2026-10-25, on `463520a`):** the diff is cut to row additions and
+  removals, the answers schema file is dropped, the catalogue is keyed by source and code, and the
+  staging write has a publication boundary ([loop.md](loop.md)).
 
 ## Why and scope
 Today one maintainer writes `stacks/deployments.yaml` by hand and checks it with `task stacks:check`.
@@ -39,16 +42,19 @@ lands in local staging; the operator copies it and runs the existing `stacks:rec
 - defaults for the fields that rarely change (header, scope, stage source, state ref and endpoint,
   project ref and mode, VLAN 0, both toggles off);
 - each refusal explained in a plain sentence with the next action;
-- a dry-run diff that says which changes `stacks:reconcile` will create and which it refuses.
+- a dry-run diff of the instance rows added and removed, each marked with what `stacks:reconcile`
+  is expected to do, judged against the current manifest.
 
 **Where it does not help** (stated, not hidden): a maintainer fluent in the manifest gains little
-beyond the diff and the notes. A manifest that uses anything outside the answers schema (tenant
+beyond the diff and the notes. The diff shows rows only: a changed CIDR, VLAN id, toggle or header
+value is not listed, and its prediction assumes the stack tree matches the current manifest. A
+manifest that uses anything outside the answers file (tenant
 scope, `external` entries, runtime slots, a region without a runtime row, custom instance ids) is
 still edited by hand. Renames and removals stay refused by `stacks:reconcile` either way. The
 project ids still go into `account.env` by hand; the command only lists the refs. Comments of a
 hand-edited manifest are not carried over. The flow-form syntax is still JSON-like.
 
-**In:** the answers schema and its strict decoder; defaults and derivation; the decoder gate; plain
+**In:** the answers file format and its strict decoder; defaults and derivation; the decoder gate; plain
 messages; the dry-run diff; consequence notes; a staging write; a how-to; tracing spec 004.
 
 **Out** (see *Deferred user stories* and *Out of scope*): the interactive terminal journey, save and
@@ -97,17 +103,20 @@ left open, with the default this spec applies.
   - derive every instance row by one fixed rule (R3), rejecting an answers field per row;
   - check the export by calling `stacks.DecodeManifest` in-process (R4), rejecting a call of
     `task stacks:check` (that judges the candidate tree, not a staging file);
-  - a message catalogue keyed by refusal code, checked complete against the decoder's `Code*`
-    constants (R5).
+  - a message catalogue keyed by source and refusal code (the answers file and the command, or the
+    generated manifest), checked complete against the decoder's `Code*` constants (R5);
+  - no published answers schema: the Go types and data-model.md are the definition, and a test
+    checks the shared fields' patterns against `schemas/deployments.schema.json` (review round 1).
 
 ## User Scenarios & Testing
 
 ### User Story 1 — A second operator exports a manifest from a short answers file (Priority: P1)
 A second operator copies the sandbox answers file, adds tenant `lab` with environment `dev`, region
 `GRA11` and a CIDR, and runs `task configure:check -- .local/configure/answers.yaml`. The command
-prints the dry-run diff (four new rows for `lab`, each "created by stacks:reconcile"), the
-consequence notes (`LZ_PROJECT_ID_LAB_DEV` is needed in `account.env`; one project per tenant and
-environment; KD-1 covers `STATE` only) and `configure: ok`. `task configure:export -- …` then writes
+prints the dry-run diff (four new rows for `lab`, each "expected: created by stacks:reconcile"),
+the consequence notes (`LZ_PROJECT_ID_LAB_DEV` is needed in `account.env`; one project per tenant
+and environment, and `LAB_DEV` on the project of `DEMO_DEV` is refused at bind (A17); KD-1 covers
+`STATE` only) and `configure: ok`. `task configure:export -- …` then writes
 `.local/configure/deployments.yaml` and prints the next steps. After the copy, `stacks:reconcile`,
 `stacks:generate` and `stacks:check` pass.
 **Independent test**: V001, V002, V004, V005. Failure: if the decoder refuses the export, nothing
@@ -123,10 +132,10 @@ Nothing is written and the exit status is 1.
 **Independent test**: V003.
 
 ### User Story 3 — The maintainer sees what would change before anything changes (Priority: P2)
-The maintainer runs `configure:check` on an answers file that drops tenant `lab` and changes the
-CIDR of `demo/dev/GRA11`. The diff lists four removed rows marked "refused by stacks:reconcile
-(UNSUPPORTED_CHANGE)" and one value change, and the command writes nothing. With no current
-manifest every row is new.
+The maintainer runs `configure:check` on an answers file that drops tenant `lab`. Against the
+current manifest, the diff lists four removed rows marked "expected: refused by stacks:reconcile
+(UNSUPPORTED_CHANGE)", a warning line says that `stacks:reconcile` would refuse the export, and the
+command writes nothing. With no current manifest every row is new.
 **Independent test**: V004.
 
 ### Deferred user stories (not tasks; each starts only on its trigger and within the review budget)
@@ -147,7 +156,9 @@ that a derived id passes 63 characters (`INVALID_VALUE` from the decoder); a dup
 variant (`Tenants`), an unknown field, `null`, a second document, a trailing comment, block YAML; a
 file over 64 KiB; a symlinked answers path, `.local`, `.local/configure` or staging file; a current
 manifest that does not decode (diff skipped, export still checked); no current manifest; a staging
-write that fails half-way (the previous staging file stays).
+write that fails before the rename (the previous staging file stays) or whose directory sync fails
+after it (the new file is in place, its durability is reported uncertain); an existing
+`.local/configure` looser than 0700 (tightened to 0700).
 
 ## Premises
 
@@ -162,11 +173,15 @@ write that fails half-way (the previous staging file stays).
 ### Functional requirements
 - **FR-001 Answers file, strictly decoded** — an answers file has `apiVersion`
   `lz.platformrelay.dev/v1alpha1`, `kind` `DeploymentAnswers` and the fields of data-model.md
-  *Answers file*, mirrored by `schemas/answers.schema.json`. It is YAML in its JSON-compatible flow
+  *Answers file*. It is YAML in its JSON-compatible flow
   form with whole-line comments, at most 64 KiB, decoded strictly through `checks.DecodeStrict`:
   syntax errors, duplicate keys, case variants, unknown or missing fields, `null`, unsupported
   versions and values outside a field's pattern or enum are refused before anything is derived.
-  Shared fields use the manifest's patterns. No field holds a project id, a credential or a command.
+  Shared fields use the manifest's patterns: `tools/internal/configure` keeps its own copies, and a
+  test checks each against `schemas/deployments.schema.json` for the manifest field it maps to.
+  Drift would fail safe (the decoder gate still refuses the generated manifest), but the refusal
+  would name the manifest path instead of the answers path, so the test keeps it out. No field
+  holds a project id, a credential or a command.
 - **FR-002 Defaults and derivation** — the export fills every manifest field the answers file omits
   by the fixed rules of data-model.md *Derivation* (header, `scope` platform, `stage_source` local,
   `state.project.ref` `STATE`, `state.endpoint` from the region, project ref `<TENANT>_<ENV>`, mode
@@ -181,26 +196,39 @@ write that fails half-way (the previous staging file stays).
 - **FR-004 Plain-word refusals** — every refusal prints one line
   `configure: <CODE>: <detail>. <plain sentence>. Next: <action>`, where `<detail>` is the field
   path for an answers decode error and the decoder's own detail (which names tenant, environment and
-  region) for a refusal of the generated manifest. The catalogue of contracts/checks.md covers every
-  refusal code of `tools/internal/configure` and every `Code*` constant of
-  `tools/internal/stacks/manifest.go`; a code without an entry fails a test and never falls back
-  silently. Codes the derivation cannot reach say so and ask for a report. Exit status 1.
+  region) for a refusal of the generated manifest. The catalogue of contracts/checks.md is keyed by
+  source and code: source `configure` covers every refusal code of `tools/internal/configure` and
+  the command (answers file, current manifest, staging), source `generated` covers every `Code*`
+  constant of `tools/internal/stacks/manifest.go` as a refusal of the generated manifest. The
+  answers decoder and the manifest decoder share code strings (`DUPLICATE_KEY`, `UNKNOWN_FIELD`,
+  `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_VALUE`), so the source picks the entry. Every
+  `generated` code the derivation cannot reach maps to the one tool-defect entry, which says so and
+  asks for a report. A (source, code) pair without an entry fails a test and never falls back
+  silently. Exit status 1.
 - **FR-005 Dry-run diff** — `configure:check` decodes the current `stacks/deployments.yaml` (when
-  present) and prints a deterministic diff by value: header and spec fields, tenants, environments
-  and regions, and instance rows added, removed or changed. Each added row is marked "created by
-  stacks:reconcile"; each removed row and each changed id or dimension is marked "refused by
-  stacks:reconcile (UNSUPPORTED_CHANGE)" (`reconcile.go:25-29`). It writes nothing. A current
-  manifest that does not decode is reported with its plain message and the diff is skipped.
+  present) and prints a deterministic diff of the instance rows, by id: rows added and rows removed.
+  Value-level changes (header, CIDR, VLAN id, toggles, a changed stage or dimension of a kept id)
+  are not listed. The marks are a prediction made against the current manifest, assuming the stack
+  tree matches it, not against the tree: each added row is marked "expected: created by
+  stacks:reconcile"; each removed row "expected: refused by stacks:reconcile (UNSUPPORTED_CHANGE)"
+  (`reconcile.go:25-29`). When a refusal is predicted, the command prints one warning line before
+  `configure: ok`; the exit status stays 0. It writes nothing. A current manifest that does not
+  decode is reported with its plain message and the diff is skipped.
 - **FR-006 Consequence notes** — after a successful check or export, the command prints the notes of
   data-model.md *Consequence notes* whose trigger applies, in a fixed order: the
   `LZ_PROJECT_ID_<REF>` names the bound `account.env` needs (names only); one project per tenant and
-  environment (D107); KD-1 when `shared_state_project` is set (D88, D105); reference versus adopt
+  environment (D107), and two refs that resolve to one project id are refused at bind (A17, spec
+  007 US2), so `configure: ok` and a green `stacks:check` do not mean the bind passes; KD-1 when `shared_state_project` is set (D88, D105); reference versus adopt
   (D94); one VLAN id per private network (005 T098); `org` keeps globally unique bucket names apart
   (005 P21); state buckets are Object-Locked (D104).
 - **FR-007 Staging write** — `configure:export` writes only `.local/configure/deployments.yaml`
-  (directory 0700, file 0600) through a temporary file in that directory, `fsync` and rename. It
-  refuses a symlinked `.local`, `.local/configure` or target; on any failure the previous staging
-  file stays. It never writes `stacks/` or any other path (pending the open clarification). It
+  (directory 0700, file 0600) through a temporary file in that directory, `fsync`, rename and a
+  directory `fsync`. It creates `.local` and `.local/configure` when absent and tightens an existing
+  `.local/configure` looser than 0700 to 0700. It refuses a symlinked `.local`, `.local/configure`
+  or target. The rename is the publication point: a failure before it removes the temporary file
+  and leaves the previous staging file unchanged (`STAGING_WRITE`); a failed directory `fsync`
+  after it is reported as written but of uncertain durability (`STAGING_NOT_DURABLE`), exit 1. It
+  never writes `stacks/` or any other path (pending the open clarification). It
   prints the next steps: copy to `stacks/deployments.yaml`, then `task stacks:reconcile`,
   `task stacks:generate`, `task stacks:check`. `configure:check` writes nothing.
 - **FR-008 No authority** — neither command opens a network connection, reads a credential, an
@@ -223,8 +251,9 @@ note, staging file. See `data-model.md`.
 - **SC-002**: Each invalid answers fixture yields exactly its expected code, its detail and a next
   action, writes nothing and exits 1; the catalogue completeness test fails when a code lacks an
   entry (V003).
-- **SC-003**: Across the check and export tests the only path created or changed under the test
-  root is `.local/configure/deployments.yaml`; and the two packages import no `net`, `net/http` or
+- **SC-003**: Across the check and export tests the only paths created or changed under the test
+  root are `.local` and `.local/configure` (created when absent, `.local/configure` tightened to
+  0700) and `.local/configure/deployments.yaml`; `check` changes none; and the two packages import no `net`, `net/http` or
   `os/exec` and call no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` (a source
   test) (V005).
 - **SC-004**: A second reader, given only the how-to, produces a two-tenant answers file that
@@ -250,14 +279,14 @@ are also host-side, credential-free commands, like `stacks:reconcile`. Controls 
 | V007 | FR-010 | `task check:specs; task test:traceability; task test:foundation-ci` |
 
 ## Implementation surface
-- `schemas/answers.schema.json` (new); `tools/internal/configure/` (new: `answers.go`, `export.go`,
+- `tools/internal/configure/` (new: `answers.go`, `export.go`,
   `messages.go`, `diff.go`, `notes.go`, their tests); `tools/cmd/lz-configure/` (new: `main.go`,
   `main_test.go`); `tests/fixtures/answers/` (new: `sandbox.yaml`, `sandbox-two-tenants.yaml`,
   `invalid/` with `cases.json`).
 - `Taskfile.yml` (`test:configure`, `configure:check`, `configure:export`; spec lists);
   `tools/harness/checks.yaml` (keys, checks, inputs).
 - `docs/how-to/prepare-deployments-from-answers.md` (new), `docs/explanation/guided-setup-walkthrough.md`,
-  `docs/README.md`, `specs/README.md`, `schemas/README.md`.
+  `docs/README.md`, `specs/README.md`.
 - One tools Go module; no new dependency.
 
 ## Out of scope / postponed (with trigger)
@@ -266,6 +295,8 @@ are also host-side, credential-free commands, like `stacks:reconcile`. Controls 
 | D-US4 to D-US7 | D127: simplest form first, about 15 review legs | see *Deferred user stories* |
 | Writing `stacks/deployments.yaml` in place | ADR-0023: applying the draft is a separate reviewed action | the open clarification answered "in place", with an ADR-0023 amendment |
 | Tenant-scope manifests, `external` entries, runtime slots, regions without runtime | not needed by the sandbox or the two-tenant layout; each adds answers fields | a manifest in use that needs one |
+| A published `schemas/answers.schema.json` | review round 1: a JSON Schema cannot judge duplicate keys, size or symlinks, the module has no validator, and a second definition beside the Go types adds drift without a reader | an editor integration is asked for, or D-US4 needs a machine-readable answers form |
+| Value-level diff (header, CIDR, VLAN id, toggles, changed stage or dimension) | review round 1: only row additions and removals predict `stacks:reconcile`; the rest is scope without a decision behind it | T022 records that a value change surprised the reader |
 | Block-style YAML for the answers file | a vendored YAML library is a dependency decision (005 T034) | the owner takes that decision for the manifest too |
 | Plain messages for `stacks:check` itself | that changes spec 005's checked output | after this catalogue lands, if a hand-edit error goes unexplained |
 | Consequences beyond D113's list | no new live evidence in this spec | a later live spec |

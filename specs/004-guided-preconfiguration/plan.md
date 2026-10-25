@@ -30,10 +30,10 @@ Before research and after design.
 | --- | --- | --- |
 | I Evidence, UNVERIFIED | pass | P1 read in code (believed, probed by T017); P2 cites the kb mirror and is UNVERIFIED beyond `gra`; P3 (the value for a second operator) is UNVERIFIED until T022 |
 | II Traceability | pass | `004/` registry keys; 004 in the `check:specs` default and in `ci-source` (spec-set commit; T015 verifies); every planned target names its creator (T016, T020) |
-| III Tests first | pass | every code task closes on a red commit (tests failing for their stated reason against a compiling stub) before its green commit; cases are given/when/then with the defect each exposes |
+| III Tests first | pass | every code task closes on a red commit before its green commit: acceptance cases fail on a compiling stub for their stated reason; rejection cases are proven by a positive control plus a named mutant, not by the stub; structural tests are marked *pin* with a control (tasks.md *Red first*); cases are given/when/then with the defect each exposes |
 | III Mutation proof | pass (scoped) | guards G29–G32 (`contracts/checks.md`) |
 | IV One owner, explicit authority | pass | the command derives a draft; `stacks/deployments.yaml` stays platform-controlled (ADR-0005); the copy is the operator's reviewed action (ADR-0023) |
-| V Fail closed | pass | a refused manifest is never printed or written; a failed write keeps the previous staging file; unreachable codes report a defect, never success |
+| V Fail closed | pass | a refused manifest is never printed or written; a write that fails before the rename keeps the previous staging file, a failed directory sync after it is reported, never success; unreachable codes report a defect, never success |
 | V Cost | pass | no cloud work |
 | VI Smallest increment | pass | D127's simplest form; four layers deferred with triggers; about 15 review legs |
 | VII Planned vs implemented; approachable operations | pass | targets planned until T016/T020; plain messages with next actions; the how-to states where the tool does not help |
@@ -44,8 +44,13 @@ Before research and after design.
 - **Rows** (R3): derived by one rule (chosen) vs one answer per row.
 - **Gate** (R4): `DecodeManifest` in-process, then `stacks:check` after the copy (chosen) vs calling
   `stacks:check` on staging (it judges the candidate tree).
-- **Messages** (R5): catalogue keyed by code with a completeness test (chosen) vs answers-level copies
-  of the cross-row rules (drift).
+- **Messages** (R5): catalogue keyed by (source, code) with a completeness test (chosen) vs
+  answers-level copies of the cross-row rules (drift).
+- **Answers schema**: none published; shared patterns checked against
+  `schemas/deployments.schema.json` (chosen, review round 1) vs `schemas/answers.schema.json` with a
+  validator (a new dependency, and it cannot judge duplicate keys, size or symlinks).
+- **Diff**: row additions and removals, the part that predicts `stacks:reconcile` (chosen, review
+  round 1) vs a full value diff.
 - **Format** (R6): flow YAML (chosen) vs block YAML (a dependency decision).
 - **Destination** (R7): staging (default) vs in place (open owner choice).
 - Cheapest discriminating experiment for P3: T022, one second reader with the how-to, no code beyond
@@ -55,8 +60,7 @@ Before research and after design.
 ```
 specs/004-guided-preconfiguration/
   spec.md  plan.md  research.md  data-model.md  quickstart.md  tasks.md
-  contracts/checks.md  checklists/requirements.md  evidence/ (created by tasks)
-schemas/answers.schema.json                                 (new)
+  contracts/checks.md  checklists/requirements.md  loop.md  evidence/ (created by tasks)
 tools/internal/configure/  answers.go export.go messages.go diff.go notes.go (+ tests)   (new)
 tools/cmd/lz-configure/    main.go main_test.go             (new)
 tests/fixtures/answers/    sandbox.yaml sandbox-two-tenants.yaml invalid/ (new)
@@ -77,9 +81,10 @@ docs/how-to/prepare-deployments-from-answers.md            (new)
 V001–V007 in spec.md and `contracts/checks.md`. Offline: `task test:configure`, `task check:specs`,
 `task test:traceability`, `task test:foundation-ci`, `task docs:check`, each through the entry;
 `task configure:check -- tests/fixtures/answers/sandbox.yaml` through the entry; `configure:export`
-host-side on a fixture. A code task's red commit is a behavioural failure against a stub whose new
-functions return "not implemented"; its green commit passes the same tests unchanged; G29–G32 each
-kill a mutant. The round trip (T017) compares values, not bytes and not `Manifest` (research R4).
+host-side on a fixture. A code task's red commit is a behavioural failure of its acceptance cases
+against a stub whose new functions return "not implemented"; its rejection cases are proven by a
+positive control and a named mutant; its structural tests are pins; its green commit passes the
+same tests unchanged; G29–G32 each kill a mutant. The round trip (T017) compares values, not bytes and not `Manifest` (research R4).
 Docs tasks run `task docs:check`; T022's record is reviewed by hand.
 
 ## Dependencies and live change ordering
@@ -92,7 +97,19 @@ Docs tasks run `task docs:check`; T022's record is reviewed by hand.
   easier) → D-US4 and later stay closed and the spec records it.
 
 ## Complexity tracking
-One package, one command, one schema, two Task targets plus a test target, three fixture sets. No
-new dependency, no state beyond one staging file, no authority. The review budget (D127: about 15
-strong legs) is the binding constraint: two legs for the spec set, about one per code task (T016–T020),
-one for the docs and two for the branch. Deferred: D-US4 to D-US7 and the in-place write (spec).
+One package, one command, no new schema, two Task targets plus a test target, three fixture sets.
+No new dependency, no state beyond one staging file, no authority. The review budget (D127: about
+15 strong legs) is the binding constraint, counted in legs:
+
+| Item | Legs |
+| --- | --- |
+| Spec set, round 1 (spent, `463520a`) | 2 |
+| T016–T020, one leg each, round 1 | 5 |
+| T021 (docs) | 1 |
+| Branch review | 2 |
+| Planned | 10 |
+| Reserve: one rework round, for example a second leg on up to three code tasks plus a spec-set round 2 only if the coordinator asks | 5 |
+| Cap | 15 |
+
+A rework round beyond the reserve stops the loop for the owner. Deferred: D-US4 to D-US7, the
+in-place write, the answers schema and the value-level diff (spec).

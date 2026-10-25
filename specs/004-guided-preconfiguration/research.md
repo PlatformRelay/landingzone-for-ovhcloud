@@ -50,16 +50,19 @@ operator is P3, UNVERIFIED until T022.
   (`stacks/_lz/globals.tm.hcl:5`).
 
 ## R5 Plain messages
-- **Chosen:** one catalogue entry per code (contracts/checks.md *Message catalogue*), keyed by code,
-  with a plain sentence and a next action. The decoder's detail already names the tenant,
+- **Chosen:** one catalogue entry per (source, code) (contracts/checks.md *Message catalogue*), with
+  a plain sentence and a next action. The answers decoder and the manifest decoder share five code
+  strings, so a key by code alone would blame the answers for a derivation defect (review round 1). The decoder's detail already names the tenant,
   environment and region, so the command does not re-implement the cross-row rules to find the
   place. A completeness test lists the decoder's `Code*` constants by parsing
-  `tools/internal/stacks/manifest.go`, so a new code without an entry is red.
+  `tools/internal/stacks/manifest.go`, so a new code without an entry is red; a parse that finds
+  no constant is red too.
 - **Rejected:** answers-level copies of the cross-row rules (duplicate names, VLANs, shared state).
   They would drift from the decoder.
 - Reachable from the derivation: `DUPLICATE_NAME`, `DUPLICATE_VLAN`, `SHARED_STATE_PROJECT`,
-  `INVALID_VALUE` (a derived id over 63 characters). The others are unreachable by construction;
-  their entries say so and ask for a report.
+  `INVALID_VALUE` (a derived id over 63 characters). The others are unreachable by construction,
+  including the decode codes the manifest shares with the answers file; under source `generated`
+  they map to the one tool-defect entry, which asks for a report.
 
 ## R6 Format of the answers file
 - **Chosen:** JSON-compatible flow YAML, decoded strictly like the manifest; no new dependency.
