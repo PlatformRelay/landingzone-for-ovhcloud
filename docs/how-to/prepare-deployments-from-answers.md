@@ -4,6 +4,10 @@ references:
     blob: 1c7c17842d0badfd155a037e745041c289b938c6
   - path: tools/internal/configure/answers.go
     blob: 47b21c94ba559dc0ccde021c3c09623e86d8e79c
+  - path: tools/internal/configure/export.go
+    blob: 01c3a294cd586723d620f826019c60dd76426b2b
+  - path: tools/internal/configure/diff.go
+    blob: f9b66733c983ac1d65593251cbd8004f0c6d5c68
   - path: tools/internal/configure/messages.go
     blob: 8abb3161c2ec48b3e4343777083ca2a33b482ad1
   - path: tools/internal/configure/notes.go
@@ -67,7 +71,7 @@ explains why.
 
 The file is YAML in its JSON-compatible flow form: braces, brackets, double quotes and commas.
 Comments are whole lines that start with `#`. A comment after a value on the same line is refused.
-Keys are lower case with `_`. Each key appears once. The file is at most 64 KiB.
+Keys are lower case with `_`, except `apiVersion`. Each key appears once. The file is at most 64 KiB.
 
 | Field | Required | Form | Default |
 | --- | --- | --- | --- |
@@ -197,16 +201,21 @@ After the diff come the notes, then `configure: ok`. For the two-tenant answers 
 - One project per tenant and environment is the only isolation boundary. Tags do not scope bucket
   access. Two refs whose project ids name one project are refused at bind. So `configure: ok` and
   a green `stacks:check` do not mean the bind passes. The sandbox account has one project, so
-  `lab/dev` needs a second project before this manifest can be applied there.
+  `lab/dev` needs a second project before this manifest can be applied there. Sources: D107, after
+  the live probe that refuted tag-scoped bucket access (P25 in [spec 005](../../specs/005-first-landing-zone-slice/spec.md)); the bind
+  refusal is A17 in [spec 007](../../specs/007-cleanup-first-live-slice/spec.md).
 - KD-1, because `shared_state_project` is `true`: the state buckets share a project with tenant
   resources. Tenant state isolation is not claimed.
 - The project mode of each environment. `reference` uses the existing project. `adopt` plans a
   replacement of it.
-- Each private network in a project needs its own VLAN id.
+- Each private network in a project needs its own VLAN id
+  ([spec 005 T098](../../specs/005-first-landing-zone-slice/evidence/T098.md)).
 - Bucket names are unique across all of OVHcloud. `org` keeps them apart. A taken name fails at
-  apply time; change `org` if that happens.
-- State buckets are Object-Locked in governance mode. Tearing one down needs the governance bypass
-  or the end of the retention.
+  apply time; change `org` if that happens. Source: the OVHcloud Object Storage S3 limitations
+  guide, P21 in [spec 005](../../specs/005-first-landing-zone-slice/spec.md).
+- State buckets are Object-Locked in governance mode (D104). Tearing one down needs the
+  governance bypass or the end of the retention. That teardown path has not been run on OVHcloud
+  (UNVERIFIED).
 
 A note appears only when its trigger holds. The KD-1 note, for example, needs
 `shared_state_project`.
