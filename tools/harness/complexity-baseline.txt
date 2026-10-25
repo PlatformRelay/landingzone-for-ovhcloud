@@ -12,7 +12,6 @@
 20 tools/cmd/lz-check/docs.go readmePages
 15 tools/cmd/lz-check/lint_test.go TestLintWithTools
 18 tools/cmd/lz-check/lint_test.go TestUnitCommandsWithTools
-17 tools/cmd/lz-check/main.go slice
 17 tools/cmd/lz-check/main_test.go TestDependencyCommands
 16 tools/cmd/lz-check/main_test.go TestFoundationCISpecScopedCreators
 35 tools/cmd/lz-check/main_test.go TestRegistryInputsCoverGoDeps

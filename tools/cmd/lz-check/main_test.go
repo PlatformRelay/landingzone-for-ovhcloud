@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1567,4 +1568,177 @@ func TestRegistryInputsCoverGoDeps(t *testing.T) {
 			t.Errorf("BEHAVIORAL_RED: want one failure naming test:orphan, got %q", failures)
 		}
 	})
+}
+
+// `lz-check check` (task check, ADR-0019) on the paths that run no pinned
+// tool: a docs-only change runs the dependency scan and the docs rules and
+// says only L0 ran; a failing docs rule or dependency scan fails the check; a
+// selection holding no library or stage directory names what it did not run
+// and fails rather than pass on nothing; a path outside the repository is a
+// usage error. The runs with the pinned tools are TestUnitCheckWithTools.
+func TestCheckWithoutTools(t *testing.T) {
+	probe := map[string]string{"tests/live/probes/p/main.tf": "variable \"a\" {\n  type = string\n}\n"}
+	for name, c := range map[string]struct {
+		files map[string]string
+		args  []string
+		code  int
+		want  []string
+	}{
+		"docs only": {nil, []string{"docs/how-to/a.md"}, 0, []string{"CHECK_SELECTION none reason=DOCS_ONLY", "DOCS_OK",
+			"CHECK_LAYERS ran=L0 not_built=L3,L4", "CHECK_PASS dirs=0 not_run=0"}},
+		"docs failing": {map[string]string{"docs/how-to/a.md": pageA + "[gone](c.md)\n"}, []string{"docs/how-to/a.md"}, 1,
+			[]string{"LINK_BROKEN docs/how-to/a.md", "DOCS_FAIL", "CHECK_FAIL DOCS"}},
+		"dependencies failing": {map[string]string{"modules/x/main.tofu": "# x\n"}, []string{"docs/how-to/a.md"}, 1,
+			[]string{"UNSUPPORTED_CONFIG modules/x", "CHECK_FAIL DEPENDENCIES"}},
+		"nothing runnable": {probe, []string{"tests/live/probes/p"}, 1,
+			[]string{"CHECK_SELECTION dirs=tests/live/probes/p", "CHECK_NOT_RUN tests/live/probes/p layer=test", "CHECK_FAIL NO_DISCOVERY"}},
+		"absolute path": {nil, []string{"/etc"}, 2, []string{"check needs a path inside the repository"}},
+		"parent path":   {nil, []string{"../x"}, 2, []string{"check needs a path inside the repository"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsRepo(t, c.files), append([]string{"check"}, c.args...)...)
+			judgeCheck(t, code, out, c.code, c.want)
+		})
+	}
+}
+
+// judgeCheck fails the test unless a check run exited with code and printed
+// every line of want; a failing run never prints CHECK_PASS.
+func judgeCheck(t *testing.T, code int, out string, wantCode int, want []string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("BEHAVIORAL_RED: %q missing:\n%s", w, out)
+		}
+	}
+	if code != wantCode {
+		t.Errorf("BEHAVIORAL_RED: exit %d, want %d:\n%s", code, wantCode, out)
+	}
+	if code != 0 && strings.Contains(out, "CHECK_PASS") {
+		t.Errorf("BEHAVIORAL_RED: a failing check printed CHECK_PASS:\n%s", out)
+	}
+}
+
+// aggregateMember is one `- task: <target>` line of an aggregate's block.
+var aggregateMember = regexp.MustCompile(`(?m)^ +- task: (\S+)\s*$`)
+
+// aggregateMembers returns the targets an aggregate target of the Taskfile
+// runs, in order, failing when the target or its members are missing.
+func aggregateMembers(t *testing.T, taskfile, task string) (block string, members []string) {
+	t.Helper()
+	block, ok := taskBlock(taskfile, task)
+	if !ok {
+		t.Fatalf("BEHAVIORAL_RED: Taskfile.yml has no task %s", task)
+	}
+	for _, m := range aggregateMember.FindAllStringSubmatch(block, -1) {
+		members = append(members, m[1])
+	}
+	if len(members) == 0 {
+		t.Fatalf("BEHAVIORAL_RED: task %s runs no target", task)
+	}
+	return block, members
+}
+
+// runAggregate runs the aggregate block with the pinned Task (PATH holds it
+// inside the offline entry) in a scratch Taskfile whose members echo their
+// name into a log, the member fail exiting 7 instead. It returns Task's exit
+// code and the members that ran, in order.
+func runAggregate(t *testing.T, task, block string, members []string, fail string) (int, []string) {
+	t.Helper()
+	bin, err := exec.LookPath("task")
+	if err != nil {
+		t.Fatalf("BEHAVIORAL_RED: premise: the pinned task binary is not on PATH: %v", err)
+	}
+	dir := t.TempDir()
+	taskfile := "version: '3'\nsilent: true\n\ntasks:\n" + block + "\n"
+	for _, m := range members {
+		cmd := "echo " + m + " >> ran.log"
+		if m == fail {
+			cmd = "exit 7"
+		}
+		taskfile += "  " + m + ":\n    cmds:\n      - " + cmd + "\n\n"
+	}
+	writeFiles(t, dir, map[string]string{"Taskfile.yml": taskfile, "ran.log": ""})
+	command := exec.Command(bin, "-d", dir, task)
+	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir}
+	out, err := command.CombinedOutput()
+	code := 0
+	if exit, ok := err.(*exec.ExitError); ok {
+		code = exit.ExitCode()
+	} else if err != nil {
+		t.Fatalf("BEHAVIORAL_RED: premise: task did not run: %v\n%s", err, out)
+	}
+	log, err := os.ReadFile(filepath.Join(dir, "ran.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, strings.Fields(string(log))
+}
+
+// offlineTestTargets are the Taskfile's test:* targets that take no
+// argument: test:unit takes one directory, and test:slice runs it on every
+// library and stage.
+func offlineTestTargets(taskfile string) []string {
+	var targets []string
+	for _, target := range slices.Sorted(maps.Keys(taskfileTargets(taskfile))) {
+		if strings.HasPrefix(target, "test:") && target != "test:unit" {
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}
+
+// judgeMembers fails the test unless an aggregate runs exactly want, each a
+// target the Taskfile defines, none a live or bootstrap host target or one
+// that runs the host-built .local/bin/lz-live.
+func judgeMembers(t *testing.T, taskfile, task string, members, want []string) {
+	t.Helper()
+	if got := slices.Sorted(slices.Values(members)); !slices.Equal(got, want) {
+		t.Errorf("BEHAVIORAL_RED: task %s runs %v, want %v", task, got, want)
+	}
+	for _, m := range members {
+		body, ok := taskBlock(taskfile, m)
+		switch {
+		case !ok:
+			t.Errorf("BEHAVIORAL_RED: task %s runs %s, which Taskfile.yml does not define", task, m)
+		case strings.HasPrefix(m, "live:") || strings.HasPrefix(m, "bootstrap:") || strings.Contains(body, ".local/bin/lz-live"):
+			t.Errorf("BEHAVIORAL_RED: task %s runs %s, a live or bootstrap host target", task, m)
+		}
+	}
+}
+
+// judgePropagation fails the test unless the aggregate, run with the pinned
+// Task, passes when every member passes, after running each once in order,
+// and fails when its first or its last member fails.
+func judgePropagation(t *testing.T, task, block string, members []string) {
+	t.Helper()
+	if code, ran := runAggregate(t, task, block, members, ""); code != 0 || !slices.Equal(ran, members) {
+		t.Errorf("BEHAVIORAL_RED: every member passing: exit %d, ran %v, want 0 and %v", code, ran, members)
+	}
+	last := len(members) - 1
+	if code, _ := runAggregate(t, task, block, members, members[0]); code == 0 {
+		t.Errorf("BEHAVIORAL_RED: first member %s failing: task %s exited 0", members[0], task)
+	}
+	if code, ran := runAggregate(t, task, block, members, members[last]); code == 0 || !slices.Equal(ran, members[:last]) {
+		t.Errorf("BEHAVIORAL_RED: last member %s failing: exit %d after %v, want non-zero after %v", members[last], code, ran, members[:last])
+	}
+}
+
+// ADR-0007's aggregate entry points (D133). `task test` runs every offline
+// test target of the Taskfile, so a new test:* target that is not added to it
+// fails here, and no live or bootstrap host target; `task docs` runs the docs
+// checks. Each fails when any member fails.
+func TestTaskfileAggregates(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "Taskfile.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskfile := string(data)
+	for task, want := range map[string][]string{"test": offlineTestTargets(taskfile), "docs": {"docs:check"}} {
+		t.Run(task, func(t *testing.T) {
+			block, members := aggregateMembers(t, taskfile, task)
+			judgeMembers(t, taskfile, task, members, want)
+			judgePropagation(t, task, block, members)
+		})
+	}
 }

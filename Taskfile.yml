@@ -343,6 +343,44 @@ tasks:
       - go -C tools test -count=1 -run 'TestDocs' ./cmd/lz-check
       - go -C tools run ./cmd/lz-check -root .. docs
 
+  # ADR-0007's aggregate entry points (D133); `task lint` and `task dod` take
+  # one path, and `task policy` waits for the plan policy gate (ADR-0006).
+  # The offline entry gives one target 240 s, which `task test` exceeds: run
+  # it where the pinned tools are on PATH without that bound, or run its
+  # members one per entry invocation, as the foundation CI does. Members run
+  # in order and the first failure stops it (TestTaskfileAggregates: every
+  # test:* target but test:unit, which test:slice runs on every directory; no
+  # live or bootstrap host target).
+  check:
+    desc: 'L0-L2 on a changed path and every directory consuming it, then the dependency scan and docs rules, e.g. task check -- modules/naming; without a path every library and stage (ADR-0019)'
+    cmds:
+      - go -C tools run ./cmd/lz-check -root .. check {{.CLI_ARGS}}
+
+  test:
+    desc: Every offline test target in sequence, stopping at the first failure (ADR-0007)
+    cmds:
+      - task: test:reports
+      - task: test:dependencies
+      - task: test:static
+      - task: test:slice
+      - task: test:outputs
+      - task: test:stacks
+      - task: test:live-lane
+      - task: test:traceability
+      - task: test:runtime-image
+      - task: test:foundation-ci
+      - task: test:stack-plans
+      - task: test:exchange
+      - task: test:bootstrap
+      - task: test:update-lane
+      - task: test:release
+      - task: test:configure
+
+  docs:
+    desc: The documentation checks (ADR-0007)
+    cmds:
+      - task: docs:check
+
   # One target per report fixture case; tests/fixtures/tofu/capture.sh records
   # their stdout. Each prints exactly the pinned `tofu test -json` stream.
   capture:tofu-pass:

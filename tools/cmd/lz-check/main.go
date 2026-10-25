@@ -89,6 +89,9 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() == 1 && flags.Arg(0) == "slice":
 		tools := checks.StaticTools{Tofu: *tofu, TFLint: *tflint, TFLintConfig: filepath.Join(*root, ".tflint.hcl")}
 		return slice(out, *root, tools)
+	case (flags.NArg() == 1 || flags.NArg() == 2) && flags.Arg(0) == "check":
+		tools := checks.StaticTools{Tofu: *tofu, TFLint: *tflint, TFLintConfig: filepath.Join(*root, ".tflint.hcl")}
+		return check(out, *root, flags.Arg(1), tools)
 	case flags.NArg() == 1 && rootCommands[flags.Arg(0)] != nil:
 		return rootCommands[flags.Arg(0)](out, *root)
 	case flags.NArg() == 2 && flags.Arg(0) == "select":
@@ -98,7 +101,7 @@ func run(args []string, out io.Writer) int {
 	case flags.NArg() >= 2 && flags.Arg(0) == "ci-source":
 		// One or more spec dirs; judged with the registry below.
 	case flags.NArg() != 2 || flags.Arg(0) == "deps" || flags.Arg(0) == "update-lane":
-		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs | update-lane | complexity")
+		fmt.Fprintln(out, "usage: lz-check [-root dir] specs <spec-dir> | [-evidence dir] dod <path> | deps | select <path> | lint <dir> | unit <dir> | slice | check [<path>] | ci-workflow | ci-source <spec-dir>... | ci-runs | ci-observe (<role> <candidate> <capture-dir>)... | docs | update-lane | complexity")
 		return 2
 	}
 	registry, err := loadRegistry(*root)
@@ -348,6 +351,18 @@ func slice(out io.Writer, root string, tools checks.StaticTools) int {
 		fmt.Fprintln(out, "SLICE_FAIL NO_DISCOVERY dirs=0")
 		return 1
 	}
+	printSlice(out, dirs, o)
+	if !o.Pass {
+		fmt.Fprintf(out, "SLICE_FAIL dirs=%d\n", len(o.Entries))
+		return 1
+	}
+	fmt.Fprintf(out, "SLICE_PASS dirs=%d\n", len(o.Entries))
+	return 0
+}
+
+// printSlice prints one line per directory of a slice run, with the clauses
+// and test reasons that did not pass.
+func printSlice(out io.Writer, dirs []string, o checks.SliceObservation) {
 	for i, e := range o.Entries {
 		status := checks.StatusFail
 		switch lint := staticStatus(e.Static); {
@@ -366,12 +381,97 @@ func slice(out io.Writer, root string, tools checks.StaticTools) int {
 			fmt.Fprintf(out, "  unit %s\n", strings.Join(e.Unit.Report.Reasons, ","))
 		}
 	}
-	if !o.Pass {
-		fmt.Fprintf(out, "SLICE_FAIL dirs=%d\n", len(o.Entries))
+}
+
+// check is `task check` (ADR-0019, spec 001 contracts/checks.md): the
+// offline layers that exist, on one changed path and everything that
+// consumes it. The dependency scan (L0) builds the graph and the selection;
+// lint (L0) and the unit tests under mocked providers (L1, and the contract
+// runs L2 of the components and stages) run on every selected library and
+// stage directory; the docs rules (L0) run on every page. Without a path,
+// and for a path the selection widens (shared tooling, an unowned path),
+// every library and stage runs. A selected directory of another layer is
+// named, not run; a selection that runs no directory and is not docs-only
+// fails. L3 snapshots and L4 policy tests are not built and the output says
+// so. Every part runs, so one failure does not hide another.
+func check(out io.Writer, root, changed string, tools checks.StaticTools) int {
+	if changed != "" {
+		clean := filepath.ToSlash(filepath.Clean(changed))
+		if filepath.IsAbs(changed) || clean == ".." || strings.HasPrefix(clean, "../") {
+			fmt.Fprintf(out, "check needs a path inside the repository, not %q\n", changed)
+			return 2
+		}
+		changed = clean
+	}
+	g, ok := scan(out, root)
+	if !ok {
+		fmt.Fprintln(out, "CHECK_FAIL DEPENDENCIES")
 		return 1
 	}
-	fmt.Fprintf(out, "SLICE_PASS dirs=%d\n", len(o.Entries))
+	s := checks.Selection{Full: true, Reason: "ALL"}
+	if changed != "" {
+		s = checks.SelectChanged(g, []string{changed})
+	}
+	dirs, notRun := checkDirs(out, g, s)
+	var failed []string
+	switch {
+	case len(dirs) > 0:
+		if !checkSlice(out, root, dirs, tools) {
+			failed = append(failed, "DIRS")
+		}
+	case s.Reason != "DOCS_ONLY":
+		failed = append(failed, "NO_DISCOVERY")
+	}
+	if docs(out, root) != 0 {
+		failed = append(failed, "DOCS")
+	}
+	ran := "L0"
+	if len(dirs) > 0 {
+		ran = "L0,L1,L2"
+	}
+	fmt.Fprintf(out, "CHECK_LAYERS ran=%s not_built=L3,L4\n", ran)
+	if len(failed) > 0 {
+		fmt.Fprintf(out, "CHECK_FAIL %s dirs=%d not_run=%d\n", strings.Join(failed, ","), len(dirs), len(notRun))
+		return 1
+	}
+	fmt.Fprintf(out, "CHECK_PASS dirs=%d not_run=%d\n", len(dirs), len(notRun))
 	return 0
+}
+
+// checkDirs prints the selection and splits it into the library and stage
+// directories check runs (every one for a full selection) and the selected
+// directories of other layers, each named as not run.
+func checkDirs(out io.Writer, g checks.DependencyGraph, s checks.Selection) (dirs, notRun []string) {
+	switch {
+	case s.Full:
+		fmt.Fprintf(out, "CHECK_SELECTION full reason=%s\n", s.Reason)
+		return checks.SliceDirs(g), nil
+	case len(s.Dirs) == 0:
+		fmt.Fprintf(out, "CHECK_SELECTION none reason=%s\n", s.Reason)
+		return nil, nil
+	}
+	fmt.Fprintf(out, "CHECK_SELECTION dirs=%s\n", strings.Join(s.Dirs, " "))
+	for _, d := range s.Dirs {
+		if layer := g.Layers[d]; layer == checks.LayerLibrary || layer == checks.LayerStage {
+			dirs = append(dirs, d)
+			continue
+		}
+		notRun = append(notRun, d)
+		fmt.Fprintf(out, "CHECK_NOT_RUN %s layer=%s\n", d, g.Layers[d])
+	}
+	return dirs, notRun
+}
+
+// checkSlice runs lint and the unit tests on dirs and reports whether every
+// one passed.
+func checkSlice(out io.Writer, root string, dirs []string, tools checks.StaticTools) bool {
+	paths := make([]string, len(dirs))
+	for i, d := range dirs {
+		paths[i] = filepath.Join(root, d)
+	}
+	o := checks.RunSlice(tools, paths)
+	printSlice(out, dirs, o)
+	return o.Pass
 }
 
 // scan reports every dependency finding and whether the graph is usable.

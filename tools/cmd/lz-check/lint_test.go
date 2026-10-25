@@ -56,6 +56,48 @@ func unitModule(t *testing.T, name string) map[string]string {
 	return files
 }
 
+// With the pinned tools inside the offline entry, `lz-check check` (task
+// check, ADR-0019) runs lint and the unit tests on the changed library and
+// every directory that consumes it, then the dependency scan and the docs
+// rules, and says which layers ran: it passes only when all of them pass, and
+// a failing unit test or docs rule fails it. A consumer outside the libraries
+// and stages is named as not run. Without a path every library and stage runs.
+func TestUnitCheckWithTools(t *testing.T) {
+	config, err := os.ReadFile("../../../.tflint.hcl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := "module \"x\" {\n  source = \"../../../../modules/x\"\n}\n"
+	for name, c := range map[string]struct {
+		fixture string
+		extra   map[string]string
+		args    []string
+		code    int
+		want    []string
+	}{
+		"changed library": {"pass", nil, []string{"modules/x/main.tf"}, 0, []string{"CHECK_SELECTION dirs=modules/x tests/live/probes/p",
+			"pass modules/x lint=pass tests=1 passed=1", "CHECK_NOT_RUN tests/live/probes/p layer=test", "DOCS_OK",
+			"CHECK_LAYERS ran=L0,L1,L2 not_built=L3,L4", "CHECK_PASS dirs=1 not_run=1"}},
+		"every library": {"pass", nil, nil, 0, []string{"CHECK_SELECTION full reason=ALL", "pass modules/x lint=pass", "CHECK_PASS dirs=1 not_run=0"}},
+		"shared tool":   {"pass", nil, []string{"Taskfile.yml"}, 0, []string{"CHECK_SELECTION full reason=SHARED_TOOL", "CHECK_PASS dirs=1"}},
+		"failing test":  {"fail", nil, []string{"modules/x"}, 1, []string{"fail modules/x lint=pass tests=1 passed=0 failed=1", "DOCS_OK", "CHECK_FAIL DIRS"}},
+		"failing docs": {"pass", map[string]string{"docs/how-to/a.md": pageA + "[gone](c.md)\n"}, []string{"modules/x"}, 1,
+			[]string{"pass modules/x lint=pass", "LINK_BROKEN docs/how-to/a.md", "CHECK_FAIL DOCS"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := unitModule(t, c.fixture)
+			files[".tflint.hcl"] = string(config)
+			files["modules/x/.terraform.lock.hcl"] = ""
+			files["tests/live/probes/p/main.tf"] = consumer
+			for k, v := range c.extra {
+				files[k] = v
+			}
+			code, out := lzCheck(docsRepo(t, files), append([]string{"check"}, c.args...)...)
+			judgeCheck(t, code, out, c.code, c.want)
+		})
+	}
+}
+
 // With the pinned tools inside the offline entry, unit passes a module whose
 // tests pass and fails one whose test fails, keeping the adapter's reason and
 // the assertion message; slice prints the per-directory counts and passes
