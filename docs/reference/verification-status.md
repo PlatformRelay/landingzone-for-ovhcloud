@@ -91,6 +91,11 @@ Coded against fakes, recorded fixtures or provider docs, and not observed on OVH
   ([spec 007 T019](../../specs/007-cleanup-first-live-slice/evidence/T019.md)).
 - **Everything spec 007 changed in the live lane** (below) runs against fakes only: no live run of
   spec 007 took place.
+- **Swift reach of a tenant's S3 bucket (spec 003 C005.1):** not shown. In the runs of
+  2026-10-16 every Swift call answered 404, the own-bucket controls included, so the other-bucket
+  404s are not denials. The Swift-native control that would tell a missing route from a refusal
+  (spec 003 T040, T041) is offline-tested only: its live run (T042) did not take place
+  ([spec 003 T043](../../specs/003-platform-feasibility/evidence/T043.md)).
 
 ## What spec 006 hardened
 

@@ -413,7 +413,7 @@ apply to T040.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone at that SHA, within D117's bounds (credit, expiry): records the own Swift-native control, each S3-bucket step (`not-applicable` or `blocked`, with its reason) and the Swift-native cross steps. The run destroys in finally and sweeps; the leftover check is clean, Swift containers included.
   - Evidence: `specs/003-platform-feasibility/evidence/T042.md`, which T043 writes from the run record under `.local/live/<run-id>/` in the live clone; initial status `not-run`.
 
-- [ ] T043 [US2] Record T042's run in specs/003-platform-feasibility/evidence/T042.md and docs/reference/verification-status.md (docs only)
+- [x] T043 [US2] Record T042's run in specs/003-platform-feasibility/evidence/T042.md and docs/reference/verification-status.md (docs only) — closed 2026-10-25 (T042 not run: nothing to record), evidence: evidence/T043.md
   - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T042.
   - Scope: run id, observation, cost (or UNVERIFIED), the leftover check, and what the result means for C005.1, C006.4 and C006.5. Lay it out as T025.md does, with account and project ids replaced. Add a pointer from T025.md to the new result. Write no code.
   - Verify: `task docs:check` green; `task test:traceability` green.
