@@ -129,7 +129,7 @@ Independent test: V004.
 
 ## Phase 6: Documentation and validation
 
-- [ ] T021 Write the second-operator how-to docs/how-to/prepare-deployments-from-answers.md and align docs/explanation/guided-setup-walkthrough.md, docs/README.md and specs/README.md
+- [x] T021 Write the second-operator how-to docs/how-to/prepare-deployments-from-answers.md and align docs/explanation/guided-setup-walkthrough.md, docs/README.md and specs/README.md — closed 2026-10-25, evidence: evidence/T021.md
   - Requirements: FR-009; ADRs: 0013, 0023. Depends on: T020.
   - Scope: the how-to starts from a commented copy of `tests/fixtures/answers/sandbox.yaml`, adds a tenant, shows a refusal and its fix, the diff, the notes, the export, the copy and the three stack commands, and ends in `task configure:check`. It carries spec.md's "makes easier" and "does not help" lists. The walkthrough states that the interactive journey is deferred (D-US4) and points to the how-to.
   - Verify: `task docs:check`: green, with the new page's header and references current.
