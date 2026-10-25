@@ -1572,12 +1572,14 @@ func TestRegistryInputsCoverGoDeps(t *testing.T) {
 
 // `lz-check check` (task check, ADR-0019) on the paths that run no pinned
 // tool: a docs-only change runs the dependency scan and the docs rules and
-// says only L0 ran; a failing docs rule or dependency scan fails the check; a
-// selection holding no library or stage directory names what it did not run
-// and fails rather than pass on nothing; a path outside the repository is a
-// usage error. The runs with the pinned tools are TestUnitCheckWithTools.
+// says only part of L0 ran; a failing docs rule or dependency scan fails the
+// check, and an unusable graph still lets the docs rules run; a selection
+// holding nothing runnable names what it did not run and fails rather than
+// pass on nothing; a path outside the repository is a usage error. The runs
+// with the pinned tools are TestUnitCheckWithTools.
 func TestCheckWithoutTools(t *testing.T) {
-	probe := map[string]string{"tests/live/probes/p/main.tf": "variable \"a\" {\n  type = string\n}\n"}
+	example := map[string]string{"examples/e/main.tf": "variable \"a\" {\n  type = string\n}\n", docsMapPage: docsBaseMap + "| `examples/` | Examples. |\n"}
+	broken := map[string]string{"modules/x/main.tofu": "# x\n", "docs/how-to/a.md": pageA + "[gone](c.md)\n"}
 	for name, c := range map[string]struct {
 		files map[string]string
 		args  []string
@@ -1585,13 +1587,15 @@ func TestCheckWithoutTools(t *testing.T) {
 		want  []string
 	}{
 		"docs only": {nil, []string{"docs/how-to/a.md"}, 0, []string{"CHECK_SELECTION none reason=DOCS_ONLY", "DOCS_OK",
-			"CHECK_LAYERS ran=L0 not_built=L3,L4", "CHECK_PASS dirs=0 not_run=0"}},
+			"CHECK_LAYERS ran=L0-partial not_built=L3,L4", "CHECK_PASS dirs=0 not_run=0"}},
 		"docs failing": {map[string]string{"docs/how-to/a.md": pageA + "[gone](c.md)\n"}, []string{"docs/how-to/a.md"}, 1,
-			[]string{"LINK_BROKEN docs/how-to/a.md", "DOCS_FAIL", "CHECK_FAIL DOCS"}},
+			[]string{"LINK_BROKEN docs/how-to/a.md", "DOCS_FAIL", "CHECK_LAYERS attempted=L0-partial", "CHECK_FAIL DOCS"}},
 		"dependencies failing": {map[string]string{"modules/x/main.tofu": "# x\n"}, []string{"docs/how-to/a.md"}, 1,
-			[]string{"UNSUPPORTED_CONFIG modules/x", "CHECK_FAIL DEPENDENCIES"}},
-		"nothing runnable": {probe, []string{"tests/live/probes/p"}, 1,
-			[]string{"CHECK_SELECTION dirs=tests/live/probes/p", "CHECK_NOT_RUN tests/live/probes/p layer=test", "CHECK_FAIL NO_DISCOVERY"}},
+			[]string{"UNSUPPORTED_CONFIG modules/x", "CHECK_BLOCKED directories", "DOCS_OK", "CHECK_FAIL DEPENDENCIES dirs=0"}},
+		"dependencies and docs failing": {broken, []string{"docs/how-to/a.md"}, 1,
+			[]string{"UNSUPPORTED_CONFIG modules/x", "LINK_BROKEN docs/how-to/a.md", "CHECK_FAIL DEPENDENCIES,DOCS"}},
+		"nothing runnable": {example, []string{"examples/e"}, 1,
+			[]string{"CHECK_SELECTION dirs=examples/e", "CHECK_NOT_RUN examples/e layer=example", "CHECK_FAIL NO_DISCOVERY dirs=0 not_run=1"}},
 		"absolute path": {nil, []string{"/etc"}, 2, []string{"check needs a path inside the repository"}},
 		"parent path":   {nil, []string{"../x"}, 2, []string{"check needs a path inside the repository"}},
 	} {

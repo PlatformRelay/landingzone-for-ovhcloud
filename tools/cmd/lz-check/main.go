@@ -386,14 +386,15 @@ func printSlice(out io.Writer, dirs []string, o checks.SliceObservation) {
 // check is `task check` (ADR-0019, spec 001 contracts/checks.md): the
 // offline layers that exist, on one changed path and everything that
 // consumes it. The dependency scan (L0) builds the graph and the selection;
-// lint (L0) and the unit tests under mocked providers (L1, and the contract
-// runs L2 of the components and stages) run on every selected library and
-// stage directory; the docs rules (L0) run on every page. Without a path,
-// and for a path the selection widens (shared tooling, an unowned path),
-// every library and stage runs. A selected directory of another layer is
-// named, not run; a selection that runs no directory and is not docs-only
-// fails. L3 snapshots and L4 policy tests are not built and the output says
-// so. Every part runs, so one failure does not hide another.
+// lint (L0) and the unit tests under mocked providers (L1; L2 where a
+// component or stage runs) run on every selected library and stage, the unit
+// tests alone on every selected test root; the docs rules (L0) run on every
+// page. Without a path, and for a path the selection widens (shared tooling,
+// an unowned path), every library and stage runs. A selected instance or
+// example is named, not run; a selection that runs nothing and is not
+// docs-only fails. L3 snapshots and L4 policy tests are not built and the
+// output says so, and says "attempted" instead of "ran" on a failure. An
+// unusable graph blocks the directories but not the docs rules.
 func check(out io.Writer, root, changed string, tools checks.StaticTools) int {
 	if changed != "" {
 		clean := filepath.ToSlash(filepath.Clean(changed))
@@ -403,75 +404,121 @@ func check(out io.Writer, root, changed string, tools checks.StaticTools) int {
 		}
 		changed = clean
 	}
-	g, ok := scan(out, root)
-	if !ok {
-		fmt.Fprintln(out, "CHECK_FAIL DEPENDENCIES")
-		return 1
-	}
-	s := checks.Selection{Full: true, Reason: "ALL"}
-	if changed != "" {
-		s = checks.SelectChanged(g, []string{changed})
-	}
-	dirs, notRun := checkDirs(out, g, s)
 	var failed []string
-	switch {
-	case len(dirs) > 0:
-		if !checkSlice(out, root, dirs, tools) {
-			failed = append(failed, "DIRS")
+	g, ok := scan(out, root)
+	var sel checkSelection
+	if ok {
+		s := checks.Selection{Full: true, Reason: "ALL"}
+		if changed != "" {
+			s = checks.SelectChanged(g, []string{changed})
 		}
-	case s.Reason != "DOCS_ONLY":
-		failed = append(failed, "NO_DISCOVERY")
+		sel = checkDirs(out, g, s)
+		failed = sel.run(out, root, tools)
+	} else {
+		fmt.Fprintln(out, "CHECK_BLOCKED directories: the dependency graph is unusable")
+		failed = append(failed, "DEPENDENCIES")
 	}
 	if docs(out, root) != 0 {
 		failed = append(failed, "DOCS")
 	}
-	ran := "L0"
-	if len(dirs) > 0 {
-		ran = "L0,L1,L2"
-	}
-	fmt.Fprintf(out, "CHECK_LAYERS ran=%s not_built=L3,L4\n", ran)
+	verb := "ran"
 	if len(failed) > 0 {
-		fmt.Fprintf(out, "CHECK_FAIL %s dirs=%d not_run=%d\n", strings.Join(failed, ","), len(dirs), len(notRun))
+		verb = "attempted"
+	}
+	fmt.Fprintf(out, "CHECK_LAYERS %s=%s not_built=L3,L4\n", verb, sel.layers())
+	counts := fmt.Sprintf("dirs=%d not_run=%d", len(sel.slice)+len(sel.tests), len(sel.notRun))
+	if len(failed) > 0 {
+		fmt.Fprintf(out, "CHECK_FAIL %s %s\n", strings.Join(failed, ","), counts)
 		return 1
 	}
-	fmt.Fprintf(out, "CHECK_PASS dirs=%d not_run=%d\n", len(dirs), len(notRun))
+	fmt.Fprintf(out, "CHECK_PASS %s\n", counts)
 	return 0
 }
 
-// checkDirs prints the selection and splits it into the library and stage
-// directories check runs (every one for a full selection) and the selected
-// directories of other layers, each named as not run.
-func checkDirs(out io.Writer, g checks.DependencyGraph, s checks.Selection) (dirs, notRun []string) {
+// checkSelection is what check runs: lint and the unit tests on library and
+// stage directories (slice), the unit tests alone on test roots (tests, as
+// test:live-lane runs them), and the selected directories it does not run.
+type checkSelection struct {
+	slice, tests, notRun []string
+	docsOnly             bool
+}
+
+// checkDirs prints the selection and splits it: a full selection runs every
+// library and stage; a generated instance or an example is named as not run,
+// with the targets that cover an instance.
+func checkDirs(out io.Writer, g checks.DependencyGraph, s checks.Selection) checkSelection {
 	switch {
 	case s.Full:
 		fmt.Fprintf(out, "CHECK_SELECTION full reason=%s\n", s.Reason)
-		return checks.SliceDirs(g), nil
+		return checkSelection{slice: checks.SliceDirs(g)}
 	case len(s.Dirs) == 0:
 		fmt.Fprintf(out, "CHECK_SELECTION none reason=%s\n", s.Reason)
-		return nil, nil
+		return checkSelection{docsOnly: s.Reason == "DOCS_ONLY"}
 	}
 	fmt.Fprintf(out, "CHECK_SELECTION dirs=%s\n", strings.Join(s.Dirs, " "))
+	var sel checkSelection
 	for _, d := range s.Dirs {
-		if layer := g.Layers[d]; layer == checks.LayerLibrary || layer == checks.LayerStage {
-			dirs = append(dirs, d)
-			continue
+		switch layer := g.Layers[d]; layer {
+		case checks.LayerLibrary, checks.LayerStage:
+			sel.slice = append(sel.slice, d)
+		case checks.LayerTest:
+			sel.tests = append(sel.tests, d)
+		case checks.LayerInstance:
+			sel.notRun = append(sel.notRun, d)
+			fmt.Fprintf(out, "CHECK_NOT_RUN %s layer=%s run=stacks:check,test:stack-plans\n", d, layer)
+		default:
+			sel.notRun = append(sel.notRun, d)
+			fmt.Fprintf(out, "CHECK_NOT_RUN %s layer=%s\n", d, layer)
 		}
-		notRun = append(notRun, d)
-		fmt.Fprintf(out, "CHECK_NOT_RUN %s layer=%s\n", d, g.Layers[d])
 	}
-	return dirs, notRun
+	return sel
 }
 
-// checkSlice runs lint and the unit tests on dirs and reports whether every
-// one passed.
-func checkSlice(out io.Writer, root string, dirs []string, tools checks.StaticTools) bool {
-	paths := make([]string, len(dirs))
-	for i, d := range dirs {
-		paths[i] = filepath.Join(root, d)
+// run runs the selection and returns its failures: DIRS for a directory that
+// did not pass, NO_DISCOVERY when nothing ran and the change was not docs-only.
+func (s checkSelection) run(out io.Writer, root string, tools checks.StaticTools) []string {
+	if len(s.slice)+len(s.tests) == 0 {
+		if s.docsOnly {
+			return nil
+		}
+		return []string{"NO_DISCOVERY"}
 	}
-	o := checks.RunSlice(tools, paths)
-	printSlice(out, dirs, o)
-	return o.Pass
+	pass := true
+	if len(s.slice) > 0 {
+		paths := make([]string, len(s.slice))
+		for i, d := range s.slice {
+			paths[i] = filepath.Join(root, d)
+		}
+		o := checks.RunSlice(tools, paths)
+		printSlice(out, s.slice, o)
+		pass = o.Pass
+	}
+	for _, d := range s.tests {
+		o := checks.RunUnit(tools, filepath.Join(root, d))
+		fmt.Fprintf(out, "%s %s unit %s %s\n", o.Status, d, counts(o), o.Reason)
+		pass = pass && o.Status == checks.StatusPass
+	}
+	if !pass {
+		return []string{"DIRS"}
+	}
+	return nil
+}
+
+// layers names the ADR-0008 layers a check covers: L0 in part (fmt,
+// validate, TFLint, the dependency scan and the docs rules; no trivy,
+// terraform-docs or schema validation), L1 when a unit test ran, and L2 only
+// when a component or stage ran, whose tests hold the contract runs.
+func (s checkSelection) layers() string {
+	layers := "L0-partial"
+	if len(s.slice)+len(s.tests) > 0 {
+		layers += ",L1"
+	}
+	for _, d := range s.slice {
+		if strings.HasPrefix(d, "components/") || strings.HasPrefix(d, "stages/") {
+			return layers + ",L2"
+		}
+	}
+	return layers
 }
 
 // scan reports every dependency finding and whether the graph is usable.

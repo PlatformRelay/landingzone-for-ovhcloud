@@ -53,13 +53,14 @@ authority, persistent states and dependencies; a passing suite does not erase op
   - Amendment (2026-10-25, *task check*, D133): `task check -- <path>` exists, with two
     deviations. The caller names the changed path; the check does not read git, and the offline
     entry admits one path argument. It covers the layers that are built: lint and the mocked unit
-    tests (L0, L1, and the L2 contract runs of the components and stages) on the path's library
-    and stage directories and their consumers, then the dependency scan and the docs rules (L0).
-    L3 snapshots, L4 policy tests and the rest of L0 (trivy, terraform-docs, schema validation)
-    are not built; the output says which layers ran. A selected directory that is not a library
-    or a stage (a generated instance, a test root) is named as not run. Without a path every
-    library and stage runs. Through the entry it took 30 s on `modules/naming` and 47 s on
-    everything.
+    tests (L0 in part, L1) on the path's library, component and stage directories and their
+    consumers, the unit tests on consuming test roots, then the dependency scan and the docs
+    rules (L0). It reports L2 only when a component or stage ran, whose tests hold the contract
+    runs; it does not tell contract runs from unit runs. L3 snapshots, L4 policy tests and the
+    rest of L0 (trivy, terraform-docs, schema validation) are not built. The output names the
+    layers it ran, or attempted on a failure. A selected generated instance or example is named
+    as not run. Without a path every library and stage runs. Through the entry it took 30 s on
+    `modules/naming` and 47 s on everything.
 - **Structured messages**: every check, policy and validation emits
   `LZ-<area>-<nnn>: <what is wrong> — <why it matters> — fix: <the change> — see: docs/<page>`.
   Rule ids are stable, documented one per page, and the same id appears in the guardrail spec, the
