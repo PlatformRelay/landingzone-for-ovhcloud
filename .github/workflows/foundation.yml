@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      LZ_TARGETS: test:traceability check:specs test:runtime-image test:foundation-ci test:stack-plans test:exchange test:bootstrap test:update-lane test:release docs:check stacks:check
+      LZ_TARGETS: test:traceability check:specs test:runtime-image test:foundation-ci test:stack-plans test:exchange test:bootstrap test:update-lane test:release docs:check stacks:check test:configure
     steps:
       - name: Locate the work directories
         run: |
