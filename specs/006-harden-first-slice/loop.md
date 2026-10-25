@@ -9,7 +9,7 @@ Budget: strong review legs 21/120 across the goal (D117 supersedes D116's cap of
 - [x] P plan + tasks — generated with the repository's Spec Kit commands · spec set committed: the spec commit ":memo: docs(specs): specify spec 006"
 - [x] R spec-set review — round 1 on c604b97: review leg 1 REQUEST_CHANGES (10 major), the strong review leg CONCERNS (5 warnings, 4 notes); no CRITICAL. 13 verified findings fixed (462374a). Owner decisions D115 (Q4, Q5, Q7) applied (cb3a47e). A stage-R warning followed: the combined test-and-implementation tasks were split into test tasks ordered first (the spec commit ":memo: docs(specs): specify spec 006"). No second round: there was no accepted CRITICAL.
 - [x] L task loop — T001–T058 closed (see *Tasks*); T051–T058 from stage B round 1
-- [x] B branch review — round 1 (2026-10-19): astra REQUEST_CHANGES, opus:spec and opus:fitness CONCERNS → T051–T058; round 2 (2026-10-20): astra REQUEST_CHANGES (B2-001 only), opus:spec CONCERNS, no CRITICAL; remaining findings accepted (two-round rule). Records: ~/.local/share/ovh-lz/review/loop-006/reviews/B/
+- [x] B branch review — round 1 (2026-10-19): review leg 1 REQUEST_CHANGES, strong leg (spec) and strong leg (fitness) CONCERNS → T051–T058; round 2 (2026-10-20): review leg 1 REQUEST_CHANGES (B2-001 only), strong leg (spec) CONCERNS, no CRITICAL; remaining findings accepted (two-round rule). Records: ~/.local/share/ovh-lz/review/loop-006/reviews/B/
 - [ ] Hand-off — not started
 
 ## Fitness functions
@@ -98,7 +98,7 @@ Holistic run at B: T046 (all 20 LZ_TARGETS on adf671f) and every fix task's FINA
 | L T042 | Admitted top-level names absent from the checkout not in the registry digest; trailing / kind unchecked; research.md cites lz-offline/main.go:197 | minor | both | defer | stage B | no |
 | L T043 | Repository is public and main unprotected: KI-001's reassessment trigger | major | review | carry | owner decision in INBOX (ruleset recommended) | no |
 | L T044 | Other 'main checkout' wording (tasks.md:13, spec.md:229,360, plan.md:27,40) outside T044's text | minor | review | defer | stage B | no |
-| B r1 | astra REQUEST_CHANGES; opus:spec CONCERNS; opus:fitness CONCERNS (records ~/.local/share/ovh-lz/review/loop-006/reviews/B/) | — | both | accept | T051–T058 added; deferred: allowedVersions/schedule (C5), -commit binding (C6), plan.go:283 0644 provider lock | no |
+| B r1 | review leg 1 REQUEST_CHANGES; strong leg (spec) CONCERNS; strong leg (fitness) CONCERNS (records ~/.local/share/ovh-lz/review/loop-006/reviews/B/) | — | both | accept | T051–T058 added; deferred: allowedVersions/schedule (C5), -commit binding (C6), plan.go:283 0644 provider lock | no |
 | L T051 | Chain selection reads (chain.go:264, apply.go:265) run before the chain's deadline exists | minor | review | defer | spec 005 design (deadline starts at the chain); stage B round 2 judges | no |
 | L T051 | Body cut by the deadline reports 'unreadable answer'; no cancellation test for L7 collector, bootstrap:account, destroy input read | minor | both | defer | stage B round 2 | no |
 | L T051 | Vet with -tags offlinetools in the inner check (tagged build broke while untagged passed) | — | task | carry | lesson; candidate for T053's sweep | no |
@@ -109,7 +109,7 @@ Holistic run at B: T046 (all 20 LZ_TARGETS on adf671f) and every fix task's FINA
 | chore runs-timed | Head run budget 843 s of 900 (targets 589 + outside 14 + 240); same targets took 365 s on 10-19; runner variance can trip RUN_OVER_BUDGET on the next re-record | major | coordinator | carry | stage B round 2: decide parallel job split (keeps budget) vs accepting re-record retries | no |
 | L T057 | Baseline raised or added in the same change passes (no trusted earlier baseline offline) | major | both | decide C | Coordinator 2026-10-20: review is the control; PRs list raised baseline lines. A (CODEOWNERS) is moot with 0-approval self-merge; B (CI merge-base compare) goes to Theme C | no |
 | L T057 | Package-level func literals unscored (gocognit parity); no else-if nesting row; dod scope not all of tools | minor | both | defer | stage B round 2 | no |
-| B r2 | astra REQUEST_CHANGES (B2-001 only); opus:spec CONCERNS; no CRITICAL; every other round-1 finding closed (records ~/.local/share/ovh-lz/review/loop-006/reviews/B/round-2/) | — | both | accept | last round per the two-round rule | no |
+| B r2 | review leg 1 REQUEST_CHANGES (B2-001 only); strong leg (spec) CONCERNS; no CRITICAL; every other round-1 finding closed (records ~/.local/share/ovh-lz/review/loop-006/reviews/B/round-2/) | — | both | accept | last round per the two-round rule | no |
 | B r2 | B2-001: complexity baseline raised in the same change passes | major | both | accept | Coordinator 2026-10-20: review is the control (C); FR-012/T057 stay partial; merge-base compare in ci:foundation goes to Theme C | no |
 | B r2 | complexity check path-selected only for tools/internal/checks, tools/cmd/lz-check | minor | strong | accept | CI-only enforcement, stated in FR-012 (hand-off commit) | no |
 | B r2 | T054 peaks hard-coded; RUN_UNTIMED on a 0 s target; ci:foundation stale after T056/T057 | minor | strong | accept | re-measure edits both; GitHub timestamp resolution; re-record follows | no |
