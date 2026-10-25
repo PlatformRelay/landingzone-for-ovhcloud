@@ -94,3 +94,22 @@ func TestRefuseToolDefect(t *testing.T) {
 		}
 	}
 }
+
+// TestExportRegistryRowIsScratch (pin, T024 e): the configure:export registry row runs the
+// target's scratch mode, and that mode stops when the temporary root cannot be made, so neither a
+// reverted row nor a failed mktemp exports into the repository's .local/configure.
+func TestExportRegistryRowIsScratch(t *testing.T) {
+	var row string
+	for _, l := range strings.Split(string(cfgRead(t, filepath.Join(repoRoot, "tools/harness/checks.yaml"))), "\n") {
+		if strings.Contains(l, `"id": "configure:export"`) {
+			row = l
+		}
+	}
+	if !strings.Contains(row, `"command": "task configure:export LZ_EXPORT_SCRATCH=1 -- `) {
+		t.Errorf("configure:export row %q; want its command in scratch mode", row)
+	}
+	taskfile := string(cfgRead(t, filepath.Join(repoRoot, "Taskfile.yml")))
+	if !strings.Contains(taskfile, `root=$(mktemp -d) || exit 1`) {
+		t.Errorf("Taskfile.yml configure:export: no scratch root that stops when mktemp fails")
+	}
+}

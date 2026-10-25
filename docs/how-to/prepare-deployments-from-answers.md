@@ -17,7 +17,7 @@ references:
   - path: specs/004-guided-preconfiguration/spec.md
     blob: 901d053342e31299c95e5cc44c9febaf914ae723
   - path: Taskfile.yml
-    blob: 3cbca03f2e7bc9cbe27df8c6e2f0ecf648ef12d9
+    blob: 58414aba54e3609446eafa49944e329a9d5954d7
 verified_against: {task: "3.53"}
 last_verified: ccd2634dbde6a4b7378d413cd181f76f94cafc0e
 ---
@@ -232,8 +232,9 @@ mise exec -- task configure:export -- .local/configure/answers.yaml
 
 The export runs the same check, then writes `.local/configure/deployments.yaml` and nothing else.
 The file gets mode 0600. A `.local` or `.local/configure` the export creates gets 0700. An existing
-`.local/configure` loses only its group and other bits: 0755 ends 0700, but 0500 stays 0500 and the
-write then fails with `STAGING_WRITE`. An existing `.local` keeps its mode. After `configure: ok`
+`.local/configure` is checked for group and other bits only: with any of them it is set to 0700
+(0755 and 0555 both end 0700); without them it is left as it is, so 0500 stays 0500 and the write
+then fails with `STAGING_WRITE`. An existing `.local` keeps its mode. After `configure: ok`
 it prints:
 
 ```text
