@@ -1,0 +1,27 @@
+# Loop — 004-guided-preconfiguration
+
+Repo: `PlatformRelay/landingzone-for-ovhcloud` · Branch: `spec-004-refresh` · Base: `origin/main` · Started: 2026-10-25 · Reviewers: two-model (review leg 1 and the strong leg); spec-loop-duo
+Scope: D127. A non-interactive answers file exported to `deployments.yaml`, gated by the decoder behind `stacks:check`; the interactive journey, save/resume, presets and tool checks are deferred stories.
+Budget (review legs, D127 cap about 15): 2 spent on R1; plan.md *Complexity tracking* holds the count (10 planned, 5 reserve).
+
+## Stages
+- [x] 0 orient — spec set refreshed for D127 (`463520a`)
+- [x] R spec-set review — round 1 on `463520a`: review leg 1 REQUEST_CHANGES, strong leg CONCERNS (verdict line REQUEST_CHANGES); no CRITICAL. Every finding was verified against the files and accepted; fixes in the commit after `463520a`. No round 2 unless the coordinator asks (reserve in plan.md).
+- [ ] L task loop (T015–T023)
+- [ ] B branch review
+- [ ] Hand-off
+
+## Triage
+| Stage | Finding (one line) | Sev | Legs | Disposition | Where it went / why | Needs user? |
+|---|---|---|---|---|---|---|
+| R1 | FR-005's full value diff has no acceptance cases for most kinds, and its marks claim more than a manifest-only comparison knows | major | both | fix (cut) | FR-005 cut to row additions and removals; marks read "expected: …", judged against the current manifest assuming the tree matches it; a predicted refusal prints a warning line; value-level diff moved to *Out of scope*; T019 and V004 cases rewritten | no |
+| R1 | T016 asks a JSON Schema to agree with the decoder on every fixture: it cannot see duplicate keys, size or symlinks, and the module has no validator | major | both | fix | `schemas/answers.schema.json` dropped (data-model table and Go types are the definition; *Out of scope* with a trigger); duplicate keys, size and symlinks stay decoder and file-reader tests; T016 checks the shared patterns against `schemas/deployments.schema.json` as `manifest_schema_test.go` does; no new dependency | no |
+| R1 | Red-first contradicts its own tests: structural tests pass on the stub, and a "not implemented" error is no red for a rejection | major / note | both | fix | tasks.md *Red first*: acceptance cases red on the stub; rejection cases proven by a positive control and a named mutant; forbidden-import, value-count and pattern tests marked *pin*, each with a control | no |
+| R1 | The staging write promised "previous file unchanged on any failure", but a directory `fsync` fails after the rename; SC-003 forbade creating the staging directories | major | review leg 1 | fix | FR-007 and data-model: the rename is the publication point; before it `STAGING_WRITE` (old file byte-identical), after it `STAGING_NOT_DURABLE` (new file in place, exit 1); SC-003 admits creating `.local` and `.local/configure`; both failures in T020 | no |
+| R1 | What export does with an existing `.local/configure` looser than 0700 is unspecified; the quickstart's `mkdir -p` makes 0755 | note | strong | fix | chosen: tighten to 0700 (chmod), not refuse, because the quickstart puts the answers file in that directory before the first export; T020 case with a 0700 control; quickstart uses `mkdir -p -m 0700` | no |
+| R1 | Catalogue keyed by code alone, but five decode codes come from both decoders; a derivation defect would blame the answers, so T018 cannot go green | warning | strong | fix | catalogue keyed by (source, code): `configure` and `generated`; every unreachable `generated` code, the shared decode codes included, maps to the one tool-defect entry; FR-004, data-model, research R5 and T018 amended | no |
+| R1 | The catalogue completeness test passes vacuously if the `Code*` parse finds nothing | note | strong | fix | T018 case: zero constants parsed fails; the parse reads both declaration forms (18 today) | no |
+| R1 | "Shared fields use the manifest's patterns" needs unexported patterns from `tools/internal/stacks`; copies drift | warning | strong | fix | FR-001: `configure` keeps its own copies, T016 checks them against `schemas/deployments.schema.json` read as data; drift fails safe at the decoder gate but would show the manifest path, which the test prevents | no |
+| R1 | `configure:check` claims `004/SC-004` (the second reader's record); `configure:export` prints a diff against `stacks/deployments.yaml` without listing it as an input | note | strong | fix in part | `configure:export` lists `stacks/deployments.yaml` as an input. `004/SC-004` stays on `configure:check`, rejected after verification: SC-004's machine part is that `configure:check` accepts the reader's file, T022's Verify runs exactly that, and with the key dropped `task check:specs` fails (`UNCHECKED_REQUIREMENT SC-004`, `UNRELATED_CHECK T022`); no other check verifies SC-004 | no |
+| R1 | The consequence notes omit A17: two refs on one project are refused at bind, so `configure: ok` plus a green `stacks:check` can still fail the bind | note | strong | fix | one-project note extended (FR-006, data-model, US1, T019, V004) | no |
+| R1 | The leg plan uses 10 of about 15 legs and keeps no slack for rework | note | both | fix | plan.md *Complexity tracking*: 2 spent, 8 planned, 5 reserve for one rework round | no |
