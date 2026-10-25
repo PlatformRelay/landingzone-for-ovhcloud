@@ -229,7 +229,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: exempt — docs-only; the file states every limit of FR-010 and names who checks it.
   - Evidence: `evidence/window.md`; initial status `not-run`.
 
-- [ ] T019 [US3] Live: the budget-alert probe with tests/live/probes/budget-alert/ — run by the coordinator under D118
+- [x] T019 [US3] Live: the budget-alert probe with tests/live/probes/budget-alert/ — run by the coordinator under D118 — closed 2026-10-25 as dropped (not started by the cut-off; three pre-baseline runs needed the owner), FR-005 not qualified, evidence: evidence/T019.md
   - Requirements: FR-005, FR-006, FR-007, FR-008, FR-010, SC-002, SC-003; ADRs: 0006, 0024. Depends on: T006, T007, T009, T014, T015, T016 on `main` at a reviewed SHA, each reviewed by an independent leg; T018. Not started after 2026-10-21 23:00; then it is recorded as dropped and FR-005 as not qualified.
   - Verify: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` from the clean live clone: no unreconciled run refused it; `baseline.json` written before the apply; one alert created and read back (id, threshold 1, delay 3600, project); destroy and sweep removed it and the alert listing no longer holds it; leftover check `pass`, or `fail` followed by `--cleanup <run-id>` until clean, with the first record kept under `attempts/1/`; every retry line quoted; the run's cost and the credit left. P2 and P3 recorded as observed or refuted.
   - Evidence: `evidence/T019.md`; initial status `not-run`.
@@ -245,12 +245,12 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: `task check:specs -- specs/007-cleanup-first-live-slice`: `TRACE_OK`; every row is approved retained infrastructure with a removal path and a monthly cost with a source or UNVERIFIED; no blocker is open.
   - Evidence: `evidence/retained.md`; initial status `not-run`.
 
-- [ ] T022 [US5] Live: the final chain over stacks/deployments.yaml — run by the coordinator under D118
+- [x] T022 [US5] Live: the final chain over stacks/deployments.yaml — run by the coordinator under D118 — closed 2026-10-25 as not run (T021 blocker B1 open at the cut-off), evidence: evidence/T022.md
   - Requirements: FR-010, SC-002, SC-003; ADRs: 0024. Depends on: T021 with no open blocker; T006, T007 and T009 on `main` at a reviewed SHA. Finishes with its recovery on 2026-10-22.
   - Verify: before the start, `state/probes/` holds no run directory and the chain's alert listing is compared with T019's baseline (stage B, recorded in `retained.md`); `mise exec -- task live:chain -- --reviewed-sha <sha> all` from the clean live clone: the sandbox's KD-1 binding admitted by FR-003; chain `pass`; leftover check `pass` with any retries quoted from the attempt record; the run's cost and the credit left.
   - Evidence: `evidence/T022.md`; initial status `not-run`.
 
-- [ ] T023 [US5] Verification and cleanup on 2026-10-23, against specs/007-cleanup-first-live-slice/evidence/retained.md — run by the coordinator under D118
+- [ ] T023 [US5] Owner session: verification and cleanup after the window, against specs/007-cleanup-first-live-slice/evidence/retained.md (the coordinator's grant ended 2026-10-24; command sheet in evidence/T023.md)
   - Requirements: FR-010, FR-011, SC-003; ADRs: 0024. Depends on: T022.
   - Verify: for each run of this spec whose leftover check is not clean, `mise exec -- task live:probe -- --reviewed-sha <sha> --cleanup <run-id>` (probe), or the lane's destroy verb (task live:destroy with the reviewed SHA and the instance) for a chain's ephemeral instance, until clean; no run started whose recovery would cross 23:00; `retained.md` re-checked against the last record and the Control Panel, with nothing disposable left; the spec's total spend recorded (voucher and card).
   - Evidence: `evidence/T023.md`; initial status `not-run`.
