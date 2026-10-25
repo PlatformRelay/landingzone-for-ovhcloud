@@ -1,154 +1,148 @@
-# Tasks: Friendly, resumable repository preconfiguration
-Status: planned · Input: spec.md, plan.md, research.md, data-model.md, contracts/checks.md
-Only T014 is closed, for documentation authoring. Runtime targets are planned until their creating tasks land; evidence starts `not-run`.
-Real exports require actual schema/catalogue creators and any dependent joint naming decision.
+# Tasks: 004-guided-preconfiguration — answers file to deployments.yaml
+Status: planned · Created: 2026-10-01 · Refreshed: 2026-10-25 (D127) · Input: spec.md, plan.md, research.md, data-model.md, contracts/checks.md
 
-**Active slice — D29/D61:** T014 is the early written journey extracted from eventual
-T012. T001 and the minimal in-memory T002–T003 portion are authorized subject to actual
-001/T003 safety/capture qualification and fresh review of the exact experiment packet.
-T004–T005 and T010–T011, including synthetic persistence/export, remain deferred until
-real profile schemas exist. T008–T009, T012 and T013 retain their full dependencies.
-Partial prototype evidence does not close a task whose deferred clauses remain untested.
+**History.** T001–T013 of the earlier terminal/save/resume plan are retired unstarted by the D127
+re-scope; their ids are not reused. T014 (the early written journey, D29) stays closed. New tasks
+start at T015. The deferred stories D-US4 to D-US7 of spec.md have no tasks; each gets its own
+tasks only when its trigger fires.
 
-**D113 (2026-10-14): amended and held.** D29's "real profile schemas" now exist:
-`schemas/deployments.schema.json` (v1alpha1), whose shape the strict decoder behind
-`task stacks:check` mirrors, so an export is checked offline and without credentials. The
-export target is that schema (see *Export target and live consequences*). **The D85 wizard gate
-stays closed**: no wizard task starts until the owner lifts it.
+All open boxes are planned. `test:configure` is created by T016, `configure:check` and
+`configure:export` by T020; until then they are not in `Taskfile.yml`.
 
-## Early written journey (independent documentation)
+**Red first.** Every code task (T016–T020) lands as two commits: a red commit with the task's tests
+and a compiling stub whose new functions return "not implemented", where each new test fails for
+its stated reason; then the green commit, which passes the same tests unchanged. A compile error, a
+missing symbol or a missing fixture is not that red. Cases marked *pin* hold from the start. A fresh
+session writes the tests from spec.md, data-model.md and the task text, not from plan.md's
+rationale.
 
-- [x] T014 Write the early journey and align the active/deferred boundary in spec.md, plan.md, tasks.md, contracts/checks.md, quickstart.md and docs/explanation/guided-setup-walkthrough.md — documentation authoring independently approved 2026-10-02
-  - Requirements: FR-001, FR-002, FR-007, FR-008, FR-009, FR-010, SC-001 (prose only); ADRs: 0013, 0023; D29. Depends on: D29 authorization; no runtime task dependency.
-  - Verify: exempt — docs-only. Check local links and whitespace; obtain fresh independent review of both this task-boundary delta and the narrative before checkbox/commit. Cover default provenance/reasons/consequences, explicit versus suggested choices, back/edit invalidation, honest conditional progress and help/cancel/plain/narrow expectations. Label synthetic examples as authored illustrations, not terminal captures; list commands as not implemented. Record next prototype requirements without implementing or executing them. Preserve all deferred controls and T012 dependencies.
-  - Evidence: independent content/boundary review APPROVE on 2026-10-02; eight local links and two anchors resolve, whitespace clean, all 36 requirement clauses and 12 existing runtime verification contracts preserved. No behavioral tests, terminal captures, V001–V005 qualification or full T012 closure. Independent human clarity review remains distinct from runtime checks.
+**Commands.** The entry admits only `lz-offline --candidate <checkout> -- task <target> [-- <path>]`,
+so every offline Verify names a Task target and runs it through the entry, from `$HOME`. The entry's
+snapshot skips `.local/`, so `configure:export` runs host-side (`mise exec -- task …`); it needs no
+credential and no network. No task runs a live target or reads `~/.config/ovh-lz/`.
+Mutation proof is required where a Verify names a guard G29–G32 (`contracts/checks.md`).
+Evidence: the Verify output is summarised in the PR description; `evidence/<TID>.md` in this
+directory points at the PR and names the red and green commits.
 
-## Setup and bounded renderer experiment
+## Early written journey (closed, D29)
 
-- [ ] T001 Owner gate: postponed (D85) with the wizard. Pin the selected renderer after a bounded Huh/Gum comparison in tools/go.mod, mise.toml, tools/harness/configure/limits.yaml and tests/fixtures/configure/terminal/
-  - Requirements: FR-003, FR-005, FR-007, SC-001; ADRs: 0011, 0023. Depends on: 001/T001; actual 001/T003 safety/capture qualification, credential-free preparation, reviewed supply-chain pins and exact experiment execution-safety review. Requirements may be recorded now; no prototype implementation or capture before that qualification in this lane.
-  - Verify: bounded prototype on Linux amd64, recording exact tool/library versions and commands: help/cancel/back/plain/narrow-terminal controls produce usable output; unsupported terminal/platform and missing pin refuse qualification. Set concrete session/answer/output size and helper duration/process-cleanup bounds before implementation; absent/unlimited limits reject. Capture actual pinned outputs, not hand-written terminal fixtures. This is a feasibility experiment, not a shipped second renderer.
-  - Evidence: `.local/evidence/004/t001-renderer.json`; initial status `not-run`.
+- [x] T014 Write the early journey in docs/explanation/guided-setup-walkthrough.md — closed 2026-10-02 (documentation authoring, D29)
+  - Requirements: FR-009; ADRs: 0013, 0023. Depends on: none.
+  - Verify: exempt — docs-only; independent content review of the narrative; links and whitespace checked. It describes the interactive journey, which D127 defers (D-US4); T021 marks it so.
+  - Evidence: `docs/explanation/guided-setup-walkthrough.md`; independent content and boundary review APPROVE on 2026-10-02; no behavioural evidence claimed.
 
-## US1 — Understand, choose and edit (P1)
-Independent checks: V001 and V005; synthetic choices are algorithm fixtures, not supported profiles.
-The active T002–T003 portion is a bounded in-memory controller: defaults/provenance,
-help/consequences, back/edit/invalidation and progress. Save/resume and full terminal/noninteractive
-integration stay owed. Task entrypoints require the actual trusted entry; T003's full closure
-cannot be inferred from a standalone prototype. Each partial result names its exercised clauses.
+## Phase 1: Setup
 
-- [ ] T002 [US1] Owner gate: postponed (D85) with the wizard. Write independent use-case/default/progress/controller tests in tools/internal/configure/flow_test.go and tests/fixtures/configure/choices/
-  - Requirements: FR-001, FR-002, FR-008, FR-009, FR-010, SC-001; ADRs: 0013, 0023. Depends on: T001.
-  - Verify: `go -C tools test ./internal/configure -run TestFlow -count=1`: tests retain valid unusual choices and a compiling controller stub goes behaviorally red for resolved defaults/help/consequences. Exercise explicit X versus suggested X followed by a use-case edit to Y, valid override preservation, invalid dependent answer removal, conditional progress/back/edit and regulated/experimental gates. Unknown/secret fields and unsupported rules reject; remove each guarded clause and confirm red.
-  - Evidence: `.local/evidence/004/t002-flow-red.json`; initial status `not-run`.
+- [ ] T015 Verify the trace of spec 004 in Taskfile.yml and tools/harness/checks.yaml (written in the spec-set commit)
+  - Requirements: FR-010; ADRs: 0008, 0019. Depends on: none.
+  - Verify: `task test:traceability; task test:foundation-ci; task check:specs`: `TestTaskfileTracesEverySpec` green; `task check:specs` with no argument prints `TRACE_OK` for 001, 004, 005, 006 and 007; `ci-source` reads spec 004; `test:foundation-ci`'s and `test:traceability`'s inputs name `specs/004-guided-preconfiguration/tasks.md`. If `ci:foundation`'s recorded runs go stale because a target's inputs changed, record it; re-recording `pipelines/github/foundation-runs.json` is the owner's host step, not this task's.
+  - Evidence: `evidence/T015.md`; initial status `not-run`.
 
-- [ ] T003 [US1] Owner gate: postponed (D85) with the wizard. Implement the shared strict journey controller and versioned choice rules in tools/internal/configure/flow.go, tools/harness/configure/steps.yaml and Taskfile.yml
-  - Requirements: FR-001, FR-002, FR-008, FR-009, FR-010, SC-001; ADRs: 0013, 0023. Depends on: T002.
-  - Verify: `task test:configure-flow` (creates target): T002 controls pass; exact valid-completed/relevant-required count matches independent vectors after conditional edits; explicit/default provenance and visible reasons survive re-resolution. Unknown/duplicate choice keys, opaque missing help and forged qualification refuse. Zero choice/test discovery fails. UI and noninteractive callers share this controller; no renderer-owned decisions.
-  - Evidence: `.local/evidence/004/t003-flow.json`; initial status `not-run`.
+## Phase 2: User Story 1 — A second operator exports a manifest from a short answers file (P1)
+Independent tests: V001, V002, V005. T016 → T017; T020 completes the story after US2 and US3.
 
-## US2 — Leave and return safely (P1)
-Independent check: V002; current validity, not a saved percent, decides the resumed step.
-**Deferred under D29:** T004–T005, even with synthetic data, await real profile schemas
-(met by `schemas/deployments.schema.json`, D113; the D85 wizard gate still holds).
-The controls below remain mandatory when that prerequisite is met.
+- [ ] T016 [US1] Decode answers files strictly in tools/internal/configure/answers.go with schemas/answers.schema.json, tests in tools/internal/configure/answers_test.go and tests/fixtures/answers/, and the `test:configure` target in Taskfile.yml
+  - Requirements: FR-001, FR-008; ADRs: 0005, 0021, 0023. Depends on: T015.
+  - Cases (given / when / then → defect exposed), fixtures as data-model.md *Answers file* fixes them:
+    - given `tests/fixtures/answers/sandbox.yaml` (11 values) and `sandbox-two-tenants.yaml` (15) / when decoded / then every field is read and defaults are not yet applied → exposes a decoder that drops or invents fields.
+    - given each case of `tests/fixtures/answers/invalid/cases.json` (duplicate key at top, row and nested level; case variant `Tenants`; unknown field; missing `org`; `null` `forge`; wrong `apiVersion`; wrong `kind`; tenant name with a capital; region `gra11`; CIDR without prefix; `vlan_id` 4001; `vlan_id` without `cidr`; `project_mode` `order`; a second document; a trailing comment; block YAML) / when decoded / then refused with exactly its code and field path → exposes a lenient decoder (G29).
+    - given 64 KiB of valid answers plus one byte / then `ANSWERS_TOO_LARGE`; given exactly 64 KiB / then decoded → exposes an off-by-one or a missing bound.
+    - given a symlink to the sandbox answers / when read through the package's file reader / then `ANSWERS_NOT_REGULAR` → exposes a followed symlink.
+    - given the schema file / when each valid and invalid fixture is checked against `schemas/answers.schema.json` in the test / then the schema and the decoder agree on accept or refuse for every fixture → exposes schema drift.
+    - given the package's source / when parsed / then it imports no `net`, `net/http` or `os/exec` and calls no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` → exposes a path to the network or the environment.
+  - Verify: `task test:configure` (creates the target: `go -C tools test -count=1 ./internal/configure ./cmd/lz-configure`, the second package added by T020): red commit with every case except the *pin* failing for its reason; green commit passes them; G29 mutants each turn a case red.
+  - Evidence: `evidence/T016.md`; initial status `not-run`.
 
-- [ ] T004 [US2] Owner gate: postponed (D85) with the wizard. Write strict checkpoint/fault/concurrency tests in tools/internal/configure/session_test.go and tests/fixtures/configure/sessions/
-  - Requirements: FR-002, FR-003, FR-004, FR-008, FR-010, SC-002; ADRs: 0023. Depends on: T003 and real profile schemas (D29).
-  - Verify: `go -C tools test ./internal/configure -run TestSession -count=1`: valid save/restart control works and a compiling unsafe persistence stub is behaviorally red. Exercise kill/disk-full mid-write, two writers, lock-owner crash, permissions, root/path symlink swaps, oversized/duplicate/unknown fields, foreign working tree and stale source/schema/prompt contents. Equal explicit/default values must retain different provenance across resume/use-case edit. Same-user valid edits revalidate without an authenticity claim; an old completion flag cannot pass.
-  - Evidence: `.local/evidence/004/t004-session-red.json`; initial status `not-run`.
+- [ ] T017 [US1] Derive the manifest and gate it through the decoder in tools/internal/configure/export.go, tests in tools/internal/configure/export_test.go
+  - Requirements: FR-002, FR-003, SC-001; ADRs: 0005, 0008, 0023. Depends on: T016.
+  - Cases (given / when / then → defect exposed):
+    - given the sandbox answers / when exported / then the bytes are value-equal to `stacks/deployments.yaml` (comments removed, JSON values compared) and pass `stacks.DecodeManifest` → exposes a wrong default, a missing toggle or a row in the wrong order.
+    - given the two-tenant answers / when exported / then value-equal to `tests/fixtures/manifests/sandbox-two-tenants/deployments.yaml` → exposes rows not grouped per tenant.
+    - given the same answers twice / then identical bytes → exposes map-order output.
+    - given `shared_state_project` false / then no `sandbox` block is written; given true / then `{"shared_state_project": true}` → exposes a `false` block the decoder refuses.
+    - given a region without `cidr` / then no `network` key and no network row, the runtime row kept → exposes a network row without a network.
+    - given overrides of `state_endpoint`, `state_ref`, `project_ref`, `project_mode`, `vlan_id` and both toggles / then each appears in the manifest; given a key data-model marks fixed (`scope`, `stage_source`) / then `UNKNOWN_FIELD` from T016's decoder → *pin*; exposes a widened override set.
+    - given answers whose derived manifest the decoder refuses (two regions with VLAN 0; `project_ref` `STATE` without the flag; two environments with one `project_ref`; a region name of 60 letters and a digit) / when exported / then a refusal with the decoder's code and no bytes returned → exposes output after a refusal (G30).
+    - given the value counts of R2 / when the fixtures and manifests are counted / then 11, 15, 41 and 67 → exposes a fixture that grew.
+  - Verify: `task test:configure`: red commit, then green; G30 mutants each turn a case red.
+  - Evidence: `evidence/T017.md`; initial status `not-run`.
 
-- [ ] T005 [US2] Owner gate: postponed (D85) with the wizard. Implement bounded atomic checkpoint storage/revalidation in tools/internal/configure/session.go, schemas/configure-session.schema.json and Taskfile.yml
-  - Requirements: FR-002, FR-003, FR-004, FR-008, FR-010, SC-002; ADRs: 0023. Depends on: T004 and real profile schemas (D29). This task still creates the strict local session schema/decoder; synthetic checkpoint/resume work does not bypass the deferral.
-  - Verify: `task test:configure-resume` (creates target): all T004 positive/rejection/fault controls pass on the qualified filesystem; interruptions retain the last valid checkpoint, writer recovery is bounded and foreign roots reject. Persist provenance and actual content/revision bindings; recompute validity/progress. Writes stay inside owned roots; missing bound config refuses. Clause mutants fail and no signing/authentication subsystem is added.
-  - Evidence: `.local/evidence/004/t005-session.json`; initial status `not-run`.
+## Phase 3: User Story 2 — A mistake is explained in plain words (P1)
+Independent test: V003.
 
-## Trusted read-only prerequisites
+- [ ] T018 [US2] Explain every refusal through the catalogue in tools/internal/configure/messages.go, tests in tools/internal/configure/messages_test.go
+  - Requirements: FR-004, SC-002; ADRs: 0013, 0019. Depends on: T017.
+  - Cases (given / when / then → defect exposed):
+    - given the `Code*` constants parsed from `tools/internal/stacks/manifest.go` and the codes of `tools/internal/configure` / when the catalogue is checked / then each has a plain sentence and a `Next:` action → exposes a missing entry (G32).
+    - given each invalid answers fixture and each refused derivation of T017 / when formatted / then exactly one line `configure: <CODE>: <detail>. <sentence>. Next: <action>` with the expected code and detail → exposes a raw decoder error printed as is.
+    - given an unreachable decoder code / then its sentence says it is a defect of the tool → exposes a message that blames the answers.
+    - given a temporary copy of the catalogue with one entry removed / when the completeness check runs / then it fails naming that code → exposes a check that passes on an empty catalogue.
+  - Verify: `task test:configure`: red commit, then green; G32 mutants each turn a case red.
+  - Evidence: `evidence/T018.md`; initial status `not-run`.
 
-These tasks retain the full resume/final-review/export refresh controls. A later separately
-reviewed local subset can follow the in-memory controller and actual 001/T007 report contract;
-it cannot close deferred integration clauses or enable persistence/export.
+## Phase 4: User Story 3 — The maintainer sees what would change (P2)
+Independent test: V004.
 
-- [ ] T006 Owner gate: postponed (D85) with the wizard. Write helper-boundary/freshness tests in tools/internal/configure/checks_test.go and tests/fixtures/configure/checks/
-  - Requirements: FR-004, FR-005, FR-008; ADRs: 0008, 0021, 0023. Depends on: T003; 001/T007 shared report/evidence contract.
-  - Verify: `go -C tools test ./internal/configure -run TestChecks -count=1`: actual pinned local-tool capture is the valid control; compiling permissive adapter is behaviorally red. Timeout/hanging descendant, missing/mismatched binary, changed tool/content with unchanged Git HEAD, malicious hooks/answers/session commands, secret input and network attempts must refuse without outside-root writes. Refresh on resume/final review/export; remove each deadline, origin or freshness guard and confirm red.
-  - Evidence: `.local/evidence/004/t006-checks-red.json`; initial status `not-run`.
+- [ ] T019 [US3] Print the dry-run diff and the consequence notes from tools/internal/configure/diff.go and tools/internal/configure/notes.go, tests in tools/internal/configure/diff_test.go and tools/internal/configure/notes_test.go
+  - Requirements: FR-005, FR-006; ADRs: 0013, 0023. Depends on: T018.
+  - Cases (given / when / then → defect exposed):
+    - given the sandbox manifest as current and the two-tenant export / then four `+ row` lines for `lab`, each `created by stacks:reconcile`, then `diff: 4 added, 0 removed, 0 changed, …` → exposes a row-blind diff.
+    - given the reverse / then four `- row` lines, each `refused by stacks:reconcile (UNSUPPORTED_CHANGE)` → exposes removals presented as harmless.
+    - given a changed CIDR of `demo/dev/GRA11` / then one value line and no row line → exposes a value change shown as a row change.
+    - given no current manifest / then every row `+`; given a current manifest that does not decode / then `CURRENT_MANIFEST_INVALID` and no diff → exposes a diff against garbage.
+    - given the same inputs twice / then identical output → exposes unordered output.
+    - given the two-tenant export / then the notes in data-model order: the `account.env` names `LZ_PROJECT_ID_STATE`, `LZ_PROJECT_ID_DEMO_DEV`, `LZ_PROJECT_ID_LAB_DEV`, no value; the one-project note; the KD-1 note; the mode note naming both environments `reference`; the VLAN note; the `org` note; the Object Lock note → exposes a missing or misordered note.
+    - given answers without the flag and without any `cidr` / then no KD-1 note and no VLAN note → exposes notes printed regardless of their trigger.
+  - Verify: `task test:configure`: red commit, then green.
+  - Evidence: `evidence/T019.md`; initial status `not-run`.
 
-- [ ] T007 Owner gate: postponed (D85) with the wizard. Implement bounded trusted read-only helpers in tools/internal/configure/checks.go, tools/harness/configure/checks.yaml and Taskfile.yml
-  - Requirements: FR-004, FR-005, FR-008; ADRs: 0019, 0021, 0023. Depends on: T006.
-  - Verify: `task test:configure-checks` (creates target): T006 controls pass, including process-tree cleanup and actual source/tool binding refresh; missing observations report blocked, never pass. Checks come from the trusted pinned implementation, not executable repo/session/answer values. Evidence uses the shared envelope; zero helper discovery and unknown limits reject. No cloud credentials or network are required.
-  - Evidence: `.local/evidence/004/t007-checks.json`; initial status `not-run`.
+## Phase 5: User Story 1 — the command (P1)
 
-## Real terminal integration
+- [ ] T020 [US1] Add the lz-configure command with its staging write in tools/cmd/lz-configure/main.go, tests in tools/cmd/lz-configure/main_test.go, and the `configure:check` and `configure:export` targets in Taskfile.yml
+  - Requirements: FR-005, FR-006, FR-007, FR-008, SC-003; ADRs: 0021, 0023. Depends on: T019.
+  - Cases (given / when / then → defect exposed), each in a temporary root holding a copy of `stacks/deployments.yaml`, with an inventory of every path before and after:
+    - given the two-tenant answers / when `check` runs / then the diff, the notes and `configure: ok`, exit 0, and the inventory unchanged → exposes a write during `check` (G31).
+    - given the same / when `export` runs / then only `.local/configure/deployments.yaml` is new (file 0600, directory 0700), value-equal to the two-tenant fixture, and the output ends with the copy step and `task stacks:reconcile`, `task stacks:generate`, `task stacks:check` → exposes a write elsewhere or missing next steps.
+    - given a symlinked `.local`, `.local/configure` or target / when `export` runs / then `STAGING_SYMLINK`, nothing written → exposes a followed symlink (G31).
+    - given an existing staging file and an injected rename failure / when `export` runs / then `STAGING_WRITE` and the old file byte-identical, no temporary file left → exposes an in-place write (G31).
+    - given an invalid answers fixture / when `check` or `export` runs / then one refusal line, exit 1, the inventory unchanged → exposes output after a refusal.
+    - given a missing argument or an unknown verb / then usage, exit 2 → *pin* once the stub parses flags.
+    - given the command's source / then it imports no `net`, `net/http` or `os/exec` and calls no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` → exposes a path to the network or the environment.
+  - Verify: `task test:configure; task configure:check -- tests/fixtures/answers/sandbox.yaml` through the entry (diff `none`, notes, `configure: ok`), then host-side `mise exec -- task configure:export -- tests/fixtures/answers/sandbox.yaml` (writes the staging file only; remove it after): red commit, then green; G31 mutants each turn a case red.
+  - Evidence: `evidence/T020.md`; initial status `not-run`.
 
-- [ ] T008 [US1] Owner gate: postponed (D85) with the wizard. Write selected-renderer PTY/plain/controller-equivalence tests in tools/internal/configure/terminal_test.go and tests/fixtures/configure/terminal/
-  - Requirements: FR-001, FR-002, FR-007, FR-009, FR-010, SC-001; ADRs: 0013, 0023. Depends on: T005, T007.
-  - Verify: `go -C tools test ./internal/configure -run TestTerminal -count=1`: use actual T001 pinned renderer captures and input events; valid keyboard/plain controller output is retained. A compiling renderer that loses cancel/help, skips validation or invents progress is behaviorally red. Exercise no TTY, narrow terminal, back/edit/save/resume and identical noninteractive effective data; unsupported matrix stays unqualified.
-  - Evidence: `.local/evidence/004/t008-terminal-red.json`; initial status `not-run`.
+## Phase 6: Documentation and validation
 
-- [ ] T009 [US1] Owner gate: postponed (D85) with the wizard. Implement the friendly terminal adapter and Task entrypoints in tools/cmd/lz-configure/main.go, tools/internal/configure/terminal.go and Taskfile.yml
-  - Requirements: FR-001, FR-002, FR-007, FR-009, FR-010, SC-001; ADRs: 0013, 0019, 0023. Depends on: T008.
-  - Verify: `task test:configure-flow; task test:configure-resume; task test:configure-checks; task verify:configure-journey` (creates configure, configure:resume and verify:configure-journey): T008 and journey controls pass; show explained defaults/provenance/consequences, accurate progress and next actions. An independent human performs the tone/clarity rubric; missing review/capture reports review-required/blocked. At this task, review/export can remain explicitly unavailable until T011; never show a fake completed export.
-  - Evidence: `.local/evidence/004/t009-journey.json`; initial status `not-run`.
-  - Human rubric source: plan.md's Verification strategy and ADR-0023's Friendly flow and consequences, plus SC-001; T012 expands these into the finished how-to after export integration, without gating this earlier walkthrough.
+- [ ] T021 Write the second-operator how-to docs/how-to/prepare-deployments-from-answers.md and align docs/explanation/guided-setup-walkthrough.md, docs/README.md, schemas/README.md and specs/README.md
+  - Requirements: FR-009; ADRs: 0013, 0023. Depends on: T020.
+  - Scope: the how-to starts from a commented copy of `tests/fixtures/answers/sandbox.yaml`, adds a tenant, shows a refusal and its fix, the diff, the notes, the export, the copy and the three stack commands, and ends in `task configure:check`. It carries spec.md's "makes easier" and "does not help" lists. The walkthrough states that the interactive journey is deferred (D-US4) and points to the how-to.
+  - Verify: `task docs:check`: green, with the new page's header and references current.
+  - Evidence: `evidence/T021.md`; initial status `not-run`.
 
-## US3 — Review and export a draft (P2)
-Independent checks: V003–V005; export is not permission to apply the resulting data.
-**Deferred under D29:** both synthetic and real export implementations await real profile
-schemas (met by `schemas/deployments.schema.json`, D113; the D85 wizard gate still holds). The complete publication, review-binding and outside-root controls remain owed.
+- [ ] T022 [US1] Owner gate: a second reader, given only docs/how-to/prepare-deployments-from-answers.md, writes a two-tenant answers file and records the attempt in specs/004-guided-preconfiguration/evidence/T022.md
+  - Requirements: SC-004; ADRs: 0013, 0023. Depends on: T021; a reader who has not edited `stacks/deployments.yaml` (the owner names one, or records that none is available and the task closes `blocked`).
+  - Verify: `task configure:check -- <answers>` on the reader's file, host-side: `configure: ok`; the record names the time taken, each refusal met and whether its message was enough, and each step that was harder than editing the manifest would have been. The record decides D-US4's first trigger (spec.md).
+  - Evidence: `evidence/T022.md`; initial status `not-run`.
 
-- [ ] T010 [US3] Owner gate: postponed (D85) with the wizard. Write reviewed-bundle/export safety tests in tools/internal/configure/export_test.go and tests/fixtures/configure/bundles/
-  - Requirements: FR-004, FR-006, FR-008, SC-002; ADRs: 0003, 0005, 0021, 0023. Depends on: T005, T007 and real profile schemas (D29).
-  - Verify: `go -C tools test ./internal/configure -run TestExport -count=1`: valid reviewed fixture bundle is a control; compiling overwrite/permissive exporter is behaviorally red. Exercise unreviewed/invalid/unknown data, edit after review, changed tools/dirty source, incomplete/crashed publication, raced/symlinked destination and modified retry bundle. Exact verified retry is idempotent; volatile observation times cannot change config output. Inventory every path outside owned roots, including ignored files; existing configuration and credentials remain byte-for-byte unchanged.
-  - Evidence: `.local/evidence/004/t010-export-red.json`; initial status `not-run`.
+## Final phase: Polish
 
-- [ ] T011 [US3] Owner gate: postponed (D85) with the wizard. Implement strict deterministic draft export in tools/internal/configure/export.go, tools/internal/configure/terminal.go and Taskfile.yml
-  - Requirements: FR-004, FR-006, FR-008, SC-002; ADRs: 0003, 0005, 0021, 0023. Depends on: T010, T009 and real profile schemas for all export work, including synthetic (D29). Real-export integration targets spec 005's `schemas/deployments.schema.json` and `modules/naming` (D113, replacing the 001/T016 dependency), validated by `task stacks:check` on a scratch copy; any dependent joint naming choice remains. Synthetic results never qualify real export. D29's gate for persistence is met by the same schema (D113); the D85 wizard gate still holds.
-  - Verify: `task test:configure-export` (creates target): all T010 controls pass; confirmation binds exact effective draft/source digests and invalidates on change. Refresh helpers, show deterministic diff/blockers, atomically publish a complete schema-valid staging bundle with manifest and idempotent verified retry. No writes outside owned roots, cloud calls, secret collection, apply/commit/merge/procurement. Every guarded clause has red mutation proof; partial/missing discovery never passes.
-  - Evidence: `.local/evidence/004/t011-export.json`; initial status `not-run`.
+- [ ] T023 Record spec 004's state in specs/README.md and specs/004-guided-preconfiguration/spec.md and run the exit checks
+  - Requirements: FR-010; ADRs: 0008, 0019. Depends on: T022 closed or recorded `blocked`.
+  - Verify: `task check:specs; task test:traceability; task test:foundation-ci`: green, with `TRACE_OK` for 004; the spec's status and the specs table row say what was built, what T022 found and which deferred story, if any, fired.
+  - Evidence: `evidence/T023.md`; initial status `not-run`.
 
-## Guide and final independent walkthrough
+## Dependencies & execution order
+- T015 → T016 → T017 → T018 → T019 → T020 → T021 → T022 → T023. The code tasks share
+  `tools/internal/configure` and `test:configure`, so they run in order; nothing is pushed inside a
+  red window.
+- External gate: T022 needs a second reader (owner).
+- MVP boundary: T016, T017 and T020 (an export that passes the decoder and lands in staging). T018
+  and T019 carry the value for a second operator; T022 measures it.
 
-- [ ] T012 Owner gate: postponed (D85) with the wizard. Complete the final setup/resume/review/export guide and human clarity rubric in docs/explanation/guided-setup-walkthrough.md
-  - Requirements: FR-001, FR-002, FR-006, FR-009, FR-010, SC-001; ADRs: 0013, 0023. Depends on: T009, T011.
-  - Verify: exempt — docs-only prose/rubric authoring. Extend T014's early narrative using the implemented T009/T011 behavior and qualified captures; check instructions and recovery wording against that behavior. T014 does not satisfy or close this task. Any added executable example remains behavioral work with its own mapped target.
-  - Evidence: docs content review; no invented behavioral-test evidence required.
-
-- [ ] T013 Owner gate: postponed (D85) with the wizard. Aggregate V001–V005 and inspect independent journey/evidence in tools/internal/configure/qualification_test.go and Taskfile.yml
-  - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, SC-001, SC-002; ADRs: 0008, 0013, 0019, 0021, 0023. Depends on: T009, T011, T012.
-  - Verify: `task verify:configure` (creates target): run all four test:configure-* targets, verify:configure-journey and exact supported-terminal captures; independently perform every V001–V005 positive/rejection/interruption case and human rubric. Seed missing capture/human review/command/dependency evidence and zero discovery: aggregate refuses qualification; behavioral mutants fail. Distinguish fixture qualification from real export readiness and retain actual-tool private evidence. All outside-root inventories remain unchanged.
-  - Aggregate ADR rationale: 0008 verification; 0013 clarity; 0019 diagnostics; 0021 helper/export boundaries; 0023 journey/resume.
-  - Evidence: `.local/evidence/004/t013-qualification.json`; initial status `not-run`.
-
-## Planned command creators
-
-| Task target | Creating task |
-| --- | --- |
-| `task test:configure-flow` | T003 |
-| `task test:configure-resume` | T005 |
-| `task test:configure-checks` | T007 |
-| `task configure` | T009 |
-| `task configure:resume` | T009 |
-| `task verify:configure-journey` | T009 |
-| `task test:configure-export` | T011 |
-| `task verify:configure` | T013 |
-
-## Dependencies, parallel work and MVP
-T014 proceeds independently as prose. Actual 001/T003 safety/capture qualification + reviewed
-experiment packet → T001 → bounded in-memory T002 → T003 portion.
-Real profile schemas + T003 → checkpoint T004→T005; T003 + actual 001/T007 → helper T006→T007.
-These later paths use separate files with fixed common contracts; full helper refresh integration
-is still owed. Real profile schemas also gate T010–T011, including synthetic export.
-T005+T007 → T008→T009 and T010. T009+T010 → T011 → T012 → T013 (T013 also needs T009).
-No task authorizes cloud work. Phase001 cross-feature edges are explicit above and acyclic.
-
-The first useful increment is the T014 written journey, followed by a qualified bounded renderer
-experiment and in-memory choices with explained defaults and progress. Synthetic choices stay
-labelled; save/resume and all export remain deferred until real profile schemas exist.
-Actual repository-ready configuration additionally needs its real schema/catalogue creators.
-Support only the measured renderer/platform first. No second renderer, portal or broad CLI.
+## Parallel opportunities
+- None among the code tasks (one package, one target). T021's prose can be drafted while T020 is in
+  review.
 
 ## Completion
-All requirements and V001–V005 need evidence, clause red/green proof and independent human review
-for the claimed scope. Missing real-data, platform, pin or human evidence stays blocked/not-run.
-Documentation authoring is exempt; executable examples, schemas, controllers and checks are not.
+V001–V007 evidence green, or T022 recorded `blocked` with its reason; G29–G32 each with a killed
+mutant; the deferred stories untouched unless their trigger fired, which T023 records.

@@ -1,30 +1,35 @@
-# Read the early journey
-No setup helper exists yet. Start with the [written walkthrough](../../docs/explanation/guided-setup-walkthrough.md):
-choose a use case, inspect a suggestion's source/reason/consequence, compare an explicit override,
-then follow an earlier edit and the resulting progress change. Its examples are synthetic authored
-illustrations, not captured output or qualified profiles. T014 delivers prose only.
+# Quickstart: Answers file to deployments.yaml
 
-## Next bounded prototype (not runnable yet)
-T001's renderer comparison and the in-memory T002–T003 portion wait for actual 001/T003
-safety/capture qualification and review of the exact bounded experiment packet. See the
-[plan](plan.md#next-prototype-packet-requirements-only) for pins, limits, matrix and controls.
-No public launch command is implemented. Cancel will discard in-memory answers; save/resume
-and even synthetic export remain deferred until real profile schemas exist.
+**Planned, not runnable yet.** `test:configure` arrives with T016, `configure:check` and
+`configure:export` with T020. Until then, edit `stacks/deployments.yaml` by hand as
+[run the first slice](../../docs/how-to/run-the-first-slice.md) describes.
 
-## Eventual validation journey (not implemented)
-The [command contract](contracts/checks.md) lists the future targets and their creators.
-The sequence below requires the full terminal, persistence, helper and export work. It is
-not a current quickstart and is not made runnable by completing T014.
+## Offline (any contributor, no credentials, no network)
+Through the offline entry, from `$HOME`:
 
-After the tasks create their targets: `task configure` → choose a convention → inspect why/default/
-consequences → back/edit → save-and-exit → `task configure:resume` → inspect changed dependencies
-and local prerequisite findings → review the deterministic diff → export a local draft bundle.
-Configuration files and cloud resources remain unchanged; only owned local checkpoint/staging/
-evidence paths in data-model.md may change. Inventory everything outside those roots.
+```sh
+lz-offline --candidate <checkout> -- task test:configure
+lz-offline --candidate <checkout> -- task configure:check -- tests/fixtures/answers/sandbox.yaml
+lz-offline --candidate <checkout> -- task check:specs -- specs/004-guided-preconfiguration
+```
 
-Run all V001–V005 targets, inspect private evidence and perform the documented human walkthrough.
-Repeat with malformed/foreign sessions, write interruption, stale schemas, missing tools, invalid
-choices and unreviewed export. Confirm each fails for its intended behavior while valid unusual
-choices still work. This is future verification, not evidence collected by T014. T012 remains
-open until its implemented terminal/export dependencies support the final guide. No docs-only
-behavioral test is required for this prose guide.
+## An operator's own answers file (host-side, still no credentials)
+The entry does not see `.local/`, so run these on the host:
+
+```sh
+mkdir -p .local/configure
+cp tests/fixtures/answers/sandbox.yaml .local/configure/answers.yaml   # then edit it
+mise exec -- task configure:check -- .local/configure/answers.yaml     # diff, notes, or a plain refusal; writes nothing
+mise exec -- task configure:export -- .local/configure/answers.yaml    # writes .local/configure/deployments.yaml only
+cp .local/configure/deployments.yaml stacks/deployments.yaml           # your reviewed step
+mise exec -- task stacks:reconcile
+mise exec -- task stacks:generate
+lz-offline --candidate <checkout> -- task stacks:check                  # STACKS_CHECK_OK
+```
+
+A refusal reads `configure: <CODE>: <where>. <what it means>. Next: <what to do>`. The notes list
+the `LZ_PROJECT_ID_<REF>` names your `account.env` needs; the command never reads that file.
+
+## What changes for the owner
+One choice is open, with a default: the export writes only the staging file, not
+`stacks/deployments.yaml` (spec *Clarifications*). T022 needs a second reader.

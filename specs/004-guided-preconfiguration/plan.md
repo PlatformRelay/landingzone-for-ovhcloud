@@ -1,89 +1,98 @@
-# Implementation Plan: Guided preconfiguration
-Date: 2026-10-01 · Spec: [spec.md](spec.md) · Status: draft, amended and held 2026-10-14 (D113)
-
-**D113 (2026-10-14): amended and held.** D29's "real profile schemas" now exist:
-`schemas/deployments.schema.json` (v1alpha1), whose shape the strict decoder behind
-`task stacks:check` mirrors, so an export is checked offline and without credentials. The
-export target is that schema (see *Export target and live consequences*). **The D85 wizard gate
-stays closed**: no wizard task starts until the owner lifts it.
-
-**Active slice — D29:** Deliver T014's early written journey independently. Prepare the
-requirements for T001's bounded renderer experiment and the in-memory T002–T003 portion;
-implementation/execution waits for actual 001/T003 safety/capture qualification and exact
-experiment review. Persistence/export, including synthetic versions, wait for real profile
-schemas. D61 does not waive this deferral. T012 remains the final guide after T009/T011.
+# Implementation Plan: Answers file to deployments.yaml
+Branch: worktree of `main` per task · Date: 2026-10-01 · Refreshed: 2026-10-25 (D127) · Spec: [spec.md](spec.md) · Status: draft
 
 ## Summary
-Build one setup helper behind Task with a pure journey controller, strict versioned session,
-bounded read-only checks and reviewed draft export. Keep renderer separate from decisions/state.
-Versioned use-case rules propose explained defaults; derive progress from the current relevant
-validated steps, including changes after back/edit and resume.
+Turn a short answers file into a complete `stacks/deployments.yaml` with one credential-free Go
+command. The command decodes the answers strictly, derives every default and instance row, passes
+the result through the decoder behind `stacks:check`, explains any refusal in plain words, shows a
+dry-run diff against today's manifest and the consequences of the choices, and writes the result
+to local staging. The operator copies it and runs the existing stack commands. The interactive
+journey, save/resume, presets and tool checks are deferred stories with triggers (spec). Decisions
+and measurements: [research.md](research.md).
 
-## Technical Context
-Go under the `tools/` module created by 001/T001; Huh library versus Gum subprocess prototype; exact pins
-chosen before captures. Linux amd64 first, any other terminal/OS explicitly qualified later.
-Local filesystem only, no secrets/telemetry/cloud cost. Helper timeouts and session size bounds
-are explicit reviewed configuration; no arbitrary commands from repository/session/answers.
+## Technical context
+- **Language/version**: Go 1.27.1 (tools module, vendored; `tools/go.mod` `go 1.27.0`), Task
+  3.53.1 (`mise.toml`). No new dependency; strict decoding reuses `checks.DecodeStrict` and
+  `stacks.DecodeManifest`.
+- **Runtime**: the offline entry (`lz-offline`) for `test:configure` and for `configure:check` on fixtures; host-side,
+  credential-free runs of `configure:check` and `configure:export` on an operator's file under
+  `.local/`.
+- **Testing**: Go tests against fixtures under `tests/fixtures/answers/` and the committed manifests;
+  a temporary root per test for writes, with an inventory before and after; a source test for
+  forbidden imports and calls.
+- **Cost**: none. No cloud call, no credential, no live run.
+- **Constraints**: agents never read `~/.config/ovh-lz/`; no live target is part of this spec.
 
-## Constitution Check
-I: renderer/filesystem premises observed by bounded controls before claims. II–III: every FR/SC
-maps to V001–V005 and every non-doc task has tests, expected outcomes and evidence. IV–V: setup
-has no apply authority; sessions are untrusted data; persistence/export are guarded. VI: one helper,
-no portal or broad CLI. VII: consequences and next actions tested, with a human tone review.
-VIII: renderer comparison and the naming module final field names are explicit gates, not assumed decisions.
+## Constitution check
+Before research and after design.
+
+| Principle | Status | Note |
+| --- | --- | --- |
+| I Evidence, UNVERIFIED | pass | P1 read in code (believed, probed by T017); P2 cites the kb mirror and is UNVERIFIED beyond `gra`; P3 (the value for a second operator) is UNVERIFIED until T022 |
+| II Traceability | pass | `004/` registry keys; 004 in the `check:specs` default and in `ci-source` (spec-set commit; T015 verifies); every planned target names its creator (T016, T020) |
+| III Tests first | pass | every code task closes on a red commit (tests failing for their stated reason against a compiling stub) before its green commit; cases are given/when/then with the defect each exposes |
+| III Mutation proof | pass (scoped) | guards G29–G32 (`contracts/checks.md`) |
+| IV One owner, explicit authority | pass | the command derives a draft; `stacks/deployments.yaml` stays platform-controlled (ADR-0005); the copy is the operator's reviewed action (ADR-0023) |
+| V Fail closed | pass | a refused manifest is never printed or written; a failed write keeps the previous staging file; unreachable codes report a defect, never success |
+| V Cost | pass | no cloud work |
+| VI Smallest increment | pass | D127's simplest form; four layers deferred with triggers; about 15 review legs |
+| VII Planned vs implemented; approachable operations | pass | targets planned until T016/T020; plain messages with next actions; the how-to states where the tool does not help |
+| VIII Decisions | pass | D127 with the dissent kept in spec *Why and scope* and research R2; one open owner choice with a default |
 
 ## Alternatives and decisions
-Gum is quick for prompt prototypes; Go/Huh fits the controller/state language. Compare real cancel,
-description, plain-mode and narrow-terminal behavior before choosing the renderer. No general CLI
-framework or daemon. Keep naming preference data independent of the unresolved naming call API.
+- **Placement** (R1): new `configure` package and `lz-configure` (chosen) vs a verb of `lz-stacks`.
+- **Rows** (R3): derived by one rule (chosen) vs one answer per row.
+- **Gate** (R4): `DecodeManifest` in-process, then `stacks:check` after the copy (chosen) vs calling
+  `stacks:check` on staging (it judges the candidate tree).
+- **Messages** (R5): catalogue keyed by code with a completeness test (chosen) vs answers-level copies
+  of the cross-row rules (drift).
+- **Format** (R6): flow YAML (chosen) vs block YAML (a dependency decision).
+- **Destination** (R7): staging (default) vs in place (open owner choice).
+- Cheapest discriminating experiment for P3: T022, one second reader with the how-to, no code beyond
+  US1.
 
-## Project Structure
-Paths in spec.md; model in data-model.md; command/interaction contracts in contracts/checks.md;
-quickstart.md is a planned verification guide, not a claim the executable exists.
+## Project structure
+```
+specs/004-guided-preconfiguration/
+  spec.md  plan.md  research.md  data-model.md  quickstart.md  tasks.md
+  contracts/checks.md  checklists/requirements.md  evidence/ (created by tasks)
+schemas/answers.schema.json                                 (new)
+tools/internal/configure/  answers.go export.go messages.go diff.go notes.go (+ tests)   (new)
+tools/cmd/lz-configure/    main.go main_test.go             (new)
+tests/fixtures/answers/    sandbox.yaml sandbox-two-tenants.yaml invalid/ (new)
+docs/how-to/prepare-deployments-from-answers.md            (new)
+```
 
 ## Delivery phases
-T014 written journey → independent task-boundary and prose review. This branch has no runtime
-dependency and cannot close T012 or qualify V001–V005.
-
-After actual 001/T003 safety/capture qualification and exact experiment review:
-T001 bounded renderer comparison → T002–T003 in-memory choice/controller red/green.
-Keep terminal observations scoped to the measured renderer/platform. An in-memory cancel
-discards answers; it must not imply a checkpoint or resume feature.
-
-Later: real profile schemas → checkpoint red/green; trusted helper work also needs the
-actual 001/T007 report contract. Checkpoint + helper integration → full terminal integration →
-export red/green with real schema/catalogue/naming creators → final T012 guide → T013 aggregate.
-The full controls remain in tasks.md; prototype completion never closes their deferred clauses.
-
-## Next prototype packet (requirements only)
-After the safety prerequisite is available, fix exact Huh/Gum package/library pins and
-Linux amd64 terminal dimensions/input events. Review finite elapsed-time, process/descendant,
-output and answer limits, source/input/build/destination/command bindings and capture admission
-before running the experiment. Measure help, cancel, back, plain/no-TTY and narrow behavior;
-retain unsupported-platform and wrong/missing-pin refusals and actual pinned captures.
-No mock terminal output can supply qualification. Record missing evidence as not-run.
-
-For the in-memory controller, prepare independent vectors for explicit versus suggested equal
-values, changed use-case defaults, valid override retention, dependent invalidation, conditional
-counts and unsupported/regulated gates. Use tests first against a compiling subject after the
-safety gate; code, terminal captures and Task integration are not part of T014. Task integration
-also requires the real trusted entry. No save/resume, synthetic exporter or second product CLI.
+1. Setup: T015 (trace of spec 004, written in the spec-set commit).
+2. US1 decode and export: T016 (answers decoder, creates `test:configure`), T017 (derivation, gate,
+   round trip).
+3. US2 plain messages: T018.
+4. US3 diff and notes: T019.
+5. US1 command: T020 (`lz-configure`, staging write, `configure:check`, `configure:export`).
+6. Docs: T021 (how-to, walkthrough, README rows). Validation: T022 (second reader, owner-gated).
+7. Polish: T023 (state of the spec, exit checks).
 
 ## Verification strategy
-Use independent synthetic choice vectors and actual pinned terminal/tool captures. Exercise every
-guarded clause with a valid unusual case and behavioral mutation; malformed output/tool absence
-does not qualify as red. Check no repository writes/cloud calls by observing controlled adapters
-and filesystem inventory. Fault atomic writes and lock contention; replay stale/corrupt sessions.
-Human review checks warm concise language, understandable consequences and safe recovery wording;
-automation never supplies that review. Documentation-only guide authoring is exempt.
+V001–V007 in spec.md and `contracts/checks.md`. Offline: `task test:configure`, `task check:specs`,
+`task test:traceability`, `task test:foundation-ci`, `task docs:check`, each through the entry;
+`task configure:check -- tests/fixtures/answers/sandbox.yaml` through the entry; `configure:export`
+host-side on a fixture. A code task's red commit is a behavioural failure against a stub whose new
+functions return "not implemented"; its green commit passes the same tests unchanged; G29–G32 each
+kill a mutant. The round trip (T017) compares values, not bytes and not `Manifest` (research R4).
+Docs tasks run `task docs:check`; T022's record is reviewed by hand.
 
-## Dependencies and stop conditions
-Within-feature DAG is in tasks.md. Phase 001 supplies pinned tools, reporting and strict schema
-integration; real profile/catalogue data is another creator gate. Only the authorized in-memory
-choice fixtures can precede that gate; synthetic persistence/export stays deferred. No applying the draft bundle,
-cloud credential collection or deployment. The selected scalar naming interface is respected; its final field names await diagnosis.
+## Dependencies and live change ordering
+- Spec 005's decoder and schema and spec 007's two-tenant fixture are on `main`.
+- T015 first. T016 → T017 → T018 → T019 → T020 (T018–T020 share `tools/internal/configure` and its
+  target; they run in order). T020 → T021 → T022 (owner-gated) → T023.
+- No live change. No timebox or cleanup authority is needed. Claim withdrawn on refutation: P1
+  refuted (a value-equal export does not reconcile to the same stacks) → FR-003's gate claim is
+  withdrawn and the copy step needs its own check; P3 refuted (T022 finds the answers file no
+  easier) → D-US4 and later stay closed and the spec records it.
 
 ## Complexity tracking
-Count one controller, session format, renderer and export format. Reuse existing validation/report
-contracts; never merge terminal events with authorization decisions. Export a draft staging bundle
-rather than introducing partial multi-file repository writes and a migration engine.
+One package, one command, one schema, two Task targets plus a test target, three fixture sets. No
+new dependency, no state beyond one staging file, no authority. The review budget (D127: about 15
+strong legs) is the binding constraint: two legs for the spec set, about one per code task (T016–T020),
+one for the docs and two for the branch. Deferred: D-US4 to D-US7 and the in-place write (spec).
