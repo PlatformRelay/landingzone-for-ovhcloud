@@ -272,6 +272,12 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: exempt — docs-only; `docs/how-to/run-the-first-slice.md` says plan-matching is the alert sweep's only ownership evidence (no name or tag on an alert) and that a cleanup must not run beside a live probe run; `task docs:check` green.
   - Evidence: `evidence/T028.md`; initial status `not-run`.
 
+- [ ] T029 [US3] Follow-up of stage B (D131): one run lock shared by probe start and `--cleanup`, and retire of an empty claimed run directory, in tools/internal/live/runner.go and tools/internal/live/files.go
+  - Requirements: FR-006, FR-007; ADRs: 0008, 0024. Depends on: T027. Offline only; no live run.
+  - Scope: (a) `Probe.Start` and `Probe.Cleanup` take the same exclusive per-run lock (a lock file in the run's directory, created exclusively, released on every exit path; a stale lock from a dead process is recognised by its recorded pid and start time, never by age alone), so a cleanup refuses while a start of the same run id holds it, and the reverse; (b) a run directory that holds nothing but the claim (no `probe.env`, no state, no baseline) is retired by `--cleanup <run-id>` without `--accept-lost-baseline`, since nothing can exist in OVHcloud before `probe.env` is written; the start refusal's text names that cleanup instead of manual removal.
+  - Verify: `task test:live-lane`: a cleanup beside a held start lock is refused naming the run, and a start beside a held cleanup lock likewise; a lock left by a dead process is taken over, one held by a live process is not; an empty claim is retired by plain `--cleanup` and a claim with any other file is not; the unreconciled-run refusal names the cleanup. Mutation proof on the changed lines.
+  - Evidence: `evidence/T029.md`; initial status `not-run`.
+
 ## Final phase: Polish
 
 - [x] T024 Record spec 007's state in specs/README.md and specs/007-cleanup-first-live-slice/spec.md — closed 2026-10-25 (T023 still the owner's), evidence: evidence/T024.md
