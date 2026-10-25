@@ -279,7 +279,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: exempt — docs-only; the specs table row states what ran live, T001's outcome and what approved infrastructure stays; `task docs:check` green.
   - Evidence: `evidence/T024.md`; initial status `not-run`.
 
-- [ ] T025 Run the exit checks of tools/harness/checks.yaml for spec 007
+- [x] T025 Run the exit checks of tools/harness/checks.yaml for spec 007 — closed 2026-10-25, evidence: evidence/T025.md
   - Requirements: FR-012; ADRs: 0008, 0019. Depends on: T024.
   - Verify: `task check:specs; task test:traceability; task test:foundation-ci`: green, with `TRACE_OK` for 007; V001–V005 evidence linked from their tasks.
   - Evidence: `evidence/T025.md`; initial status `not-run`.
