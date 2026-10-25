@@ -50,6 +50,10 @@ None yet. A tutorial comes when someone other than the maintainer can run a slic
   enforces each.
 - [Upstream reference map](reference/upstream-reference-map.md) — what OVHcloud's
   public-cloud-examples offers this project.
+- [Test costs](reference/test-costs.md) — what the live test runs have cost, as recorded, and
+  what is still unread.
+- [Provider gaps](reference/provider-gaps.md) — what the `ovh/ovh` provider does not offer, the
+  workaround, and what it affects.
 
 ## Explanation (understand why)
 
