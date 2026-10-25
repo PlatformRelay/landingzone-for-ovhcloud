@@ -1,0 +1,27 @@
+# Answers file of the sandbox account (spec 004, data-model.md *Answers file*): 11 values.
+# YAML in its JSON-compatible flow form, decoded strictly; whole-line comments only.
+# Exported, it is value-equal to stacks/deployments.yaml (FR-003).
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "DeploymentAnswers",
+  "name": "sandbox",
+  # naming discriminator; bucket names are global, change it if one is taken
+  "org": "lz",
+  "forge": "github.com/platformrelay/landingzone-for-ovhcloud",
+  "state_region": "gra",
+  # KD-1: the sandbox account has one project, shared by the state buckets and demo/dev
+  "shared_state_project": true,
+  "tenants": [
+    {
+      "name": "demo",
+      "environments": [
+        {
+          "name": "dev",
+          "regions": [
+            {"name": "gra11", "cidr": "10.20.0.0/24"}
+          ]
+        }
+      ]
+    }
+  ]
+}

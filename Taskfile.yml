@@ -38,6 +38,13 @@ tasks:
     cmds:
       - go -C tools test -count=1 ./internal/release ./cmd/lz-release
 
+  # Spec 004 (T016): the answers-file decoder and reader, strict, on the
+  # fixtures of tests/fixtures/answers. T020 adds ./cmd/lz-configure.
+  test:configure:
+    desc: Answers file decoded strictly, read only as a regular file, its patterns agreeing with schemas/deployments.schema.json (004 V001)
+    cmds:
+      - go -C tools test -count=1 ./internal/configure
+
   test:foundation-ci:
     desc: Foundation CI source, rendered workflow and their refusals, then this repository's own (V009)
     cmds:
