@@ -84,6 +84,7 @@ As spec 006's loop.md: test:dependencies, the default check:specs (001, 005, 006
 | T028 | CLOSED: how-to states the alert sweep's plan-matching rule, its retried reads and single DELETE, and no cleanup beside a live run; residuals table (with T027's two deferred items, accepted for the window) in `evidence/T028.md` | none (docs-only, by the coordinator) | none |
 | T020 | CLOSED: how-to gives the `project-alias`, `unreconciled-run` and `untrusted` refusals with their next actions and `--accept-lost-baseline` (owner, terminal); retry line already there; status page says P10 through the module was not run (T019 dropped) | one leg for the close-window set (docs-only) | no P10 run id: T019 did not start |
 | T024 | CLOSED: specs table row 007 and spec.md *State (2026-10-25)*: nothing of this spec ran live (T019 dropped, T022 not run; the 2026-10-20 chain is spec 006's), T001 refuses, R1–R20 stay, T023 is the owner's | one leg for the close-window set (docs-only) | recorded before T023; the owner adds spend and the account check |
+| T025 | CLOSED: `check:specs` (`TRACE_OK` 007, tasks=28), `test:traceability` and `test:foundation-ci` (`FOUNDATION_CI_OK targets=20 deferred=1`) green through the entry; V001–V005 evidence linked from their tasks | one leg for the close-window set (docs-only) | T023 open (owner), so *Completion* is not met yet |
 
 ## Known red
 | Test (file:name) | Story | Written in | Cleared in |
