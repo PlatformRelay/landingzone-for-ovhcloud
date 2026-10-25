@@ -53,7 +53,7 @@ directory points at the PR and names the red and green commits.
 ## Phase 2: User Story 1 — A second operator exports a manifest from a short answers file (P1)
 Independent tests: V001, V002, V005. T016 → T017; T020 completes the story after US2 and US3.
 
-- [ ] T016 [US1] Decode answers files strictly in tools/internal/configure/answers.go, tests in tools/internal/configure/answers_test.go and tests/fixtures/answers/, and the `test:configure` target in Taskfile.yml
+- [x] T016 [US1] Decode answers files strictly in tools/internal/configure/answers.go, tests in tools/internal/configure/answers_test.go and tests/fixtures/answers/, and the `test:configure` target in Taskfile.yml — closed 2026-10-25, evidence: evidence/T016.md
   - Requirements: FR-001, FR-008; ADRs: 0005, 0021, 0023. Depends on: T015.
   - Cases (given / when / then → defect exposed), fixtures as data-model.md *Answers file* fixes them:
     - given `tests/fixtures/answers/sandbox.yaml` (11 values) and `sandbox-two-tenants.yaml` (15) / when decoded / then every field is read and defaults are not yet applied → exposes a decoder that drops or invents fields.
