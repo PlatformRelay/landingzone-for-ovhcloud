@@ -138,19 +138,30 @@ func TestDiffRemovedFirst(t *testing.T) {
 	}
 }
 
+// diffSecret is a secret-looking value pasted into a current manifest's apiVersion, which the
+// manifest decoder quotes in its own error.
+const diffSecret = "s004-AKIAEXAMPLESECRETVALUE"
+
 // TestDiffCurrentManifestInvalid: a current manifest that does not decode (garbage, an empty file,
-// a manifest the decoder refuses) gives CURRENT_MANIFEST_INVALID and no line; control: the valid
-// manifest diffs (rejection; exposes a diff against garbage).
+// a manifest the decoder refuses, one whose refusal would quote a secret-looking value) gives
+// CURRENT_MANIFEST_INVALID with the path alone as detail, never a value from the file (T024 a,
+// FR-008), and no line; control: the valid manifest diffs (rejection; exposes a diff against
+// garbage, or the decoder's error echoed).
 func TestDiffCurrentManifestInvalid(t *testing.T) {
 	generated := diffExport(t, "sandbox.yaml")
 	valid := answersReadFile(t, exportSandboxManifest)
 	if _, err := Diff(valid, generated); err != nil {
 		t.Fatalf("control: the valid manifest: %v", err)
 	}
+	secret := []byte(strings.Replace(string(valid), stacks.ManifestAPIVersion, diffSecret, 1))
+	if _, err := stacks.DecodeManifest(secret); err == nil || !strings.Contains(err.Error(), diffSecret) {
+		t.Fatalf("precondition: the decoder's refusal quotes the value, got %v", err)
+	}
 	for name, current := range map[string][]byte{
 		"garbage":       []byte("not a manifest"),
 		"empty":         {},
 		"refused value": []byte(strings.Replace(string(valid), `"org": "lz"`, `"org": "LZ!"`, 1)),
+		"secret value":  secret,
 	} {
 		t.Run(name, func(t *testing.T) {
 			lines, err := Diff(current, generated)
@@ -158,8 +169,8 @@ func TestDiffCurrentManifestInvalid(t *testing.T) {
 			if !ok || e.Code != CodeCurrentManifestInvalid {
 				t.Fatalf("want a %s *AnswersError, got %T %v", CodeCurrentManifestInvalid, err, err)
 			}
-			if !strings.HasPrefix(e.Detail, "stacks/deployments.yaml: ") {
-				t.Errorf("detail %q does not name stacks/deployments.yaml", e.Detail)
+			if e.Detail != "stacks/deployments.yaml" {
+				t.Errorf("detail %q; want the path alone", e.Detail)
 			}
 			if lines != nil {
 				t.Errorf("want no diff, got %q", lines)

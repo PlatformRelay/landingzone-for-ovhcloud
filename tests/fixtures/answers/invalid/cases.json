@@ -42,5 +42,7 @@
     "control": {"old": "\"5\"", "new": "5"}},
   "type-top-level-array.yaml": {"base": "sandbox.yaml", "code": "INVALID_VALUE", "detail": "(document)", "why": "an array where the answers object belongs; the control is the base"},
   "type-vlan-decimal-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].vlan_id", "why": "`vlan_id` 1.0, an integer value in a spelling an int does not decode; the path carries its index",
-    "control": {"old": "\"vlan_id\": 1.0", "new": "\"vlan_id\": 1"}}
+    "control": {"old": "\"vlan_id\": 1.0", "new": "\"vlan_id\": 1"}},
+  "out-of-range-vlan-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].vlan_id", "why": "`vlan_id` 1e400, a number beyond float64 in a valid document, after a valid `vlan_id` in the first tenant; a value refusal at its path, not a syntax error",
+    "control": {"old": "\"vlan_id\": 1e400", "new": "\"vlan_id\": 1"}}
 }

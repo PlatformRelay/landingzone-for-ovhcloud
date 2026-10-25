@@ -78,16 +78,19 @@ One line on standard output, exit status 1:
   The two decoders share some code strings, so the catalogue entry is chosen by (source, code); the
   printed line shows the code only.
 - `<detail>`: the field path for an answers decode error (`tenants[1].environments[0].regions[0].cidr`);
-  the decoder's detail for a refusal of the generated manifest; the path for a file error.
+  the decoder's detail for a refusal of the generated manifest; the path for a file error;
+  `stacks/deployments.yaml` alone for `CURRENT_MANIFEST_INVALID`, never a value from that file.
 - `<plain sentence>` and `<action>`: from the catalogue in contracts/checks.md.
 
 Codes of `tools/internal/configure`: `ANSWERS_SYNTAX`, `ANSWERS_TOO_LARGE`, `ANSWERS_NOT_REGULAR`,
 `DUPLICATE_KEY`, `UNKNOWN_FIELD`, `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_VALUE`,
 `CURRENT_MANIFEST_INVALID`, `STAGING_SYMLINK`, `STAGING_WRITE`, `STAGING_NOT_DURABLE`.
 
-`CURRENT_MANIFEST_INVALID` stops `check` and `export` alike: no diff, no notes, nothing written.
-One line is not a refusal message: an I/O failure that carries no code (contracts/checks.md
-*Message catalogue*) prints `configure: error: <error>`, exit 1.
+`CURRENT_MANIFEST_INVALID` (a symlink, a non-regular file, more than 1 MiB, or bytes that do not
+decode) stops `check` and `export` alike: no diff, no notes, nothing written.
+Two lines are not refusal messages (contracts/checks.md *Message catalogue*): an I/O failure that
+carries no code prints `configure: error: <error>`, exit 1; a refusal the catalogue cannot explain
+prints `configure: defect: <CODE> could not be explained. …`, exit 1, without its detail.
 
 ## Dry-run diff entry (FR-005)
 Rows are compared by id between the current manifest and the generated one. One line per row added

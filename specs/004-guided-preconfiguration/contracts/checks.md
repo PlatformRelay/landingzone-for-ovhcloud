@@ -14,11 +14,14 @@ behavioural failure against a compiling stub; a compile error or a missing symbo
 - `lz-configure [-root <repo>] check <answers>` (`task configure:check -- <answers>`): decode,
   derive, gate, then print the diff (FR-005), a warning line when a removed row predicts a refusal by
   `stacks:reconcile`, the notes (FR-006) and `configure: ok`; or one refusal line (FR-004), or the
-  `configure: error:` line (*Message catalogue*), and exit 1. A current `stacks/deployments.yaml`
-  that does not decode is refused (`CURRENT_MANIFEST_INVALID`, FR-005). Writes nothing.
+  `configure: error:` or `configure: defect:` line (*Message catalogue*), and exit 1. The current
+  `stacks/deployments.yaml` is read like the answers file: a symlink, a non-regular file, more than
+  1 MiB or a file that does not decode is refused (`CURRENT_MANIFEST_INVALID`, FR-005), with the
+  path alone as detail, never a value from the file (T024). Writes nothing.
 - `lz-configure [-root <repo>] export <answers>` (`task configure:export -- <answers>`, host-side):
   the same, then write the staging file (FR-007) and print `wrote .local/configure/deployments.yaml`
-  and the next steps. Usage errors exit 2.
+  and the next steps. Usage errors exit 2. `ROOT=<absolute dir>` exports under another root; the
+  registry row runs with a temporary one, so it never replaces an operator's staged file (T024).
 - `<answers>` is relative to the root or absolute; it must be a regular file (FR-008).
 
 ## V-checks
@@ -53,10 +56,16 @@ constants.
 
 **The one exception.** An I/O failure that is not a refusal of the answers has no entry: a read
 error of the answers file other than missing, symlink, non-regular or oversized (for example,
-permission denied), or a read error of `stacks/deployments.yaml` other than its absence. It prints
-one line `configure: error: <error>` (control characters quoted), exit 1, and nothing else. It is
-never printed as a catalogue line, so it never blames the content of the answers (coordinator
-decision of 2026-10-25, T020).
+permission denied), or a read error of `stacks/deployments.yaml` other than its absence or a
+refusal. It prints one line `configure: error: <error>` (control characters quoted), exit 1, and
+nothing else. It is never printed as a catalogue line, so it never blames the content of the
+answers (coordinator decision of 2026-10-25, T020).
+
+**A refusal the catalogue cannot explain** (a code without an entry, or a refusal wrapped in another
+error) is a defect of the tool, never an I/O error and never printed raw: one line
+`configure: defect: <CODE> could not be explained. This is a defect of the tool, not of your
+answers. Next: Report it with the answers file; meanwhile edit `stacks/deployments.yaml` by hand.`,
+exit 1, without the detail (T024).
 
 | Source | Code | Plain sentence | Next |
 | --- | --- | --- | --- |
@@ -68,7 +77,7 @@ decision of 2026-10-25, T020).
 | configure | `MISSING_FIELD` | A required answer is missing or `null`. | Add it; the how-to lists the required answers. |
 | configure | `UNSUPPORTED_VERSION` | `apiVersion` or `kind` is not the one this tool reads. | Use `lz.platformrelay.dev/v1alpha1` and `DeploymentAnswers`. |
 | configure | `INVALID_VALUE` | A value does not have the allowed form. | Use the form the how-to gives for that field. |
-| configure | `CURRENT_MANIFEST_INVALID` | Today's `stacks/deployments.yaml` does not decode, so no diff can be shown. | Fix it first; `task stacks:check` names the problem. |
+| configure | `CURRENT_MANIFEST_INVALID` | Today's `stacks/deployments.yaml` is a symlink, not a regular file, larger than 1 MiB, or does not decode, so no diff can be shown. | Fix it first; `task stacks:check` names a decoding problem. |
 | configure | `STAGING_SYMLINK` | `.local`, `.local/configure` or the staging file is a symlink; nothing was written. | Remove the symlink and run the export again. |
 | configure | `STAGING_WRITE` | The staging file could not be written; the previous one is unchanged. | Check free space and permissions of `.local/configure/`. |
 | configure | `STAGING_NOT_DURABLE` | The staging file was written, but its directory could not be synced; after a crash the previous file may come back. | Check `.local/configure/deployments.yaml` before you copy it, or run the export again. |

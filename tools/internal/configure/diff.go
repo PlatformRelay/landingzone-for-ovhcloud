@@ -1,7 +1,10 @@
 package configure
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"strings"
 
 	"github.com/PlatformRelay/landingzone-for-ovhcloud/tools/internal/stacks"
@@ -17,17 +20,48 @@ const (
 	diffMarkRemoved = "expected: refused by stacks:reconcile (UNSUPPORTED_CHANGE)"
 )
 
+// MaxCurrentManifestBytes bounds the read of today's stacks/deployments.yaml (1 MiB; the committed
+// manifest is a few KiB).
+const MaxCurrentManifestBytes = 1 << 20
+
+// currentManifestPath is today's manifest, relative to the root: the whole detail of its refusal.
+const currentManifestPath = "stacks/deployments.yaml"
+
+// currentInvalid is the refusal of today's manifest. It names the path alone, never the decoder's
+// error, which can quote a value from the file (FR-008).
+func currentInvalid() error {
+	return &AnswersError{Code: CodeCurrentManifestInvalid, Detail: currentManifestPath}
+}
+
+// ReadCurrentManifest reads the root's stacks/deployments.yaml as ReadAnswers reads an answers
+// file: nil and no error when it is absent; CURRENT_MANIFEST_INVALID when it is a symlink, not a
+// regular file, or larger than MaxCurrentManifestBytes; a plain error naming it for any other read
+// failure.
+func ReadCurrentManifest(root string) ([]byte, error) {
+	data, err := readRegular(filepath.Join(root, filepath.FromSlash(currentManifestPath)), MaxCurrentManifestBytes)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case errors.Is(err, errNotRegular) || errors.Is(err, errTooLarge):
+		return nil, currentInvalid()
+	case err != nil:
+		return nil, fmt.Errorf("read %s: %w", currentManifestPath, err)
+	}
+	return data, nil
+}
+
 // Diff returns the diff lines of the generated manifest against the current one: one line per row
 // removed, then one per row added, the count line, and the warning line when a row is removed.
 // current is today's stacks/deployments.yaml, nil when that file is absent; bytes that do not
-// decode (an empty file included) return a CURRENT_MANIFEST_INVALID *AnswersError and no line.
+// decode (an empty file included) return a CURRENT_MANIFEST_INVALID *AnswersError naming the path
+// alone, and no line.
 // generated is Export's output; a refusal of it returns the decoder's *stacks.ManifestError.
 func Diff(current, generated []byte) ([]string, error) {
 	var currentRows []stacks.Instance
 	if current != nil {
 		m, err := stacks.DecodeManifest(current)
 		if err != nil {
-			return nil, &AnswersError{Code: CodeCurrentManifestInvalid, Detail: "stacks/deployments.yaml: " + err.Error()}
+			return nil, currentInvalid()
 		}
 		currentRows = m.Instances
 	}

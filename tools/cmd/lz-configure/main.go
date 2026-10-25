@@ -10,8 +10,10 @@
 // export (task configure:export, host-side) does the same, then writes only
 // .local/configure/deployments.yaml (data-model.md *Staging file*) and prints
 // `wrote .local/configure/deployments.yaml` and the next steps. A refusal prints one line,
-// `configure: <CODE>: <detail>. <sentence> Next: <action>`, and nothing else, exit 1; an I/O error
-// that carries no refusal code prints `configure: error: <error>`, exit 1. Usage errors exit 2.
+// `configure: <CODE>: <detail>. <sentence> Next: <action>`, and nothing else, exit 1; a refusal
+// the catalogue cannot explain prints `configure: defect: <CODE> could not be explained. …`, exit
+// 1; an I/O error that carries no refusal code prints `configure: error: <error>`, exit 1. Usage
+// errors exit 2.
 // Neither command opens a connection, reads the environment or a credential, or starts a process
 // (FR-008).
 package main
@@ -103,12 +105,10 @@ func prepare(root, answers string) ([]string, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// An absent current manifest is nil to Diff (every row `+`); one that does not decode is
-	// CURRENT_MANIFEST_INVALID, which Diff returns under the configure source.
-	current, err := os.ReadFile(filepath.Join(root, "stacks", "deployments.yaml"))
-	if errors.Is(err, fs.ErrNotExist) {
-		current, err = nil, nil
-	}
+	// An absent current manifest is nil to Diff (every row `+`); a symlinked, non-regular or
+	// oversized one (ReadCurrentManifest) or one that does not decode (Diff) is
+	// CURRENT_MANIFEST_INVALID, naming the path alone.
+	current, err := configure.ReadCurrentManifest(root)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -119,12 +119,15 @@ func prepare(root, answers string) ([]string, []byte, error) {
 	return append(diff, configure.Notes(a)...), manifest, nil
 }
 
-// refuse prints the one refusal line of err and returns exit status 1. An error without a
-// catalogue source (an I/O failure other than those the reader codes) is printed as an error,
-// one line, never as a refusal of the answers.
+// refuse prints the one refusal line of err and returns exit status 1. A refusal the catalogue
+// cannot explain (a code without an entry, a wrapped refusal) is a defect of the tool, printed as
+// configure.DefectLine without its detail. Any other error (an I/O failure other than those the
+// readers code) is printed as an error, one line, never as a refusal of the answers.
 func refuse(out io.Writer, err error) int {
 	line, xerr := configure.ExplainError(err)
-	if xerr != nil {
+	if defect, ok := configure.DefectLine(err); ok { // only when ExplainError failed
+		line = defect
+	} else if xerr != nil {
 		msg := err.Error()
 		if strings.ContainsFunc(msg, unicode.IsControl) {
 			msg = strconv.Quote(msg)
