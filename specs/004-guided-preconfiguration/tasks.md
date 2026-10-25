@@ -112,7 +112,7 @@ Independent test: V004.
 
 ## Phase 5: User Story 1 — the command (P1)
 
-- [ ] T020 [US1] Add the lz-configure command with its staging write in tools/cmd/lz-configure/main.go, tests in tools/cmd/lz-configure/main_test.go, and the `configure:check` and `configure:export` targets in Taskfile.yml
+- [x] T020 [US1] Add the lz-configure command with its staging write in tools/cmd/lz-configure/main.go, tests in tools/cmd/lz-configure/main_test.go, and the `configure:check` and `configure:export` targets in Taskfile.yml — closed 2026-10-25, evidence: evidence/T020.md
   - Requirements: FR-005, FR-006, FR-007, FR-008, SC-003; ADRs: 0021, 0023. Depends on: T019.
   - Cases (given / when / then → defect exposed), each in a temporary root holding a copy of `stacks/deployments.yaml`, with an inventory of every path before and after:
     - given the two-tenant answers / when `check` runs / then the diff, the notes and `configure: ok`, exit 0, and the inventory unchanged → exposes a write during `check` (G31).
