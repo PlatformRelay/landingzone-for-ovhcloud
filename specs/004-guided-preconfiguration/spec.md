@@ -1,164 +1,278 @@
-# Feature Specification: Friendly, resumable repository preconfiguration
-Created: 2026-10-01 · Status: draft, amended and held 2026-10-14 (D113) · ADRs: 0001, 0002, 0003, 0005, 0007, 0008, 0011, 0013, 0019, 0021, 0023
+# Feature Specification: Answers file to deployments.yaml
+Feature: `004-guided-preconfiguration` · Created: 2026-10-01 · Refreshed: 2026-10-25 (D127) · Status: draft
+ADRs: 0005, 0008, 0013, 0019, 0021, 0023 (also read: 0003 naming, 0004 instances)
+Input: D127 (the wizard gate opens on 2026-10-25 with a re-scoped spec 004) and its dissenting
+judge's counterpoints; the strict manifest decoder `tools/internal/stacks/manifest.go` behind
+`task stacks:check`; `schemas/deployments.schema.json` (v1alpha1); the two-tenant fixture
+`tests/fixtures/manifests/sandbox-two-tenants/` (spec 007 T017); constitution 1.3.0.
 
-**Active slice — D29:** The early written journey (T014), bounded renderer comparison
-(T001) and minimal in-memory controller portion of T002–T003 are authorized. T014 is
-documentation only; prototype implementation/execution waits for actual 001/T003 safety
-and capture qualification and independent review of the exact experiment packet.
-Hardened persistence and export, including synthetic implementations, remain deferred
-until real profile schemas exist. Full terminal/save/resume integration, final guide T012
-and aggregate T013 remain open. D61 widens eligible work without removing these gates.
-
-**D113 (2026-10-14): amended and held.** D29's "real profile schemas" now exist:
-`schemas/deployments.schema.json` (v1alpha1), whose shape the strict decoder behind
-`task stacks:check` mirrors, so an export is checked offline and without credentials. The
-export target is that schema (see *Export target and live consequences*). **The D85 wizard gate
-stays closed**: no wizard task starts until the owner lifts it.
+## History
+- **D29 (2026-10-01):** a bounded renderer prototype and a written journey first; persistence and
+  export wait for real profile schemas. T014 wrote the journey (closed 2026-10-02).
+- **D61 (2026-10-02):** widened eligible work to all implementable specs; D29's gates stayed.
+- **D85 (2026-10-06):** postponed the wizard with the PoC staging; every wizard task held.
+- **D113 (2026-10-14):** D29's schema gate is met by `schemas/deployments.schema.json`; the export
+  target is that schema; the live consequences of spec 005 must be explained; the D85 gate stayed.
+- **D127 (2026-10-20):** the D85 gate opens on 2026-10-25. Scope starts at the simplest form: a
+  non-interactive answers file exported to `deployments.yaml`, gated by `stacks:check`. The
+  interactive terminal and save/resume layers are later, optional slices. Burn-down capped at about
+  15 strong review legs. This refresh replaces the 13-task terminal/save/resume plan: task ids
+  T001–T013 are retired unstarted, T014 stays closed, new tasks start at T015.
 
 ## Why and scope
-Help an operator understand choices and prepare a reviewable repository configuration through
-a friendly terminal journey. Save valid progress and explain consequences/next steps. No cloud
-calls, secret collection, procurement, deployment or configuration-file writes are included.
-Only owned checkpoint/staging/evidence areas in data-model.md may change; inventory all other paths.
-This is a setup helper through Task, not a general management CLI.
-Those write areas and saved-state transitions describe the eventual product, not permission
-for the in-memory prototype to save or export. The early journey produces prose only.
+Today one maintainer writes `stacks/deployments.yaml` by hand and checks it with `task stacks:check`.
+That works for him. It is a steep entry for a second operator: 41 values for the one-tenant sandbox
+and 67 for two tenants. The instance rows hold 21 and 38 of those values, and they follow fixed
+rules that a person has to apply by hand. The decoder's refusals are codes such as `DUPLICATE_VLAN`
+or `SCOPE_VIOLATION`.
+
+This spec adds a short **answers file** and one credential-free command that turns it into a
+complete `deployments.yaml`. The command checks the result with the same strict decoder that
+`stacks:check` uses. It explains every refusal in plain words with the next action, shows a dry-run
+diff against today's manifest, and lists the consequences of the choices (D113). The written file
+lands in local staging; the operator copies it and runs the existing `stacks:reconcile`,
+`stacks:generate` and `stacks:check`.
+
+**What the answers file makes easier than editing `deployments.yaml`** (the D127 counterpoint):
+- fewer values: 11 for the sandbox and 15 for two tenants, against 41 and 67 (research R2);
+- no instance rows: ids, stages, dimensions and tenant-state rows are derived;
+- defaults for the fields that rarely change (header, scope, stage source, state ref and endpoint,
+  project ref and mode, VLAN 0, both toggles off);
+- each refusal explained in a plain sentence with the next action;
+- a dry-run diff that says which changes `stacks:reconcile` will create and which it refuses.
+
+**Where it does not help** (stated, not hidden): a maintainer fluent in the manifest gains little
+beyond the diff and the notes. A manifest that uses anything outside the answers schema (tenant
+scope, `external` entries, runtime slots, a region without a runtime row, custom instance ids) is
+still edited by hand. Renames and removals stay refused by `stacks:reconcile` either way. The
+project ids still go into `account.env` by hand; the command only lists the refs. Comments of a
+hand-edited manifest are not carried over. The flow-form syntax is still JSON-like.
+
+**In:** the answers schema and its strict decoder; defaults and derivation; the decoder gate; plain
+messages; the dry-run diff; consequence notes; a staging write; a how-to; tracing spec 004.
+
+**Out** (see *Deferred user stories* and *Out of scope*): the interactive terminal journey, save and
+resume, use-case presets, local tool checks, any write to `stacks/`, any cloud call.
+
+## Clarifications
+
+### Session 2026-10-25
+Answered as the owner's delegate from D127, D113, ADR-0023 and the code at `46f5115`. One item is
+left open, with the default this spec applies.
+- Q: Which form does the answers file take? → A: YAML in its JSON-compatible flow form with
+  whole-line comments, decoded strictly, exactly as the manifest is (`manifest.go:6-10`). Block YAML
+  would need a vendored YAML library, a dependency decision this spec does not take. Counterpoint
+  kept: flow form is less friendly to a newcomer than block YAML; the starting file and the plain
+  messages carry that cost.
+- Q: Is the answers file committed? → A: No. `stacks/deployments.yaml` stays the one source of truth.
+  The answers file is a local input; the how-to suggests `.local/configure/answers.yaml`. Two
+  committed sources would drift.
+- Q: Which manifests can the answers file express? → A: platform scope only, `stage_source` local,
+  every region with a runtime row, no slots, no external entries. Everything else is hand-edited.
+- Q: Does the command read `account.env` or any credential? → A: No. It lists the
+  `LZ_PROJECT_ID_<REF>` names the account file needs, never values (FR-006, FR-008).
+- Q: Is the export byte-identical to the committed manifest? → A: No; it is value-equal: with
+  whole-line comments removed, both parse to the same JSON value (same keys and values, arrays in
+  the same order). Comments and formatting differ. Value-equality, not equality of the decoded
+  `Manifest`, is the test: `Manifest` drops CIDRs, VLAN ids and toggles, which Terramate reads from
+  the file itself (`stacks/_lz/globals.tm.hcl:5`).
+- Q: Does the command re-implement the decoder's cross-row rules to name the place? → A: No. The
+  decoder is the only judge of the generated manifest; its refusal detail already names the tenant,
+  environment and region, and the message adds the plain sentence and the next action.
+- Q: Do the interactive journey and save/resume stay in this spec? → A: As deferred user stories with
+  triggers (D127), not as tasks.
+- **Open, owner's, with default** — [NEEDS CLARIFICATION: may `configure:export` write
+  `stacks/deployments.yaml` in place (behind a flag), or only the staging file?] Default: staging
+  only (`.local/configure/deployments.yaml`), as ADR-0023 *Reviewable output* says ("applying that
+  bundle to the repository is a separate reviewed action"); the command prints the copy step.
+  Writing in place would need an ADR-0023 amendment.
 
 ## Decisions and proposals
-The terminal journey, friendly explanations, helper checks and resumability are approved direction.
-Huh versus Gum is a bounded renderer comparison; exact version/platform qualification is owed.
-Naming convention input is independent of the naming module final field names; ADR-0003 selects a scalar interface with shared context.
-
-## Export target and live consequences (D113)
-The export is a draft `stacks/deployments.yaml` that `schemas/deployments.schema.json` and
-`task stacks:check` accept (tenant × environment × region rows, `slot`, CIDR, `vlan_id`, `org`),
-checked on a scratch copy, plus an `account.env` checklist of the project references that
-`task bootstrap:account`'s `identify` phase asks for. The wizard feeds that phase and never
-collects credentials (FR-008). Naming input maps to `spec.org` and spec 005's `modules/naming`.
-
-Spec 005's live runs showed consequences the steps must explain (FR-001, FR-010):
-- **One project per tenant and environment** is the only isolation boundary: tag conditions do not
-  scope bucket access (P25 refuted, D107). Projects are ordered by hand (005 P22).
-- **KD-1**: with `spec.sandbox.shared_state_project`, state shares the tenants' project, so tenant
-  state isolation is not claimed (D88, D105).
-- **Reference mode**: an existing project is referenced, not adopted; adopting it plans a
-  replacement (P5 refuted, D94).
-- **One VLAN per network**: every private network in a project needs its own VLAN id (005 T098);
-  the decoder refuses a duplicate (`DUPLICATE_VLAN`).
-- **The `org` discriminator**: bucket names are unique across OVHcloud, so `org` keeps them apart
-  and a taken name fails (005 P21, T057).
-- **Object Lock**: state buckets are Object-Locked in governance mode with a default retention
-  (D104), so tearing one down needs the admin's governance bypass or the end of the retention.
+- **Approved direction:** D127 (scope, cap, deferred layers); D113 (export target and consequences);
+  ADR-0023 (noninteractive input shares the validation; staging; no authority); ADR-0005 (strict
+  decode; `deployments.yaml` is platform-controlled).
+- **Proposals, with alternatives** (detail in `research.md`):
+  - a new package `tools/internal/configure` and command `tools/cmd/lz-configure` (R1), rejecting
+    a subcommand of `lz-stacks` (it would mix the generator's trust boundary with input convenience);
+  - derive every instance row by one fixed rule (R3), rejecting an answers field per row;
+  - check the export by calling `stacks.DecodeManifest` in-process (R4), rejecting a call of
+    `task stacks:check` (that judges the candidate tree, not a staging file);
+  - a message catalogue keyed by refusal code, checked complete against the decoder's `Code*`
+    constants (R5).
 
 ## User Scenarios & Testing
-### User Story 1 — Understand and choose (Priority: P1)
-An operator selects a use case and sees reasoned suggested defaults, accurate customization progress,
-why each choice matters, its resolved default and consequences, can inspect detail,
-go back and edit, and sees an actionable refusal for an incompatible choice. Independent check: V001.
-### User Story 2 — Leave and return safely (Priority: P1)
-Save-and-exit retains valid progress; restart resumes the correct step. A changed schema or earlier
-answer triggers revalidation, while corruption or a foreign session refuses resume. Check: V002.
-### User Story 3 — Inspect and export a draft (Priority: P2)
-Local checks report prerequisites honestly; the operator reviews a diff and exports a complete draft
-bundle. No existing repository file or cloud object changes. Checks: V003–V005.
+
+### User Story 1 — A second operator exports a manifest from a short answers file (Priority: P1)
+A second operator copies the sandbox answers file, adds tenant `lab` with environment `dev`, region
+`GRA11` and a CIDR, and runs `task configure:check -- .local/configure/answers.yaml`. The command
+prints the dry-run diff (four new rows for `lab`, each "created by stacks:reconcile"), the
+consequence notes (`LZ_PROJECT_ID_LAB_DEV` is needed in `account.env`; one project per tenant and
+environment; KD-1 covers `STATE` only) and `configure: ok`. `task configure:export -- …` then writes
+`.local/configure/deployments.yaml` and prints the next steps. After the copy, `stacks:reconcile`,
+`stacks:generate` and `stacks:check` pass.
+**Independent test**: V001, V002, V004, V005. Failure: if the decoder refuses the export, nothing
+is written and the previous staging file stays.
+
+### User Story 2 — A mistake is explained in plain words (Priority: P1)
+The operator gives two regions of `lab/dev` the default VLAN 0, writes `"cidr": "10.40.0.0"`, or
+misspells `environments`. The command prints one line with the code, where it is, a plain sentence
+and the next action, for example
+`configure: DUPLICATE_VLAN: vlan_id 0 of lab/dev/SBG5 is also GRA11's: project LAB_DEV holds one private network per VLAN id. Two regions of one environment share a VLAN id. Next: give one region its own "vlan_id" (1 to 4000).`
+(the detail is the decoder's own, `manifest.go:499-500`).
+Nothing is written and the exit status is 1.
+**Independent test**: V003.
+
+### User Story 3 — The maintainer sees what would change before anything changes (Priority: P2)
+The maintainer runs `configure:check` on an answers file that drops tenant `lab` and changes the
+CIDR of `demo/dev/GRA11`. The diff lists four removed rows marked "refused by stacks:reconcile
+(UNSUPPORTED_CHANGE)" and one value change, and the command writes nothing. With no current
+manifest every row is new.
+**Independent test**: V004.
+
+### Deferred user stories (not tasks; each starts only on its trigger and within the review budget)
+| Story | What it adds | Trigger to start |
+| --- | --- | --- |
+| D-US4 Interactive terminal journey | a renderer (Huh or Gum, ADR-0023), help, back/edit, progress, plain/no-TTY mode, PTY tests | US1–US3 done; T022 records that the answers file itself, not the manifest, was the second reader's obstacle; review budget left after the D127 cap; a renderer pin qualified under 001/T003's capture rules |
+| D-US5 Save and resume | an atomic, owner-only, single-writer session under `.local/configure/` with revalidation (ADR-0023 *Save and resume*) | D-US4 exists and a journey longer than one sitting is observed; until then the answers file is the saved state |
+| D-US6 Use-case presets with default provenance | learning versus production presets, explicit/default provenance, preview of changed defaults | the manifest schema admits a second profile or golden path (ADR-0016) whose defaults differ |
+| D-US7 Local tool checks | bounded read-only checks of pinned tools before export | D-US4, or a reported failure caused by a missing tool after a clean export |
+
+### Edge cases
+An empty `tenants` list (valid: the two account rows only); a tenant with no environments (valid:
+its tenant-state row only); an environment with no regions (valid: its project row only); a region
+without `cidr` (no network row, runtime row kept); two regions with VLAN 0 in one environment
+(`DUPLICATE_VLAN`); a project-ref override equal to `STATE` without `shared_state_project`
+(`SHARED_STATE_PROJECT`); two overrides with one ref (`DUPLICATE_NAME`); a region name long enough
+that a derived id passes 63 characters (`INVALID_VALUE` from the decoder); a duplicate key, a case
+variant (`Tenants`), an unknown field, `null`, a second document, a trailing comment, block YAML; a
+file over 64 KiB; a symlinked answers path, `.local`, `.local/configure` or staging file; a current
+manifest that does not decode (diff skipped, export still checked); no current manifest; a staging
+write that fails half-way (the previous staging file stays).
 
 ## Premises
-| ID | Mechanism premise | Probe | Evidence status |
-| --- | --- | --- | --- |
-| P1 | Pinned renderer supports keyboard/help/cancel and plain mode on selected platforms | Real PTY captures from a minimal Huh/Gum prototype | UNVERIFIED; T001/T008 |
-| P2 | Local checkpoint operations meet atomicity/permission and single-writer contract | Filesystem fault/concurrency controls on the named OS matrix | UNVERIFIED; T004/T005 |
-| P3 | Versioned choices/schemas expose compatibility and clear consequences | Synthetic strict choice/schema fixtures initially; real integration as those creators land | UNVERIFIED; dependency gate |
+
+| ID | Premise | Source | Probe | Status |
+| --- | --- | --- | --- | --- |
+| P1 | `stacks:reconcile`, `stacks:generate` and `stacks:check` see only the manifest's value, never its comments or layout: they read it through `stacks.DecodeManifest` and through Terramate's `tm_yamldecode` of the same file, so a value-equal export yields the same stacks | `tools/internal/stacks/reconcile.go:74-81`, `generate.go:81-88`, `tools/cmd/lz-stacks/main.go:183-187`, `stacks/_lz/globals.tm.hcl:5` | T017 (value-equality with `stacks/deployments.yaml` and the two-tenant fixture, which `test:stacks` reconciles and generates, 007 T017); the operator's `stacks:check` after the copy | read in code; believed |
+| P2 | The state endpoint of region `<r>` is `https://s3.<r>.io.cloud.ovh.net` | OVHcloud kb mirror `storage-and-backup/object-storage/s3-post-object-upload.mdx`, cited in `components/runtime/managed-only/README.md:17-20`; `gra` used by spec 005's live chains | none here: the derived default is overridable | doc; observed live for `gra` only; UNVERIFIED for other regions |
+| P3 | The answers file lowers the entry for a second operator | D127 (two judges for, one against) | T022, a second reader's recorded attempt | UNVERIFIED |
 
 ## Requirements
-- **FR-001**: MUST satisfy each clause below.
-  - **C001.1**: Provide a warm concise introduction.
-  - **C001.2**: Explain each choice, default provenance and consequence.
-  - **C001.3**: Offer optional detail and next safe action instead of an opaque boolean questionnaire.
-- **FR-002**: MUST satisfy each clause below.
-  - **C002.1**: Support back/edit/save-and-exit/resume.
-  - **C002.2**: Invalidate dependent answers after an earlier change.
-  - **C002.3**: Reject unsupported choices with reasons.
-- **FR-003**: MUST satisfy each clause below.
-  - **C003.1**: Persist bounded allowlisted data atomically.
-  - **C003.2**: Use owner-only permissions and repository/version binding.
-  - **C003.3**: Enforce single writer.
-  - **C003.4**: Reject corrupt, duplicate, foreign or symlinked data.
-- **FR-004**: MUST satisfy each clause below.
-  - **C004.1**: Revalidate against current schema/catalogue/prompt contents.
-  - **C004.2**: Rerun bounded helpers on resume and before final review/export.
-  - **C004.3**: Do not treat old completion flag or unchanged Git HEAD as readiness.
-- **FR-005**: MUST satisfy each clause below.
-  - **C005.1**: Run bounded trusted local read-only helpers.
-  - **C005.2**: Reject command injection.
-  - **C005.3**: Report missing/mismatched tools as blocked.
-  - **C005.4**: Require no secrets, cloud authority or network.
-- **FR-006**: MUST satisfy each clause below.
-  - **C006.1**: Show effective choices, blockers and deterministic draft diff.
-  - **C006.2**: Export a complete schema-valid bundle only after explicit review.
-  - **C006.3**: Preserve existing repository files.
-- **FR-007**: MUST satisfy each clause below.
-  - **C007.1**: Share controller/validation between interactive and noninteractive modes.
-  - **C007.2**: Provide keyboard and plain-terminal operation.
-  - **C007.3**: Leave unsupported terminals/platforms unqualified.
-- **FR-008**: MUST satisfy each clause below.
-  - **C008.1**: Never request or persist secrets.
-  - **C008.2**: Never execute answer/session-supplied code.
-  - **C008.3**: Never infer cloud authority.
-  - **C008.4**: Never present planned/experimental selections as verified.
-  - **C008.5**: Reject sensitive free-text and unsupported fields.
-- **FR-009**: MUST satisfy each clause below.
-  - **C009.1**: Show a progress bar and accessible completed/required count for current conditional journey.
-  - **C009.2**: Count only valid completed steps.
-  - **C009.3**: Recompute after back/edit/resume or relevant branch change without claiming deployment readiness.
-- **FR-010**: MUST satisfy each clause below.
-  - **C010.1**: Ask the use case.
-  - **C010.2**: Resolve versioned suggested defaults with per-field provenance and explanation.
-  - **C010.3**: Preserve valid explicit overrides.
-  - **C010.4**: Preview changed defaults after a use-case edit.
-  - **C010.5**: Retain qualification and customer-action gates on unsupported/regulated selections.
 
-The requirements above retain the full product contract. The active prototype exercises
-only in-memory choice/help/back/edit/progress behavior; save/resume, helper integration and
-export clauses stay owed to their later creators. T014 illustrates that behavior without
-claiming any V-check or success criterion has passed.
+### Functional requirements
+- **FR-001 Answers file, strictly decoded** — an answers file has `apiVersion`
+  `lz.platformrelay.dev/v1alpha1`, `kind` `DeploymentAnswers` and the fields of data-model.md
+  *Answers file*, mirrored by `schemas/answers.schema.json`. It is YAML in its JSON-compatible flow
+  form with whole-line comments, at most 64 KiB, decoded strictly through `checks.DecodeStrict`:
+  syntax errors, duplicate keys, case variants, unknown or missing fields, `null`, unsupported
+  versions and values outside a field's pattern or enum are refused before anything is derived.
+  Shared fields use the manifest's patterns. No field holds a project id, a credential or a command.
+- **FR-002 Defaults and derivation** — the export fills every manifest field the answers file omits
+  by the fixed rules of data-model.md *Derivation* (header, `scope` platform, `stage_source` local,
+  `state.project.ref` `STATE`, `state.endpoint` from the region, project ref `<TENANT>_<ENV>`, mode
+  `reference`, `vlan_id` 0, both toggles off) and derives every instance row in a fixed order with
+  fixed ids. An explicit answer overrides only the defaults data-model.md marks overridable. The
+  output is deterministic: the same answers give the same bytes.
+- **FR-003 The decoder gate** — before it prints or writes a manifest, the command passes the
+  generated bytes through `stacks.DecodeManifest`, the decoder behind `stacks:check`; a refused
+  manifest is never printed as a result or written. The export of the sandbox answers fixture is
+  value-equal to `stacks/deployments.yaml`, and that of the two-tenant answers fixture to
+  `tests/fixtures/manifests/sandbox-two-tenants/deployments.yaml`.
+- **FR-004 Plain-word refusals** — every refusal prints one line
+  `configure: <CODE>: <detail>. <plain sentence>. Next: <action>`, where `<detail>` is the field
+  path for an answers decode error and the decoder's own detail (which names tenant, environment and
+  region) for a refusal of the generated manifest. The catalogue of contracts/checks.md covers every
+  refusal code of `tools/internal/configure` and every `Code*` constant of
+  `tools/internal/stacks/manifest.go`; a code without an entry fails a test and never falls back
+  silently. Codes the derivation cannot reach say so and ask for a report. Exit status 1.
+- **FR-005 Dry-run diff** — `configure:check` decodes the current `stacks/deployments.yaml` (when
+  present) and prints a deterministic diff by value: header and spec fields, tenants, environments
+  and regions, and instance rows added, removed or changed. Each added row is marked "created by
+  stacks:reconcile"; each removed row and each changed id or dimension is marked "refused by
+  stacks:reconcile (UNSUPPORTED_CHANGE)" (`reconcile.go:25-29`). It writes nothing. A current
+  manifest that does not decode is reported with its plain message and the diff is skipped.
+- **FR-006 Consequence notes** — after a successful check or export, the command prints the notes of
+  data-model.md *Consequence notes* whose trigger applies, in a fixed order: the
+  `LZ_PROJECT_ID_<REF>` names the bound `account.env` needs (names only); one project per tenant and
+  environment (D107); KD-1 when `shared_state_project` is set (D88, D105); reference versus adopt
+  (D94); one VLAN id per private network (005 T098); `org` keeps globally unique bucket names apart
+  (005 P21); state buckets are Object-Locked (D104).
+- **FR-007 Staging write** — `configure:export` writes only `.local/configure/deployments.yaml`
+  (directory 0700, file 0600) through a temporary file in that directory, `fsync` and rename. It
+  refuses a symlinked `.local`, `.local/configure` or target; on any failure the previous staging
+  file stays. It never writes `stacks/` or any other path (pending the open clarification). It
+  prints the next steps: copy to `stacks/deployments.yaml`, then `task stacks:reconcile`,
+  `task stacks:generate`, `task stacks:check`. `configure:check` writes nothing.
+- **FR-008 No authority** — neither command opens a network connection, reads a credential, an
+  environment variable, `~/.config/ovh-lz/` or `account.env`, or executes anything named in the
+  answers file. The answers path must be a regular file, not a symlink.
+- **FR-009 Second-operator how-to** — `docs/how-to/prepare-deployments-from-answers.md` takes a
+  reader from the sandbox answers file to a checked manifest, states what the answers file makes
+  easier and where it does not (this spec's *Why and scope*), and ends in `task configure:check`.
+  `docs/explanation/guided-setup-walkthrough.md` marks the interactive journey as deferred.
+- **FR-010 Traceability** — `task check:specs` with no argument and CI's source check trace spec
+  004; every requirement and task of this spec is traced through its `004/` registry keys.
 
-Each numbered clause inherits its parent requirement’s V-check and creating tasks.
-For every guarded clause, implementation records a distinct expected outcome and
-valid/defect control; parent coverage alone cannot satisfy an untested child clause.
+### Key entities
+Answers file, derivation rule, generated manifest, refusal message, dry-run diff entry, consequence
+note, staging file. See `data-model.md`.
+
+## Success criteria
+- **SC-001**: The sandbox answers fixture holds 11 values and the two-tenant one 15; their exports
+  are value-equal to the 41-value and 67-value manifests (V002).
+- **SC-002**: Each invalid answers fixture yields exactly its expected code, its detail and a next
+  action, writes nothing and exits 1; the catalogue completeness test fails when a code lacks an
+  entry (V003).
+- **SC-003**: Across the check and export tests the only path created or changed under the test
+  root is `.local/configure/deployments.yaml`; and the two packages import no `net`, `net/http` or
+  `os/exec` and call no `os.Getenv`, `os.LookupEnv`, `os.Environ` or `os.UserHomeDir` (a source
+  test) (V005).
+- **SC-004**: A second reader, given only the how-to, produces a two-tenant answers file that
+  `configure:check` accepts, and records the time taken and each step that was harder than editing
+  the manifest (V006).
 
 ## Acceptance and predefined verification
-All targets are **planned**, with creators in tasks.md. Evidence starts `not-run`, private under
-`.local/evidence/004/`. Synthetic choices do not qualify a real profile or naming kind.
+Planned Task targets: `test:configure` (creator T016), `configure:check` and `configure:export`
+(creator T020). Offline checks run through `lz-offline` as `task <target> [-- <path>]` when their
+input lies in an admitted tree. An operator's answers file under `.local/` is outside the entry's
+snapshot (`EntrySkipped`, `tools/internal/checks/offline.go:43-45`), so both `configure:*` targets
+are also host-side, credential-free commands, like `stacks:reconcile`. Controls in
+`contracts/checks.md`. Evidence starts `not-run`.
 
-| Check | Requirements | Positive and rejection outcomes | Verify (planned) | Evidence |
-| --- | --- | --- | --- | --- |
-| V001 | FR-001, FR-002, FR-009, FR-010, SC-001 | Use-case defaults have provenance and preserve valid overrides; valid journey shows help/consequence and exact conditional progress; invalid choice refuses, back/edit changes only dependent answers/progress, regulated choices retain gates; human tone rubric reviewed | `task test:configure-flow; task verify:configure-journey` | `004/journey.json` |
-| V002 | FR-003, FR-004, SC-002 | Save/restart retains valid progress; write interruption retains prior checkpoint; stale schema invalidates affected answers; corrupt/duplicate/foreign/symlink/racing writer rejects | `task test:configure-resume` | `004/resume.json` |
-| V003 | FR-005, FR-008 | Pinned local tool control passes; missing/mismatch/timeout returns blocked; injection, hook, secret input or network attempt refuses | `task test:configure-checks` | `004/checks.json` |
-| V004 | FR-006, FR-008, SC-002 | Reviewed valid draft exports complete manifest with deterministic diff; unreviewed/invalid/partial/symlinked destination refuses; existing repo inventory remains unchanged | `task test:configure-export` | `004/export.json` |
-| V005 | FR-007, SC-001 | Supported PTY/plain and noninteractive inputs give matching effective data; cancel/resume and narrow terminal work; unsupported platform clearly blocked | `task verify:configure` | `004/terminal.json` |
-
-## Success Criteria
-- **SC-001**: Every choice in the exercised journey has visible help, default provenance and consequences; the human walkthrough reviews tone/clarity independently of passing controller tests (V001/V005).
-- **SC-002**: All exercised interruption/resume/export cases preserve the last valid checkpoint and leave existing repository files unchanged (V002/V004).
-
-## Edge cases
-No TTY, narrow terminal, cancel mid-input, process death mid-write, disk full, two writers,
-copied session, stale prompt/schema, duplicate keys, unknown answer, invalid earlier edit,
-unsupported tuple, missing tool, long helper run, symlink destination, secret-like free text.
+| Check | Requirements | Verify |
+| --- | --- | --- |
+| V001 | FR-001, FR-008 | `task test:configure` (planned, T016) |
+| V002 | FR-002, FR-003, SC-001 | `task test:configure`; after the copy, `task stacks:check` |
+| V003 | FR-004, SC-002 | `task test:configure` |
+| V004 | FR-005, FR-006 | `task test:configure; task configure:check -- tests/fixtures/answers/sandbox.yaml` (planned, T020) |
+| V005 | FR-007, FR-008, SC-003 | `task test:configure` |
+| V006 | FR-009, SC-004 | `task docs:check`; T022's record |
+| V007 | FR-010 | `task check:specs; task test:traceability; task test:foundation-ci` |
 
 ## Implementation surface
-`tools/cmd/lz-configure/`, `tools/internal/configure/`, `schemas/configure-session.schema.json`,
-`tools/harness/configure/{steps,checks,limits}.yaml`, `tests/fixtures/configure/`, `Taskfile.yml`,
-`docs/explanation/guided-setup-walkthrough.md`. One tools Go module created by 001/T001; no second module.
+- `schemas/answers.schema.json` (new); `tools/internal/configure/` (new: `answers.go`, `export.go`,
+  `messages.go`, `diff.go`, `notes.go`, their tests); `tools/cmd/lz-configure/` (new: `main.go`,
+  `main_test.go`); `tests/fixtures/answers/` (new: `sandbox.yaml`, `sandbox-two-tenants.yaml`,
+  `invalid/` with `cases.json`).
+- `Taskfile.yml` (`test:configure`, `configure:check`, `configure:export`; spec lists);
+  `tools/harness/checks.yaml` (keys, checks, inputs).
+- `docs/how-to/prepare-deployments-from-answers.md` (new), `docs/explanation/guided-setup-walkthrough.md`,
+  `docs/README.md`, `specs/README.md`, `schemas/README.md`.
+- One tools Go module; no new dependency.
+
+## Out of scope / postponed (with trigger)
+| Item | Why not here | Trigger to start |
+| --- | --- | --- |
+| D-US4 to D-US7 | D127: simplest form first, about 15 review legs | see *Deferred user stories* |
+| Writing `stacks/deployments.yaml` in place | ADR-0023: applying the draft is a separate reviewed action | the open clarification answered "in place", with an ADR-0023 amendment |
+| Tenant-scope manifests, `external` entries, runtime slots, regions without runtime | not needed by the sandbox or the two-tenant layout; each adds answers fields | a manifest in use that needs one |
+| Block-style YAML for the answers file | a vendored YAML library is a dependency decision (005 T034) | the owner takes that decision for the manifest too |
+| Plain messages for `stacks:check` itself | that changes spec 005's checked output | after this catalogue lands, if a hand-edit error goes unexplained |
+| Consequences beyond D113's list | no new live evidence in this spec | a later live spec |
 
 ## Dependencies and stop conditions
-Phase 001 T001 pins tools; its T007 report/evidence contract supports local integration.
-The checkpoint has its own strict schema; it does not require the naming module/interface choice.
-Real-export integration uses spec 005's `schemas/deployments.schema.json` and `modules/naming`
-(D113), not 001/T016. Only in-memory synthetic choice vectors may precede real profile data;
-they do not authorize synthetic checkpointing or export. D29's schema gate for T004–T005 and
-T010–T011 is met (D113); they still wait for the D85 wizard gate. Preserve all fault, permission, concurrency and publication controls for that work.
-A renderer comparison needs exact reviewed pins, finite bounds and actual 001/T003 safety/
-capture qualification before implementation/execution in this lane. Missing platform
-qualification blocks that platform's claim, not T014 prose. No invented runnable cloud configuration.
+- Builds on spec 005's decoder and schema and spec 007's two-tenant fixture, all on `main`.
+- Stop: a change to `schemas/deployments.schema.json` or to the decoder's codes during this spec
+  re-opens T016–T018 (the catalogue completeness test fails by design). If T017 finds an export that
+  is not value-equal to the committed manifest, the derivation is wrong; the manifest is not edited
+  to match. No task makes a cloud call, reads a credential or writes `stacks/`.

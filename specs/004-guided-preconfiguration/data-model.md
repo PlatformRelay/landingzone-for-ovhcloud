@@ -1,25 +1,115 @@
-# Data model
-- StepDefinition: stable id, dependencies, question, brief explanation, default provenance,
-  consequence, optional detail, allowed choice references, validation and next-action messages.
-- UseCaseDefaults: versioned rule id, declared use-case dimensions, compatible choices and
-  per-field suggested value/reason. Explicit answers and derived defaults have distinct provenance.
-- Progress: derived valid completed-step count and relevant required-step count; recomputed from
-  the current branch/answers, never trusted from a persisted percent or a prior completion flag.
-- Session: schemaVersion, repository binding, source/schema/catalogue/prompt revisions,
-  allowlisted valid answers with explicit/default origin and default-rule references, completed
-  step ids, last completed step, status and stale observations. Binding identifies this working
-  tree and actual relevant source contents, not merely an origin URL, branch or Git HEAD.
-  No secret field, executable code or arbitrary path/command. Size is bounded; unknown keys reject.
-- CheckObservation: shared phase-001 report envelope plus check id, trusted command identity,
-  deadline, observed prerequisites and pass/fail/blocked status. A timeout never passes.
-  Rerun cheap checks on resume and before final review/export; compare actual source/tool bindings
-  and effective results. Changed inputs/results invalidate review. Observation timestamps alone
-  are not draft configuration inputs and do not make an otherwise identical draft nondeterministic.
-- DraftBundle: selected effective data, source bindings, unresolved actions, qualification status,
-  file digests and complete bundle manifest; explicit review confirmation tied to its input digest.
-Transitions: start → answering → saved → resume/revalidate → answering → review → exported-draft.
-Cancel preserves only previously validated answers. Editing a dependency invalidates downstream
-answers and old review confirmation. Source changes trigger revalidation, not silent defaulting.
-Use-case edits preview changed suggestions, preserve valid explicit overrides and recompute progress.
-Only checkpoint/temp/staging under `.local/configure/` and private `.local/evidence/004/` reports
-may be written. Complete-bundle publication is atomic; partial/changed existing staging refuses.
+# Data model: Answers file to deployments.yaml
+Spec: [spec.md](spec.md) · Research: [research.md](research.md) · Refreshed: 2026-10-25 (D127)
+
+No record here holds a project id, a credential or a command. The answers file and the staging file
+are local; neither is committed.
+
+## Answers file (FR-001)
+YAML in its JSON-compatible flow form, whole-line `#` comments allowed, at most 64 KiB, decoded
+strictly (`checks.DecodeStrict`). Mirrored by `schemas/answers.schema.json`. Patterns marked
+"manifest" are the ones of `schemas/deployments.schema.json` for the field it maps to.
+
+| Field | Type and rule | Required | Maps to | Default (overridable) |
+| --- | --- | --- | --- | --- |
+| `apiVersion` | `lz.platformrelay.dev/v1alpha1` | yes | — | — |
+| `kind` | `DeploymentAnswers` | yes | — | — |
+| `name` | manifest `metadata.name` | yes | `metadata.name` | — |
+| `org` | manifest `spec.org` | yes | `spec.org` | — |
+| `forge` | manifest `spec.forge` | yes | `spec.forge` | — |
+| `state_region` | manifest `spec.state.region` | yes | `spec.state.region` | — |
+| `state_endpoint` | manifest `spec.state.endpoint` | no | `spec.state.endpoint` | `https://s3.<state_region>.io.cloud.ovh.net` (P2) |
+| `state_ref` | manifest project ref | no | `spec.state.project.ref` | `STATE` |
+| `shared_state_project` | boolean | no | `spec.sandbox` (written only when true) | `false` |
+| `tenants` | array of *Tenant*, may be empty | yes | `spec.tenants` | — |
+
+*Tenant*: `name` (manifest tenant name, required), `environments` (array of *Environment*, required,
+may be empty).
+
+*Environment*: `name` (manifest environment name, required); `regions` (array of *Region*, required,
+may be empty); `project_ref` (manifest project ref, default `<TENANT>_<ENV>`, the two names upper
+case); `project_mode` (`adopt` or `reference`, default `reference`); `budget_alert` and
+`quota_guard` (booleans, default `false`).
+
+*Region*: `name` (manifest region name, required); `cidr` (manifest CIDR pattern, optional; without
+it the region has no network row); `vlan_id` (integer 0–4000, default 0, refused without `cidr`).
+
+Values: the sandbox answers fixture holds 11 leaf values, the two-tenant one 15 (research R2).
+
+## Derivation (FR-002)
+The export writes the manifest in this key order, so the same answers give the same bytes:
+1. `apiVersion` `lz.platformrelay.dev/v1alpha1`, `kind` `Deployments`, `metadata.name`.
+2. `spec.scope` `platform`; `spec.org`; `spec.forge`; `spec.stage_source.kind` `local`;
+   `spec.sandbox.shared_state_project: true` only when the answer is true (a `false` block is
+   refused by the decoder, `tests/fixtures/manifests/invalid/cases.json:36`); `spec.state`
+   (`project.ref`, `region`, `endpoint`).
+3. `spec.tenants`, in answers order; each environment with `project` (`mode`, `ref`), `regions`
+   (`name`, and `network` {`cidr`, `vlan_id`} only when `cidr` is given), then `budget_alert` and
+   `quota_guard` written explicitly.
+4. `spec.instances`, in this order:
+
+| Row | id | stage | dimensions | When |
+| --- | --- | --- | --- | --- |
+| 1 | `account-bootstrap` | `bootstrap` | — | always |
+| 2 | `account-governance` | `account-governance` | — | always |
+| per tenant `t`, in order | `<t>-state` | `tenant-state` | tenant | always |
+| per environment `e` of `t` | `<t>-<e>-project` | `project` | tenant, environment | always |
+| per region `r` of `e` | `<t>-<e>-<lower r>-network` | `project-network` | tenant, environment, region | `cidr` given |
+| per region `r` of `e` | `<t>-<e>-<lower r>-runtime` | `runtime` | tenant, environment, region | always |
+
+A tenant's rows are contiguous: its tenant-state row, then per environment its project row, then
+per region its network and runtime rows. This is the order of `stacks/deployments.yaml` and of the
+two-tenant fixture. No slot and no `external` entry is ever written.
+
+**Value-equality** (FR-003, SC-001): two manifests are value-equal when, with whole-line comments
+removed, they parse to the same JSON value (objects compared by key, arrays by position).
+
+## Generated manifest and the gate (FR-003)
+The generated bytes go to `stacks.DecodeManifest` before anything is printed as a result or
+written. A refusal is a *Refusal message*; the bytes are dropped.
+
+## Refusal message (FR-004)
+One line on standard output, exit status 1:
+`configure: <CODE>: <detail>. <plain sentence>. Next: <action>`
+- `<CODE>`: a refusal code of `tools/internal/configure` or a `Code*` constant of
+  `tools/internal/stacks/manifest.go`.
+- `<detail>`: the field path for an answers decode error (`tenants[1].environments[0].regions[0].cidr`);
+  the decoder's detail for a refusal of the generated manifest; the path for a file error.
+- `<plain sentence>` and `<action>`: from the catalogue in contracts/checks.md.
+
+Codes of `tools/internal/configure`: `ANSWERS_SYNTAX`, `ANSWERS_TOO_LARGE`, `ANSWERS_NOT_REGULAR`,
+`DUPLICATE_KEY`, `UNKNOWN_FIELD`, `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_VALUE`,
+`CURRENT_MANIFEST_INVALID`, `STAGING_SYMLINK`, `STAGING_WRITE`.
+
+## Dry-run diff entry (FR-005)
+One line per difference, sorted by the manifest path of the value, then:
+| Kind | Line | Reconcile mark |
+| --- | --- | --- |
+| row added | `+ row <id> (<stage> <tenant>/<env>/<region>)` | `created by stacks:reconcile` |
+| row removed | `- row <id> (…)` | `refused by stacks:reconcile (UNSUPPORTED_CHANGE)` |
+| row changed (id kept, dimension or stage changed) | `~ row <id>: <field> <old> -> <new>` | `refused by stacks:reconcile (UNSUPPORTED_CHANGE)` |
+| value changed | `~ <path>: <old> -> <new>` | none |
+| value added or removed | `+ <path>: <new>` / `- <path>: <old>` | none |
+Then one count line `diff: <a> added, <r> removed, <c> changed, <v> values`, or `diff: none`.
+Without a current manifest every row is `+`.
+
+## Consequence notes (FR-006)
+Printed after a successful check or export, in this order, each only when its trigger holds:
+| Note | Trigger | Source |
+| --- | --- | --- |
+| `account.env needs LZ_PROJECT_ID_<REF> for: <refs>` (names only) | always | D113; `tools/internal/live/publish.go` binding |
+| one project per tenant and environment is the only isolation boundary; tags do not scope bucket access | at least one environment | D107, 005 P25 |
+| KD-1: state shares the project of `<ref>`; tenant state isolation is not claimed | `shared_state_project` true | D88, D105 |
+| reference mode references the existing project; `adopt` plans a replacement (P5 refuted) | always (names the mode of each environment) | D94 |
+| each private network in a project needs its own VLAN id | at least one `cidr` | 005 T098 |
+| bucket names are unique across OVHcloud; `org` keeps them apart and a taken name fails | always | 005 P21, T057 |
+| state buckets are Object-Locked in governance mode; tearing one down needs the governance bypass or the end of the retention | always | D104 |
+
+## Staging file (FR-007)
+`.local/configure/deployments.yaml` under the repository root given by `-root`. Directory 0700,
+file 0600. Written to a temporary file in that directory, `fsync`, rename, directory `fsync`. Refused
+with `STAGING_SYMLINK` when `.local`, `.local/configure` or the target is a symlink. On any failure
+the temporary file is removed and the previous staging file is unchanged.
+
+## Not modelled (deferred)
+Session, step, progress, use-case preset and tool-check records of the earlier plan belong to
+D-US4 to D-US7 (spec.md) and are not built here.

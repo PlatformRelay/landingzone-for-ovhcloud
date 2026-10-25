@@ -1,8 +1,8 @@
 ---
 references:
   - path: specs/004-guided-preconfiguration/spec.md
-    blob: 7f40147f03c664dd4e216f00240ef024b7b6f767
-last_verified: 525ba2d658acf7b1eb8aac3d6a4f1d65a7c17c71
+    blob: cc41841d0c9d9a2a63e0b17ca2cb2850ed9e22d4
+last_verified: 46f5115b7f14bb51201e3a0fb1605d42039baa36
 ---
 
 # Guided setup: a design walkthrough
@@ -14,11 +14,12 @@ Start with what you want to learn or build. The planned setup helper will explai
 suggest a starting point and help you see what changes when you choose something else. You
 remain in control of the answers; finishing the questions will not deploy anything.
 
-**Available now: this written walkthrough.** There is no setup helper to run yet. The next
-increment is a bounded terminal experiment with answers held only in memory. Saving, resuming
-and exporting are deferred until real profile schemas exist and their safety controls are
-implemented and verified. No credentials, cloud connection or terminal commands are needed
-to read this guide.
+**Available now: this written walkthrough.** There is no setup helper to run yet. Spec 004 was
+re-scoped on 2026-10-20 (D127): its first increment is a non-interactive answers file that a
+planned command exports to `deployments.yaml`, checked by the same decoder as `stacks:check`. The
+interactive journey this page describes, with saving and resuming, is a deferred story that
+starts only on its trigger. No credentials, cloud connection or terminal commands are needed to
+read this guide.
 
 Every example below is a **synthetic, authored illustration**, not captured terminal output,
 a supported profile, a naming contract or evidence of implemented behavior. The wording
@@ -120,33 +121,24 @@ It must leave existing repository files unchanged. Edits or relevant source/tool
 invalidate review; retry must not bless a partial or changed bundle. Even that future draft
 will carry no authority to deploy, procure resources or commit changes.
 
-These later controls remain part of the [full specification](../../specs/004-guided-preconfiguration/spec.md).
-Real profile schemas are a prerequisite for persistence and export, including synthetic
-implementations. Real export also needs its configuration, catalogue and naming contracts.
-Writing this guide does not supply those contracts or qualify save/resume, helper checks or export.
+The [specification](../../specs/004-guided-preconfiguration/spec.md) now covers the answers-file
+export only; the interactive journey, save/resume and helper checks are its deferred stories.
+Writing this guide does not qualify any of them.
 
 ## Commands you may see in the plan
 
 **All of these targets are planned and not in Taskfile.yml yet. Do not run them as setup
-instructions.** There is no public command for the bounded prototype yet.
+instructions.**
 
 | Planned Task target | Intended purpose | Creating task in spec 004 |
 | --- | --- | --- |
-| `configure` | Start the full guided helper | T009 |
-| `configure:resume` | Revalidate and continue a saved session | T009, after T005 persistence |
-| `test:configure-flow` | Check controller/default/progress behavior | T003 |
-| `test:configure-resume` | Check checkpoint and revalidation controls | T005 |
-| `test:configure-checks` | Check bounded local helper controls | T007 |
-| `verify:configure-journey` | Inspect actual terminal captures and the human walkthrough | T009 |
-| `test:configure-export` | Check reviewed draft publication controls | T011 |
-| `verify:configure` | Aggregate the full V001–V005 evidence | T013 |
+| `test:configure` | Check the answers decoder, the export, the messages, the diff and the staging write | T016 |
+| `configure:check` | Check an answers file: diff, consequences or a plain refusal; writes nothing | T020 |
+| `configure:export` | Write the checked manifest to local staging | T020 |
 
-The [task list](../../specs/004-guided-preconfiguration/tasks.md) keeps the implementation
-dependencies and deferred controls. T014 owns this early written journey. T012 will turn it
-into the final setup/resume/review/export guide after the full terminal and export work exists.
-The [prototype preparation plan](../../specs/004-guided-preconfiguration/plan.md#next-prototype-packet-requirements-only)
-records the next experiment's requirements; implementation and captures wait for actual
-foundation safety/capture qualification. This walkthrough supplies no terminal evidence.
+The interactive targets this page once listed belong to the deferred journey and have no task.
+The [task list](../../specs/004-guided-preconfiguration/tasks.md) keeps the order and the checks.
+T014 owns this early written journey. This walkthrough supplies no terminal evidence.
 
 ## Clarity review
 
