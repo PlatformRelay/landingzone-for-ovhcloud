@@ -82,7 +82,7 @@ Independent tests: V001, V002, V005. T016 → T017; T020 completes the story aft
 ## Phase 3: User Story 2 — A mistake is explained in plain words (P1)
 Independent test: V003.
 
-- [ ] T018 [US2] Explain every refusal through the catalogue in tools/internal/configure/messages.go, tests in tools/internal/configure/messages_test.go
+- [x] T018 [US2] Explain every refusal through the catalogue in tools/internal/configure/messages.go, tests in tools/internal/configure/messages_test.go — closed 2026-10-25, evidence: evidence/T018.md
   - Requirements: FR-004, SC-002; ADRs: 0013, 0019. Depends on: T017.
   - Cases (given / when / then → defect exposed):
     - given the `Code*` constants parsed from `tools/internal/stacks/manifest.go` (both the `const (…)` block and single `const` declarations; 18 today) under source `generated`, and the codes of `tools/internal/configure` under source `configure` / when the catalogue is checked / then each (source, code) pair has a plain sentence and a `Next:` action → exposes a missing entry (G32).
