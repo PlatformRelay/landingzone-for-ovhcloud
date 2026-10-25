@@ -223,7 +223,7 @@
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/checks"]},
     {"id": "test:configure", "requirements": ["004/FR-001", "004/FR-002", "004/FR-003", "004/FR-004", "004/FR-005", "004/FR-006", "004/FR-007", "004/FR-008", "004/SC-001", "004/SC-002", "004/SC-003"], "command": "task test:configure", "creator": "004/T016", "kind": "behavioral",
      "scope": ["tools/internal/configure", "tools/cmd/lz-configure", "tests/fixtures/answers"],
-     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/stacks", "tools/internal/checks", "schemas/deployments.schema.json", "stacks/deployments.yaml", "tests/fixtures/manifests"]},
+     "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/stacks", "tools/internal/checks", "tools/internal/report", "schemas/deployments.schema.json", "stacks/deployments.yaml", "tests/fixtures/manifests"]},
     {"id": "configure:check", "requirements": ["004/FR-005", "004/FR-006", "004/SC-004"], "command": "task configure:check -- tests/fixtures/answers/sandbox.yaml", "creator": "004/T020", "kind": "behavioral",
      "scope": ["tests/fixtures/answers"],
      "inputs": ["Taskfile.yml", "tools/go.mod", "tools/internal/configure", "tools/cmd/lz-configure", "tools/internal/stacks", "tools/internal/checks", "stacks/deployments.yaml"]},
