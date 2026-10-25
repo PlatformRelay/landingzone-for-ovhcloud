@@ -61,19 +61,24 @@ tasks:
   # LZ_EXPORT_SCRATCH=1 (the registry row) exports under a temporary root
   # holding a copy of stacks/deployments.yaml, removed afterwards, so running
   # the row never replaces an operator's staged export; give it an absolute
-  # answers path. If the temporary root cannot be made, nothing runs.
+  # answers path. If the temporary root cannot be made, nothing runs; an
+  # interrupted run can leave it in /tmp. Only the value 1 turns it on.
   configure:export:
     desc: As configure:check, then write .local/configure/deployments.yaml and print the next steps (004 FR-007)
     cmds:
       - |
         root=..
-        if [ -n "{{.LZ_EXPORT_SCRATCH}}" ]; then
+        scratch={{if eq (print .LZ_EXPORT_SCRATCH) "1"}}1{{end}}
+        if [ -n "$scratch" ]; then
           root=$(mktemp -d) || exit 1
           mkdir "$root/stacks" && cp stacks/deployments.yaml "$root/stacks/" || { rm -rf "$root"; exit 1; }
         fi
         status=0
         go -C tools run ./cmd/lz-configure -root "$root" export {{.CLI_ARGS}} || status=$?
-        if [ "$root" != .. ]; then rm -rf "$root"; fi
+        if [ -n "$scratch" ]; then
+          rm -rf "$root"
+          echo "configure: scratch export: written under a temporary root, now removed; nothing staged in this repository" >&2
+        fi
         exit $status
 
   test:foundation-ci:
