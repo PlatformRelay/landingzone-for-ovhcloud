@@ -221,10 +221,15 @@ func TestMessagesCheckNamesMissingEntry(t *testing.T) {
 	if err := messagesCheck(map[catalogueKey]catalogueEntry{}, generated, configure); err == nil {
 		t.Error("an empty catalogue passed")
 	}
-	blank := maps.Clone(catalogue)
-	blank[catalogueKey{SourceConfigure, CodeDuplicateKey}] = catalogueEntry{sentence: "A key appears twice."}
-	if err := messagesCheck(blank, generated, configure); err == nil || !strings.Contains(err.Error(), "(configure, DUPLICATE_KEY)") {
-		t.Errorf("an entry without an action: %v", err)
+	for name, entry := range map[string]catalogueEntry{
+		"an entry without an action":  {sentence: "A key appears twice."},
+		"an entry without a sentence": {next: "Keep one of the two keys."},
+	} {
+		blank := maps.Clone(catalogue)
+		blank[catalogueKey{SourceConfigure, CodeDuplicateKey}] = entry
+		if err := messagesCheck(blank, generated, configure); err == nil || !strings.Contains(err.Error(), "(configure, DUPLICATE_KEY)") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 	want, err := messagesWantKeys(generated, configure)
 	if err != nil {
