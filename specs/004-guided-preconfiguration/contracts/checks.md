@@ -1,8 +1,8 @@
 # Checks and command contracts: Answers file to deployments.yaml
 Refreshed: 2026-10-25 (D127)
 
-Planned targets, each absent from `Taskfile.yml` until its creating task closes: `test:configure`
-(T016), `configure:check` and `configure:export` (T020). The entry admits exactly `lz-offline
+Targets in `Taskfile.yml`: `test:configure` (T016), `configure:check` and `configure:export`
+(T020). The entry admits exactly `lz-offline
 --candidate <checkout> -- task <target> [-- <path>]` (`tools/cmd/lz-offline/main.go`); its snapshot
 skips `.local/`, so the `configure:*` targets run host-side for an operator's file and through the
 entry only for files under `tests/`. No target here needs a credential or the network.
@@ -10,11 +10,12 @@ entry only for files under `tests/`. No target here needs a credential or the ne
 Outcome words: `pass`, `fail`, `blocked`, `not-run`, `review-required` (constitution V). "Red" is a
 behavioural failure against a compiling stub; a compile error or a missing symbol is not red.
 
-## Commands (planned)
+## Commands
 - `lz-configure [-root <repo>] check <answers>` (`task configure:check -- <answers>`): decode,
   derive, gate, then print the diff (FR-005), a warning line when a removed row predicts a refusal by
-  `stacks:reconcile`, the notes (FR-006) and `configure: ok`; or one refusal line (FR-004) and
-  exit 1. Writes nothing.
+  `stacks:reconcile`, the notes (FR-006) and `configure: ok`; or one refusal line (FR-004), or the
+  `configure: error:` line (*Message catalogue*), and exit 1. A current `stacks/deployments.yaml`
+  that does not decode is refused (`CURRENT_MANIFEST_INVALID`, FR-005). Writes nothing.
 - `lz-configure [-root <repo>] export <answers>` (`task configure:export -- <answers>`, host-side):
   the same, then write the staging file (FR-007) and print `wrote .local/configure/deployments.yaml`
   and the next steps. Usage errors exit 2.
@@ -49,6 +50,13 @@ of `tools/internal/stacks/manifest.go` returned for the generated manifest. `<de
 the source (data-model *Refusal message*). The completeness test requires an entry for every
 `configure` code and every parsed `Code*` constant under `generated`, and fails when it parses zero
 constants.
+
+**The one exception.** An I/O failure that is not a refusal of the answers has no entry: a read
+error of the answers file other than missing, symlink, non-regular or oversized (for example,
+permission denied), or a read error of `stacks/deployments.yaml` other than its absence. It prints
+one line `configure: error: <error>` (control characters quoted), exit 1, and nothing else. It is
+never printed as a catalogue line, so it never blames the content of the answers (coordinator
+decision of 2026-10-25, T020).
 
 | Source | Code | Plain sentence | Next |
 | --- | --- | --- | --- |
