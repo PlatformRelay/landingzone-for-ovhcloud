@@ -65,7 +65,7 @@ Independent tests: V001, V002, V005. T016 → T017; T020 completes the story aft
   - Verify: `task test:configure` (creates the target: `go -C tools test -count=1 ./internal/configure ./cmd/lz-configure`, the second package added by T020): red commit with the acceptance cases failing on the stub for their reason and the pins passing; green commit passes them; each rejection case's G29 mutant turns it red with its real reason while its positive control passes.
   - Evidence: `evidence/T016.md`; initial status `not-run`.
 
-- [ ] T017 [US1] Derive the manifest and gate it through the decoder in tools/internal/configure/export.go, tests in tools/internal/configure/export_test.go
+- [x] T017 [US1] Derive the manifest and gate it through the decoder in tools/internal/configure/export.go, tests in tools/internal/configure/export_test.go — closed 2026-10-25, evidence: evidence/T017.md
   - Requirements: FR-002, FR-003, SC-001; ADRs: 0005, 0008, 0023. Depends on: T016.
   - Cases (given / when / then → defect exposed):
     - given the sandbox answers / when exported / then the bytes are value-equal to `stacks/deployments.yaml` (comments removed, JSON values compared) and pass `stacks.DecodeManifest` → exposes a wrong default, a missing toggle or a row in the wrong order.
