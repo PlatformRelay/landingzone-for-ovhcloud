@@ -429,13 +429,17 @@ outcomes and the known deviations into the evidence or PR, never the record itse
 - A probe start is refused (exit 3) while another probe run is unreconciled, that is while its
   directory under `state/probes/` exists: `refused (unreconciled-run): probe run <run-ids> is
   unreconciled (its directory under state/probes/ exists); finish it first: task live:probe --
-  --reviewed-sha <sha> --cleanup <run-id>` (`tools/internal/live/runner.go:1711`). Next action:
+  --reviewed-sha <sha> --cleanup <run-id>` (`tools/internal/live/runner.go:1787`). Next action:
   run that `--cleanup` for each named run, then start again. A directory without `probe.env`
-  cannot be cleaned up: the owner checks the project and removes it by hand.
+  (a start killed right after claiming it, before anything was created, or a passing run whose
+  retire was cut short) is retired by that plain `--cleanup` when it holds nothing but its lock
+  and `.write-*` temporaries and the run has no baseline recovery copy under `state/baselines/`;
+  with anything else the cleanup refuses (`record`), removes nothing, and
+  the owner checks the project and removes it by hand (spec 007 T029).
 - A `--cleanup` of a run with no trustworthy baseline, such as a probe run from before baselines
   existed, is refused `untrusted` (exit 3) before anything is read or deleted: `cleanup of run
   <run-id>: BASELINE_MISSING: …; nothing deleted and its files kept: owner recovery, then
-  --cleanup <run-id> --accept-lost-baseline` (`runner.go:1795`; `BASELINE_INVALID <reason>` for
+  --cleanup <run-id> --accept-lost-baseline` (`runner.go:1888`; `BASELINE_INVALID <reason>` for
   a baseline that exists but fails validation). Next action, the owner's only: check the
   project, remove by hand what the run created that its state does not hold, then run
   `task live:probe -- --reviewed-sha "$S" --cleanup <run-id> --accept-lost-baseline` at a
@@ -443,7 +447,7 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   for `budget-alert` are in the [probe run sheet](../../tests/live/probes/README.md#runs)).
   Without a terminal, or with another line typed back, it is refused `accept-lost-baseline` and
   nothing is deleted. It is refused too for a run that is not `untrusted`: a plain `--cleanup`
-  finishes that one (`runner.go:1793`). It destroys from the run's state if there is one and
+  finishes that one (`runner.go:1886`). It destroys from the run's state if there is one and
   runs the root's sweep, except for `budget-alert`, where it deletes nothing
   (`probe.go:66-80`); then it runs the leftover check, and retires the run's files only if all
   of it passed (`runner.go:1213-1223`).
@@ -487,8 +491,12 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   alert someone else creates in the project after the baseline would be deleted too; do not
   create budget alerts by hand in the sandbox project while a probe run is unreconciled (spec 007
   stage B, D131). Its reads are retried like the listings above; its DELETE is sent once.
-- Never run `--cleanup <run-id>` while that run is still going in another terminal: a cleanup
-  takes no lock against a live run of the same id. Run live verbs one at a time.
+- A probe start and a `--cleanup` of the same run id exclude each other through `run.lock` in
+  the run's directory: the second is refused `run-locked` (exit 3) naming the run and the
+  holder's pid; try again when that one has ended. A lock left by a killed process (its pid
+  gone, or reused by a process with another start time) is taken over; one held by a live
+  process is not, however old (spec 007 T029). The lock covers one run id only: still run live
+  verbs one at a time.
 - The leftover check does not catch everything:
   - A resource created during a run without the `lz-` prefix, and missed by the inventory, is
     not found (evidence T047, gap 4).

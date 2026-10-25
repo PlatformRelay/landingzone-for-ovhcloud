@@ -3,7 +3,7 @@ references:
   - path: tools/cmd/lz-live/main.go
     blob: 0f07bee04de813455817624ddefbfa0b9a293aa2
   - path: tools/cmd/lz-live/probe.go
-    blob: 093177583a9d931f5869336a1349142151db1c58
+    blob: 7ff15ddec9934b5d0edb552b053ecdd4e4ffb70b
   - path: tools/internal/live/apply.go
     blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
   - path: Taskfile.yml

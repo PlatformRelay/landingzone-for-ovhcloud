@@ -1220,7 +1220,13 @@ type Probe struct {
 	// the owner recovery of a root whose objects only a baseline could tell apart deletes nothing;
 	// the owner removed them by hand). The run's state file is retired with its other files.
 	AcceptDeletesNothing bool
+	// claimed (tests only; nil in production) runs right after Start claimed the run's directory,
+	// before it takes the run lock: the window a cleanup of the same run id can enter.
+	claimed func(dir string)
 }
+
+// CondRunLocked refuses a probe start or cleanup while another process holds the run's lock.
+const CondRunLocked = "run-locked"
 
 // CondAcceptLostBaseline refuses `--accept-lost-baseline`: no terminal, another line typed back,
 // or a run that is not untrusted.
@@ -1605,9 +1611,11 @@ func (p Probe) run(ctx context.Context, phrase string, cleanup bool) error {
 // then its directory: a crash part-way leaves probe.env, so `--cleanup` can still finish the run.
 // The run's own `.write-*` temporaries (a kill inside WriteCredentialFile) go with its files; any
 // other entry refuses before anything is removed, so the run never leaves a directory that blocks
-// every start and that `--cleanup` cannot reach (spec 007 T027).
+// every start and that `--cleanup` cannot reach (spec 007 T027). The run lock its caller holds
+// goes after probe.env (spec 007 T029): a crash in between leaves an empty claim.
 func retire(dir, root string, files ...string) error {
-	temps, stray, err := runDirEntries(dir, append([]string{root}, files...)...)
+	lock := filepath.Join(dir, runLockName)
+	temps, stray, err := runDirEntries(dir, append([]string{root, lock}, files...)...)
 	if err != nil {
 		return err
 	}
@@ -1618,10 +1626,68 @@ func retire(dir, root string, files ...string) error {
 	if err := removeFiles(slices.Concat(files, temps)...); err != nil {
 		return err
 	}
-	if err := removeFiles(root); err != nil {
+	if err := removeFiles(root, lock); err != nil {
 		return err
 	}
 	return removeEmptyDir(dir)
+}
+
+// retireEmptyClaim retires a run directory that holds nothing but its claim (spec 007 T029): no
+// probe.env, no entry but the run lock and `.write-*` temporaries, and no baseline recovery copy.
+// Nothing can exist in OVHcloud for such a run: probe.env is written before anything else, and
+// retire removes the recovery copy before probe.env, so a retire that crashed after probe.env
+// leaves the same (the record copy, in the run record, is kept by every passing run and is no
+// sign of a live run). A run with probe.env is not a claim (false, nil); a claim holding
+// anything else is refused and nothing removed. The caller holds the run lock.
+func retireEmptyClaim(runID, dir, recovery string) (bool, error) {
+	root := filepath.Join(dir, "probe.env")
+	if _, err := os.Lstat(root); !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	_, stray, err := runDirEntries(dir, filepath.Join(dir, runLockName))
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(recovery); !errors.Is(err, fs.ErrNotExist) {
+		stray = append(stray, recovery)
+	}
+	if len(stray) > 0 {
+		return false, refuse(CondRecord, "run %s has no probe.env but holds %s: not retired, nothing removed; the owner checks the project and removes them by hand",
+			runID, strings.Join(stray, ", "))
+	}
+	return true, retire(dir, root)
+}
+
+// RetireEmptyClaim is a plain `--cleanup <run-id>` of a run whose directory holds only its claim
+// (a start killed before probe.env), for lz-live, which reads probe.env before it builds a Probe:
+// under the run lock it retires the claim (retireEmptyClaim) and reports true. A run with
+// probe.env, or without a directory, is left to the caller (false, nil).
+func RetireEmptyClaim(configRoot, account, runID string) (retired bool, err error) {
+	p := Probe{Run: Runner{ID: runID}, ConfigRoot: configRoot, Account: account}
+	rc, err := p.recovery()
+	if err != nil {
+		return false, err
+	}
+	dir, err := ProbeDir(configRoot, account, runID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	lock, err := lockRun(dir, runID)
+	if err != nil {
+		return false, err
+	}
+	defer releaseRun(lock, &err)
+	return retireEmptyClaim(runID, dir, rc.path())
+}
+
+// releaseRun releases a run lock on the way out; its error is the result unless there is one.
+func releaseRun(lock *runLock, err *error) {
+	if rerr := lock.release(); *err == nil {
+		*err = rerr
+	}
 }
 
 // runDirEntries reads a run directory (spec 007 T027): temps are its WriteCredentialFile
@@ -1657,8 +1723,8 @@ func runDirEntries(dir string, known ...string) (temps, stray []string, err erro
 // order, each written and synced before the next (spec 007 FR-006): probe.env (the root and the
 // project), the passphrase, the baseline (Execute, before the first apply); it runs the probe and
 // deletes the probe's files and the baseline's recovery copy only after destroy, the sweep and the
-// leftover check passed.
-func (p Probe) Start(ctx context.Context) error {
+// leftover check passed. It holds the run lock (lockRun) from right after the claim to its end.
+func (p Probe) Start(ctx context.Context) (err error) {
 	dir, _, _, _, err := p.files()
 	if err != nil {
 		return err
@@ -1678,11 +1744,21 @@ func (p Probe) Start(ctx context.Context) error {
 	// An earlier run still unreconciled may have left a nameless resource this run's baseline
 	// would take in as the project's own (FR-006): refused before any file of this run. The run's
 	// own directory is claimed first (created exclusively, synced), so of two starts at once each
-	// sees the other and both are refused; a refused start removes its empty directory again.
+	// sees the other and both are refused; a refused start removes its empty directory again. A
+	// cleanup of this run id that took the lock in between (an empty claim) refuses the start.
 	if err := claimDir(p.ConfigRoot, rel); err != nil {
 		return err
 	}
+	if p.claimed != nil {
+		p.claimed(dir)
+	}
+	lock, err := lockRun(dir, p.Run.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseRun(lock, &err)
 	if err := refuseUnreconciled(filepath.Dir(dir), p.Run.ID); err != nil {
+		_ = lock.release()
 		_ = removeEmptyDir(dir)
 		return err
 	}
@@ -1708,7 +1784,7 @@ func refuseUnreconciled(probesDir, self string) error {
 		return err
 	}
 	if len(others) > 0 {
-		return refuse(CondUnreconciledRun, "probe run %s is unreconciled (its directory under state/probes/ exists); finish it first: task live:probe -- --reviewed-sha <sha> --cleanup %s (a directory without probe.env cannot be cleaned up: the owner checks the project and removes it by hand)",
+		return refuse(CondUnreconciledRun, "probe run %s is unreconciled (its directory under state/probes/ exists); finish it first: task live:probe -- --reviewed-sha <sha> --cleanup %s",
 			strings.Join(others, ", "), others[0])
 	}
 	return nil
@@ -1721,15 +1797,32 @@ func refuseUnreconciled(probesDir, self string) error {
 // baseline-backed whose create left no state) runs no tofu and needs no passphrase; otherwise it
 // reads the retained passphrase and destroys the probe from its retained state (planning and
 // applying nothing). Then the check's Sweep and the leftover check run, with a baseline-backed
-// run's baseline as Before; the probe's files and the recovery copy go only when all passed.
-func (p Probe) Cleanup(ctx context.Context) error {
-	_, state, pass, record, err := p.files()
+// run's baseline as Before; the probe's files and the recovery copy go only when all passed. It
+// holds the run lock before it reads anything of the run; a run directory holding only its claim
+// is retired (retireEmptyClaim).
+func (p Probe) Cleanup(ctx context.Context) (err error) {
+	dir, state, pass, record, err := p.files()
 	if err != nil {
 		return err
 	}
 	// Before the passphrase is read.
 	if err := p.Run.scratchOutside(); err != nil {
 		return err
+	}
+	rc, err := p.recovery()
+	if err != nil {
+		return err
+	}
+	lock, err := lockRun(dir, p.Run.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseRun(lock, &err)
+	// An empty claim is retired by a plain cleanup only, as from lz-live (retireClaim).
+	if !p.AcceptLostBaseline {
+		if retired, err := retireEmptyClaim(p.Run.ID, dir, rc.path()); retired || err != nil {
+			return err
+		}
 	}
 	// The project the run ran against, whatever the caller passes now.
 	project, err := recordedProject(record, p.Run.ID)
