@@ -28,8 +28,9 @@ No profiles; a single hardened default; **switchable profiles** with per-control
   product docs; permitted: "aligned with", "supports controls X, Y". Each profile page has three
   columns per control: *implemented in code*, *detective only*, *not covered / customer responsibility*.
   Amendment (2026-10-25, D133): `docs:check` enforces the wording rule as `WORDING_BANNED` on
-  every page under `docs/`, ADRs included, and on the READMEs. A word between quotation marks, in
-  a code span or in a fenced block names the word and is allowed.
+  every page under `docs/`, ADRs included, and on the READMEs. A word in a fenced block names the
+  word; a quoted or code-span word does only on a line that states the ban, so scare quotes
+  around a claim are refused.
 - Claims are tied to product and region, using the allowlist the profile references; the
   scanner (ADR-0006) flags resources outside the claimed product/region set.
 - No profile ships before its control mapping is reviewed by someone with the relevant expertise; v1
