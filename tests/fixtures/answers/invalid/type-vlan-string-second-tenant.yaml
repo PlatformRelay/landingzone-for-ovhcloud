@@ -15,7 +15,7 @@
         {
           "name": "dev",
           "regions": [
-            {"name": "GRA11", "cidr": "10.20.0.0/24"}
+            {"name": "GRA11", "cidr": "10.20.0.0/24", "vlan_id": 7}
           ]
         }
       ]

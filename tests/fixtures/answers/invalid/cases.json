@@ -38,7 +38,9 @@
     "control": {"old": "\"10.40.0.0\"", "new": "\"10.40.0.0/24\""}},
   "type-flag-string.yaml": {"base": "sandbox.yaml", "code": "INVALID_VALUE", "detail": "shared_state_project", "why": "a boolean written as a string",
     "control": {"old": "\"true\"", "new": "true"}},
-  "type-vlan-string-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].vlan_id", "why": "`vlan_id` written as a string in the second tenant; a type mismatch's path carries its index",
+  "type-vlan-string-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].vlan_id", "why": "`vlan_id` written as a string in the second tenant, after a valid one in the first; a type mismatch's path carries its index",
     "control": {"old": "\"5\"", "new": "5"}},
-  "type-top-level-array.yaml": {"base": "sandbox.yaml", "code": "INVALID_VALUE", "detail": "(document)", "why": "an array where the answers object belongs; the control is the base"}
+  "type-top-level-array.yaml": {"base": "sandbox.yaml", "code": "INVALID_VALUE", "detail": "(document)", "why": "an array where the answers object belongs; the control is the base"},
+  "type-vlan-decimal-second-tenant.yaml": {"base": "sandbox-two-tenants.yaml", "code": "INVALID_VALUE", "detail": "tenants[1].environments[0].regions[0].vlan_id", "why": "`vlan_id` 1.0, an integer value in a spelling an int does not decode; the path carries its index",
+    "control": {"old": "\"vlan_id\": 1.0", "new": "\"vlan_id\": 1"}}
 }

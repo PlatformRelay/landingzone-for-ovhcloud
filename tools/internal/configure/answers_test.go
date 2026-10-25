@@ -367,11 +367,12 @@ func answersReadFile(t *testing.T, path string) []byte {
 }
 
 // answersForbidden are the imports and os functions that would give the package a path to the
-// network, a process or the environment (FR-008): net and every package under it, os/exec, the
+// network, a process or the environment (FR-008): net and every package under it, os/exec,
+// os/user (the home directory by another way), the
 // os functions that read or change the environment or start a process, and every syscall name
 // but the open flags and errno values ReadAnswers needs.
 var (
-	answersForbiddenImports = []string{"net", "os/exec", "golang.org/x/sys/unix"}
+	answersForbiddenImports = []string{"net", "os/exec", "os/user", "golang.org/x/sys/unix"}
 	answersForbiddenCalls   = []string{"Getenv", "LookupEnv", "Environ", "UserHomeDir", "ExpandEnv",
 		"Setenv", "Unsetenv", "Clearenv", "StartProcess"}
 	answersAllowedSyscall = []string{"O_NOFOLLOW", "O_NONBLOCK", "ELOOP", "ENOTDIR"}
@@ -451,8 +452,8 @@ func answersSelectorUse(path string, names map[string]string, sel *ast.SelectorE
 	return nil
 }
 
-// TestAnswersSourceHasNoAuthority (pin): the package imports nothing under net, no os/exec and no
-// golang.org/x/sys/unix, uses no os function that reads or changes the environment or starts a
+// TestAnswersSourceHasNoAuthority (pin): the package imports nothing under net, no os/exec, no
+// os/user and no golang.org/x/sys/unix, uses no os function that reads or changes the environment or starts a
 // process (os.Getenv, os.LookupEnv, os.Environ, os.UserHomeDir among them) and no syscall name
 // but the open flags and errno values ReadAnswers needs (FR-008); controls: a planted os.Getenv
 // under another import name, a planted net/http import and a planted syscall.Getenv in a scratch

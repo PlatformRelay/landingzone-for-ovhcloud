@@ -23,11 +23,11 @@ import (
 	"io"
 	"io/fs"
 	"maps"
-	"math"
 	"os"
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -43,9 +43,10 @@ const (
 
 // Refusal codes of DecodeAnswers and ReadAnswers (data-model.md *Refusal message*). When a
 // document breaks several rules, the first in this order is reported: size, syntax and duplicate
-// keys (in document order); then, object by object from the top, missing or null fields (in
-// field declaration order) before unknown keys (in sorted order); a JSON type mismatch (in
-// declaration order); the header; value rules (keys in sorted order); a VLAN id without a CIDR.
+// keys (in document order); then checks.DecodeStrict's walk, depth first: an object's missing
+// fields (in field declaration order), then its keys in sorted order, each refused as unknown
+// or null or descended into; then a JSON type mismatch (in declaration order); the header; value
+// rules (keys in sorted order); a VLAN id without a CIDR.
 const (
 	CodeAnswersSyntax      = "ANSWERS_SYNTAX"      // not one JSON-compatible document
 	CodeAnswersTooLarge    = "ANSWERS_TOO_LARGE"   // more than MaxAnswersBytes
@@ -335,7 +336,7 @@ func decodeError(data []byte, err error) error {
 	}
 	switch {
 	case errors.As(err, &typeErr):
-		return refuse(CodeInvalidValue, "%s", mismatchPath(data, typeErr))
+		return refuse(CodeInvalidValue, "%s", mismatchPath(data))
 	case strings.HasPrefix(msg, CodeDuplicateKey): // the keyWalker reports these first, with their path
 		return refuse(CodeDuplicateKey, "%s", strings.TrimPrefix(msg, CodeDuplicateKey+": "))
 	case strings.HasSuffix(msg, ": unknown field"):
@@ -367,8 +368,14 @@ func typeMismatch(v any, t reflect.Type, path string) (string, bool) {
 		_, ok := v.(bool)
 		return path, !ok
 	case reflect.Int:
-		f, ok := v.(float64)
-		return path, !ok || f != math.Trunc(f) || math.Abs(f) > math.MaxInt32
+		// the document is decoded with UseNumber, so the literal is judged as encoding/json
+		// judges it for an int: 1.0, 1e0 and an overflow are type errors, as 1.5 is
+		n, ok := v.(json.Number)
+		if ok {
+			_, err := strconv.ParseInt(string(n), 10, strconv.IntSize)
+			ok = err == nil
+		}
+		return path, !ok
 	}
 	return "", false
 }
@@ -403,16 +410,15 @@ func sliceMismatch(v any, t reflect.Type, path string) (string, bool) {
 }
 
 // mismatchPath is the indexed path of a type error, "(document)" for the top level.
-func mismatchPath(data []byte, typeErr *json.UnmarshalTypeError) string {
+func mismatchPath(data []byte) string {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	var generic any
-	if json.Unmarshal(data, &generic) != nil {
-		return typeErr.Field // unreachable: DecodeStrict parsed the document before the type error
+	if dec.Decode(&generic) != nil {
+		return "(document)" // unreachable: DecodeStrict parsed the document before the type error
 	}
 	path, found := typeMismatch(generic, reflect.TypeFor[Answers](), "")
-	switch {
-	case !found:
-		return typeErr.Field
-	case path == "":
+	if !found || path == "" { // not found: unreachable while typeMismatch knows every field kind
 		return "(document)"
 	}
 	return path
