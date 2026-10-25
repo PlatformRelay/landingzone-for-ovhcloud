@@ -17,12 +17,12 @@ references:
   - path: specs/001-offline-foundation/spec.md
     blob: 5b18e1d04a145c62f2d840542b5fbf56563fabf7
   - path: .github/workflows/foundation.yml
-    blob: 51b2c4a7a9f510307ef094f420a7d3f0cb3fd78d
+    blob: 294f43357244e263499845dfa9061619774cb3d8
   - path: pipelines/github/foundation-source.json
-    blob: 0666ade9fcc848ec2e51d10b701731550781e77d
+    blob: 4be7ce1703021a8266715577ffc159fbd289f8bd
   - path: tools/internal/checks/foundation_ci.go
-    blob: bd002e3ed3d5fb05eb87ec1a4b2b0d56613d9ea0
-last_verified: dd48eca721d707804fc640c76f70570b3937dfa2
+    blob: f95b0e9c9ef65d0f12343dfc2720f22128a6c887
+last_verified: 920060781388ee7f24df5384cfd17274012b2240
 ---
 
 ## What is true
@@ -39,6 +39,13 @@ qualification:
   `CheckFoundationCI` in `tools/internal/checks/foundation_ci.go`: no token permission, no
   Action, no secret, a hosted runner, the head fetched as data, the runtime fetched by
   digest and every target run through the offline entry.
+- Since D126 part A (2026-10-25, re-read on this branch's base `9200607`) the targets run
+  in parallel jobs, and the check named `foundation` comes from a gate job that needs
+  them all. The gate runs whatever they concluded (`if: ${{ always() }}`), so it is never
+  skipped. It fails unless every job's result is `success`. `ci:foundation` requires that
+  gate to have seen every job succeed on a head run and to have failed on the red control.
+  The ruleset still requires `foundation` and `SonarCloud Code Analysis` (re-read through
+  the API on 2026-10-25). Admission is unchanged by the split.
 - None of that is admission. The workflow runs on `pull_request`, and the source file, the
   renderer and the check all sit in the candidate's own tree, so a candidate that changes
   them together passes its own check: a candidate-owned manifest approves itself. Which

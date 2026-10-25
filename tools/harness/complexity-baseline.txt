@@ -85,11 +85,10 @@
 15 tools/internal/checks/fetch_entry_test.go TestFoundationFetchBwrapMessage
 17 tools/internal/checks/fetch_entry_test.go TestFoundationFetchModes
 22 tools/internal/checks/foundation_ci.go CheckFoundationCI
-15 tools/internal/checks/foundation_ci.go judgeRed
-32 tools/internal/checks/foundation_ci.go judgeRun
-48 tools/internal/checks/foundation_ci.go observeLog
-21 tools/internal/checks/foundation_ci.go splitLog
-20 tools/internal/checks/foundation_ci_test.go TestFoundationObserve
+17 tools/internal/checks/foundation_ci.go judgeRun
+15 tools/internal/checks/foundation_ci.go observeLog
+16 tools/internal/checks/foundation_ci.go splitLog
+17 tools/internal/checks/foundation_ci_test.go TestFoundationObserve
 15 tools/internal/checks/foundation_ci_test.go TestFoundationObserveUnnamedSteps
 37 tools/internal/checks/offline.go ValidateMounts
 19 tools/internal/checks/offline.go VerifyRuntime

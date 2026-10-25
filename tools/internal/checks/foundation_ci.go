@@ -16,7 +16,8 @@ import (
 // FoundationSource is pipelines/github/foundation-source.json: the approved
 // inputs of the foundation workflow. The workflow itself is rendered from it
 // by RenderFoundationWorkflow, so a reviewed change to this file and to the
-// renderer is the only way the workflow changes.
+// renderer is the only way the workflow changes. Jobs run in parallel, each
+// its targets in order, and TimeoutMinutes bounds each of them (D126 part A).
 type FoundationSource struct {
 	Runner         string            `json:"runner"`
 	TimeoutMinutes int               `json:"timeout_minutes"`
@@ -24,8 +25,24 @@ type FoundationSource struct {
 	Layer          string            `json:"layer"`
 	EntrySHA256    string            `json:"entry_sha256"`
 	BwrapSHA256    string            `json:"bwrap_sha256"`
-	Targets        []string          `json:"targets"`
+	Jobs           []FoundationJob   `json:"jobs"`
 	Deferred       map[string]string `json:"deferred"`
+}
+
+// FoundationJob is one job of the workflow: its name and the targets it
+// runs, in order, through the offline entry.
+type FoundationJob struct {
+	Name    string   `json:"name"`
+	Targets []string `json:"targets"`
+}
+
+// Targets is every target of the source, job by job, in order.
+func (s FoundationSource) Targets() []string {
+	var targets []string
+	for _, j := range s.Jobs {
+		targets = append(targets, j.Targets...)
+	}
+	return targets
 }
 
 const (
@@ -34,14 +51,31 @@ const (
 	// FoundationWorkflow and FoundationSourcePath are where both live.
 	FoundationWorkflow   = ".github/workflows/foundation.yml"
 	FoundationSourcePath = "pipelines/github/foundation-source.json"
+	// FoundationCheck is the gate job: it needs every job of the source and
+	// succeeds only when each of them did. Its name is the check the main
+	// ruleset requires, so it stays foundation (D123, D126).
+	FoundationCheck = "foundation"
 	// foundationCreator is the task that creates the CI and its own checks.
 	foundationCreator = "T023"
-	maxTimeoutMinutes = 20
+	// maxTimeoutMinutes bounds each job (D125; D126 part A withdrew the
+	// 20-minute bridge once the targets ran in parallel jobs).
+	maxTimeoutMinutes = 15
+	// maxFoundationJobs bounds the jobs: each costs a runner and a fetch of
+	// the runtime.
+	maxFoundationJobs = 4
+	// gateTimeoutMinutes bounds the gate, which starts once the jobs ended
+	// and only compares their results.
+	gateTimeoutMinutes = 5
 	// FoundationChildDeadline is the offline entry's deadline for one target
 	// (lz-offline's childDeadline, which its TestChildDeadline binds to this).
-	// The job keeps room for one target to run into it (T055, D125).
+	// Each job keeps room for one target to run into it (T055, D125).
 	FoundationChildDeadline = 240 * time.Second
 )
+
+// foundationJobName is a job name of the family: foundation-, then lower-case
+// letters and digits in dash-separated words, so it can carry no YAML,
+// expression or shell syntax and never names the gate.
+var foundationJobName = regexp.MustCompile(`^foundation(-[a-z0-9]+)+$`)
 
 // hostedRunners are the GitHub-hosted, ephemeral runner labels the workflow
 // may use.
@@ -82,11 +116,32 @@ func ParseFoundationSource(data []byte) (FoundationSource, error) {
 	return s, nil
 }
 
+// gateStep is the gate's one step.
+const gateStep = "Require every foundation job to succeed"
+
+// jobResults is LZ_JOB_RESULTS, each job of the source with its result as
+// result gives it: the gate's template, or what the gate requires.
+func jobResults(s FoundationSource, result func(name string) string) string {
+	var results []string
+	for _, j := range s.Jobs {
+		results = append(results, j.Name+"="+result(j.Name))
+	}
+	return strings.Join(results, " ")
+}
+
+// allSucceeded is the only LZ_JOB_RESULTS the gate passes.
+func allSucceeded(s FoundationSource) string {
+	return jobResults(s, func(string) string { return "success" })
+}
+
 // RenderFoundationWorkflow is the only workflow the check accepts. It grants
 // the token no permission, uses no Action and no secret, runs on pushes to
-// and pull requests against main, fetches the exact head as data, fetches
-// the runtime layer by digest, installs the pinned launcher and runs every
-// target through the offline entry.
+// and pull requests against main, and pins the head and the runtime once for
+// every job. Each job of the source, in parallel, fetches the exact head as
+// data, fetches the runtime layer by digest, installs the pinned launcher and
+// runs its targets through the offline entry. The gate, named foundation,
+// needs them all and runs whatever they concluded (always()), so it is never
+// skipped; it fails unless each of them succeeded.
 func RenderFoundationWorkflow(s FoundationSource) string {
 	var b strings.Builder
 	line := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
@@ -107,20 +162,44 @@ func RenderFoundationWorkflow(s FoundationSource) string {
 	line("  push:")
 	line("    branches: [main]")
 	line("permissions: {}")
+	line("env:")
+	line("  LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}")
+	line("  LZ_IMAGE: %s", RuntimeImage)
+	line("  LZ_MANIFEST: %s", s.Manifest)
+	line("  LZ_LAYER: %s", s.Layer)
+	line("  LZ_ENTRY_SHA256: %s", s.EntrySHA256)
+	line("  LZ_BWRAP_SHA256: %s", s.BwrapSHA256)
 	line("jobs:")
-	line("  foundation:")
+	for _, j := range s.Jobs {
+		renderTargetJob(line, script, s, j)
+	}
+	var needs []string
+	for _, j := range s.Jobs {
+		needs = append(needs, j.Name)
+	}
+	line("  %s:", FoundationCheck)
+	line("    needs: [%s]", strings.Join(needs, ", "))
+	line("    if: ${{ always() }}")
+	line("    runs-on: %s", s.Runner)
+	line("    timeout-minutes: %d", gateTimeoutMinutes)
+	line("    env:")
+	line("      LZ_JOB_RESULTS: %s", jobResults(s, func(name string) string { return "${{ needs." + name + ".result }}" }))
+	line("    steps:")
+	script(gateStep,
+		`echo "LZ_JOB_RESULTS $LZ_JOB_RESULTS"`,
+		`test "$LZ_JOB_RESULTS" = "`+allSucceeded(s)+`"`)
+	return b.String()
+}
+
+// renderTargetJob renders one job of the source.
+func renderTargetJob(line func(string, ...any), script func(string, ...string), s FoundationSource, j FoundationJob) {
+	line("  %s:", j.Name)
 	line("    runs-on: %s", s.Runner)
 	line("    timeout-minutes: %d", s.TimeoutMinutes)
 	line("    env:")
-	line("      LZ_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}")
-	line("      LZ_IMAGE: %s", RuntimeImage)
-	line("      LZ_MANIFEST: %s", s.Manifest)
-	line("      LZ_LAYER: %s", s.Layer)
-	line("      LZ_ENTRY_SHA256: %s", s.EntrySHA256)
-	line("      LZ_BWRAP_SHA256: %s", s.BwrapSHA256)
-	line("      LZ_TARGETS: %s", strings.Join(s.Targets, " "))
+	line("      LZ_TARGETS: %s", strings.Join(j.Targets, " "))
 	line("    steps:")
-	// The runner context is not available to job-level env.
+	// The runner context is not available to env.
 	script("Locate the work directories",
 		`echo "LZ_CANDIDATE=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"`,
 		`echo "LZ_RUNTIME=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"`)
@@ -151,14 +230,14 @@ func RenderFoundationWorkflow(s FoundationSource) string {
 		`  echo "LZ_TARGET_OK $target"`,
 		`done`,
 		`echo "LZ_TARGETS_DONE $(wc -w <<<"$LZ_TARGETS")"`)
-	return b.String()
 }
 
 // ValidateFoundationSource checks what can be judged from the source alone:
-// a hosted runner, a bounded timeout, well-formed digests, and plain target
-// names. ci-workflow renders only a source without findings, so no name can
-// inject into the workflow. Deferred names are not rendered, and only the
-// deferrable ones are accepted.
+// a hosted runner, a bounded timeout, well-formed digests, one to four jobs
+// of distinct plain names, none the gate's, each running a target, and plain
+// target names. ci-workflow renders only a source without findings, so no
+// name can inject into the workflow. Deferred names are not rendered, and
+// only the deferrable ones are accepted.
 func ValidateFoundationSource(s FoundationSource) []Finding {
 	var findings []Finding
 	add := func(rule, subject, format string, args ...any) {
@@ -180,7 +259,8 @@ func ValidateFoundationSource(s FoundationSource) []Finding {
 			add("SOURCE_PIN", field, "%q is not a hex SHA-256", value)
 		}
 	}
-	for _, id := range s.Targets {
+	findings = append(findings, validateJobs(s.Jobs)...)
+	for _, id := range s.Targets() {
 		if AdmitTarget(id) != nil {
 			add("CHECK_NAME", id, "not a plain Task target")
 		}
@@ -188,10 +268,36 @@ func ValidateFoundationSource(s FoundationSource) []Finding {
 	return findings
 }
 
+// validateJobs requires one to maxFoundationJobs jobs of distinct names of
+// the family, each running a target.
+func validateJobs(jobs []FoundationJob) []Finding {
+	var findings []Finding
+	add := func(subject, format string, args ...any) {
+		findings = append(findings, Finding{Rule: "SOURCE_JOBS", Subject: subject, Detail: fmt.Sprintf(format, args...)})
+	}
+	if len(jobs) < 1 || len(jobs) > maxFoundationJobs {
+		add("jobs", "%d jobs, want 1..%d", len(jobs), maxFoundationJobs)
+	}
+	names := map[string]bool{}
+	for _, j := range jobs {
+		switch {
+		case !foundationJobName.MatchString(j.Name):
+			add(j.Name, "not a job name of the form foundation-<word>")
+		case names[j.Name]:
+			add(j.Name, "named twice")
+		case len(j.Targets) == 0:
+			add(j.Name, "runs no target")
+		}
+		names[j.Name] = true
+	}
+	return findings
+}
+
 // CheckFoundationCI judges the approved source and the committed workflow.
 // The source must pin a hosted runner, a bounded timeout and well-formed
 // digests, and account for every argument-free check of a closed spec 001
-// task or of T023 itself: each runs, or is deferred with a reason. An
+// task or of T023 itself: each runs once, in one job, or is deferred with a
+// reason. An
 // argument-free check of another spec's closed task (tasks keyed by spec
 // number, creator "005/T055") may run too. The workflow must be exactly the
 // rendered one.
@@ -224,14 +330,14 @@ func CheckFoundationCI(source, workflow []byte, registry Registry, tasks map[str
 			}
 		}
 	}
-	if len(s.Targets) == 0 {
+	if len(s.Targets()) == 0 {
 		add("NO_TARGETS", "targets", "the workflow would run no check")
 	}
 	seen := map[string]bool{}
-	for _, id := range s.Targets {
+	for _, id := range s.Targets() {
 		switch {
 		case seen[id]:
-			add("CHECK_DUPLICATE", id, "listed twice")
+			add("CHECK_DUPLICATE", id, "listed twice, in one job or in two")
 		case !known[id]:
 			add("CHECK_UNKNOWN", id, "not in the check registry")
 		case !runnable[id]:
@@ -301,8 +407,9 @@ type FoundationRuns struct {
 }
 
 // FoundationRun is what one run of the foundation workflow showed. Candidate
-// is the commit the run is evidence for; the rest is observed. OutsideSeconds
-// is the job's time outside its targets (timeTargets).
+// is the commit the run is evidence for; the rest is observed. CheckRunID is
+// the check run of the gate, the check named foundation (0 when the run had
+// no gate); Jobs are the run's jobs, ordered by name.
 type FoundationRun struct {
 	Role           string            `json:"role"`
 	Candidate      string            `json:"candidate"`
@@ -318,7 +425,20 @@ type FoundationRun struct {
 	SourceBlob     string            `json:"source_blob"`
 	Status         string            `json:"status"`
 	Conclusion     string            `json:"conclusion"`
-	JobConclusion  string            `json:"job_conclusion"`
+	Jobs           []RunJob          `json:"jobs"`
+	CheckDigests   map[string]string `json:"check_digests"`
+}
+
+// RunJob is what one job of the run showed: its own check run, outcome,
+// runner, token, steps, the environment of its main step (the checks step of
+// a job of the source, the gate's step of the gate), the head it fetched and
+// its targets. OutsideSeconds is the job's time outside its targets
+// (timeTargets); a job without targets has TargetsDone -1 and spends its
+// whole log outside them.
+type RunJob struct {
+	Name           string            `json:"name"`
+	CheckRunID     int64             `json:"check_run_id"`
+	Conclusion     string            `json:"conclusion"`
 	RunnerLabels   []string          `json:"runner_labels"`
 	RunnerGroup    string            `json:"runner_group"`
 	RunnerImage    string            `json:"runner_image"`
@@ -329,10 +449,19 @@ type FoundationRun struct {
 	Targets        []RunTarget       `json:"targets"`
 	TargetsDone    int               `json:"targets_done"`
 	OutsideSeconds int               `json:"outside_seconds"`
-	CheckDigests   map[string]string `json:"check_digests"`
 }
 
-// RunStep is one step of the run's job as GitHub reported it.
+// job is the run's job of that name, or nil.
+func (r *FoundationRun) job(name string) *RunJob {
+	for i := range r.Jobs {
+		if r.Jobs[i].Name == name {
+			return &r.Jobs[i]
+		}
+	}
+	return nil
+}
+
+// RunStep is one step of a run's job as GitHub reported it.
 type RunStep struct {
 	Name       string `json:"name"`
 	Conclusion string `json:"conclusion"`
@@ -392,9 +521,27 @@ var (
 	failedTask  = regexp.MustCompile(`^task: Failed to run task "([^"]+)"`)
 )
 
-// ObserveFoundationRun derives the observation of one run from its capture.
-// It refuses a capture that is not one completed-or-not run of exactly one
-// job, a blob that is not a git SHA, or an empty log; it judges nothing.
+// capturedJob is one job of a run as GitHub's jobs API reports it.
+type capturedJob struct {
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	RunID       int64    `json:"run_id"`
+	RunAttempt  int      `json:"run_attempt"`
+	HeadSHA     string   `json:"head_sha"`
+	Conclusion  *string  `json:"conclusion"`
+	Labels      []string `json:"labels"`
+	RunnerGroup string   `json:"runner_group_name"`
+	Steps       []struct {
+		Name       string  `json:"name"`
+		Conclusion *string `json:"conclusion"`
+	} `json:"steps"`
+}
+
+// ObserveFoundationRun derives the observation of one run from its capture,
+// job by job. It refuses a capture that is not one completed-or-not run of
+// one or more uniquely named jobs of that run, a log line of a job the run
+// does not have, a blob that is not a git SHA, or an empty log; it judges
+// nothing.
 func ObserveFoundationRun(role, candidate string, c RunCapture) (FoundationRun, error) {
 	var run struct {
 		ID         int64   `json:"id"`
@@ -414,27 +561,9 @@ func ObserveFoundationRun(role, candidate string, c RunCapture) (FoundationRun, 
 	if err := json.Unmarshal(c.Run, &run); err != nil {
 		return FoundationRun{}, fmt.Errorf("CAPTURE_RUN: %w", err)
 	}
-	var jobs struct {
-		TotalCount int `json:"total_count"`
-		Jobs       []struct {
-			ID          int64    `json:"id"`
-			RunID       int64    `json:"run_id"`
-			RunAttempt  int      `json:"run_attempt"`
-			HeadSHA     string   `json:"head_sha"`
-			Conclusion  *string  `json:"conclusion"`
-			Labels      []string `json:"labels"`
-			RunnerGroup string   `json:"runner_group_name"`
-			Steps       []struct {
-				Name       string  `json:"name"`
-				Conclusion *string `json:"conclusion"`
-			} `json:"steps"`
-		} `json:"jobs"`
-	}
-	if err := json.Unmarshal(c.Jobs, &jobs); err != nil {
-		return FoundationRun{}, fmt.Errorf("CAPTURE_JOBS: %w", err)
-	}
-	if jobs.TotalCount != 1 || len(jobs.Jobs) != 1 {
-		return FoundationRun{}, fmt.Errorf("CAPTURE_JOBS: %d jobs, want the one foundation job", jobs.TotalCount)
+	jobs, err := captureJobs(c.Jobs)
+	if err != nil {
+		return FoundationRun{}, err
 	}
 	blobs := [2]string{strings.TrimSpace(string(c.WorkflowBlob)), strings.TrimSpace(string(c.SourceBlob))}
 	for _, blob := range blobs {
@@ -448,28 +577,85 @@ func ObserveFoundationRun(role, candidate string, c RunCapture) (FoundationRun, 
 	if len(c.Digests) == 0 {
 		return FoundationRun{}, fmt.Errorf("CAPTURE_TREE: no check digests of the run's head")
 	}
-	job := jobs.Jobs[0]
-	if job.RunID != run.ID || job.RunAttempt != run.Attempt || job.HeadSHA != run.HeadSHA {
-		return FoundationRun{}, fmt.Errorf("CAPTURE_JOBS: job of run %d attempt %d at %s, want run %d attempt %d at %s",
-			job.RunID, job.RunAttempt, job.HeadSHA, run.ID, run.Attempt, run.HeadSHA)
+	logs, err := readLog(string(c.Log), jobs)
+	if err != nil {
+		return FoundationRun{}, err
 	}
 	o := FoundationRun{
-		Role: role, Candidate: candidate, RunID: run.ID, Attempt: run.Attempt, CheckRunID: job.ID,
+		Role: role, Candidate: candidate, RunID: run.ID, Attempt: run.Attempt,
 		Repository: run.Repository.FullName, HeadRepository: run.HeadRepository.FullName,
 		Event: run.Event, HeadSHA: run.HeadSHA, WorkflowPath: run.Path,
 		WorkflowBlob: blobs[0], SourceBlob: blobs[1],
-		Status: run.Status, Conclusion: deref(run.Conclusion), JobConclusion: deref(job.Conclusion),
-		RunnerLabels: append([]string{}, job.Labels...), RunnerGroup: job.RunnerGroup,
-		Permissions: []string{}, Steps: []RunStep{}, Env: map[string]string{}, Targets: []RunTarget{}, TargetsDone: -1,
+		Status: run.Status, Conclusion: deref(run.Conclusion), Jobs: []RunJob{},
 		CheckDigests: maps.Clone(c.Digests),
 	}
-	for _, s := range job.Steps {
-		o.Steps = append(o.Steps, RunStep{Name: s.Name, Conclusion: deref(s.Conclusion)})
-	}
-	if err := observeLog(&o, string(c.Log)); err != nil {
+	if err := observeJobs(&o, jobs, logs); err != nil {
 		return FoundationRun{}, err
 	}
 	return o, nil
+}
+
+// observeJobs observes each job of the run, refusing one of another run,
+// attempt or head, orders them by name and takes the gate's check run as the
+// run's.
+func observeJobs(o *FoundationRun, jobs []capturedJob, logs map[string][]logLine) error {
+	for _, job := range jobs {
+		if job.RunID != o.RunID || job.RunAttempt != o.Attempt || job.HeadSHA != o.HeadSHA {
+			return fmt.Errorf("CAPTURE_JOBS: job %s of run %d attempt %d at %s, want run %d attempt %d at %s",
+				job.Name, job.RunID, job.RunAttempt, job.HeadSHA, o.RunID, o.Attempt, o.HeadSHA)
+		}
+		j, err := observeJob(job, logs[job.Name])
+		if err != nil {
+			return err
+		}
+		if job.Name == FoundationCheck {
+			o.CheckRunID = job.ID
+		}
+		o.Jobs = append(o.Jobs, j)
+	}
+	slices.SortFunc(o.Jobs, func(a, b RunJob) int { return strings.Compare(a.Name, b.Name) })
+	return nil
+}
+
+// captureJobs decodes the run's jobs: at least one, as many as GitHub
+// counted, each named, no name twice.
+func captureJobs(data []byte) ([]capturedJob, error) {
+	var jobs struct {
+		TotalCount int           `json:"total_count"`
+		Jobs       []capturedJob `json:"jobs"`
+	}
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		return nil, fmt.Errorf("CAPTURE_JOBS: %w", err)
+	}
+	if jobs.TotalCount < 1 || jobs.TotalCount != len(jobs.Jobs) {
+		return nil, fmt.Errorf("CAPTURE_JOBS: %d jobs counted, %d listed; want one or more, all listed", jobs.TotalCount, len(jobs.Jobs))
+	}
+	names := map[string]bool{}
+	for _, job := range jobs.Jobs {
+		if job.Name == "" || names[job.Name] {
+			return nil, fmt.Errorf("CAPTURE_JOBS: job name %q missing or repeated", job.Name)
+		}
+		names[job.Name] = true
+	}
+	return jobs.Jobs, nil
+}
+
+// observeJob observes one job from its entry in the jobs and its lines of
+// the log.
+func observeJob(job capturedJob, lines []logLine) (RunJob, error) {
+	j := RunJob{
+		Name: job.Name, CheckRunID: job.ID, Conclusion: deref(job.Conclusion),
+		RunnerLabels: append([]string{}, job.Labels...), RunnerGroup: job.RunnerGroup,
+		Permissions: []string{}, Steps: []RunStep{}, Env: map[string]string{}, Targets: []RunTarget{}, TargetsDone: -1,
+	}
+	for _, s := range job.Steps {
+		j.Steps = append(j.Steps, RunStep{Name: s.Name, Conclusion: deref(s.Conclusion)})
+	}
+	lines, err := splitLog(lines, j.Steps)
+	if err != nil {
+		return RunJob{}, fmt.Errorf("%w (job %s)", err, job.Name)
+	}
+	return j, observeLog(&j, lines)
 }
 
 func deref(s *string) string {
@@ -496,23 +682,21 @@ const stepMarker = "##[group]Run "
 // and its text without the timestamp.
 type logLine struct{ step, stamp, text string }
 
-// splitLog reads `gh run view --log` output: job, step and a timestamped
-// line, tab-separated. When gh names no step, it attributes the lines from
-// the log itself: those before the first step marker to "Set up job", and
-// each marker and the lines after it to the next step between "Set up job"
-// and "Complete job" of steps, the job's steps as GitHub reported them, that
-// was not skipped, since a skipped step prints no marker. The lines after the
-// last marker stay with the last workflow step, as no marker opens "Complete
-// job". Markers and steps that do not pair one to one, or a log that names
-// some steps and not others, are refused; so a step's output that prints a
-// marker has its run refused, not misread.
-func splitLog(log string, steps []RunStep) ([]logLine, error) {
-	var lines []logLine
-	unknown := 0
+// readLog reads `gh run view --log` output: job, step and a timestamped
+// line, tab-separated, into each job's lines in order. A line of a job the
+// run does not have is refused.
+func readLog(log string, jobs []capturedJob) (map[string][]logLine, error) {
+	lines := map[string][]logLine{}
+	for _, job := range jobs {
+		lines[job.Name] = nil
+	}
 	for _, raw := range strings.Split(log, "\n") {
 		fields := strings.SplitN(raw, "\t", 3)
 		if len(fields) != 3 {
 			continue
+		}
+		if _, known := lines[fields[0]]; !known {
+			return nil, fmt.Errorf("CAPTURE_LOG: a line of job %q, which the run does not have", fields[0])
 		}
 		text := strings.TrimPrefix(fields[2], "\uFEFF")
 		stamp, rest, ok := strings.Cut(text, " ")
@@ -521,8 +705,24 @@ func splitLog(log string, steps []RunStep) ([]logLine, error) {
 		} else {
 			text = ""
 		}
-		lines = append(lines, logLine{step: fields[1], stamp: stamp, text: strings.TrimRight(text, "\r")})
-		if fields[1] == unknownStep {
+		lines[fields[0]] = append(lines[fields[0]], logLine{step: fields[1], stamp: stamp, text: strings.TrimRight(text, "\r")})
+	}
+	return lines, nil
+}
+
+// splitLog attributes one job's lines to its steps. When gh names no step,
+// it attributes them from the log itself: those before the first step marker
+// to "Set up job", and each marker and the lines after it to the next step
+// between "Set up job" and "Complete job" of steps, the job's steps as GitHub
+// reported them, that was not skipped, since a skipped step prints no marker.
+// The lines after the last marker stay with the last workflow step, as no
+// marker opens "Complete job". Markers and steps that do not pair one to one,
+// or a log that names some steps and not others, are refused; so a step's
+// output that prints a marker has its run refused, not misread.
+func splitLog(lines []logLine, steps []RunStep) ([]logLine, error) {
+	unknown := 0
+	for _, l := range lines {
+		if l.step == unknownStep {
 			unknown++
 		}
 	}
@@ -564,101 +764,128 @@ func splitLog(log string, steps []RunStep) ([]logLine, error) {
 	return lines, nil
 }
 
-// observeLog takes the runner image and token permissions from the job
-// set-up, the fetched head, the checks step's environment and each target's
-// outcome, discovery and time from the job log (splitLog, timeTargets).
-func observeLog(o *FoundationRun, log string) error {
-	lines, err := splitLog(log, o.Steps)
-	if err != nil {
-		return err
-	}
-	var group string
-	inEnv := false
-	current, failures := RunTarget{}, 0
+// targetScan reads the targets from the checks step's output: each target's
+// outcome, discovery and failed assertions, the lines they closed on, and the
+// done count.
+type targetScan struct {
+	o        *RunJob
+	current  RunTarget
+	failures int
 	// tested and idle are the current target's packages that ran tests and
 	// that printed `[no tests to run]`; Empty is what is idle and untested.
-	tested, idle := map[string]bool{}, map[string]bool{}
+	tested, idle map[string]bool
 	// ends are the lines each target closed on, in order.
-	at, ends := 0, []int{}
-	closeTarget := func(status string) {
-		ends = append(ends, at)
-		for pkg := range idle {
-			if !tested[pkg] {
-				current.Empty++
-			}
+	ends []int
+}
+
+func (s *targetScan) close(at int, name, status string) {
+	s.ends = append(s.ends, at)
+	for pkg := range s.idle {
+		if !s.tested[pkg] {
+			s.current.Empty++
 		}
-		current.Status = status
-		o.Targets = append(o.Targets, current)
-		current, tested, idle = RunTarget{}, map[string]bool{}, map[string]bool{}
 	}
+	s.current.Name, s.current.Status = name, status
+	s.o.Targets = append(s.o.Targets, s.current)
+	s.current, s.tested, s.idle = RunTarget{}, map[string]bool{}, map[string]bool{}
+}
+
+func (s *targetScan) line(at int, text string) {
+	if strings.HasPrefix(strings.TrimLeft(text, " "), "--- FAIL: ") {
+		s.failures++
+	}
+	if name, ok := strings.CutPrefix(text, "LZ_TARGET_OK "); ok {
+		s.close(at, name, "ok")
+		s.failures = 0
+	} else if m := failedTask.FindStringSubmatch(text); m != nil {
+		s.close(at, m[1], "failed")
+	} else if count, ok := strings.CutPrefix(text, "LZ_TARGETS_DONE "); ok {
+		if n, err := strconv.Atoi(count); err == nil {
+			s.o.TargetsDone = n
+		}
+	} else if pkg, isPackage := goPackage(text); isPackage && strings.Contains(text, "[no tests to run]") {
+		s.idle[pkg] = true
+	} else if isPackage {
+		s.tested[pkg] = true
+		s.current.Discovered++
+	} else if summaryLine.MatchString(text) {
+		s.current.Discovered++
+	}
+}
+
+// finish gives a failed last target the failed assertions since the last
+// passing one: Go prints them around Task's failure line.
+func (s *targetScan) finish() {
+	if n := len(s.o.Targets); n > 0 && s.o.Targets[n-1].Status == "failed" {
+		s.o.Targets[n-1].Failures = s.failures
+	}
+}
+
+// setUpLine takes the runner image and the token permissions from the job
+// set-up.
+func setUpLine(o *RunJob, group, text string) {
+	switch {
+	case group == "Runner Image" && strings.HasPrefix(text, "Image: "):
+		o.RunnerImage = strings.TrimPrefix(text, "Image: ")
+	case group == "GITHUB_TOKEN Permissions":
+		o.Permissions = append(o.Permissions, text)
+	}
+}
+
+// envLine reads one line of a step's echoed environment, which `env:` opens:
+// each `  NAME: value` line under it is one variable. It reports whether the
+// environment is open.
+func envLine(o *RunJob, inEnv bool, text string) bool {
+	if text == "env:" {
+		return true
+	}
+	if name, value, ok := strings.Cut(strings.TrimPrefix(text, "  "), ": "); inEnv && ok && strings.HasPrefix(text, "  ") {
+		o.Env[name] = value
+	}
+	return inEnv
+}
+
+// observeLog takes the runner image and token permissions from the job
+// set-up, the fetched head, the environment of the checks step or the gate's
+// step, and each target's outcome, discovery and time from the job's lines
+// (splitLog, timeTargets).
+func observeLog(o *RunJob, lines []logLine) error {
+	var group string
+	inEnv := false
+	scan := &targetScan{o: o, tested: map[string]bool{}, idle: map[string]bool{}, ends: []int{}}
 	fetched := map[string]bool{}
-	for at = range lines {
-		step, text := lines[at].step, lines[at].text
+	for at, l := range lines {
 		switch {
-		case strings.HasPrefix(text, "##[group]"):
-			group = strings.TrimPrefix(text, "##[group]")
+		case strings.HasPrefix(l.text, "##[group]"):
+			group = strings.TrimPrefix(l.text, "##[group]")
 			continue
-		case text == "##[endgroup]":
+		case l.text == "##[endgroup]":
 			group, inEnv = "", false
 			continue
 		}
-		switch step {
+		switch l.step {
 		case "Set up job":
-			switch {
-			case group == "Runner Image" && strings.HasPrefix(text, "Image: "):
-				o.RunnerImage = strings.TrimPrefix(text, "Image: ")
-			case group == "GITHUB_TOKEN Permissions":
-				o.Permissions = append(o.Permissions, text)
-			}
+			setUpLine(o, group, l.text)
 		case "Fetch the exact head as data":
-			if head, ok := strings.CutPrefix(text, "LZ_CANDIDATE_HEAD "); ok {
+			if head, ok := strings.CutPrefix(l.text, "LZ_CANDIDATE_HEAD "); ok {
 				fetched[head] = true
 			}
-		case checksStep:
+		case checksStep, gateStep:
 			if group != "" {
-				if text == "env:" {
-					inEnv = true
-				} else if name, value, ok := strings.Cut(strings.TrimPrefix(text, "  "), ": "); inEnv && ok && strings.HasPrefix(text, "  ") {
-					o.Env[name] = value
-				}
-				continue
-			}
-			if strings.HasPrefix(strings.TrimLeft(text, " "), "--- FAIL: ") {
-				failures++
-			}
-			if name, ok := strings.CutPrefix(text, "LZ_TARGET_OK "); ok {
-				current.Name = name
-				closeTarget("ok")
-				failures = 0
-			} else if m := failedTask.FindStringSubmatch(text); m != nil {
-				current.Name = m[1]
-				closeTarget("failed")
-			} else if count, ok := strings.CutPrefix(text, "LZ_TARGETS_DONE "); ok {
-				if n, err := strconv.Atoi(count); err == nil {
-					o.TargetsDone = n
-				}
-			} else if pkg, isPackage := goPackage(text); isPackage && strings.Contains(text, "[no tests to run]") {
-				idle[pkg] = true
-			} else if isPackage {
-				tested[pkg] = true
-				current.Discovered++
-			} else if summaryLine.MatchString(text) {
-				current.Discovered++
+				inEnv = envLine(o, inEnv, l.text)
+			} else if l.step == checksStep {
+				scan.line(at, l.text)
 			}
 		}
 	}
-	// Go prints a failed target's assertions around Task's failure line, so
-	// every one since the last passing target belongs to the failed one.
-	if n := len(o.Targets); n > 0 && o.Targets[n-1].Status == "failed" {
-		o.Targets[n-1].Failures = failures
-	}
-	// A run that fetched more than one head proves none of them.
+	scan.finish()
+	// A job that fetched more than one head proves none of them.
 	if len(fetched) == 1 {
 		for head := range fetched {
 			o.FetchedHead = head
 		}
 	}
-	return timeTargets(o, lines, ends)
+	return timeTargets(o, lines, scan.ends)
 }
 
 // timeTargets sets each target's Seconds from the log's timestamps: the time
@@ -668,7 +895,7 @@ func observeLog(o *FoundationRun, log string) error {
 // the checks step's first (the whole log if there is none), and from the last
 // target's end to its last line. A line without a time, or a span that ends
 // before it began, is refused rather than guessed at.
-func timeTargets(o *FoundationRun, lines []logLine, ends []int) error {
+func timeTargets(o *RunJob, lines []logLine, ends []int) error {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -725,12 +952,16 @@ func gitBlob(data []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// foundationExpectation is what every run of the approved source must show.
+// foundationExpectation is what every run of the approved source must show:
+// its jobs, by name in order, the steps of a job of the source and of the
+// gate, and the pinned workflow environment every step sees.
 type foundationExpectation struct {
 	source       FoundationSource
 	workflowBlob string
 	sourceBlob   string
-	steps        []string
+	jobs         []string
+	targetSteps  []string
+	gateSteps    []string
 	env          map[string]string
 	digests      map[string]string
 }
@@ -739,21 +970,45 @@ type foundationExpectation struct {
 // the head, checked separately, and the work directories.
 var runEnvKeys = []string{"LZ_HEAD", "LZ_CANDIDATE", "LZ_RUNTIME"}
 
+// gateEnvKeys are the gate's variables beyond the pinned ones: the head,
+// checked separately, and the results it judged, judged with the outcome.
+var gateEnvKeys = []string{"LZ_HEAD", "LZ_JOB_RESULTS"}
+
 // hostedRunnerGroup is the runner group of GitHub-hosted, ephemeral runners.
 const hostedRunnerGroup = "GitHub Actions"
 
 // tokenPermissions is what `permissions: {}` leaves the job token.
 var tokenPermissions = []string{"Metadata: read"}
 
+// renderedSteps is the steps GitHub reports for the job of that name in the
+// rendered workflow: Set up job, the job's own steps, Complete job.
+func renderedSteps(workflow, name string) []string {
+	steps := []string{"Set up job"}
+	_, section, _ := strings.Cut(workflow, "\n  "+name+":\n")
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") {
+			break // the next job
+		}
+		if step, ok := strings.CutPrefix(line, "      - name: "); ok {
+			steps = append(steps, step)
+		}
+	}
+	return append(steps, "Complete job")
+}
+
 // JudgeFoundationRuns judges the recorded runs against the approved source:
 // at least one green run of the candidate head and one red control, each of
-// this repository's foundation workflow, rendered from this exact source, on
-// a hosted runner with the pinned image and launcher, its fetched head the
-// candidate; the head run completed green with every target run, in order,
-// each having discovered something, at a head whose target digests equal
-// current, those of the judged tree (FoundationDigests); the red control
-// failed with failed assertions inside one listed target after the earlier
-// ones passed.
+// this repository's foundation workflow, rendered from this exact source,
+// with exactly the source's jobs and the gate, each on a hosted runner, the
+// jobs with the pinned image and launcher and their fetched head the
+// candidate; the head run completed green, every job and the gate with it,
+// the gate having seen every job succeed, each job with its targets run, in
+// order, each having discovered something, within its own budget, at a head
+// whose target digests equal current, those of the judged tree
+// (FoundationDigests); the red control failed in a job's checks, with failed
+// assertions inside one listed target after the earlier ones passed, its
+// other jobs passed or failed the same way, and its gate failed on exactly
+// those results.
 func JudgeFoundationRuns(source, record []byte, current map[string]string) []Finding {
 	var findings []Finding
 	add := func(rule, subject, format string, args ...any) {
@@ -765,7 +1020,7 @@ func JudgeFoundationRuns(source, record []byte, current map[string]string) []Fin
 		return findings
 	}
 	findings = append(findings, ValidateFoundationSource(s)...)
-	if len(s.Targets) == 0 {
+	if len(s.Targets()) == 0 {
 		add("NO_TARGETS", "targets", "the workflow would run no check")
 	}
 	var r FoundationRuns
@@ -776,18 +1031,17 @@ func JudgeFoundationRuns(source, record []byte, current map[string]string) []Fin
 	workflow := RenderFoundationWorkflow(s)
 	want := foundationExpectation{
 		source: s, workflowBlob: gitBlob([]byte(workflow)), sourceBlob: gitBlob(source),
-		steps: []string{"Set up job"}, digests: current,
+		jobs: []string{FoundationCheck}, gateSteps: renderedSteps(workflow, FoundationCheck), digests: current,
 		env: map[string]string{
 			"LZ_IMAGE": RuntimeImage, "LZ_MANIFEST": s.Manifest, "LZ_LAYER": s.Layer,
-			"LZ_ENTRY_SHA256": s.EntrySHA256, "LZ_BWRAP_SHA256": s.BwrapSHA256, "LZ_TARGETS": strings.Join(s.Targets, " "),
+			"LZ_ENTRY_SHA256": s.EntrySHA256, "LZ_BWRAP_SHA256": s.BwrapSHA256,
 		},
 	}
-	for _, line := range strings.Split(workflow, "\n") {
-		if name, ok := strings.CutPrefix(line, "      - name: "); ok {
-			want.steps = append(want.steps, name)
-		}
+	for _, j := range s.Jobs {
+		want.jobs = append(want.jobs, j.Name)
+		want.targetSteps = renderedSteps(workflow, j.Name)
 	}
-	want.steps = append(want.steps, "Complete job")
+	slices.Sort(want.jobs)
 
 	roles := map[string]int{}
 	seen := map[int64]bool{}
@@ -825,17 +1079,14 @@ func judgeRun(want foundationExpectation, run FoundationRun, subject string) []F
 		add("RUN_FOREIGN", "%s %s from %s on %s, want %s from %s on push or pull_request",
 			run.Repository, run.WorkflowPath, run.HeadRepository, run.Event, FoundationWorkflow, FoundationRepository)
 	}
-	if names := stepNames(run.Steps); !slices.Equal(names, want.steps) {
-		add("RUN_STEPS", "ran steps %q, want %q", names, want.steps)
-	}
-	if !gitSHA.MatchString(run.Candidate) || run.HeadSHA != run.Candidate || run.FetchedHead != run.HeadSHA || run.Env["LZ_HEAD"] != run.HeadSHA {
-		add("RUN_STALE_HEAD", "candidate %q, run head %q, fetched %q, LZ_HEAD %q", run.Candidate, run.HeadSHA, run.FetchedHead, run.Env["LZ_HEAD"])
+	if !gitSHA.MatchString(run.Candidate) || run.HeadSHA != run.Candidate {
+		add("RUN_STALE_HEAD", "candidate %q, run head %q", run.Candidate, run.HeadSHA)
 	}
 	// A green run is evidence for the judged tree only where everything that
 	// decides each target's result is unchanged since the run's head.
 	if run.Role == RoleHead && !maps.Equal(run.CheckDigests, want.digests) {
 		var changed []string
-		for _, id := range s.Targets {
+		for _, id := range s.Targets() {
 			if run.CheckDigests[id] != want.digests[id] {
 				changed = append(changed, id)
 			}
@@ -847,27 +1098,7 @@ func judgeRun(want foundationExpectation, run FoundationRun, subject string) []F
 		add("RUN_STALE_SOURCE", "ran workflow %s and source %s, the approved are %s and %s",
 			run.WorkflowBlob, run.SourceBlob, want.workflowBlob, want.sourceBlob)
 	}
-	for _, key := range slices.Sorted(maps.Keys(run.Env)) {
-		if _, pinned := want.env[key]; !pinned && !slices.Contains(runEnvKeys, key) {
-			add("RUN_IDENTITY", "unexpected variable %s in the checks step", key)
-		}
-	}
-	for _, key := range slices.Sorted(maps.Keys(want.env)) {
-		if got, ok := run.Env[key]; !ok || got != want.env[key] {
-			add("RUN_IDENTITY", "%s was %q, want %q", key, got, want.env[key])
-		}
-	}
-	for _, key := range runEnvKeys {
-		if _, ok := run.Env[key]; !ok {
-			add("RUN_IDENTITY", "%s missing from the checks step", key)
-		}
-	}
-	if !slices.Equal(run.RunnerLabels, []string{s.Runner}) || run.RunnerGroup != hostedRunnerGroup || run.RunnerImage != s.Runner {
-		add("RUN_IDENTITY", "runner %v in group %q with image %q, want hosted %s", run.RunnerLabels, run.RunnerGroup, run.RunnerImage, s.Runner)
-	}
-	if !slices.Equal(run.Permissions, tokenPermissions) {
-		add("RUN_IDENTITY", "token permissions %q, want %q", run.Permissions, tokenPermissions)
-	}
+	judgeJobs(want, run, add)
 	if run.Status != "completed" {
 		add("RUN_INCOMPLETE", "status %q", run.Status)
 		return findings
@@ -878,6 +1109,88 @@ func judgeRun(want foundationExpectation, run FoundationRun, subject string) []F
 		judgeRed(run, s, add)
 	}
 	return findings
+}
+
+// judgeJobs requires the run's jobs to be exactly the source's and the gate,
+// the run's check run the gate's, and judges each job's identity.
+func judgeJobs(want foundationExpectation, run FoundationRun, add func(string, string, ...any)) {
+	names := []string{}
+	for _, j := range run.Jobs {
+		names = append(names, j.Name)
+	}
+	if !slices.Equal(names, want.jobs) {
+		add("RUN_JOBS", "ran jobs %q, want %q", names, want.jobs)
+	}
+	if gate := run.job(FoundationCheck); gate != nil && run.CheckRunID != gate.CheckRunID {
+		add("RUN_IDENTITY", "check run %d is not the gate's, %d", run.CheckRunID, gate.CheckRunID)
+	}
+	for _, j := range run.Jobs {
+		if j.Name == FoundationCheck {
+			judgeJobIdentity(run, j, jobExpectation{runner: want.source.Runner, steps: want.gateSteps, pinned: want.env, own: gateEnvKeys}, add)
+			continue
+		}
+		i := slices.IndexFunc(want.source.Jobs, func(sj FoundationJob) bool { return sj.Name == j.Name })
+		if i < 0 {
+			continue // RUN_JOBS
+		}
+		pinned := maps.Clone(want.env)
+		pinned["LZ_TARGETS"] = strings.Join(want.source.Jobs[i].Targets, " ")
+		judgeJobIdentity(run, j, jobExpectation{runner: want.source.Runner, steps: want.targetSteps, pinned: pinned, own: runEnvKeys, required: runEnvKeys}, add)
+		if j.FetchedHead != run.HeadSHA {
+			add("RUN_STALE_HEAD", "job %s fetched %q, run head %q", j.Name, j.FetchedHead, run.HeadSHA)
+		}
+	}
+}
+
+// jobExpectation is what one job must show: its runner, its steps, the
+// pinned variables of its main step's environment, the keys of its own it may
+// add there and those it must.
+type jobExpectation struct {
+	runner        string
+	steps         []string
+	pinned        map[string]string
+	own, required []string
+}
+
+// judgeJobIdentity requires a job to have run the rendered steps on the
+// hosted runner with the empty token, with exactly the pinned variables and
+// its own keys in the environment of its main step, the head among them the
+// run's.
+func judgeJobIdentity(run FoundationRun, j RunJob, want jobExpectation, add func(string, string, ...any)) {
+	if names := stepNames(j.Steps); !slices.Equal(names, want.steps) {
+		add("RUN_STEPS", "job %s ran steps %q, want %q", j.Name, names, want.steps)
+	}
+	if j.Env["LZ_HEAD"] != run.HeadSHA {
+		add("RUN_STALE_HEAD", "job %s had LZ_HEAD %q, run head %q", j.Name, j.Env["LZ_HEAD"], run.HeadSHA)
+	}
+	judgeJobEnv(j, want, add)
+	if !slices.Equal(j.RunnerLabels, []string{want.runner}) || j.RunnerGroup != hostedRunnerGroup || j.RunnerImage != want.runner {
+		add("RUN_IDENTITY", "job %s ran on %v in group %q with image %q, want hosted %s", j.Name, j.RunnerLabels, j.RunnerGroup, j.RunnerImage, want.runner)
+	}
+	if !slices.Equal(j.Permissions, tokenPermissions) {
+		add("RUN_IDENTITY", "job %s had token permissions %q, want %q", j.Name, j.Permissions, tokenPermissions)
+	}
+}
+
+// judgeJobEnv requires exactly the pinned variables, with their values, and
+// the job's own keys, the required ones among them, in its main step's
+// environment.
+func judgeJobEnv(j RunJob, want jobExpectation, add func(string, string, ...any)) {
+	for _, key := range slices.Sorted(maps.Keys(j.Env)) {
+		if _, pinned := want.pinned[key]; !pinned && !slices.Contains(want.own, key) {
+			add("RUN_IDENTITY", "unexpected variable %s in job %s", key, j.Name)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(want.pinned)) {
+		if got, ok := j.Env[key]; !ok || got != want.pinned[key] {
+			add("RUN_IDENTITY", "job %s: %s was %q, want %q", j.Name, key, got, want.pinned[key])
+		}
+	}
+	for _, key := range want.required {
+		if _, ok := j.Env[key]; !ok {
+			add("RUN_IDENTITY", "%s missing from job %s", key, j.Name)
+		}
+	}
 }
 
 func stepNames(steps []RunStep) []string {
@@ -901,90 +1214,164 @@ func outcomeRule(conclusion string) string {
 	return "RUN_FAILED"
 }
 
-// judgeGreen requires the head run, its job and every step to have
-// succeeded, and every target of the source to have run, in order, each
-// having discovered something.
+// judgeGreen requires the head run, each of its jobs and their every step to
+// have succeeded, the gate to have seen every job of the source succeed, and
+// each job of the source to have run its targets, in order, each having
+// discovered something, within its budget.
 func judgeGreen(run FoundationRun, s FoundationSource, add func(string, string, ...any)) {
-	for _, o := range [][2]string{{"run", run.Conclusion}, {"job", run.JobConclusion}} {
-		if rule := outcomeRule(o[1]); rule != "" {
-			add(rule, "%s concluded %q", o[0], o[1])
+	if rule := outcomeRule(run.Conclusion); rule != "" {
+		add(rule, "run concluded %q", run.Conclusion)
+	}
+	for _, j := range run.Jobs {
+		if rule := outcomeRule(j.Conclusion); rule != "" {
+			add(rule, "job %s concluded %q", j.Name, j.Conclusion)
+		}
+		for _, step := range j.Steps {
+			if rule := outcomeRule(step.Conclusion); rule != "" {
+				add(rule, "job %s step %q concluded %q", j.Name, step.Name, step.Conclusion)
+			}
 		}
 	}
-	for _, step := range run.Steps {
-		if rule := outcomeRule(step.Conclusion); rule != "" {
-			add(rule, "step %q concluded %q", step.Name, step.Conclusion)
+	if gate := run.job(FoundationCheck); gate != nil && gate.Env["LZ_JOB_RESULTS"] != allSucceeded(s) {
+		add("RUN_FAILED", "the gate saw %q, want %q", gate.Env["LZ_JOB_RESULTS"], allSucceeded(s))
+	}
+	for _, sj := range s.Jobs {
+		if j := run.job(sj.Name); j != nil {
+			judgeTargets(*j, sj, add)
+			judgeBudget(*j, s, add)
 		}
 	}
-	names := []string{}
-	for _, target := range run.Targets {
-		names = append(names, target.Name)
-		if target.Status != "ok" {
-			add("RUN_FAILED", "target %s %s", target.Name, target.Status)
-		}
-		if target.Discovered == 0 || target.Empty > 0 {
-			add("RUN_ZERO_DISCOVERY", "target %s discovered %d, ran no test in %d packages", target.Name, target.Discovered, target.Empty)
-		}
-	}
-	if !slices.Equal(names, s.Targets) || run.TargetsDone != len(s.Targets) {
-		add("RUN_COUNT", "ran %q and reported %d done, want %q", names, run.TargetsDone, s.Targets)
-	}
-	judgeBudget(run, s, add)
 }
 
-// judgeBudget requires the head run's targets and its time outside them,
-// plus one target running into the entry's deadline, to fit the job's
-// timeout, so that a suite slowing towards the timeout is refused before it
-// times the job out (T055, D125). Every target must carry a positive time and
-// the time outside them may not be negative, or a missing or negative one
-// would hide another's; the sum is a float so no value can wrap it.
-func judgeBudget(run FoundationRun, s FoundationSource, add func(string, string, ...any)) {
+// judgeTargets requires a job to have run its targets of the source, in
+// order, each passed and having discovered something.
+func judgeTargets(j RunJob, sj FoundationJob, add func(string, string, ...any)) {
+	names := []string{}
+	for _, target := range j.Targets {
+		names = append(names, target.Name)
+		if target.Status != "ok" {
+			add("RUN_FAILED", "job %s target %s %s", j.Name, target.Name, target.Status)
+		}
+		if target.Discovered == 0 || target.Empty > 0 {
+			add("RUN_ZERO_DISCOVERY", "job %s target %s discovered %d, ran no test in %d packages", j.Name, target.Name, target.Discovered, target.Empty)
+		}
+	}
+	if !slices.Equal(names, sj.Targets) || j.TargetsDone != len(sj.Targets) {
+		add("RUN_COUNT", "job %s ran %q and reported %d done, want %q", j.Name, names, j.TargetsDone, sj.Targets)
+	}
+}
+
+// judgeBudget requires a job's targets and its time outside them, plus one
+// target running into the entry's deadline, to fit the job's timeout, so
+// that a suite slowing towards the timeout is refused before it times the job
+// out (T055, D125). Each job is judged on its own: they run in parallel
+// (D126 part A). Every target must carry a positive time and the time outside
+// them may not be negative, or a missing or negative one would hide
+// another's; the sum is a float so no value can wrap it.
+func judgeBudget(j RunJob, s FoundationSource, add func(string, string, ...any)) {
 	took := 0.0
-	for _, target := range run.Targets {
+	for _, target := range j.Targets {
 		if target.Seconds <= 0 {
-			add("RUN_UNTIMED", "target %s took %d s", target.Name, target.Seconds)
+			add("RUN_UNTIMED", "job %s target %s took %d s", j.Name, target.Name, target.Seconds)
 		}
 		took += float64(target.Seconds)
 	}
-	if run.OutsideSeconds < 0 {
-		add("RUN_UNTIMED", "the job took %d s outside its targets", run.OutsideSeconds)
+	if j.OutsideSeconds < 0 {
+		add("RUN_UNTIMED", "job %s took %d s outside its targets", j.Name, j.OutsideSeconds)
 	}
-	outside := float64(run.OutsideSeconds)
+	outside := float64(j.OutsideSeconds)
 	deadline, budget := FoundationChildDeadline.Seconds(), float64(s.TimeoutMinutes*60)
 	if took+outside+deadline > budget {
-		add("RUN_OVER_BUDGET", "targets took %.0f s and the job %.0f s outside them; with one %.0f s child deadline that is %.0f s, over the %d-minute job timeout (%.0f s)",
-			took, outside, deadline, took+outside+deadline, s.TimeoutMinutes, budget)
+		add("RUN_OVER_BUDGET", "job %s: targets took %.0f s and the job %.0f s outside them; with one %.0f s child deadline that is %.0f s, over the %d-minute job timeout (%.0f s)",
+			j.Name, took, outside, deadline, took+outside+deadline, s.TimeoutMinutes, budget)
 	}
 }
 
-// judgeRed requires the red control to have failed in the checks step, every
-// earlier step having succeeded, inside one listed target after the targets
-// before it passed, so that it is a behavioural red and not a broken fetch.
+// judgeRed requires the red control to have failed: in one job or more, each
+// in its checks step, every earlier step having succeeded, inside one listed
+// target after the targets before it passed, so that it is a behavioural red
+// and not a broken fetch; every other job of the source passed all its
+// targets; and the gate failed in its step on exactly the jobs' results, so
+// the check named foundation went red for it.
 func judgeRed(run FoundationRun, s FoundationSource, add func(string, string, ...any)) {
 	if rule := outcomeRule(run.Conclusion); rule == "RUN_SKIPPED" || rule == "RUN_CANCELLED" {
 		add(rule, "red control concluded %q", run.Conclusion)
 		return
 	}
-	red := run.Conclusion == "failure" && run.JobConclusion == "failure"
-	for _, step := range run.Steps {
+	var why []string
+	if run.Conclusion != "failure" {
+		why = append(why, fmt.Sprintf("run concluded %q", run.Conclusion))
+	}
+	red := 0
+	for _, sj := range s.Jobs {
+		j := run.job(sj.Name)
+		switch {
+		case j == nil:
+			continue // RUN_JOBS
+		case redJob(*j, sj):
+			red++
+		case !passedJob(*j, sj):
+			why = append(why, fmt.Sprintf("job %s concluded %q with targets %+v and %d done", j.Name, j.Conclusion, j.Targets, j.TargetsDone))
+		}
+	}
+	if red == 0 {
+		why = append(why, "no job failed in its checks")
+	}
+	results := jobResults(s, func(name string) string {
+		if j := run.job(name); j != nil {
+			return j.Conclusion
+		}
+		return ""
+	})
+	if gate := run.job(FoundationCheck); gate != nil &&
+		(gate.Conclusion != "failure" || !stepsConcluded(gate.Steps, gateStep) || gate.Env["LZ_JOB_RESULTS"] != results) {
+		why = append(why, fmt.Sprintf("the gate concluded %q on %q, want failure in its step on %q", gate.Conclusion, gate.Env["LZ_JOB_RESULTS"], results))
+	}
+	if len(why) > 0 {
+		add("RUN_NOT_RED", "%s; want failed assertions inside one listed target of a job's checks step, and the gate failed for it", strings.Join(why, "; "))
+	}
+}
+
+// stepsConcluded reports whether the step named failing failed and every
+// other step succeeded.
+func stepsConcluded(steps []RunStep, failing string) bool {
+	for _, step := range steps {
 		want := "success"
-		if step.Name == checksStep {
+		if step.Name == failing {
 			want = "failure"
 		}
-		red = red && step.Conclusion == want
+		if step.Conclusion != want {
+			return false
+		}
 	}
-	n := len(run.Targets)
-	red = red && n > 0 && n <= len(s.Targets) && run.TargetsDone == -1
+	return true
+}
+
+// redJob reports whether a job failed in its checks step, inside one of its
+// listed targets, with failed assertions, after the targets before it passed.
+func redJob(j RunJob, sj FoundationJob) bool {
+	n := len(j.Targets)
+	red := j.Conclusion == "failure" && stepsConcluded(j.Steps, checksStep) && n > 0 && n <= len(sj.Targets) && j.TargetsDone == -1
 	for i := 0; red && i < n; i++ {
 		want := "ok"
 		if i == n-1 {
 			want = "failed"
 		}
-		red = run.Targets[i].Name == s.Targets[i] && run.Targets[i].Status == want
+		red = j.Targets[i].Name == sj.Targets[i] && j.Targets[i].Status == want
 	}
 	// A build, tool or resource failure prints no failed assertion.
-	red = red && run.Targets[n-1].Failures > 0
-	if !red {
-		add("RUN_NOT_RED", "concluded %q (job %q) with targets %+v and %d done; want failed assertions inside one listed target of the checks step",
-			run.Conclusion, run.JobConclusion, run.Targets, run.TargetsDone)
+	return red && j.Targets[n-1].Failures > 0
+}
+
+// passedJob reports whether a job succeeded with every step and all its
+// listed targets, in order.
+func passedJob(j RunJob, sj FoundationJob) bool {
+	names := []string{}
+	for _, target := range j.Targets {
+		if target.Status != "ok" {
+			return false
+		}
+		names = append(names, target.Name)
 	}
+	return j.Conclusion == "success" && stepsConcluded(j.Steps, "") && slices.Equal(names, sj.Targets) && j.TargetsDone == len(sj.Targets)
 }
