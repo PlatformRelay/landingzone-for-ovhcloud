@@ -71,14 +71,19 @@ func TestNotesTriggers(t *testing.T) {
 		t.Errorf("without the flag and any cidr:\n got  %q\n want %q", got, want)
 	}
 
-	control := plain
-	control.SharedStateProject = true
-	control.Tenants = slices.Clone(plain.Tenants)
-	control.Tenants[1].Environments = slices.Clone(plain.Tenants[1].Environments)
-	control.Tenants[1].Environments[0].Regions = []Region{{Name: "GRA11", CIDR: "10.40.0.0/24"}}
-	got := Notes(control)
-	if !slices.Contains(got, strings.Replace(notesKD1, "STATE", "ACME_STATE", 1)) || !slices.Contains(got, notesVLAN) {
-		t.Errorf("control: the flag and one cidr: want the KD-1 and VLAN notes, got %q", got)
+	kd1 := strings.Replace(notesKD1, "STATE", "ACME_STATE", 1)
+	flagOnly := plain
+	flagOnly.SharedStateProject = true
+	if got := Notes(flagOnly); !slices.Contains(got, kd1) || slices.Contains(got, notesVLAN) {
+		t.Errorf("control: the flag alone: want the KD-1 note and no VLAN note, got %q", got)
+	}
+
+	cidrOnly := plain
+	cidrOnly.Tenants = slices.Clone(plain.Tenants)
+	cidrOnly.Tenants[1].Environments = slices.Clone(plain.Tenants[1].Environments)
+	cidrOnly.Tenants[1].Environments[0].Regions = []Region{{Name: "GRA11", CIDR: "10.40.0.0/24"}}
+	if got := Notes(cidrOnly); !slices.Contains(got, notesVLAN) || slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, "note: KD-1") }) {
+		t.Errorf("control: one cidr alone: want the VLAN note and no KD-1 note, got %q", got)
 	}
 }
 
