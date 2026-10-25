@@ -3,7 +3,6 @@ package configure
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -120,6 +119,36 @@ func TestExportDeterministic(t *testing.T) {
 				t.Fatalf("%s: two exports differ:\n%s\n---\n%s", name, first, again)
 			}
 		}
+		exportKeyOrder(t, name, first)
+	}
+}
+
+// exportKeyOrder: the keys appear in data-model *Derivation* order, which value-equality cannot
+// see (each key's first occurrence; the fixtures set shared_state_project, so sandbox is written).
+func exportKeyOrder(t *testing.T, name string, data []byte) {
+	t.Helper()
+	at := -1
+	for _, key := range []string{`"apiVersion"`, `"kind"`, `"metadata"`, `"spec"`, `"scope"`, `"org"`, `"forge"`,
+		`"stage_source"`, `"sandbox"`, `"state"`, `"tenants"`, `"instances"`} {
+		i := bytes.Index(data, []byte(key+": ")) // a key, not a value such as metadata.name "sandbox"
+		if i <= at {
+			t.Errorf("%s: key %s at byte %d, not after the previous key (byte %d)", name, key, i, at)
+		}
+		at = i
+	}
+}
+
+// TestExportNoTenants: an answers file with no tenant exports the two account rows only
+// (acceptance; exposes a null tenants list or a refused empty manifest).
+func TestExportNoTenants(t *testing.T) {
+	a := exportAnswers(t, "sandbox.yaml")
+	a.Tenants = []Tenant{}
+	spec := exportSpec(t, a)
+	if got, ok := spec["tenants"].([]any); !ok || len(got) != 0 {
+		t.Errorf("tenants %v, want []", spec["tenants"])
+	}
+	if ids := exportRowIDs(spec); !slices.Equal(ids, []string{"account-bootstrap", "account-governance"}) {
+		t.Errorf("rows %v, want the two account rows", ids)
 	}
 }
 
@@ -128,10 +157,12 @@ func TestExportDeterministic(t *testing.T) {
 func TestExportSandboxBlock(t *testing.T) {
 	a := exportAnswers(t, "sandbox.yaml")
 	a.SharedStateProject = false
-	if spec := exportSpec(t, a); spec != nil {
-		if _, present := spec["sandbox"]; present {
-			t.Errorf("shared_state_project false: sandbox written: %v", spec["sandbox"])
-		}
+	spec := exportSpec(t, a)
+	if spec == nil {
+		t.Fatal("shared_state_project false: no spec object")
+	}
+	if _, present := spec["sandbox"]; present {
+		t.Errorf("shared_state_project false: sandbox written: %v", spec["sandbox"])
 	}
 	a.SharedStateProject = true
 	want := map[string]any{"shared_state_project": true}
@@ -281,9 +312,10 @@ func exportGateRow(t *testing.T, c exportGateCase) {
 		t.Errorf("control: want exported, got %d bytes, %v", len(got), err)
 	}
 	got, err := Export(exportGateAnswers(t, c.defect))
-	var refusal *stacks.ManifestError
-	if !errors.As(err, &refusal) || refusal.Code != c.code {
-		t.Errorf("want the decoder's %s, got %v", c.code, err)
+	// the decoder's own error, unwrapped, with its detail naming the second tenant's place
+	refusal, ok := err.(*stacks.ManifestError)
+	if !ok || refusal.Code != c.code || !strings.Contains(refusal.Detail, "lab") {
+		t.Errorf("want the decoder's %s naming lab, got %T: %v", c.code, err, err)
 	}
 	if got != nil {
 		t.Errorf("%d bytes returned after a refusal", len(got))
