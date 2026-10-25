@@ -42,6 +42,13 @@ authority, persistent states and dependencies; a passing suite does not erase op
     outside them, and one 240 s child deadline). The follow-up is a parallel split behind an
     aggregator job still named `foundation`, after 2026-10-23. Return to 15 minutes when each
     job's budget (targets + outside + 240 s) fits 15.
+  - Amendment (2026-10-25, *PR feedback budget*, D126 part A): the split landed, and the
+    bridge is withdrawn. The targets run in three parallel jobs, each judged against its own
+    budget. A gate job still named `foundation`, the check the `main` ruleset requires, needs
+    all three and fails unless each one succeeded. Each job's timeout is 15 minutes again, and
+    the source refuses more. With the per-target times of the slowest recorded run (39490455107,
+    671 s of targets in one job), the heaviest job needs about 235 s of targets, a budget of
+    about 490 s of 900. The PR feedback budget is 15 minutes.
 - **Structured messages**: every check, policy and validation emits
   `LZ-<area>-<nnn>: <what is wrong> — <why it matters> — fix: <the change> — see: docs/<page>`.
   Rule ids are stable, documented one per page, and the same id appears in the guardrail spec, the
