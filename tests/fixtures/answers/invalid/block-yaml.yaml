@@ -1,0 +1,14 @@
+# The sandbox answers written as block-style YAML: refused, only the JSON-compatible flow form is read.
+apiVersion: lz.platformrelay.dev/v1alpha1
+kind: DeploymentAnswers
+name: sandbox
+org: lz
+forge: github.com/platformrelay/landingzone-for-ovhcloud
+state_region: gra
+shared_state_project: true
+tenants:
+  - name: demo
+    environments:
+      - name: dev
+        regions:
+          - {name: GRA11, cidr: 10.20.0.0/24}

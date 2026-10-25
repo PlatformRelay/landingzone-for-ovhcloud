@@ -1,0 +1,33 @@
+# Every field of the answers file set, each optional one to a value other than its default
+# (spec 004, data-model.md *Answers file*), so a decoder that drops one is seen.
+{
+  "apiVersion": "lz.platformrelay.dev/v1alpha1",
+  "kind": "DeploymentAnswers",
+  "name": "acme-prod",
+  "org": "acme",
+  "forge": "git.example.com/acme/landing-zone",
+  "state_region": "de",
+  "state_endpoint": "https://s3.de.io.cloud.ovh.net",
+  "state_ref": "ACME_STATE",
+  "shared_state_project": true,
+  "tenants": [
+    {
+      "name": "shop",
+      "environments": [
+        {
+          "name": "prod",
+          "project_ref": "SHOP_PRODUCTION",
+          "project_mode": "adopt",
+          "budget_alert": true,
+          "quota_guard": true,
+          "regions": [
+            {"name": "DE1", "cidr": "10.60.0.0/24", "vlan_id": 4000},
+            {"name": "GRA11"}
+          ]
+        },
+        {"name": "test", "regions": []}
+      ]
+    },
+    {"name": "empty", "environments": []}
+  ]
+}
