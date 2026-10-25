@@ -47,8 +47,8 @@ import (
 // says where it goes, and a header row on every table.
 //
 // ADR-0012's wording rule holds on the same pages and on the READMEs
-// (wording): "compliant" and "certified" are not used outside quotation
-// marks, code spans and fenced blocks.
+// (wording): "compliant" and "certified" are used only in fenced blocks, or
+// quoted or in a code span on a line that states the ban.
 //
 // Blob ids are git's (sha1 over "blob <size>\x00" and the content), computed
 // from the file on disk: on a clean checkout that is the id of HEAD:<path>,
@@ -518,10 +518,15 @@ var bannedWord = regexp.MustCompile(`(?i)\b[a-z]*(?:compliant|certified)\b`)
 // word rather than a claim.
 const wordQuotes = "\"'“”‘’"
 
+// banWord marks a line that states the ban (banned, bans, WORDING_BANNED).
+var banWord = regexp.MustCompile(`(?i)\bban|_banned\b`)
+
 // wording judges a page's body against ADR-0012's wording rule
 // (WORDING_BANNED): the words "compliant" and "certified" are banned in
-// product docs. Front matter is not body; a fenced block, a code span and a
-// word between quotation marks name the word, they do not use it.
+// product docs. Front matter is not body and a fenced block is an example. A
+// word between quotation marks or in a code span names the word only on a
+// line that states the ban; elsewhere quotes or a span are formatting around
+// a claim (scare quotes) and the word is refused.
 func (c *docChecker) wording(page, text string) {
 	lines := strings.Split(text, "\n")
 	start := 0
@@ -533,12 +538,13 @@ func (c *docChecker) wording(page, text string) {
 		if code.step(lines[n]) {
 			continue
 		}
-		prose := blankCodeSpans(lines[n])
-		for _, m := range bannedWord.FindAllStringIndex(prose, -1) {
-			if quoted(prose, m[0], m[1]) {
+		line, prose := lines[n], blankCodeSpans(lines[n])
+		statesBan := banWord.MatchString(line)
+		for _, m := range bannedWord.FindAllStringIndex(line, -1) {
+			if statesBan && (prose[m[0]] == ' ' || quoted(line, m[0], m[1])) {
 				continue
 			}
-			c.add("WORDING_BANNED", page, "line %d uses %q; write \"aligned with\" or \"supports controls …\" (ADR-0012)", n+1, prose[m[0]:m[1]])
+			c.add("WORDING_BANNED", page, "line %d uses %q; write \"aligned with\" or \"supports controls …\" (ADR-0012)", n+1, line[m[0]:m[1]])
 		}
 	}
 }

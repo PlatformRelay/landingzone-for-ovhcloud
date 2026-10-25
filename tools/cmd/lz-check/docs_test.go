@@ -885,8 +885,8 @@ func TestDocsAccessibilityVagueWords(t *testing.T) {
 
 // ADR-0012's wording rule: the words "compliant" and "certified" are banned
 // in product docs, the pages under docs/ (ADRs included) and the READMEs. A
-// page names them as words only in quotation marks, in a code span or in a
-// fenced block (the rule itself, an example); the nouns compliance and
+// page names them as words only in a fenced block, or in quotation marks or
+// a code span on a line that states the ban (the rule itself); the nouns compliance and
 // certification are not banned. Each accepted row adds lines that hold the
 // rule.
 func TestDocsWordingAccepted(t *testing.T) {
@@ -895,11 +895,11 @@ func TestDocsWordingAccepted(t *testing.T) {
 		"quoted curly":         docsA11yPage("\nThe words \u201ccompliant\u201d and \u2018Certified\u2019 are banned.\n"),
 		"quoted pair":          docsA11yPage("\n| Rule | Note |\n| --- | --- |\n| LZ-DOC-004 | \"compliant\"/\"certified\" banned |\n"),
 		"bold quoted":          {"docs/adr/0013-docs.md": "# ADR\n\nThe words **\"compliant\"** and **\"certified\"** are banned.\n"},
-		"code span":            docsA11yPage("\nThe linter refuses `compliant` and ``certified``.\n"),
+		"code span":            docsA11yPage("\nThe ban covers `compliant` and ``certified``.\n"),
 		"fenced":               docsA11yPage("\n```text\nnever write compliant or certified\n```\n"),
 		"nouns are not banned": docsA11yPage("\nCompliance profiles state their certification scope.\n"),
 		"front matter":         {"docs/how-to/c.md": header("references: []\nnote: compliant\n") + "# Steps\n"},
-		"readme quoted":        {"modules/x/README.md": moduleReadme + "Never \"certified\".\n"},
+		"readme quoted":        {"modules/x/README.md": moduleReadme + "The word \"certified\" is banned.\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := lzCheck(docsRepo(t, files), "docs")
@@ -930,6 +930,8 @@ func TestDocsWordingRejected(t *testing.T) {
 		"in an adr":          {map[string]string{adr: "# ADR\n\nThe profile is certified.\n"}, adr, `"certified"`},
 		"in a root readme":   {map[string]string{"README.md": rootReadme + "A compliant landing zone.\n"}, "README.md", `"compliant"`},
 		"in a module readme": {map[string]string{"modules/x/README.md": moduleReadme + "Certified module.\n"}, "modules/x/README.md", `"Certified"`},
+		"scare quotes":       {docsA11yPage("\nThe profile is \"compliant\".\n"), b, `"compliant"`},
+		"code span claim":    {docsA11yPage("\nThis zone is `certified`.\n"), b, `"certified"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := lzCheck(docsRepo(t, r.files), "docs")
