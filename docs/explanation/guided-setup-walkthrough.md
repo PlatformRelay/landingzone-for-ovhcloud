@@ -7,19 +7,22 @@ last_verified: 8c5e3e2500d2a238586c8ae8284ecbbcb85a0438
 
 # Guided setup: a design walkthrough
 
-> **Design walkthrough.** The setup helper described here does not exist yet; this page explains
-> the planned journey ([ADR-0023](../adr/0023-guided-repository-preconfiguration.md)).
+> **Design walkthrough.** The interactive setup helper described here does not exist; it is
+> deferred (story D-US4 of spec 004). This page explains that journey
+> ([ADR-0023](../adr/0023-guided-repository-preconfiguration.md)). To prepare a manifest today,
+> follow [prepare deployments.yaml from an answers file](../how-to/prepare-deployments-from-answers.md).
 
 Start with what you want to learn or build. The planned setup helper will explain the choices,
 suggest a starting point and help you see what changes when you choose something else. You
 remain in control of the answers; finishing the questions will not deploy anything.
 
-**Available now: this written walkthrough.** There is no setup helper to run yet. Spec 004 was
-re-scoped on 2026-10-20 (D127): its first increment is a non-interactive answers file that a
-planned command exports to `deployments.yaml`, checked by the same decoder as `stacks:check`. The
-interactive journey this page describes, with saving and resuming, is a deferred story that
-starts only on its trigger. No credentials, cloud connection or terminal commands are needed to
-read this guide.
+**Available now: an answers file and one command, not this journey.** Spec 004 was re-scoped on
+2026-10-20 (D127). Its first increment is a non-interactive answers file that `lz-configure`
+exports to `deployments.yaml`, checked by the same decoder as `stacks:check`; the
+[how-to](../how-to/prepare-deployments-from-answers.md) takes a second operator through it. The
+interactive journey this page describes is deferred (D-US4), and saving and resuming with it
+(D-US5). Each starts only on its trigger. No credentials, cloud connection or terminal commands
+are needed to read this guide.
 
 Every example below is a **synthetic, authored illustration**, not captured terminal output,
 a supported profile, a naming contract or evidence of implemented behavior. The wording
@@ -123,14 +126,16 @@ will carry no authority to deploy, procure resources or commit changes.
 
 The [specification](../../specs/004-guided-preconfiguration/spec.md) now covers the answers-file
 export only; the interactive journey, save/resume and helper checks are its deferred stories.
-Writing this guide does not qualify any of them.
+Writing this guide does not qualify any of them. The export that exists today shows a row diff
+and writes only a staging file; the
+[how-to](../how-to/prepare-deployments-from-answers.md) describes it.
 
-## Commands you may see in the plan
+## Commands of the answers-file increment
 
-**All of these targets are planned and not in Taskfile.yml yet. Do not run them as setup
-instructions.**
+These targets exist in `Taskfile.yml`. They belong to the answers file, not to this journey; the
+[how-to](../how-to/prepare-deployments-from-answers.md) shows how to run them.
 
-| Planned Task target | Intended purpose | Creating task in spec 004 |
+| Task target | Purpose | Creating task in spec 004 |
 | --- | --- | --- |
 | `test:configure` | Check the answers decoder, the export, the messages, the diff and the staging write | T016 |
 | `configure:check` | Check an answers file: diff, consequences or a plain refusal; writes nothing | T020 |

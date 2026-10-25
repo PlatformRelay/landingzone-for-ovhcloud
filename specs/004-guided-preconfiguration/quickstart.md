@@ -1,8 +1,8 @@
 # Quickstart: Answers file to deployments.yaml
 
-**Planned, not runnable yet.** `test:configure` arrives with T016, `configure:check` and
-`configure:export` with T020. Until then, edit `stacks/deployments.yaml` by hand as
-[run the first slice](../../docs/how-to/run-the-first-slice.md) describes.
+Runnable since T020. The second operator's guide, step by step, is
+[prepare deployments.yaml from an answers file](../../docs/how-to/prepare-deployments-from-answers.md);
+this page is the short form for contributors.
 
 ## Offline (any contributor, no credentials, no network)
 Through the offline entry, from `$HOME`:
