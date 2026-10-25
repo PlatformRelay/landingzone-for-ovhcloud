@@ -60,13 +60,18 @@ AppArmor restricts unprivileged user namespaces (recent Ubuntu), CI also runs
 Other checks run the same way:
 
 ```sh
+"$E" --candidate "$PWD" -- task check -- modules/naming  # after a change: that path and its consumers
 "$E" --candidate "$PWD" -- task stacks:check       # generated stacks match stacks/deployments.yaml
 "$E" --candidate "$PWD" -- task test:stack-plans   # every stack plans against mocks
 "$E" --candidate "$PWD" -- task stacks:order -- all  # the order the stacks would be applied in
 ```
 
-A green run ends with `SLICE_PASS` (`test:slice`), `STACKS_CHECK_OK` (`stacks:check`) or `pass`;
-`stacks:order` prints the order.
+A green run ends with `SLICE_PASS` (`test:slice`), `CHECK_PASS` (`check`), `STACKS_CHECK_OK`
+(`stacks:check`) or `pass`; `stacks:order` prints the order. `task check` runs lint and the unit
+tests on the changed path and every module, component and stage that uses it, then the
+dependency and docs checks, and says which test layers ran. `task test` runs every offline test
+target in a row; that takes longer than the 240 s the entry gives one target, so through the
+entry run its targets one at a time.
 With [Task](https://taskfile.dev) installed, `task --list` shows every target; CI runs the ones
 in the `LZ_TARGETS` lists of the same workflow's jobs. Applying to a real account
 (`task bootstrap:*`, `task live:*`) is maintainer-only today; see the

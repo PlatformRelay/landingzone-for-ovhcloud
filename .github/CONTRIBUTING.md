@@ -56,6 +56,9 @@ shows how to get it. Then, from the root of your clone:
 "$LZ_RUNTIME/runtime/lz-offline" --candidate "$PWD" -- task <target>
 ```
 
+- **While you work:** `task check -- <path>` on the path you changed runs lint and the unit tests
+  on it and on everything that uses it, then the dependency and docs checks, in under two
+  minutes. It does not replace the lists below.
 - **Docs only:** `docs:check`, `check:specs` and `test:traceability`. Check every relative link
   you add or move; a moved page's inbound links change in the same commit.
 - **Code or configuration:** every target in `LZ_TARGETS` of
