@@ -85,6 +85,10 @@ Codes of `tools/internal/configure`: `ANSWERS_SYNTAX`, `ANSWERS_TOO_LARGE`, `ANS
 `DUPLICATE_KEY`, `UNKNOWN_FIELD`, `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_VALUE`,
 `CURRENT_MANIFEST_INVALID`, `STAGING_SYMLINK`, `STAGING_WRITE`, `STAGING_NOT_DURABLE`.
 
+`CURRENT_MANIFEST_INVALID` stops `check` and `export` alike: no diff, no notes, nothing written.
+One line is not a refusal message: an I/O failure that carries no code (contracts/checks.md
+*Message catalogue*) prints `configure: error: <error>`, exit 1.
+
 ## Dry-run diff entry (FR-005)
 Rows are compared by id between the current manifest and the generated one. One line per row added
 or removed, removed rows first, each group in the order of the manifest that holds the row:

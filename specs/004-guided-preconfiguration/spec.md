@@ -155,7 +155,7 @@ without `cidr` (no network row, runtime row kept); two regions with VLAN 0 in on
 that a derived id passes 63 characters (`INVALID_VALUE` from the decoder); a duplicate key, a case
 variant (`Tenants`), an unknown field, `null`, a second document, a trailing comment, block YAML; a
 file over 64 KiB; a symlinked answers path, `.local`, `.local/configure` or staging file; a current
-manifest that does not decode (diff skipped, export still checked); no current manifest; a staging
+manifest that does not decode (refused by check and export, exit 1); no current manifest; a staging
 write that fails before the rename (the previous staging file stays) or whose directory sync fails
 after it (the new file is in place, its durability is reported uncertain); an existing
 `.local/configure` looser than 0700 (tightened to 0700).
@@ -204,7 +204,9 @@ after it (the new file is in place, its durability is reported uncertain); an ex
   `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_VALUE`), so the source picks the entry. Every
   `generated` code the derivation cannot reach maps to the one tool-defect entry, which says so and
   asks for a report. A (source, code) pair without an entry fails a test and never falls back
-  silently. Exit status 1.
+  silently. Exit status 1. The one exception is an I/O failure that is not a refusal of the
+  answers: it prints `configure: error: <error>`, exit 1, with no catalogue entry
+  (contracts/checks.md *Message catalogue*).
 - **FR-005 Dry-run diff** — `configure:check` decodes the current `stacks/deployments.yaml` (when
   present) and prints a deterministic diff of the instance rows, by id: rows added and rows removed.
   Value-level changes (header, CIDR, VLAN id, toggles, a changed stage or dimension of a kept id)
@@ -213,7 +215,9 @@ after it (the new file is in place, its durability is reported uncertain); an ex
   stacks:reconcile"; each removed row "expected: refused by stacks:reconcile (UNSUPPORTED_CHANGE)"
   (`reconcile.go:25-29`). When a refusal is predicted, the command prints one warning line before
   `configure: ok`; the exit status stays 0. It writes nothing. A current manifest that does not
-  decode is reported with its plain message and the diff is skipped.
+  decode is refused by `check` and `export` alike: one `CURRENT_MANIFEST_INVALID` line, exit 1, no
+  diff, no notes and nothing written (fail closed: the diff would be judged against a manifest
+  nobody can reconcile; coordinator decision of 2026-10-25, T020).
 - **FR-006 Consequence notes** — after a successful check or export, the command prints the notes of
   data-model.md *Consequence notes* whose trigger applies, in a fixed order: the
   `LZ_PROJECT_ID_<REF>` names the bound `account.env` needs (names only); one project per tenant and
