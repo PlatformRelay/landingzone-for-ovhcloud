@@ -2,14 +2,14 @@
   "runs": [
     {
       "role": "head",
-      "candidate": "a7a81808693517c89937226ee06c9e9409f475f3",
-      "run_id": 40239004667,
+      "candidate": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
+      "run_id": 40299667820,
       "attempt": 1,
-      "check_run_id": 121307457188,
+      "check_run_id": 121495685537,
       "repository": "PlatformRelay/landingzone-for-ovhcloud",
       "head_repository": "PlatformRelay/landingzone-for-ovhcloud",
-      "event": "pull_request",
-      "head_sha": "a7a81808693517c89937226ee06c9e9409f475f3",
+      "event": "push",
+      "head_sha": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
       "workflow_path": ".github/workflows/foundation.yml",
       "workflow_blob": "b2c3d6d4f9b127743ccb0d08e8208fb0b996a5a8",
       "source_blob": "83d664d922c1e9cabbc6971b1633e9d808fa8988",
@@ -18,7 +18,7 @@
       "jobs": [
         {
           "name": "foundation",
-          "check_run_id": 121307457188,
+          "check_run_id": 121495685537,
           "conclusion": "success",
           "runner_labels": [
             "ubuntu-24.04"
@@ -45,7 +45,7 @@
           "env": {
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "a7a81808693517c89937226ee06c9e9409f475f3",
+            "LZ_HEAD": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_JOB_RESULTS": "foundation-1=success foundation-2=success foundation-3=success",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
@@ -58,7 +58,7 @@
         },
         {
           "name": "foundation-1",
-          "check_run_id": 121306577013,
+          "check_run_id": 121494164058,
           "conclusion": "success",
           "runner_labels": [
             "ubuntu-24.04"
@@ -102,14 +102,14 @@
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "a7a81808693517c89937226ee06c9e9409f475f3",
+            "LZ_HEAD": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
             "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
             "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
             "LZ_TARGETS": "verify:toolchain test:offline-boundary test:reports test:dependencies test:static test:slice test:outputs test:stacks"
           },
-          "fetched_head": "a7a81808693517c89937226ee06c9e9409f475f3",
+          "fetched_head": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
           "targets": [
             {
               "name": "verify:toolchain",
@@ -125,7 +125,7 @@
               "discovered": 1,
               "empty": 0,
               "failures": 0,
-              "seconds": 1
+              "seconds": 2
             },
             {
               "name": "test:reports",
@@ -133,7 +133,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 7
+              "seconds": 10
             },
             {
               "name": "test:dependencies",
@@ -141,7 +141,7 @@
               "discovered": 3,
               "empty": 0,
               "failures": 0,
-              "seconds": 10
+              "seconds": 15
             },
             {
               "name": "test:static",
@@ -149,7 +149,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 10
+              "seconds": 15
             },
             {
               "name": "test:slice",
@@ -157,7 +157,7 @@
               "discovered": 3,
               "empty": 0,
               "failures": 0,
-              "seconds": 50
+              "seconds": 80
             },
             {
               "name": "test:outputs",
@@ -165,7 +165,7 @@
               "discovered": 1,
               "empty": 0,
               "failures": 0,
-              "seconds": 9
+              "seconds": 14
             },
             {
               "name": "test:stacks",
@@ -173,15 +173,15 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 37
+              "seconds": 55
             }
           ],
           "targets_done": 8,
-          "outside_seconds": 9
+          "outside_seconds": 13
         },
         {
           "name": "foundation-2",
-          "check_run_id": 121306577233,
+          "check_run_id": 121494164029,
           "conclusion": "success",
           "runner_labels": [
             "ubuntu-24.04"
@@ -225,14 +225,14 @@
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "a7a81808693517c89937226ee06c9e9409f475f3",
+            "LZ_HEAD": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
             "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
             "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
             "LZ_TARGETS": "test:live-lane"
           },
-          "fetched_head": "a7a81808693517c89937226ee06c9e9409f475f3",
+          "fetched_head": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
           "targets": [
             {
               "name": "test:live-lane",
@@ -240,15 +240,15 @@
               "discovered": 26,
               "empty": 0,
               "failures": 0,
-              "seconds": 207
+              "seconds": 176
             }
           ],
           "targets_done": 1,
-          "outside_seconds": 12
+          "outside_seconds": 11
         },
         {
           "name": "foundation-3",
-          "check_run_id": 121306577224,
+          "check_run_id": 121494163624,
           "conclusion": "success",
           "runner_labels": [
             "ubuntu-24.04"
@@ -292,14 +292,14 @@
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "a7a81808693517c89937226ee06c9e9409f475f3",
+            "LZ_HEAD": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
             "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
             "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
             "LZ_TARGETS": "test:traceability check:specs test:runtime-image test:foundation-ci test:stack-plans test:exchange test:bootstrap test:update-lane test:release docs:check stacks:check test:configure"
           },
-          "fetched_head": "a7a81808693517c89937226ee06c9e9409f475f3",
+          "fetched_head": "fde7c35b2d7ac7c8b8b961e9d3b0082ca4a711f3",
           "targets": [
             {
               "name": "test:traceability",
@@ -307,7 +307,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 13
+              "seconds": 14
             },
             {
               "name": "check:specs",
@@ -323,7 +323,7 @@
               "discovered": 3,
               "empty": 0,
               "failures": 0,
-              "seconds": 17
+              "seconds": 18
             },
             {
               "name": "test:foundation-ci",
@@ -331,7 +331,7 @@
               "discovered": 3,
               "empty": 0,
               "failures": 0,
-              "seconds": 12
+              "seconds": 13
             },
             {
               "name": "test:stack-plans",
@@ -339,7 +339,7 @@
               "discovered": 1,
               "empty": 0,
               "failures": 0,
-              "seconds": 28
+              "seconds": 30
             },
             {
               "name": "test:exchange",
@@ -347,7 +347,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 24
+              "seconds": 25
             },
             {
               "name": "test:bootstrap",
@@ -355,7 +355,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 21
+              "seconds": 23
             },
             {
               "name": "test:update-lane",
@@ -363,7 +363,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 11
+              "seconds": 12
             },
             {
               "name": "test:release",
@@ -371,7 +371,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 9
+              "seconds": 10
             },
             {
               "name": "docs:check",
@@ -399,18 +399,18 @@
             }
           ],
           "targets_done": 12,
-          "outside_seconds": 9
+          "outside_seconds": 8
         }
       ],
       "check_digests": {
-        "check:specs": "sha256:ef12238703bb04f808020031aad0c6d7ea52e020daf2445f55ba27c3f780ec7c",
-        "docs:check": "sha256:8c0b2d79039a230166c966692b828f62c638c5892f972579615625d627dc1c9f",
+        "check:specs": "sha256:44f26903d1877f440b65113398481fbd7acfc5482c4baaec7d55ff7ede6267de",
+        "docs:check": "sha256:8b06705663b454c9574d664efe16e94fb37f2b999ac025820ab52bc1376e6dc5",
         "stacks:check": "sha256:cca1086e82aa801fa86318432234875c771be5b188421eaf77e40586ee2d1408",
         "test:bootstrap": "sha256:ebaf5dab491451e288e88ffa89607d0da62796ad59f84b97400a0f47c0c4052c",
         "test:configure": "sha256:70a1b0dbb500cf1a14266aa18a4bd4956c4bb5a16bbeefaa027d2d27c4e9e30e",
         "test:dependencies": "sha256:2b455da876507779403c54b1caa1396e3c41a845f59042246ac2fdf3f71ae091",
         "test:exchange": "sha256:ebae7375c3729dbe57eaf2daf3b9e717d8ac45b38b156e7e84a2ae91aafa9d5a",
-        "test:foundation-ci": "sha256:91bef0dc76b50a379d7a18389f52dd6daf5fc99294151336e5b99a8838decf70",
+        "test:foundation-ci": "sha256:6c5031559831291dd8011638f341be043c0620d8a5c6061b0fee4d7df4e90626",
         "test:live-lane": "sha256:fb9ac43168c3d6034fa74a9cccb64bc483660c22ea40f72935757625646172ae",
         "test:offline-boundary": "sha256:8c91316d36e0d0a67b89e1981f38e873c17ebb5c0c778730559ec2a15a563c98",
         "test:outputs": "sha256:a83fdc26cfb827b7ea0f374b0aeb42fd8e66ddb23e12826b57de59ef288e91f9",
@@ -421,21 +421,21 @@
         "test:stack-plans": "sha256:bb31b5ecbbb1de464b8229e4c71235b92883b2e8e9ce15b0b7e5f9a8a1efcced",
         "test:stacks": "sha256:26912eee20f9975df11fcf02a318cd633d911dd7b615e9966069363ab1ce8307",
         "test:static": "sha256:1d583387ca3e05d78741dcadef84fad32655c3a88e3803424ec6b9808cbd156b",
-        "test:traceability": "sha256:b999c19f93ed1a8e7378bf63097aea4940459aae5120d586b268f3b7d396237d",
+        "test:traceability": "sha256:3904349fbd7c5a3e4f8d6cd3a0b27deb7eb0943623f85c494a4a032fe73870fa",
         "test:update-lane": "sha256:ffb07532e0baeb862028d26dba807674f8c2ab1616788cb96383f10416f00e54",
         "verify:toolchain": "sha256:b0faa34a34ba7cc498cafe991f981dfbc08ec6c291991d8186bf3dd6a3ec6f12"
       }
     },
     {
       "role": "red-control",
-      "candidate": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
-      "run_id": 40239024269,
+      "candidate": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
+      "run_id": 40299738937,
       "attempt": 1,
-      "check_run_id": 121307381022,
+      "check_run_id": 121496020507,
       "repository": "PlatformRelay/landingzone-for-ovhcloud",
       "head_repository": "PlatformRelay/landingzone-for-ovhcloud",
       "event": "pull_request",
-      "head_sha": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+      "head_sha": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
       "workflow_path": ".github/workflows/foundation.yml",
       "workflow_blob": "b2c3d6d4f9b127743ccb0d08e8208fb0b996a5a8",
       "source_blob": "83d664d922c1e9cabbc6971b1633e9d808fa8988",
@@ -444,7 +444,7 @@
       "jobs": [
         {
           "name": "foundation",
-          "check_run_id": 121307381022,
+          "check_run_id": 121496020507,
           "conclusion": "failure",
           "runner_labels": [
             "ubuntu-24.04"
@@ -471,7 +471,7 @@
           "env": {
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+            "LZ_HEAD": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_JOB_RESULTS": "foundation-1=failure foundation-2=success foundation-3=failure",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
@@ -484,7 +484,7 @@
         },
         {
           "name": "foundation-1",
-          "check_run_id": 121306637843,
+          "check_run_id": 121494397612,
           "conclusion": "failure",
           "runner_labels": [
             "ubuntu-24.04"
@@ -528,14 +528,14 @@
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+            "LZ_HEAD": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
             "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
             "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
             "LZ_TARGETS": "verify:toolchain test:offline-boundary test:reports test:dependencies test:static test:slice test:outputs test:stacks"
           },
-          "fetched_head": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+          "fetched_head": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
           "targets": [
             {
               "name": "verify:toolchain",
@@ -559,7 +559,7 @@
               "discovered": 2,
               "empty": 0,
               "failures": 0,
-              "seconds": 10
+              "seconds": 8
             },
             {
               "name": "test:dependencies",
@@ -567,15 +567,15 @@
               "discovered": 0,
               "empty": 0,
               "failures": 22,
-              "seconds": 14
+              "seconds": 11
             }
           ],
           "targets_done": -1,
-          "outside_seconds": 12
+          "outside_seconds": 9
         },
         {
           "name": "foundation-2",
-          "check_run_id": 121306637990,
+          "check_run_id": 121494397250,
           "conclusion": "success",
           "runner_labels": [
             "ubuntu-24.04"
@@ -619,14 +619,14 @@
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+            "LZ_HEAD": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
             "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
             "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
             "LZ_TARGETS": "test:live-lane"
           },
-          "fetched_head": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+          "fetched_head": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
           "targets": [
             {
               "name": "test:live-lane",
@@ -634,15 +634,15 @@
               "discovered": 26,
               "empty": 0,
               "failures": 0,
-              "seconds": 172
+              "seconds": 209
             }
           ],
           "targets_done": 1,
-          "outside_seconds": 13
+          "outside_seconds": 8
         },
         {
           "name": "foundation-3",
-          "check_run_id": 121306637997,
+          "check_run_id": 121494397601,
           "conclusion": "failure",
           "runner_labels": [
             "ubuntu-24.04"
@@ -686,14 +686,14 @@
             "LZ_BWRAP_SHA256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
             "LZ_CANDIDATE": "/home/runner/work/_temp/candidate",
             "LZ_ENTRY_SHA256": "ecdbb31c6d82867dac2f709ee33356864ed0d843338a673837f9a3a494b66c91",
-            "LZ_HEAD": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+            "LZ_HEAD": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
             "LZ_IMAGE": "platformrelay/landingzone-for-ovhcloud/runtime",
             "LZ_LAYER": "sha256:687a1a985fce014fddd55feb108108552e6881c1ad8755d83d8a67da38a1e9bf",
             "LZ_MANIFEST": "sha256:115ed3a16167c964354e664f8568588533546b14b8e96541f8456519ef1e93b9",
             "LZ_RUNTIME": "/home/runner/work/_temp/runtime",
             "LZ_TARGETS": "test:traceability check:specs test:runtime-image test:foundation-ci test:stack-plans test:exchange test:bootstrap test:update-lane test:release docs:check stacks:check test:configure"
           },
-          "fetched_head": "805e9eaac6c51478f719cc7bf91b08e303e1ad30",
+          "fetched_head": "d499cae8f49de493e2c8d31d87740fa9e6a08c43",
           "targets": [
             {
               "name": "test:traceability",
@@ -701,7 +701,7 @@
               "discovered": 0,
               "empty": 0,
               "failures": 23,
-              "seconds": 12
+              "seconds": 18
             }
           ],
           "targets_done": -1,
@@ -709,14 +709,14 @@
         }
       ],
       "check_digests": {
-        "check:specs": "sha256:33a1f6c99a38e235a30c349ccec63f8b04ba68ffd99703b8f726c1a492c92216",
-        "docs:check": "sha256:02fd1e40ab42b826183478ecf60b359d4bf08f35448fd63851ab71aa1077e85e",
+        "check:specs": "sha256:8ed5848f14b9eed1276f595581b7ce2326f89cc6934a73c93d0c94b6e6977ffe",
+        "docs:check": "sha256:1c3cd6c5fcb080ad411021aa97402567606af7fa8b56cf47732e37f4d5d18625",
         "stacks:check": "sha256:8ab8209a4c184d4e5b5bca5c68847065d057a2ebf7d1e173487d8abff6c56d05",
         "test:bootstrap": "sha256:5a5d4dd69eb629cbec1a100ba7e1777941adaf92909a30b541345f6c4563e1cf",
         "test:configure": "sha256:6a54154ccd0da21206dac2efc0a0a513668b1ee5515a9c5df7eb073772e19784",
         "test:dependencies": "sha256:b513aa15057de12478c3fe0f336dd212c52d53f534d41b5d714f07bd05eb3d23",
         "test:exchange": "sha256:830bd8c4d9c4000d8f947340594ae47e6284abfea46137e1ba36effdad623d87",
-        "test:foundation-ci": "sha256:e0ff68b19e7f04f0575f208041c03fe64ce1e45549694255ae74b9d3bd73781f",
+        "test:foundation-ci": "sha256:73b66940dfbfb8bf511d59dd7cc8a938228bb88182af3b024d608e0d0c8c2543",
         "test:live-lane": "sha256:c5e5d6d3fcaa381a6868650847c180236fac67bd3e2828b7577a9c274023e6f7",
         "test:offline-boundary": "sha256:696fea94fc3ee33cd0453e2f5c522e0fb3e394db1f0fd10447d860dd5fffce17",
         "test:outputs": "sha256:9f5e86911f0cbf35dd74de08ff9613a66c568264bbe6765a32c0c52a3f082c02",
@@ -727,7 +727,7 @@
         "test:stack-plans": "sha256:5c10ffbf37c6b2afec900b3b4c5c399aa388ee36e0cfb3ad410ae8f7633b05ab",
         "test:stacks": "sha256:023ed0be9a1060b3adf2726080dd4f4a6f56c9199dda7c2435a03797a98195a6",
         "test:static": "sha256:8e7858a8c06aac4aa7279233ab55300703dca9c390b8474f4549668658ff0adb",
-        "test:traceability": "sha256:a5c2374ecfbb18b51da090a56abb9a9db7794bd2c7cecb960f2e1db8500d4077",
+        "test:traceability": "sha256:ff7d938047db4cdb9d053b3379bf904b57bdbf0620f4b14d668ad6f283908542",
         "test:update-lane": "sha256:9bd3cbb1d497923d23ff87444b336dc4471eb1d81bad19e93aaaad597f9de6a3",
         "verify:toolchain": "sha256:01188f5387c6444858d27dec208949b21bb023df969d42d7a75dfa716efbfcd3"
       }
