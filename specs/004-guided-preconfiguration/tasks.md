@@ -135,7 +135,7 @@ Independent test: V004.
   - Verify: `task docs:check`: green, with the new page's header and references current.
   - Evidence: `evidence/T021.md`; initial status `not-run`.
 
-- [ ] T022 [US1] (blocked 2026-10-25: waiting for the owner to name a reader; sheet in evidence/T022.md) Owner gate: a second reader, given only docs/how-to/prepare-deployments-from-answers.md, writes a two-tenant answers file and records the attempt in specs/004-guided-preconfiguration/evidence/T022.md
+- [x] T022 [US1] (closed 2026-10-26 as a stand-in: simulated reader by owner decision D134; SC-004 not met by a human; evidence/T022.md) Owner gate: a second reader, given only docs/how-to/prepare-deployments-from-answers.md, writes a two-tenant answers file and records the attempt in specs/004-guided-preconfiguration/evidence/T022.md
   - Requirements: SC-004; ADRs: 0013, 0023. Depends on: T021; a reader who has not edited `stacks/deployments.yaml` (the owner names one, or records that none is available and the task closes `blocked`).
   - Verify: `task configure:check -- <answers>` on the reader's file, host-side: `configure: ok`; the record names the time taken, each refusal met and whether its message was enough, and each step that was harder than editing the manifest would have been. The record decides D-US4's first trigger (spec.md).
   - Evidence: `evidence/T022.md`; initial status `not-run`.

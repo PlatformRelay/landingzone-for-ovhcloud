@@ -13,10 +13,10 @@ judge's counterpoints; the strict manifest decoder `tools/internal/stacks/manife
 - **Built on `lane-004`, not yet merged:** the `lz-configure` command with its staging write and the
   `configure:check` and `configure:export` targets (T020), and the second operator's how-to
   `docs/how-to/prepare-deployments-from-answers.md` (T021).
-- **T022 is blocked:** no second reader has been named; only the owner names one
-  (`evidence/T022.md`). SC-004 is not met, and D-US4's first trigger (the answers file itself was
-  the obstacle) is undecided.
-- **Deferred stories:** none fired. D-US4 waits on T022; D-US5 needs D-US4; D-US7 needs D-US4 or a
+- **T022 closed as a stand-in (2026-10-26, owner decision D134):** a simulated reader given only the
+  how-to reached `configure: ok` for two tenants (`evidence/T022.md`). SC-004 is not met by a human
+  reader. The answers file was not the obstacle, so D-US4's first trigger did not fire.
+- **Deferred stories:** none fired. D-US4 did not fire (T022); D-US5 needs D-US4; D-US7 needs D-US4 or a
   reported missing-tool failure after a clean export, and none is recorded; D-US6 needs a second
   profile in the manifest schema.
 - **CI:** `test:configure` is not yet a target of the CI workflow, so CI does not run this spec's
