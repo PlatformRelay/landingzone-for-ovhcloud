@@ -15,11 +15,11 @@ references:
   - path: tests/fixtures/answers/sandbox.yaml
     blob: 8f1488b84f0e509c9065a197c4c352b81bc8fc73
   - path: specs/004-guided-preconfiguration/spec.md
-    blob: 901d053342e31299c95e5cc44c9febaf914ae723
+    blob: c3ac36db39f5cf6552ecb7e58ad179867134a965
   - path: Taskfile.yml
     blob: 8ce5ea0598855c9821fd40636e3e51ee05ea1f19
 verified_against: {task: "3.53"}
-last_verified: fb968189fcc70955232a704509663c595151aeeb
+last_verified: 659d5be2c2f68fc581abc89a37b8dd497de94490
 ---
 
 # Prepare deployments.yaml from an answers file
@@ -158,8 +158,14 @@ configure: INVALID_VALUE: tenants[1].environments[0].regions[0].cidr. A value do
 
 Every refusal has this shape: `configure: <CODE>: <where>. <what it means>. Next: <what to do>`.
 The place counts from 0, so `tenants[1]` is the second tenant, `lab`. The table in
-[the answers file](#the-answers-file) says a CIDR needs its prefix. `task` then reports
-`task: Failed to run task "configure:check": exit status 1`. Nothing was written.
+[the answers file](#the-answers-file) says a CIDR needs its prefix. `INVALID_VALUE` does not
+say which form was expected (a number, a pattern, a range): look the field up in that table. After
+the refusal the command prints a bare `exit status 1` line, then
+`task: Failed to run task "configure:check": exit status 1`; through `mise exec` the shell sees
+exit code 201, not 1. Nothing was written.
+
+The check confirms only what it can see: a toggle such as `budget_alert: true` inside a row that
+already exists gives no diff line and no note. Check toggles by reading your answers file.
 
 A refusal of the file itself, such as `ANSWERS_NOT_REGULAR`, names the answers file by its
 absolute path, even when you gave a relative one: the command resolves it against the repository
