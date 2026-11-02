@@ -31,6 +31,8 @@ Unfamiliar terms are in the [glossary](../reference/glossary.md).
 
 ```mermaid
 flowchart LR
+  accTitle: The four layers and who may call whom
+  accDescr: Stacks call stages, stages call components, components call modules and the naming module, and modules call the naming module. Nothing calls upwards.
   naming["modules/naming"]
   mod["modules/*<br/>one OVHcloud concern"]
   comp["components/*<br/>a feature built from modules"]
