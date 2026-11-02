@@ -5,11 +5,11 @@ references:
   - path: tools/internal/checks/dependencies.go
     blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
   - path: tools/cmd/lz-check/docs.go
-    blob: 963a632797ee8a5ac994e7922f538f08aaf68942
+    blob: 3668af2ca09533882e8fd17ac47dbf6aed23bd75
   - path: tools/internal/checks/offline.go
     blob: 761a61f38609c26f431c4ef80fcb35d85e3f067c
 verified_against: {task: "3.53"}
-last_verified: 25f806fe1bae5d02a46543220b5965b28528b7d8
+last_verified: cfcf033329ba1e87685b23754560acc113100cc2
 ---
 
 # Repository map
