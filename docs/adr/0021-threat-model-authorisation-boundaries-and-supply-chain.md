@@ -42,6 +42,16 @@ recovery (ADR-0009); each logged and alerting.
 - Private artefacts: plan JSON, state, cassettes and logs are never published raw; sanitised
   summaries only.
 
+Amendment (2026-11-02, owner decision): one narrow exception to "images pinned by digest". The
+OpenSSF Scorecard workflow (`.github/workflows/scorecard.yml`) runs `ossf/scorecard-action`, which
+starts its own container image by tag (`ghcr.io/ossf/scorecard-action:v2.5.0`), not by digest.
+Scope: that action's image only; every other action, include and image stays pinned by digest.
+Why: calling the image by digest would replace the action, and Scorecard's publish verification
+accepts the workflow only when it uses the action itself. Mitigation: the action is pinned by full
+commit SHA, the job holds no repository secret, and its token can only read the repository and
+write code-scanning results. Revisit when upstream pins its image by digest: then the exception
+ends.
+
 ### Security test suite
 `tests/security/` holds the authority and cross-tenant abuse cases: self-authorising requests, forged
 approvals, stale candidates, tenant-to-tenant state and network access, credential reuse after
@@ -62,3 +72,4 @@ identity code and before every release.
 
 ## Review log
 - 2026-10-01: created from the round-2 external adversarial review.
+- 2026-11-02: amended with the Scorecard image exception (owner decision).
