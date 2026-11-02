@@ -61,7 +61,7 @@ const (
 	bssRepoRoot   = "../../.."
 	bssRevision   = "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a" // the reviewed commit the envelope names
 	bssWorldFile  = "bs-world.json"
-	bssBucket     = "lz-bkt-state" // spec.org lz (D87), account scope
+	bssBucket     = "lz2-bkt-state" // spec.org lz2 (D87), account scope
 	bssRegion     = "GRA"
 	bssStateFile  = "account-bootstrap.tfstate"
 	bssGovState   = "account/account-governance/terraform.tfstate"
@@ -800,7 +800,7 @@ func newBSSHarness(t *testing.T) *bssHarness {
 	h.world = bssWorld{Account: bsOldAccount, Project: bsOldProject, Region: bssRegion, Bucket: bssBucket,
 		Cloud: filepath.Join(fake, "cloud.json"), S3: filepath.Join(fake, "s3"), Log: filepath.Join(fake, "tofu.jsonl"),
 		Tenants:         map[string]string{"demo": bsOldProject}, // KD-1: DEMO_DEV is the state project
-		UserDescription: bssCapturedUserDescription(t)}
+		UserDescription: bssCapturedUserDescription(t, h.m.Org)}
 	h.saveWorld()
 	if err := bssSave(h.world.Cloud, bssCloud{Buckets: map[string]bssBucketRec{}, Users: map[string]bssUser{}}); err != nil {
 		t.Fatal(err)
@@ -977,8 +977,9 @@ func (h *bssHarness) userRoutes(acct *bsAccount, client *bsClient, may func(stri
 }
 
 // bssCapturedUserDescription is the platform S3 user's description in the plan pinned OpenTofu
-// 1.13.0 made of the bootstrap stage (org lz).
-func bssCapturedUserDescription(t *testing.T) string {
+// 1.13.0 made of the bootstrap stage (its unit test, org lz), with that org prefix replaced by
+// org, the world's manifest org: the name modules/naming gives the user for org.
+func bssCapturedUserDescription(t *testing.T, org string) string {
 	t.Helper()
 	var capture struct {
 		TestPlan struct {
@@ -993,8 +994,8 @@ func bssCapturedUserDescription(t *testing.T) string {
 	readJSON(t, filepath.Join(bssRepoRoot, "tests/fixtures/outputs/captures/bootstrap-plan.json"), &capture)
 	for _, rc := range capture.TestPlan.ResourceChanges {
 		if "module.bootstrap."+rc.Address == bssUserAddr {
-			if d, _ := rc.Change.After["description"].(string); d != "" {
-				return d
+			if d, _ := rc.Change.After["description"].(string); strings.HasPrefix(d, "lz-") {
+				return org + strings.TrimPrefix(d, "lz")
 			}
 		}
 	}
@@ -2114,8 +2115,8 @@ func TestBootstrapPartial(t *testing.T) {
 			// project (KD-1), a tenant's S3 user: only the first is a leftover of the bootstrap.
 			c.Users["4690"] = bssUser{Account: h.world.Account, Project: h.world.Project, Bucket: h.world.Bucket,
 				Description: h.world.UserDescription, AccessKey: "FAKEAK0690", Secret: "fakeS3Secret0690Qx7v"}
-			c.Users["4691"] = bssUser{Account: h.world.Account, Project: h.world.Project, Bucket: "lz-demo-bkt-state",
-				Description: strings.Replace(h.world.UserDescription, "lz-", "lz-demo-", 1), AccessKey: "FAKEAK0691", Secret: "fakeS3Secret0691Qx7v"}
+			c.Users["4691"] = bssUser{Account: h.world.Account, Project: h.world.Project, Bucket: "lz2-demo-bkt-state",
+				Description: strings.Replace(h.world.UserDescription, h.m.Org+"-", h.m.Org+"-demo-", 1), AccessKey: "FAKEAK0691", Secret: "fakeS3Secret0691Qx7v"}
 			h.setCloud(c)
 		}, func(t *testing.T, h *bssHarness, rs []PhaseResult, err error) {
 			resumed(StatusRan, StatusRan)(t, h, rs, err)

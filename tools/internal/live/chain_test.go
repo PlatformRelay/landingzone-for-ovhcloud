@@ -77,37 +77,37 @@ func chainResources() map[string][]chainResource {
 	urn := "urn:v1:eu:resource:publicCloudProject:" + laneProject
 	return map[string][]chainResource{
 		"account-bootstrap": {
-			{"module.bootstrap.module.state_backend.ovh_cloud_project_storage.this", tStorage, "lz-bkt-state", map[string]any{"name": "lz-bkt-state", "region": "GRA"}},
-			{`module.bootstrap.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4711", map[string]any{"id": "4711", "description": "lz-account-platform-s3"}},
+			{"module.bootstrap.module.state_backend.ovh_cloud_project_storage.this", tStorage, "lz2-bkt-state", map[string]any{"name": "lz2-bkt-state", "region": "GRA"}},
+			{`module.bootstrap.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4711", map[string]any{"id": "4711", "description": "lz2-account-platform-s3"}},
 			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_credential.s3["platform"]`, tCred, laneAccountAK, map[string]any{"user_id": "4711", "access_key_id": laneAccountAK, "secret_access_key": laneAccountSK}},
 			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, "4711", map[string]any{"user_id": "4711", "policy": "{}"}},
 		},
 		"account-governance": {
-			{"module.account_governance.module.identity.ovh_me_api_oauth2_client.platform_deployer", tClient, lanePlatformID, map[string]any{"client_id": lanePlatformID, "name": "lz-platform-deployer", "client_secret": lanePlatformSecret}},
-			{`module.account_governance.module.identity.ovh_me_api_oauth2_client.tenant_deployer["demo"]`, tClient, laneTenantID, map[string]any{"client_id": laneTenantID, "name": "lz-demo-deployer", "client_secret": laneTenantSecret}},
-			{"module.account_governance.module.identity.ovh_iam_policy.platform_deployer", tPolicy, "00000000-0000-4000-8000-0000000000b1", map[string]any{"id": "00000000-0000-4000-8000-0000000000b1", "name": "lz-platform-deployer"}},
-			{`module.account_governance.module.identity.ovh_iam_policy.tenant_deployer["demo"]`, tPolicy, "00000000-0000-4000-8000-0000000000b2", map[string]any{"id": "00000000-0000-4000-8000-0000000000b2", "name": "lz-demo-deployer"}},
-			{`module.account_governance.module.identity.ovh_me_identity_group.tenant["demo"]`, tGroup, "lz-demo-deployers", map[string]any{"name": "lz-demo-deployers"}},
+			{"module.account_governance.module.identity.ovh_me_api_oauth2_client.platform_deployer", tClient, lanePlatformID, map[string]any{"client_id": lanePlatformID, "name": "lz2-platform-deployer", "client_secret": lanePlatformSecret}},
+			{`module.account_governance.module.identity.ovh_me_api_oauth2_client.tenant_deployer["demo"]`, tClient, laneTenantID, map[string]any{"client_id": laneTenantID, "name": "lz2-demo-deployer", "client_secret": laneTenantSecret}},
+			{"module.account_governance.module.identity.ovh_iam_policy.platform_deployer", tPolicy, "00000000-0000-4000-8000-0000000000b1", map[string]any{"id": "00000000-0000-4000-8000-0000000000b1", "name": "lz2-platform-deployer"}},
+			{`module.account_governance.module.identity.ovh_iam_policy.tenant_deployer["demo"]`, tPolicy, "00000000-0000-4000-8000-0000000000b2", map[string]any{"id": "00000000-0000-4000-8000-0000000000b2", "name": "lz2-demo-deployer"}},
+			{`module.account_governance.module.identity.ovh_me_identity_group.tenant["demo"]`, tGroup, "lz2-demo-deployers", map[string]any{"name": "lz2-demo-deployers"}},
 		},
 		"demo-state": {
-			{"module.tenant_state.module.state_backend.ovh_cloud_project_storage.this", tStorage, "lz-demo-bkt-state", map[string]any{"name": "lz-demo-bkt-state", "region": "GRA"}},
-			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["tenant"]`, tUser, "4712", map[string]any{"id": "4712", "description": "lz-demo-tenant-s3"}},
-			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4713", map[string]any{"id": "4713", "description": "lz-demo-platform-s3"}},
+			{"module.tenant_state.module.state_backend.ovh_cloud_project_storage.this", tStorage, "lz2-demo-bkt-state", map[string]any{"name": "lz2-demo-bkt-state", "region": "GRA"}},
+			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["tenant"]`, tUser, "4712", map[string]any{"id": "4712", "description": "lz2-demo-tenant-s3"}},
+			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4713", map[string]any{"id": "4713", "description": "lz2-demo-platform-s3"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_credential.s3["tenant"]`, tCred, laneTenantAK, map[string]any{"user_id": "4712", "access_key_id": laneTenantAK, "secret_access_key": laneTenantSK}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_credential.s3["platform"]`, tCred, lanePlatformAK, map[string]any{"user_id": "4713", "access_key_id": lanePlatformAK, "secret_access_key": lanePlatformSK}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["tenant"]`, tS3Pol, "4712", map[string]any{"user_id": "4712", "policy": "{}"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, "4713", map[string]any{"user_id": "4713", "policy": "{}"}},
 		},
 		"demo-dev-project": {
-			{"module.project.ovh_iam_resource_tags.project", tTags, urn, map[string]any{"id": urn, "urn": urn, "tags": map[string]string{"lz:org": "lz", "lz:tenant": "demo", "lz-retained-tag": "demo"}}},
-			{"module.project.ovh_cloud_project_alerting.budget[0]", tAlert, "al-retained", map[string]any{"id": "al-retained", "name": "lz-demo-dev-budget"}},
+			{"module.project.ovh_iam_resource_tags.project", tTags, urn, map[string]any{"id": urn, "urn": urn, "tags": map[string]string{"lz:org": "lz2", "lz:tenant": "demo", "lz2-retained-tag": "demo"}}},
+			{"module.project.ovh_cloud_project_alerting.budget[0]", tAlert, "al-retained", map[string]any{"id": "al-retained", "name": "lz2-demo-dev-budget"}},
 		},
 		"demo-dev-gra11-network": {
 			{"module.project_network.module.network.ovh_cloud_project_network_private.this", tNetwork, "pn-0000058_0", nil},
 			{"module.project_network.module.network.ovh_cloud_project_network_private_subnet.this", tSubnet, "sn-chain-58", nil},
 		},
 		"demo-dev-gra11-runtime": {
-			{"module.runtime.ovh_cloud_project_storage.this", tStorage, "lz-demo-dev-gra11-bkt-runtime", nil},
+			{"module.runtime.ovh_cloud_project_storage.this", tStorage, "lz2-demo-dev-gra11-bkt-runtime", nil},
 		},
 	}
 }
@@ -165,7 +165,7 @@ func newChainHarness(t *testing.T) *laneHarness {
 	t.Helper()
 	h := newLaneHarness(t)
 	h.destroys = true
-	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 		"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject, "LZ_ADMIN_CLIENT_ID": laneAdminID, "LZ_ADMIN_POLICY_ID": chainAdminPolicy})
 	raw, _ := json.Marshal(laneState{PassSHA: passSHA(lanePassphrase), Serial: 1})
 	if err := os.WriteFile(filepath.Join(h.world.States, "account-bootstrap.json"), raw, 0o600); err != nil {
@@ -240,8 +240,11 @@ func (h *laneHarness) setStack(id string, f func(*laneStack)) {
 // tags and budget alert. The ephemeral stacks' resources are gone.
 func chainWorld(t *testing.T, runID string) (capturedProvenance, syntheticWorld) {
 	t.Helper()
-	p, w := loadCapturedWorld(t, "lz-")
-	swap := strings.NewReplacer(p.Project.ID, laneProject, p.Exempt.ClientID, laneAdminID, "xx000001-ovh", laneAccount)
+	p, w := loadCapturedWorld(t, "lz2-")
+	// The admin's captured name (lz-sandbox-admin) is given the lane org's prefix, so that only its
+	// recorded ids, never its name, keep it out of the leftovers.
+	swap := strings.NewReplacer(p.Project.ID, laneProject, p.Exempt.ClientID, laneAdminID, "xx000001-ovh", laneAccount,
+		`"name":"lz-sandbox-admin"`, `"name":"lz2-sandbox-admin"`)
 	resp := map[string][]json.RawMessage{}
 	for k, pages := range w.Responses {
 		var out []json.RawMessage
@@ -266,26 +269,26 @@ func chainWorld(t *testing.T, runID string) (capturedProvenance, syntheticWorld)
 		raw, _ := json.Marshal(append(arr, json.RawMessage(elem)))
 		w.Responses[path] = one(string(raw))
 	}
-	for _, b := range []string{"lz-bkt-state", "lz-demo-bkt-state"} {
+	for _, b := range []string{"lz2-bkt-state", "lz2-demo-bkt-state"} {
 		add(pr+"/region/GRA/storage", `{"name":"`+b+`","region":"GRA","createdAt":"2026-10-08T12:00:00Z","objectsCount":1,"objectsSize":1,"ownerId":1,"virtualHost":"x","arn":"arn:aws:s3:::`+b+`","objects":[]}`)
 	}
-	for _, u := range []struct{ id, desc, ak string }{{"4711", "lz-account-platform-s3", laneAccountAK}, {"4712", "lz-demo-tenant-s3", laneTenantAK}, {"4713", "lz-demo-platform-s3", lanePlatformAK}} {
+	for _, u := range []struct{ id, desc, ak string }{{"4711", "lz2-account-platform-s3", laneAccountAK}, {"4712", "lz2-demo-tenant-s3", laneTenantAK}, {"4713", "lz2-demo-platform-s3", lanePlatformAK}} {
 		add(pr+"/user", `{"id":`+u.id+`,"username":"user-`+u.id+`","description":"`+u.desc+`","status":"ok","roles":[],"creationDate":"2026-10-08T12:00:00Z"}`)
 		w.Responses[pr+"/user/"+u.id+"/s3Credentials"] = one(`[{"access":"` + u.ak + `","userId":` + u.id + `,"tenantId":"t"}]`)
 		w.Responses[pr+"/user/"+u.id+"/policy"] = one(`{"policy":"{\"Statement\":[]}"}`)
 	}
-	for _, c := range []struct{ id, name string }{{lanePlatformID, "lz-platform-deployer"}, {laneTenantID, "lz-demo-deployer"}} {
+	for _, c := range []struct{ id, name string }{{lanePlatformID, "lz2-platform-deployer"}, {laneTenantID, "lz2-demo-deployer"}} {
 		add("/me/api/oauth2/client", `"`+c.id+`"`)
 		w.Responses["/me/api/oauth2/client/"+c.id] = one(`{"clientId":"` + c.id + `","name":"` + c.name + `"}`)
 	}
-	for _, pol := range []struct{ id, name string }{{"00000000-0000-4000-8000-0000000000b1", "lz-platform-deployer"}, {"00000000-0000-4000-8000-0000000000b2", "lz-demo-deployer"}} {
+	for _, pol := range []struct{ id, name string }{{"00000000-0000-4000-8000-0000000000b1", "lz2-platform-deployer"}, {"00000000-0000-4000-8000-0000000000b2", "lz2-demo-deployer"}} {
 		add("/iam/policy", `{"id":"`+pol.id+`","owner":"`+laneAccount+`","name":"`+pol.name+`","readOnly":false,"identities":[],"resources":[],"permissions":{},"permissionsGroups":[],"createdAt":"2026-10-08T12:00:00Z"}`)
 	}
-	add("/me/identity/group", `"lz-demo-deployers"`)
-	w.Responses["/me/identity/group/lz-demo-deployers"] = one(`{"name":"lz-demo-deployers"}`)
-	w.Responses["/iam/resource/"+p.Project.URN] = one(`{"urn":"` + p.Project.URN + `","name":"` + laneProject + `","type":"publicCloudProject","tags":{"lz:org":"lz","lz:tenant":"demo","lz-retained-tag":"demo"}}`)
+	add("/me/identity/group", `"lz2-demo-deployers"`)
+	w.Responses["/me/identity/group/lz2-demo-deployers"] = one(`{"name":"lz2-demo-deployers"}`)
+	w.Responses["/iam/resource/"+p.Project.URN] = one(`{"urn":"` + p.Project.URN + `","name":"` + laneProject + `","type":"publicCloudProject","tags":{"lz:org":"lz2","lz:tenant":"demo","lz2-retained-tag":"demo"}}`)
 	add(pr+"/alerting", `"al-retained"`)
-	w.Responses[pr+"/alerting/al-retained"] = one(`{"id":"al-retained","name":"lz-demo-dev-budget","delay":3600,"monthlyThreshold":10,"email":"user1@example.invalid"}`)
+	w.Responses[pr+"/alerting/al-retained"] = one(`{"id":"al-retained","name":"lz2-demo-dev-budget","delay":3600,"monthlyThreshold":10,"email":"user1@example.invalid"}`)
 	return p, w
 }
 
@@ -1047,10 +1050,10 @@ func TestChainDestroyGuard(t *testing.T) {
 			seed := syntheticSeed{Replace: map[string][]json.RawMessage{}}
 			var expect []Leftover
 			if refused == "demo-dev-gra11-runtime" {
-				seed.Replace[pr+"/region/GRA/storage"] = chainAppend(t, w, pr+"/region/GRA/storage", `{"name":"lz-demo-dev-gra11-bkt-runtime","region":"GRA","createdAt":"2026-10-08T12:00:00Z","objectsCount":0,"objectsSize":0,"ownerId":1,"virtualHost":"x","arn":"arn:aws:s3:::lz-demo-dev-gra11-bkt-runtime","objects":[]}`)
-				expect = []Leftover{{Type: tStorage, ID: "lz-demo-dev-gra11-bkt-runtime"}}
+				seed.Replace[pr+"/region/GRA/storage"] = chainAppend(t, w, pr+"/region/GRA/storage", `{"name":"lz2-demo-dev-gra11-bkt-runtime","region":"GRA","createdAt":"2026-10-08T12:00:00Z","objectsCount":0,"objectsSize":0,"ownerId":1,"virtualHost":"x","arn":"arn:aws:s3:::lz2-demo-dev-gra11-bkt-runtime","objects":[]}`)
+				expect = []Leftover{{Type: tStorage, ID: "lz2-demo-dev-gra11-bkt-runtime"}}
 			} else {
-				seed.Replace[pr+"/network/private"] = chainAppend(t, w, pr+"/network/private", `{"id":"pn-0000058_0","name":"lz-demo-dev-gra11-net","status":"ACTIVE","type":"private","vlanId":0,"regions":[]}`)
+				seed.Replace[pr+"/network/private"] = chainAppend(t, w, pr+"/network/private", `{"id":"pn-0000058_0","name":"lz2-demo-dev-gra11-net","status":"ACTIVE","type":"private","vlanId":0,"regions":[]}`)
 				seed.Replace[pr+"/network/private/pn-0000058_0/subnet"] = []json.RawMessage{json.RawMessage(`[{"id":"sn-chain-58","cidr":"10.20.0.0/24","ipPools":[],"gatewayIp":null}]`)}
 				expect = []Leftover{{Type: tNetwork, ID: "pn-0000058_0"}, {Type: tSubnet, ID: "sn-chain-58"}}
 			}
@@ -1082,7 +1085,7 @@ func TestChainDestroyGuard(t *testing.T) {
 // the answers and the expected leftovers.
 func chainSeed(p capturedProvenance, w syntheticWorld, name string) syntheticSeed {
 	s := capturedSeeds(p, w)[name]
-	rename := strings.NewReplacer("lzprobe-", "lz-seed-")
+	rename := strings.NewReplacer("lzprobe-", "lz2-seed-")
 	out := syntheticSeed{Replace: map[string][]json.RawMessage{}}
 	for k, pages := range s.Replace {
 		for _, pg := range pages {
@@ -1144,7 +1147,7 @@ func TestChainLeftovers(t *testing.T) {
 			}
 			// A tag is listed by its key; only the slice-prefixed key is a candidate (review r1:
 			// the state's tags exempt it).
-			out = append(out, Leftover{Type: tTags, ID: "lz-retained-tag"})
+			out = append(out, Leftover{Type: tTags, ID: "lz2-retained-tag"})
 		}
 		return leftoverKeys(out)
 	}
@@ -1155,7 +1158,7 @@ func TestChainLeftovers(t *testing.T) {
 	}
 	rows = append(rows,
 		row{name: "admin-policy-other-id", setup: func(h *laneHarness) {
-			h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+			h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 				"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject, "LZ_ADMIN_CLIENT_ID": laneAdminID, "LZ_ADMIN_POLICY_ID": "00000000-0000-4000-8000-0000000000ff"})
 		}, expect: []string{tPolicy + " " + chainAdminPolicy}},
 		// The admin client is exempt by its recorded id only: a client named like it with another
@@ -1163,7 +1166,7 @@ func TestChainLeftovers(t *testing.T) {
 		row{name: "admin-client-name-other-id", seed: func(p capturedProvenance, w syntheticWorld) syntheticSeed {
 			return syntheticSeed{Replace: map[string][]json.RawMessage{
 				"/me/api/oauth2/client":                     {json.RawMessage(`["` + laneAdminID + `","EU.00000000000000c1"]`)},
-				"/me/api/oauth2/client/EU.00000000000000c1": {json.RawMessage(`{"clientId":"EU.00000000000000c1","name":"lz-sandbox-admin"}`)},
+				"/me/api/oauth2/client/EU.00000000000000c1": {json.RawMessage(`{"clientId":"EU.00000000000000c1","name":"lz2-sandbox-admin"}`)},
 			}}
 		}, expect: []string{tClient + " EU.00000000000000c1"}},
 		row{name: "listing-error", faults: func(p capturedProvenance) map[string]listFault {
@@ -1407,7 +1410,7 @@ func TestChainBaseline(t *testing.T) {
 		if !seen {
 			t.Fatalf("no %s in the run directory while the first apply ran", chainBaselineFile)
 		}
-		if at.RunID != r.runID || !slices.Contains(at.Listed[tStorage], "lz-bkt-state") || !slices.Contains(at.Listed[tClient], laneAdminID) || len(at.Errors) != 0 {
+		if at.RunID != r.runID || !slices.Contains(at.Listed[tStorage], "lz2-bkt-state") || !slices.Contains(at.Listed[tClient], laneAdminID) || len(at.Errors) != 0 {
 			t.Errorf("baseline record %+v: want run %s, the listed state bucket and admin client, no error", at, r.runID)
 		}
 		if raws, _ := filepath.Glob(filepath.Join(r.runDir, "listings-before", "*.json")); len(raws) == 0 {
@@ -1423,7 +1426,7 @@ func TestChainBaseline(t *testing.T) {
 		}
 		return out
 	}
-	seedKey := tStorage + " lz-seed-bkt-seed"
+	seedKey := tStorage + " lz2-seed-bkt-seed"
 	for _, tc := range []struct {
 		name    string
 		early   bool
@@ -1967,10 +1970,10 @@ func TestChainLeftoverTokenRedacted(t *testing.T) {
 	t.Run("token-inside-longer-id", func(t *testing.T) {
 		h := newChainHarness(t)
 		_, w := chainWorld(t, h.nextRunID())
-		const name = "lz-t006-token-inside"
-		r := h.chain(chainExec{production: true, bearers: true, early: true, seed: chainTokenPolicy(t, w, "lz-"+chainEchoBearer+"-t006", name)})
+		const name = "lz2-t006-token-inside"
+		r := h.chain(chainExec{production: true, bearers: true, early: true, seed: chainTokenPolicy(t, w, "lz2-"+chainEchoBearer+"-t006", name)})
 		chainNoTokenInRecord(t, h, r, chainListingTokens(t, r))
-		want := "lz-" + redacted + "-t006"
+		want := "lz2-" + redacted + "-t006"
 		if p, ok := chainListedPolicy(t, r.runDir, name); ok && p["id"] != want {
 			t.Errorf("listed policy %s recorded with id %q, want %q", name, p["id"], want)
 		}

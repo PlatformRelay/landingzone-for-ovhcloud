@@ -13,13 +13,13 @@ references:
   - path: tools/internal/configure/notes.go
     blob: 18b4a3a45d031b7c408f7fbd9832c1debc58cc6a
   - path: tests/fixtures/answers/sandbox.yaml
-    blob: 8f1488b84f0e509c9065a197c4c352b81bc8fc73
+    blob: 6878d950beffd24cf1cf5539cbd9d47178da07d4
   - path: specs/004-guided-preconfiguration/spec.md
     blob: c3ac36db39f5cf6552ecb7e58ad179867134a965
   - path: Taskfile.yml
     blob: 8ce5ea0598855c9821fd40636e3e51ee05ea1f19
 verified_against: {task: "3.53"}
-last_verified: 659d5be2c2f68fc581abc89a37b8dd497de94490
+last_verified: 25f806fe1bae5d02a46543220b5965b28528b7d8
 ---
 
 # Prepare deployments.yaml from an answers file

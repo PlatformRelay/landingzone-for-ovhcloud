@@ -148,7 +148,7 @@ func TestS3SigV4Vectors(t *testing.T) {
 const (
 	s3TestAK     = "AK0EXAMPLE0ACCESS0KEY"
 	s3TestSK     = "SK0example0secret0that0must0never0leave"
-	s3TestBucket = "lz-bkt-state"
+	s3TestBucket = "lz2-bkt-state"
 	s3TestHost   = "s3.gra.io.cloud.ovh.net"
 )
 

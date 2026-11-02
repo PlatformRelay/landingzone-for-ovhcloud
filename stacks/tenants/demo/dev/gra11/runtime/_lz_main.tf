@@ -3,7 +3,7 @@
 module "runtime" {
   instance   = "demo-dev-gra11-runtime"
   managed_in = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/tenants/demo/dev/gra11/runtime"
-  org        = "lz"
+  org        = "lz2"
   project    = var.project
   region     = "GRA11"
   slot       = null

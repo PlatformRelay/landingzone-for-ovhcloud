@@ -236,7 +236,7 @@ func TestExportFixedKeysNotOverridable(t *testing.T) {
 		"scope":        `"scope": "platform",`,
 		"stage_source": `"stage_source": {"kind": "local"},`,
 	} {
-		doc := strings.Replace(base, `"org": "lz",`, `"org": "lz", `+insert, 1)
+		doc := strings.Replace(base, `"org": "lz2",`, `"org": "lz2", `+insert, 1)
 		if doc == base {
 			t.Fatalf("%s: not inserted", key)
 		}
@@ -339,7 +339,7 @@ func TestExportValueCounts(t *testing.T) {
 			t.Errorf("%d values, want %d:\n%s", got, row.want, row.data)
 		}
 	}
-	more := strings.Replace(string(answersReadFile(t, exportSandboxManifest)), `"org": "lz",`, `"org": "lz", "x": 1,`, 1)
+	more := strings.Replace(string(answersReadFile(t, exportSandboxManifest)), `"org": "lz2",`, `"org": "lz2", "x": 1,`, 1)
 	if got := answersValueCount(t, []byte(more)); got != 42 {
 		t.Errorf("control: one value more counts %d, want 42", got)
 	}

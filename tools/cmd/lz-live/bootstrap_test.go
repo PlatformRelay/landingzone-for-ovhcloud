@@ -120,8 +120,8 @@ func TestBootstrapEntryManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Org != "lz" || !slices.Equal(refs, []string{"STATE", "DEMO_DEV"}) {
-		t.Errorf("org %q refs %v, want lz [STATE DEMO_DEV]", m.Org, refs)
+	if m.Org != "lz2" || !slices.Equal(refs, []string{"STATE", "DEMO_DEV"}) {
+		t.Errorf("org %q refs %v, want lz2 [STATE DEMO_DEV]", m.Org, refs)
 	}
 	// T089: the state bucket's region and endpoint come from the same manifest.
 	if m.StateRegion != "gra" || m.StateEndpoint != "https://s3.gra.io.cloud.ovh.net" {

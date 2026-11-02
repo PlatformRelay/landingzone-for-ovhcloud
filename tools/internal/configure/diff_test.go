@@ -160,7 +160,7 @@ func TestDiffCurrentManifestInvalid(t *testing.T) {
 	for name, current := range map[string][]byte{
 		"garbage":       []byte("not a manifest"),
 		"empty":         {},
-		"refused value": []byte(strings.Replace(string(valid), `"org": "lz"`, `"org": "LZ!"`, 1)),
+		"refused value": []byte(strings.Replace(string(valid), `"org": "lz2"`, `"org": "LZ!"`, 1)),
 		"secret value":  secret,
 	} {
 		t.Run(name, func(t *testing.T) {
