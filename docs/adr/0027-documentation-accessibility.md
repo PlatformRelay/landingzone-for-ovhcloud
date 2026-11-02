@@ -83,13 +83,15 @@ Contrast and the full WCAG audit run on the built site once it exists.
 - `HEADING_SKIP`, `LINK_TEXT_VAGUE` and `TABLE_HEADER_MISSING` hold on the same pages, ADRs
   included, outside front matter and fenced code blocks: a heading may rise one level at a time
   and a page has one H1, a link's text is not one of a fixed list of vague words, and a table's
-  first row is followed by a delimiter row (`tools/cmd/lz-check/docs.go:458-644`; passing and
+  first row is followed by a delimiter row (`tools/cmd/lz-check/docs.go:471-705`; passing and
   failing fixtures in `tools/cmd/lz-check/docs_test.go:799-884`). Triggered by this ADR's
   acceptance (D128).
 - `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING`, `IMAGE_ALT_MISSING` and, for the designed SVGs
   of the ADR-0013 amendment, `DIAGRAM_EXTERNAL_REF` hold on the same pages, outside front matter
   and blocks nested in another fence. Triggered by the owner decision of 2026-11-02, ahead of the
-  second diagram. A line is read on its own, as for the link rules.
+  second diagram. A line is read on its own, as for the link rules, and an image inside an HTML
+  comment is still judged. Only Mermaid blocks are diagrams to these rules: no page uses D2, and
+  a D2 block is held to them when the first one arrives.
   - `DIAGRAM_ACC_MISSING`: a block fenced as `mermaid`, in any case, has an `accTitle:` line with
     a value and an `accDescr:` line with a value or a multi-line `accDescr {`. A `%%` comment
     does not count.
@@ -99,16 +101,20 @@ Contrast and the full WCAG audit run on the built site once it exists.
     break, a reference definition or the end of the page is not. An SVG twin can therefore sit
     between a Mermaid block and its text. An image inside a sentence and a decorative image need
     no text after them.
-  - `IMAGE_ALT_MISSING`: a Markdown image, inline or by reference, has alt text that is not blank;
-    an `<img>` has a non-blank `alt` unless it is marked decorative (`alt=""` and
-    `role="presentation"`).
+  - `IMAGE_ALT_MISSING`: a Markdown image, inline or by a full, collapsed or shortcut reference
+    (a shortcut only when its label is defined), has alt text that is not blank; a code span in
+    it is text. An `<img>` has a non-blank `alt` unless it is marked decorative (`alt=""` and
+    `role="presentation"`). Attributes are read with their quotes, so a name inside another
+    attribute's value does not count.
   - `DIAGRAM_EXTERNAL_REF`: an SVG a page shows, by a Markdown image, a reference or an `<img>`,
-    holds no `<script`, no `@import`, and no absolute or protocol-relative URL in an `href`, a
-    `src` or a CSS `url()`. An `<img>` source is held to the link rules too, so a missing SVG is
-    `LINK_BROKEN`.
+    holds no `<script`, no event-handler attribute (`onload=`), no `javascript:` URL, no
+    `@import`, and no absolute or protocol-relative URL in an `href`, a `src` or a CSS `url()`,
+    after character references are decoded. A reference resolves to its first definition, and a
+    symbolic link that stays in the repository is followed. An `<img>` source is held to the
+    link rules too, so a missing SVG is `LINK_BROKEN`.
 
-  Code: `tools/cmd/lz-check/docs.go:706-961`; passing and failing fixtures and the SVG cases in
-  `tools/cmd/lz-check/docs_test.go:886-1024`. 32 hand mutants of the rules all turn the tests red.
+  Code: `tools/cmd/lz-check/docs.go:707-991`; passing and failing fixtures and the SVG cases in
+  `tools/cmd/lz-check/docs_test.go:886-1063`. 40 hand mutants of the rules all turn the tests red.
 - One diagram exists (`docs/explanation/architecture-overview.md:32-43`). It sets `accTitle` and
   `accDescr`, and is followed by a one-line reading of the arrows and a table of the layers
   (`:45-52`), which together are its text equivalent.
@@ -155,3 +161,5 @@ Contrast and the full WCAG audit run on the built site once it exists.
 - 2026-11-02: `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING`, `IMAGE_ALT_MISSING` and
   `DIAGRAM_EXTERNAL_REF` added ahead of their triggers (owner decision on designed SVGs, ADR-0013
   amendment); the decorative-image marker set; the existing diagram given `accTitle` and `accDescr`.
+  Two independent reviews; their bypasses (shortcut references, repeated definitions, attribute
+  decoys, encoded URLs, linked SVGs, event handlers) closed with a regression row each.

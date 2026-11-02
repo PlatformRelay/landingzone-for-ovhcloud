@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"net/url"
@@ -712,22 +713,25 @@ var (
 	accTitleLine = regexp.MustCompile(`^\s*accTitle\s*:\s*\S`)
 	accDescrLine = regexp.MustCompile(`^\s*accDescr\s*(?::\s*\S|\{)`)
 	// mdImage is a Markdown image: its alt text, then an inline destination
-	// (with an optional title) or a reference label.
-	mdImage = regexp.MustCompile(`!\[([^\[\]]*)\](?:\(\s*<?([^)\s>]*)>?[^)]*\)|\[([^\[\]]*)\])`)
-	// imgTag is an HTML <img> tag within one line; imgAlt, imgSrc and
-	// imgDecorative read its attributes.
-	imgTag        = regexp.MustCompile(`(?i)<img\b[^>]*>`)
-	imgAlt        = regexp.MustCompile(`(?i)\salt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
-	imgSrc        = regexp.MustCompile(`(?i)\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
-	imgDecorative = regexp.MustCompile(`(?i)\srole\s*=\s*["']?presentation\b`)
+	// (with an optional title), a reference label, or nothing (a shortcut
+	// reference, an image only when its label is defined).
+	mdImage = regexp.MustCompile(`!\[([^\[\]]*)\](?:\(\s*<?([^)\s>]*)>?[^)]*\)|\[([^\[\]]*)\])?`)
+	// imgTag is an HTML <img> tag within one line; htmlAttr reads its
+	// attributes one at a time, quotes respected.
+	imgTag   = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+	htmlAttr = regexp.MustCompile(`([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?`)
+	// htmlStart is a line opening an HTML block or comment; an autolink
+	// (<https://…>) opens a paragraph.
+	htmlStart = regexp.MustCompile(`^\s*<(?:!--|/?[a-zA-Z][a-zA-Z0-9-]*(?:[\s/>]|$))`)
 	// emptyLink is what is left of a link around an image once the image is
 	// removed: [](…) or [][…].
 	emptyLink     = regexp.MustCompile(`\[\s*\](?:\([^)]*\)|\[[^\]]*\])`)
 	thematicBreak = regexp.MustCompile(`^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$`)
-	// svgExternal is what makes an SVG fetch from elsewhere: a script, a
-	// stylesheet import, or an absolute or protocol-relative URL in an href,
-	// a src or a CSS url(). Namespace declarations (xmlns) are not fetched.
-	svgExternal = regexp.MustCompile(`(?i)<script|@import|\b(?:href|src)\s*=\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//|url\(\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//`)
+	// svgExternal is what makes an SVG fetch from elsewhere or run code: a
+	// script element, an event-handler attribute, a javascript: URL, a
+	// stylesheet import, or an absolute or protocol-relative URL in an href, a
+	// src or a CSS url(). Namespace declarations (xmlns) are not fetched.
+	svgExternal = regexp.MustCompile(`(?i)<script|\bon[a-z]+\s*=|javascript:|@import|\b(?:href|src)\s*=\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//|url\(\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//`)
 )
 
 // image is one image on a line: its source as written and whether it is
@@ -825,7 +829,7 @@ func (c *docChecker) textAfter(page string, lines []string, from int, what strin
 // prose rather than a heading, a fence, HTML, a thematic break or a reference
 // definition.
 func proseLine(line string) bool {
-	return !heading.MatchString(line) && !fence.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "<") &&
+	return !heading.MatchString(line) && !fence.MatchString(line) && !htmlStart.MatchString(line) &&
 		!thematicBreak.MatchString(line) && !refLabel.MatchString(line)
 }
 
@@ -844,8 +848,7 @@ func imageBlock(line string) bool {
 // or is a decorative <img>, each SVG it shows fetches nothing, and an image
 // block that is not wholly decorative is followed by a text equivalent.
 func (c *docChecker) images(page string, lines []string, n int, dests map[string]string) {
-	prose := blankCodeSpans(lines[n])
-	found := append(c.mdImages(page, n+1, prose, dests), c.imgTags(page, n+1, prose)...)
+	found := append(c.mdImages(page, n+1, lines[n], dests), c.imgTags(page, n+1, lines[n])...)
 	decorative := true
 	for _, im := range found {
 		c.svgRef(page, im.src)
@@ -856,62 +859,80 @@ func (c *docChecker) images(page string, lines []string, n int, dests map[string
 	}
 }
 
-// mdImages judges the alt text of the Markdown images in prose (line n) and
-// returns them; a reference image's source is its definition's destination.
-// A Markdown image is never decorative: that needs an <img> tag.
-func (c *docChecker) mdImages(page string, n int, prose string, dests map[string]string) []image {
+// mdImages judges the alt text of the Markdown images of line (number n)
+// outside code spans and returns them; a reference image's source is its
+// definition's destination. Alt text is read from the line itself, so a code
+// span inside it is text. A Markdown image is never decorative: that needs an
+// <img> tag.
+func (c *docChecker) mdImages(page string, n int, line string, dests map[string]string) []image {
 	var found []image
-	for _, m := range mdImage.FindAllStringSubmatchIndex(prose, -1) {
-		alt := prose[m[2]:m[3]]
+	for _, m := range mdImage.FindAllStringSubmatchIndex(blankCodeSpans(line), -1) {
+		alt := line[m[2]:m[3]]
+		src, ok := imageSource(line, m, alt, dests)
+		if !ok {
+			continue
+		}
 		if strings.TrimSpace(alt) == "" {
 			c.add("IMAGE_ALT_MISSING", page, "line %d has an image without alt text; say what it shows (ADR-0027)", n)
 		}
-		if m[4] >= 0 {
-			found = append(found, image{src: prose[m[4]:m[5]]})
-			continue
-		}
-		label := prose[m[6]:m[7]]
-		if strings.TrimSpace(label) == "" {
-			label = alt
-		}
-		found = append(found, image{src: dests[refKey(label)]})
+		found = append(found, image{src: src})
 	}
 	return found
 }
 
-// imgTags judges the <img> tags in prose (line n) and returns them. A tag
-// needs a non-blank alt, unless it is decorative: alt="" with
-// role="presentation" (ADR-0027). A tag's src is held to the link rules.
-func (c *docChecker) imgTags(page string, n int, prose string) []image {
+// imageSource is the source of the mdImage match m in line, and whether it is
+// an image: an inline destination, or a reference label's destination (a
+// collapsed or shortcut reference is labelled by its alt text). A shortcut
+// reference whose label is not defined is text, not an image.
+func imageSource(line string, m []int, alt string, dests map[string]string) (string, bool) {
+	switch {
+	case m[4] >= 0:
+		return line[m[4]:m[5]], true
+	case m[6] >= 0 && strings.TrimSpace(line[m[6]:m[7]]) != "":
+		return dests[refKey(line[m[6]:m[7]])], true
+	case m[6] >= 0:
+		return dests[refKey(alt)], true
+	}
+	src, ok := dests[refKey(alt)]
+	return src, ok
+}
+
+// imgTags judges the <img> tags of line (number n) outside code spans and
+// returns them. A tag needs a non-blank alt, unless it is decorative: alt=""
+// with role="presentation" (ADR-0027). A tag's src is held to the link rules.
+func (c *docChecker) imgTags(page string, n int, line string) []image {
 	var found []image
-	for _, tag := range imgTag.FindAllString(prose, -1) {
-		alt, hasAlt := attr(imgAlt, tag)
+	for _, at := range imgTag.FindAllStringIndex(blankCodeSpans(line), -1) {
+		attrs := tagAttrs(line[at[0]+len("<img") : at[1]-1])
+		alt, hasAlt := attrs["alt"]
 		blank := strings.TrimSpace(alt) == ""
-		decorative := hasAlt && blank && imgDecorative.MatchString(tag)
+		decorative := hasAlt && blank && strings.EqualFold(strings.TrimSpace(attrs["role"]), "presentation")
 		if blank && !decorative {
 			c.add("IMAGE_ALT_MISSING", page, "line %d has an <img> without alt text; say what it shows, or mark it decorative with alt=\"\" role=\"presentation\" (ADR-0027)", n)
 		}
-		src, _ := attr(imgSrc, tag)
-		if src != "" {
+		if src := attrs["src"]; src != "" {
 			c.link(page, src, false)
 		}
-		found = append(found, image{src, decorative})
+		found = append(found, image{attrs["src"], decorative})
 	}
 	return found
 }
 
-// attr is the value of the attribute re matches in tag, and whether it is
-// there.
-func attr(re *regexp.Regexp, tag string) (string, bool) {
-	m := re.FindStringSubmatch(tag)
-	if m == nil {
-		return "", false
+// tagAttrs are the attributes of an HTML tag's body, names lower-cased; the
+// first of a repeated name counts, as in HTML.
+func tagAttrs(body string) map[string]string {
+	attrs := map[string]string{}
+	for _, m := range htmlAttr.FindAllStringSubmatch(body, -1) {
+		name := strings.ToLower(m[1])
+		if _, seen := attrs[name]; !seen {
+			attrs[name] = m[2] + m[3] + m[4]
+		}
 	}
-	return m[1] + m[2] + m[3], true
+	return attrs
 }
 
 // refDests maps a page's reference labels, normalised by refKey, to their
-// destinations, outside fenced blocks.
+// destinations, outside fenced blocks; the first of a repeated label counts.
 func refDests(lines []string) map[string]string {
 	dests := map[string]string{}
 	var code fenced
@@ -920,7 +941,10 @@ func refDests(lines []string) map[string]string {
 			continue
 		}
 		label, dest := refLabel.FindStringSubmatch(line), refLink.FindStringSubmatch(line)
-		if label != nil && dest != nil {
+		if label == nil || dest == nil {
+			continue
+		}
+		if _, seen := dests[refKey(label[1])]; !seen { // the first definition counts (CommonMark)
 			dests[refKey(label[1])] = strings.Trim(dest[1], "<>")
 		}
 	}
@@ -928,18 +952,24 @@ func refDests(lines []string) map[string]string {
 }
 
 // svgRef judges an SVG that page shows (src as written): it fetches nothing
-// (DIAGRAM_EXTERNAL_REF). A source that is not a local .svg is not read; a
-// missing or escaping one is the link rules' (LINK_BROKEN).
+// and runs nothing (DIAGRAM_EXTERNAL_REF), judged after character references
+// are decoded (&#47; is /). A source that is not a local .svg is not read; a
+// missing or escaping one is the link rules' (LINK_BROKEN). A symbolic link
+// that stays in the repository is followed (localSVG checks where it ends).
 func (c *docChecker) svgRef(page, src string) {
 	full, ok := c.localSVG(page, src)
 	if !ok {
 		return
 	}
-	text, err := regularText(full)
+	info, err := os.Stat(full)
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	data, err := os.ReadFile(full)
 	if err != nil {
 		return
 	}
-	if hits := svgExternal.FindAllString(text, -1); len(hits) > 0 {
+	if hits := svgExternal.FindAllString(html.UnescapeString(string(data)), -1); len(hits) > 0 {
 		c.add("DIAGRAM_EXTERNAL_REF", page, "%s fetches from outside the page (`%s`); a committed SVG carries its fonts, styles and images itself (ADR-0013)", src, strings.Join(hits, "`, `"))
 	}
 }
