@@ -1,0 +1,32 @@
+name: Feature request
+description: Something the landing zone should do that it does not do today.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [product direction](https://github.com/PlatformRelay/landingzone-for-ovhcloud/blob/main/docs/explanation/product-direction.md)
+        and the [ADRs](https://github.com/PlatformRelay/landingzone-for-ovhcloud/blob/main/docs/adr/README.md)
+        first: much that is not delivered is already planned or deliberately left out.
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need, and why?
+      description: The situation you are in and what you cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+  - type: textarea
+    id: ovhcloud
+    attributes:
+      label: OVHcloud behaviour it depends on
+      description: |
+        Cite a source (docs.ovhcloud.com, the API schema or the ovh/ovh provider docs) for any
+        claim about how OVHcloud behaves, or mark it UNVERIFIED.
+  - type: textarea
+    id: related
+    attributes:
+      label: Related ADRs, specs or issues
