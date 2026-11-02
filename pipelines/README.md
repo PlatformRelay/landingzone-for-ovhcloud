@@ -1,6 +1,9 @@
 # pipelines
 
-The CI source and the record of CI runs. Today there is one forge, GitHub, and one workflow.
+The CI source and the record of CI runs. Today there is one forge, GitHub, and one CI workflow,
+`foundation`. The other workflows under `.github/workflows/` (CodeQL, OpenSSF Scorecard) are
+hand-written, analyse the repository rather than check it, and are neither generated from here
+nor part of the `foundation` check.
 
 | Path | What it holds |
 | --- | --- |
