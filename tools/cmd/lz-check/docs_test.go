@@ -814,7 +814,7 @@ func TestDocsAccessibilityAccepted(t *testing.T) {
 		"fenced vague link":     docsA11yPage("\n```md\n[here](#x) and [click here](#x)\n```\n"),
 		"fenced table":          docsA11yPage("\n```text\n| no | header |\n| at | all |\n```\n"),
 		"vague text in a span":  docsA11yPage("\nWrite `[here](#x)` never.\n"),
-		"image alt is not text": docsA11yPage("\n![more](b.md)\n"),
+		"image alt is not text": docsA11yPage("\n![more](b.md)\n\nThe B page, shown as an image.\n"),
 		"double-backtick span":  docsA11yPage("\nWrite `` ` [here](#x) `` never.\n"),
 		"longer run inside":     docsA11yPage("\nWrite ` ``[here](#x)`` ` never.\n"),
 		"undefined reference":   docsA11yPage("\nThe words [here][missing] and [more] are text, not links.\n"),
@@ -878,6 +878,146 @@ func TestDocsAccessibilityVagueWords(t *testing.T) {
 			code, out := lzCheck(docsRepo(t, docsA11yPage("\nSee ["+word+"](#x).\n")), "docs")
 			if code != 1 || !docsFindingLine(out, "LINK_TEXT_VAGUE", "docs/reference/b.md", strconv.Quote(word)) {
 				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with LINK_TEXT_VAGUE naming %q:\n%s", code, word, out)
+			}
+		})
+	}
+}
+
+// ADR-0027 and the ADR-0013 amendment of 2026-11-02: every page under docs/,
+// ADRs included, gives a Mermaid block accTitle and accDescr, follows each
+// diagram and image block with a text equivalent, gives every image alt text
+// (or marks it decorative), and references only self-contained SVGs.
+const (
+	layersSVG = "docs/assets/diagrams/layers.svg"
+	// cleanSVG is a designed diagram: namespaces, internal references and a
+	// system font stack, nothing fetched.
+	cleanSVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" role=\"img\">\n" +
+		"<style>text { font-family: system-ui, sans-serif; fill: url(#g); }</style>\n" +
+		"<defs><linearGradient id=\"g\"/></defs><use href=\"#g\" xlink:href=\"#g\"/></svg>\n"
+	mermaidOK = "\n```mermaid\nflowchart LR\n  accTitle: Two layers\n  accDescr: A stack calls a stage.\n  stack --> stage\n```\n"
+	layersImg = "![Two layers: a stack calls a stage](../assets/diagrams/layers.svg)"
+	textAfter = "\nA stack calls a stage.\n"
+)
+
+// docsDiagramPage is the reference page with extra lines, beside the clean
+// SVG; the first extra line after the leading newline is line 15.
+func docsDiagramPage(extra string) map[string]string {
+	files := docsA11yPage(extra)
+	files[layersSVG] = cleanSVG
+	return files
+}
+
+func TestDocsDiagramsAccepted(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"mermaid with metadata and text": docsDiagramPage(mermaidOK + textAfter),
+		"multi-line description, table":  docsDiagramPage("\n```mermaid\nflowchart LR\n  accTitle: Two layers\n  accDescr {\n    A stack calls a stage.\n  }\n  stack --> stage\n```\n\n| From | To |\n| --- | --- |\n| stack | stage |\n"),
+		"tilde fence, list after":        docsDiagramPage("\n~~~mermaid\nflowchart LR\n  accTitle: Two layers\n  accDescr: A stack calls a stage.\n~~~\n- A stack calls a stage.\n"),
+		"mermaid, its svg, then text":    docsDiagramPage(mermaidOK + "\n" + layersImg + "\n" + textAfter),
+		"image block then text":          docsDiagramPage("\n" + layersImg + "\n" + textAfter),
+		"img tag block then text":        docsDiagramPage("\n<img src=\"../assets/diagrams/layers.svg\" alt=\"Two layers\" width=\"600\">\n\n1. A stack calls a stage.\n"),
+		"linked image block then text":   docsDiagramPage("\n[" + layersImg + "](../assets/diagrams/layers.svg)\n" + textAfter),
+		"reference image then text":      docsDiagramPage("\n![Two layers][svg]\n" + textAfter + "\n[svg]: ../assets/diagrams/layers.svg\n"),
+		"decorative img needs no text":   docsDiagramPage("\n<img src=\"../assets/diagrams/layers.svg\" alt=\"\" role=\"presentation\">\n\n## After\n"),
+		"inline image in a sentence":     docsDiagramPage("\nThe badge " + layersImg + " sits in a sentence.\n\n## After\n"),
+		"mermaid inside an outer fence":  docsDiagramPage("\n````md\n```mermaid\nflowchart LR\n```\n![](x.png)\n````\n\n## After\n"),
+		"image in a code span":           docsDiagramPage("\nWrite `![](x.png)` and `<img src=x>` never.\n"),
+		"other fence languages":          docsDiagramPage("\n```text\nflowchart LR\n```\n\n## After\n"),
+		"a png is not read as an svg": func() map[string]string {
+			files := docsDiagramPage("\n![A screenshot](../assets/shot.png)\n" + textAfter)
+			files["docs/assets/shot.png"] = "<script>"
+			return files
+		}(),
+		"adr with a diagram": {"docs/adr/0013-docs.md": "# ADR\n" + mermaidOK + textAfter},
+		"readme not held":    {"modules/x/README.md": moduleReadme + "\n```mermaid\nflowchart LR\n```\n\n![](../../tools/hello.txt)\n\n## End\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsRepo(t, files), "docs")
+			if code != 0 || !strings.Contains(out, "DOCS_OK") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 0 with DOCS_OK (diagram and image control):\n%s", code, out)
+			}
+		})
+	}
+}
+
+// One row per clause of the diagram and image rules; each breaks exactly one
+// clause of the passing tree.
+func TestDocsDiagramsRejected(t *testing.T) {
+	const b, adr = "docs/reference/b.md", "docs/adr/0013-docs.md"
+	acc, text, alt := "DIAGRAM_ACC_MISSING", "DIAGRAM_TEXT_MISSING", "IMAGE_ALT_MISSING"
+	noTitle := strings.Replace(mermaidOK, "  accTitle: Two layers\n", "", 1)
+	noDescr := strings.Replace(mermaidOK, "  accDescr: A stack calls a stage.\n", "", 1)
+	for name, r := range map[string]struct {
+		files              map[string]string
+		rule, page, detail string
+	}{
+		"no accTitle":                {docsDiagramPage(noTitle + textAfter), acc, b, "line 15 starts a Mermaid diagram without accTitle;"},
+		"no accDescr":                {docsDiagramPage(noDescr + textAfter), acc, b, "without accDescr;"},
+		"title only in a comment":    {docsDiagramPage(strings.Replace(mermaidOK, "  accTitle:", "  %% accTitle:", 1) + textAfter), acc, b, "without accTitle;"},
+		"empty accTitle":             {docsDiagramPage(strings.Replace(mermaidOK, "accTitle: Two layers", "accTitle:", 1) + textAfter), acc, b, "without accTitle;"},
+		"empty accDescr":             {docsDiagramPage(strings.Replace(mermaidOK, "accDescr: A stack calls a stage.", "accDescr:  ", 1) + textAfter), acc, b, "without accDescr;"},
+		"capitalised info, tildes":   {docsDiagramPage("\n~~~ Mermaid\nflowchart LR\n~~~\n" + textAfter), acc, b, "without accTitle and accDescr"},
+		"unclosed block":             {docsDiagramPage("\n```mermaid\nflowchart LR\n"), acc, b, "without accTitle and accDescr"},
+		"acc missing in an adr":      {map[string]string{adr: "# ADR\n\n```mermaid\nflowchart LR\n```\n" + textAfter}, acc, adr, "line 3 starts"},
+		"heading after mermaid":      {docsDiagramPage(mermaidOK + "\n## After\n"), text, b, "line 15 starts a Mermaid diagram"},
+		"end of page after mermaid":  {docsDiagramPage(mermaidOK), text, b, "Mermaid diagram"},
+		"unclosed block has no text": {docsDiagramPage("\n```mermaid\nflowchart LR\n  accTitle: T\n  accDescr: D\n"), text, b, "Mermaid diagram"},
+		"code block after mermaid":   {docsDiagramPage(mermaidOK + "\n```text\nA stack calls a stage.\n```\n"), text, b, "Mermaid diagram"},
+		"comment after mermaid":      {docsDiagramPage(mermaidOK + "\n<!-- A stack calls a stage. -->\n"), text, b, "Mermaid diagram"},
+		"rule after mermaid":         {docsDiagramPage(mermaidOK + "\n***\n" + textAfter), text, b, "Mermaid diagram"},
+		"definition after mermaid":   {docsDiagramPage(mermaidOK + "\n[r]: #x\n"), text, b, "Mermaid diagram"},
+		"svg but no text":            {docsDiagramPage(mermaidOK + "\n" + layersImg + "\n\n## After\n"), text, b, "Mermaid diagram"},
+		"image block then heading":   {docsDiagramPage("\n" + layersImg + "\n\n## After\n"), text, b, "line 15 holds an image"},
+		"linked image then heading":  {docsDiagramPage("\n[" + layersImg + "](../assets/diagrams/layers.svg)\n\n## After\n"), text, b, "line 15 holds an image"},
+		"img tag at the end":         {docsDiagramPage("\n<img src=\"../assets/diagrams/layers.svg\" alt=\"Two layers\">\n"), text, b, "line 15 holds an image"},
+		"text missing in an adr":     {map[string]string{adr: "# ADR\n" + mermaidOK}, text, adr, "line 3 starts a Mermaid diagram"},
+		"empty markdown alt":         {docsDiagramPage("\n![](../assets/diagrams/layers.svg)\n" + textAfter), alt, b, "line 15"},
+		"blank markdown alt":         {docsDiagramPage("\nThe badge ![  ](../assets/diagrams/layers.svg) here.\n"), alt, b, "line 15"},
+		"empty reference alt":        {docsDiagramPage("\nThe badge ![][r] here.\n\n[r]: ../assets/diagrams/layers.svg\n"), alt, b, "line 15"},
+		"img without alt":            {docsDiagramPage("\n<img src=\"../assets/diagrams/layers.svg\">\n" + textAfter), alt, b, "line 15"},
+		"img empty alt, no role":     {docsDiagramPage("\n<IMG ALT='' SRC='../assets/diagrams/layers.svg'>\n" + textAfter), alt, b, "line 15"},
+		"img blank alt":              {docsDiagramPage("\n<img alt=\" \" src=\"../assets/diagrams/layers.svg\">\n" + textAfter), alt, b, "line 15"},
+		"role without alt":           {docsDiagramPage("\n<img src=\"../assets/diagrams/layers.svg\" role=\"presentation\">\n" + textAfter), alt, b, "line 15"},
+		"second image on a line":     {docsDiagramPage("\nThe badges " + layersImg + " and ![](../assets/diagrams/layers.svg) here.\n"), alt, b, "line 15"},
+		"alt missing in an adr":      {map[string]string{adr: "# ADR\n\n![](../../tools/hello.txt)\n" + textAfter}, alt, adr, "line 3"},
+		"img to a missing file":      {docsA11yPage("\n<img src=\"../assets/diagrams/gone.svg\" alt=\"Gone\">\n" + textAfter), "LINK_BROKEN", b, "gone.svg does not exist"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := lzCheck(docsRepo(t, r.files), "docs")
+			if code != 1 || !docsFindingLine(out, r.rule, r.page, r.detail) || !strings.Contains(out, "DOCS_FAIL") {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %s %s naming %q and DOCS_FAIL:\n%s", code, r.rule, r.page, r.detail, out)
+			}
+		})
+	}
+}
+
+// A referenced SVG fetches nothing: no script, no stylesheet import, no
+// absolute or protocol-relative URL in an href, a src or a CSS url(). The SVG
+// is judged however the page references it.
+func TestDocsDiagramsExternalRef(t *testing.T) {
+	const b, ext = "docs/reference/b.md", "DIAGRAM_EXTERNAL_REF"
+	block := "\n" + layersImg + "\n" + textAfter
+	for name, r := range map[string]struct{ svg, extra, detail string }{
+		"script":                  {"<svg><script>alert(1)</script></svg>", block, "`<script`"},
+		"script in caps":          {"<svg><SCRIPT href=\"#x\"/></svg>", block, "`<SCRIPT`"},
+		"web font import":         {"<svg><style>@import url(fonts.css);</style></svg>", block, "`@import`"},
+		"font url":                {"<svg><style>@font-face { src: url(https://fonts.gstatic.com/x.woff2); }</style></svg>", block, "`url(https://`"},
+		"quoted font url":         {"<svg><style>@font-face { src: url( 'http://f.example/x.woff2'); }</style></svg>", block, "`url( 'http://`"},
+		"linked stylesheet":       {"<svg><link href=\"https://fonts.googleapis.com/css2\"/></svg>", block, "`href=\"https://`"},
+		"xlink image":             {"<svg><image xlink:href='http://x.example/a.png'/></svg>", block, "`href='http://`"},
+		"protocol-relative href":  {"<svg><use href=\"//x.example/s.svg#a\"/></svg>", block, "`href=\"//`"},
+		"foreign src":             {"<svg><foreignObject><img src=\"https://x.example/a.png\"/></foreignObject></svg>", block, "`src=\"https://`"},
+		"through an img tag":      {"<svg><script/></svg>", "\n<img src=\"../assets/diagrams/layers.svg\" alt=\"Two layers\">\n" + textAfter, "`<script`"},
+		"through a reference":     {"<svg><script/></svg>", "\n![Two layers][svg]\n" + textAfter + "\n[svg]: ../assets/diagrams/layers.svg\n", "`<script`"},
+		"through a collapsed ref": {"<svg><script/></svg>", "\n![Two Layers][]\n" + textAfter + "\n[two layers]: ../assets/diagrams/layers.svg\n", "`<script`"},
+		"inline image":            {"<svg><script/></svg>", "\nThe badge " + layersImg + " sits in a sentence.\n", "`<script`"},
+		"decorative image":        {"<svg><script/></svg>", "\n<img src=\"../assets/diagrams/layers.svg\" alt=\"\" role=\"presentation\">\n", "`<script`"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := docsA11yPage(r.extra)
+			files[layersSVG] = r.svg
+			code, out := lzCheck(docsRepo(t, files), "docs")
+			if code != 1 || !docsFindingLine(out, ext, b, "../assets/diagrams/layers.svg") || !docsFindingLine(out, ext, b, r.detail) {
+				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %s naming the SVG and %s:\n%s", code, ext, r.detail, out)
 			}
 		})
 	}
