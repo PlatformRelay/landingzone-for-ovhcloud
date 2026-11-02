@@ -2,7 +2,15 @@
 # OpenSSF API (the README badge reads it) and uploads the findings to code scanning. It is not
 # part of the foundation check and gates nothing.
 #
-# Every action is pinned by full commit SHA (ADR-0021); Renovate proposes the updates.
+# Every action is pinned by full commit SHA (ADR-0021); Renovate's default managers see these pins,
+# but `task test:update-lane` does not judge them.
+#
+# Known gap against ADR-0021: the pinned ossf/scorecard-action commit runs the container image
+# ghcr.io/ossf/scorecard-action:v2.5.0 by tag, not by digest, so that image can change under an
+# unchanged pin. Calling the image by digest directly would replace the action, and the
+# publish_results workflow restrictions (ossf/scorecard-action README) list the action by name.
+# The job holds no repository secret: its token can read contents and write code-scanning
+# results, and its OIDC token is what publishes the score.
 name: scorecard
 
 on:
