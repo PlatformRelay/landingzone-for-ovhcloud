@@ -4,7 +4,8 @@
 # The Go build uses only tools/vendor: GOPROXY=off and GOFLAGS=-mod=vendor make a dependency
 # missing from it fail the build instead of being fetched, and GOTOOLCHAIN=local keeps the Go
 # that setup-go installed from tools/go.mod. Every action is pinned by full commit SHA
-# (ADR-0021); Renovate proposes the updates.
+# (ADR-0021); Renovate's default managers see these pins, but `task test:update-lane` does not
+# judge them.
 name: codeql
 
 on:
