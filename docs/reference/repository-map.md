@@ -63,8 +63,9 @@ counted as unjudged. Counts are as of the first slice
 | `tests/live/chain/` | Expected and observed live-chain results that the chain's assertions are tested against. |
 | `pipelines/` | The CI source and the record of CI runs. |
 | `pipelines/github/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
-| `.github/` | GitHub configuration: the CI workflow, Renovate rules, contribution and security policies, review routing and issue and pull request templates. |
-| `.github/workflows/foundation.yml` | The one CI workflow; its jobs' `LZ_TARGETS` lists are what CI runs, and its `foundation` job passes only when they all did. |
+| `.github/` | GitHub configuration: the CI workflow, the analysis workflows, Renovate rules, contribution and security policies, review routing and issue and pull request templates. |
+| `.github/workflows/foundation.yml` | The CI workflow; its jobs' `LZ_TARGETS` lists are what CI runs, and its `foundation` job passes only when they all did. |
+| `.github/workflows/codeql.yml`, `.github/workflows/scorecard.yml` | Code scanning (CodeQL on the workflows and the Go tools) and the OpenSSF Scorecard; they report and gate nothing. |
 | `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | How to contribute (checks, commits, merging); how to report a vulnerability. |
 | `.github/CODEOWNERS`, `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md` | Who reviews which path; the bug and feature forms (security reports go to private reporting); what a pull request states. |
 | `Taskfile.yml` | Every check and operation as `task <target>`; `task --list` shows them. |
