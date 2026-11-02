@@ -1,0 +1,20 @@
+# Review routing. @konih, the maintainer, owns every path until more maintainers join.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @konih
+
+# Paths that change what CI runs, what gets deployed or what a check accepts, named so that a
+# later maintainer's ownership never silently covers them.
+/.github/    @konih
+/pipelines/  @konih
+/tools/      @konih
+/modules/    @konih
+/components/ @konih
+/stages/     @konih
+/stacks/     @konih
+/schemas/    @konih
+/tests/live/ @konih
+/Taskfile.yml @konih
+/mise.toml   @konih
+/mise.live.toml @konih
+/AGENTS.md   @konih

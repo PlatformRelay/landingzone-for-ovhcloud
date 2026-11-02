@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/PlatformRelay/landingzone-for-ovhcloud/security/advisories/new
+    about: Security issues go through private vulnerability reporting, never a public issue. See .github/SECURITY.md.
+  - name: Security policy
+    url: https://github.com/PlatformRelay/landingzone-for-ovhcloud/blob/main/.github/SECURITY.md
+    about: What is supported today (nothing yet) and how a report is handled.

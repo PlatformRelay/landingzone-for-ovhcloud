@@ -63,9 +63,10 @@ counted as unjudged. Counts are as of the first slice
 | `tests/live/chain/` | Expected and observed live-chain results that the chain's assertions are tested against. |
 | `pipelines/` | The CI source and the record of CI runs. |
 | `pipelines/github/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
-| `.github/` | GitHub configuration: the CI workflow, Renovate rules, contribution and security policies. |
+| `.github/` | GitHub configuration: the CI workflow, Renovate rules, contribution and security policies, review routing and issue and pull request templates. |
 | `.github/workflows/foundation.yml` | The one CI workflow; its jobs' `LZ_TARGETS` lists are what CI runs, and its `foundation` job passes only when they all did. |
 | `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | How to contribute (checks, commits, merging); how to report a vulnerability. |
+| `.github/CODEOWNERS`, `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md` | Who reviews which path; the bug and feature forms (security reports go to private reporting); what a pull request states. |
 | `Taskfile.yml` | Every check and operation as `task <target>`; `task --list` shows them. |
 | `mise.toml`, `mise.live.toml` | Pinned tool versions; the second adds host-only live tools. |
 | `.tflint.hcl`, `.sonarcloud.properties` | Linter and code-analysis configuration. |
@@ -81,7 +82,7 @@ counted as unjudged. Counts are as of the first slice
 | `docs/known-issues/` | Verified findings and accepted limitations (KI-nnn). |
 | `specs/` | The delivery record: one folder per feature with spec, plan, tasks and evidence. Not needed to use the landing zone. |
 | `.specify/` | The Spec Kit templates, scripts and project constitution behind `specs/`. |
-| `README.md`, `AGENTS.md` | The front page; working rules for contributors, human or automated. |
+| `README.md`, `AGENTS.md`, `CODE_OF_CONDUCT.md` | The front page; working rules for contributors, human or automated; the Contributor Covenant 2.1. |
 | `LICENSE`, `NOTICE`, `docs/LICENSE` | Apache-2.0 for code, CC BY 4.0 for `docs/`, third-party notices. |
 
 Not in the repository: `.local/` (built binaries and live run records) and the maintainer's

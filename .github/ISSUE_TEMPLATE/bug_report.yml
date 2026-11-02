@@ -1,0 +1,58 @@
+name: Bug report
+description: A check, module, stage or command did something other than what its docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The project is pre-release and not for production use; nothing is
+        supported yet (see SECURITY.md). A security issue goes through private reporting instead.
+
+        **Never paste credentials, OVHcloud account ids, project ids or state files.** Redact
+        them as `<redacted>`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Name the page or ADR that says what should have happened, if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        The exact command and its output. Offline checks run as
+        `lz-offline --candidate "$PWD" -- task <target>`; say which target.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Revision
+      description: The commit you ran (`git rev-parse HEAD`).
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it run?
+      options:
+        - Offline entry (lz-offline), no account
+        - Against an OVHcloud account
+        - Somewhere else (say below)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and architecture, and the tool versions if you ran outside the offline entry.
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Before you submit
+      options:
+        - label: The report holds no credentials, account ids, project ids or state.
+          required: true
