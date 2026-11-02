@@ -63,9 +63,10 @@ counted as unjudged. Counts are as of the first slice
 | `tests/live/chain/` | Expected and observed live-chain results that the chain's assertions are tested against. |
 | `pipelines/` | The CI source and the record of CI runs. |
 | `pipelines/github/` | The CI source the GitHub workflow is rendered from, and recorded CI runs. |
-| `.github/` | GitHub configuration: the CI workflow, the analysis workflows, Renovate rules, contribution and security policies, review routing and issue and pull request templates. |
+| `.github/` | GitHub configuration: the CI workflow, the analysis and documentation-site workflows, Renovate rules, contribution and security policies, review routing and issue and pull request templates. |
 | `.github/workflows/foundation.yml` | The CI workflow; its jobs' `LZ_TARGETS` lists are what CI runs, and its `foundation` job passes only when they all did. |
 | `.github/workflows/codeql.yml`, `.github/workflows/scorecard.yml` | Code scanning (CodeQL on the workflows and the Go tools) and the OpenSSF Scorecard; they report and gate nothing. |
+| `.github/workflows/docs.yml` | Builds the documentation site with `mkdocs build --strict` and deploys it from `main` to GitHub Pages; gates nothing. |
 | `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | How to contribute (checks, commits, merging); how to report a vulnerability. |
 | `.github/CODEOWNERS`, `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md` | Who reviews which path; the bug and feature forms (security reports go to private reporting); what a pull request states. |
 | `Taskfile.yml` | Every check and operation as `task <target>`; `task --list` shows them. |
@@ -81,6 +82,8 @@ counted as unjudged. Counts are as of the first slice
 | `docs/adr/` | Architecture decision records. |
 | `docs/explanation/`, `docs/how-to/`, `docs/reference/` | Explanations, task guides and look-up pages. |
 | `docs/known-issues/` | Verified findings and accepted limitations (KI-nnn). |
+| `docs/requirements.in`, `docs/requirements.txt` | The site's build tools (MkDocs Material) and their hash-locked versions. |
+| `mkdocs.yml`, `overrides/hooks/` | The documentation site's configuration and the hook that points links leaving `docs/` at the file on GitHub. |
 | `specs/` | The delivery record: one folder per feature with spec, plan, tasks and evidence. Not needed to use the landing zone. |
 | `.specify/` | The Spec Kit templates, scripts and project constitution behind `specs/`. |
 | `README.md`, `AGENTS.md`, `CODE_OF_CONDUCT.md` | The front page; working rules for contributors, human or automated; the Contributor Covenant 2.1. |

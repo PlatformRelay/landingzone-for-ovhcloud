@@ -39,3 +39,8 @@ secrets/
 knowledge-base/
 # Local upstream/reference clones retain their own history and licences.
 references/
+
+# ─── Documentation site ──────────────────────────────────────────────────────
+# Built by `mkdocs build` (mkdocs.yml); CI publishes it, it is never committed.
+site/
+__pycache__/
