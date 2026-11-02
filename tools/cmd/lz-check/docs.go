@@ -44,7 +44,11 @@ import (
 //
 // ADR-0027 adds three mechanical accessibility rules on the same pages, ADRs
 // included (accessibility): headings in order with one H1, link text that
-// says where it goes, and a header row on every table.
+// says where it goes, and a header row on every table. Its diagram and image
+// rules hold on the same pages (diagrams): a Mermaid block sets accTitle and
+// accDescr, a diagram or image block is followed by a text equivalent, an
+// image has alt text unless it is a decorative <img>, and an SVG a page shows
+// fetches nothing (the ADR-0013 amendment of 2026-11-02).
 //
 // ADR-0012's wording rule holds on the same pages and on the READMEs
 // (wording): "compliant" and "certified" are used only in fenced blocks, or
@@ -146,6 +150,7 @@ func docs(out io.Writer, root string) int {
 		}
 		c.body(page, text, bodyRules{ids: true, targets: !adr})
 		c.accessibility(page, text)
+		c.diagrams(page, text)
 		c.wording(page, text)
 		c.versionGate(page, text)
 	}
@@ -696,6 +701,263 @@ func (c *docChecker) tableStep(page string, lines []string, n int, inTable bool)
 		c.add("TABLE_HEADER_MISSING", page, "line %d starts a table without a header row followed by a | --- | delimiter row", n+1)
 	}
 	return true
+}
+
+var (
+	// mermaidInfo is a fence's info string naming Mermaid, in any case.
+	mermaidInfo = regexp.MustCompile(`(?i)^\s*mermaid(?:\s|$)`)
+	// accTitleLine and accDescrLine are Mermaid's accessibility directives
+	// with a value: accTitle: text, accDescr: text, or a multi-line
+	// accDescr { … }. A %% comment line is not one.
+	accTitleLine = regexp.MustCompile(`^\s*accTitle\s*:\s*\S`)
+	accDescrLine = regexp.MustCompile(`^\s*accDescr\s*(?::\s*\S|\{)`)
+	// mdImage is a Markdown image: its alt text, then an inline destination
+	// (with an optional title) or a reference label.
+	mdImage = regexp.MustCompile(`!\[([^\[\]]*)\](?:\(\s*<?([^)\s>]*)>?[^)]*\)|\[([^\[\]]*)\])`)
+	// imgTag is an HTML <img> tag within one line; imgAlt, imgSrc and
+	// imgDecorative read its attributes.
+	imgTag        = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+	imgAlt        = regexp.MustCompile(`(?i)\salt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	imgSrc        = regexp.MustCompile(`(?i)\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	imgDecorative = regexp.MustCompile(`(?i)\srole\s*=\s*["']?presentation\b`)
+	// emptyLink is what is left of a link around an image once the image is
+	// removed: [](…) or [][…].
+	emptyLink     = regexp.MustCompile(`\[\s*\](?:\([^)]*\)|\[[^\]]*\])`)
+	thematicBreak = regexp.MustCompile(`^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$`)
+	// svgExternal is what makes an SVG fetch from elsewhere: a script, a
+	// stylesheet import, or an absolute or protocol-relative URL in an href,
+	// a src or a CSS url(). Namespace declarations (xmlns) are not fetched.
+	svgExternal = regexp.MustCompile(`(?i)<script|@import|\b(?:href|src)\s*=\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//|url\(\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//`)
+)
+
+// image is one image on a line: its source as written and whether it is
+// marked decorative.
+type image struct {
+	src        string
+	decorative bool
+}
+
+// diagrams judges a page's body against ADR-0027's diagram and image rules
+// and the SVG rule of the ADR-0013 amendment of 2026-11-02:
+// DIAGRAM_ACC_MISSING, DIAGRAM_TEXT_MISSING, IMAGE_ALT_MISSING and
+// DIAGRAM_EXTERNAL_REF. Front matter is not body and a block inside another
+// fenced block is an example, as for the other rules; an image or an <img>
+// tag is read within one line.
+func (c *docChecker) diagrams(page, text string) {
+	lines := strings.Split(text, "\n")
+	start := 0
+	if lines[0] == "---" {
+		start = closingLine(lines) + 1
+	}
+	dests := refDests(lines[start:])
+	var code fenced
+	for n := start; n < len(lines); n++ {
+		opens := code.marker == "" && mermaidFence(lines[n])
+		if code.step(lines[n]) {
+			if opens {
+				n = c.mermaid(page, lines, n, &code)
+			}
+			continue
+		}
+		c.images(page, lines, n, dests)
+	}
+}
+
+// mermaidFence reports whether line is a fence whose info string names Mermaid.
+func mermaidFence(line string) bool {
+	m := fence.FindStringSubmatch(line)
+	return m != nil && mermaidInfo.MatchString(m[2])
+}
+
+// mermaid judges the Mermaid block opened at lines[open] and returns the
+// index of its closing fence (len(lines) when it is never closed): the block
+// sets accTitle and accDescr, and a text equivalent follows it.
+func (c *docChecker) mermaid(page string, lines []string, open int, code *fenced) int {
+	title, descr := false, false
+	n := open + 1
+	for ; n < len(lines); n++ {
+		code.step(lines[n])
+		if code.marker == "" {
+			break
+		}
+		title = title || accTitleLine.MatchString(lines[n])
+		descr = descr || accDescrLine.MatchString(lines[n])
+	}
+	if missing := accMissing(title, descr); missing != "" {
+		c.add("DIAGRAM_ACC_MISSING", page, "line %d starts a Mermaid diagram without %s; set both (ADR-0027)", open+1, missing)
+	}
+	c.textAfter(page, lines, n+1, fmt.Sprintf("line %d starts a Mermaid diagram", open+1))
+	return n
+}
+
+// accMissing names the accessibility directives a Mermaid block lacks.
+func accMissing(title, descr bool) string {
+	switch {
+	case !title && !descr:
+		return "accTitle and accDescr"
+	case !title:
+		return "accTitle"
+	case !descr:
+		return "accDescr"
+	}
+	return ""
+}
+
+// textAfter requires a text equivalent after a diagram or an image block
+// (what): the first non-blank line from lines[from] that is not itself an
+// image block is prose — a paragraph, a list, a table or a quote — and not a
+// heading, a fence, HTML, a thematic break or a reference definition, nor the
+// end of the page. Whether it carries the same facts stays with review.
+func (c *docChecker) textAfter(page string, lines []string, from int, what string) {
+	for n := from; n < len(lines); n++ {
+		if strings.TrimSpace(lines[n]) == "" || imageBlock(lines[n]) {
+			continue
+		}
+		if proseLine(lines[n]) {
+			return
+		}
+		break
+	}
+	c.add("DIAGRAM_TEXT_MISSING", page, "%s with no text equivalent after it; follow it with a paragraph, list or table (ADR-0027)", what)
+}
+
+// proseLine reports whether a non-blank line outside a fenced block starts
+// prose rather than a heading, a fence, HTML, a thematic break or a reference
+// definition.
+func proseLine(line string) bool {
+	return !heading.MatchString(line) && !fence.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "<") &&
+		!thematicBreak.MatchString(line) && !refLabel.MatchString(line)
+}
+
+// imageBlock reports whether line holds images and nothing else, links
+// around them aside.
+func imageBlock(line string) bool {
+	prose := blankCodeSpans(line)
+	if !mdImage.MatchString(prose) && !imgTag.MatchString(prose) {
+		return false
+	}
+	rest := emptyLink.ReplaceAllString(imgTag.ReplaceAllString(mdImage.ReplaceAllString(prose, ""), ""), "")
+	return strings.TrimSpace(rest) == ""
+}
+
+// images judges the images of lines[n] outside code spans: each has alt text
+// or is a decorative <img>, each SVG it shows fetches nothing, and an image
+// block that is not wholly decorative is followed by a text equivalent.
+func (c *docChecker) images(page string, lines []string, n int, dests map[string]string) {
+	prose := blankCodeSpans(lines[n])
+	found := append(c.mdImages(page, n+1, prose, dests), c.imgTags(page, n+1, prose)...)
+	decorative := true
+	for _, im := range found {
+		c.svgRef(page, im.src)
+		decorative = decorative && im.decorative
+	}
+	if len(found) > 0 && !decorative && imageBlock(lines[n]) {
+		c.textAfter(page, lines, n+1, fmt.Sprintf("line %d holds an image", n+1))
+	}
+}
+
+// mdImages judges the alt text of the Markdown images in prose (line n) and
+// returns them; a reference image's source is its definition's destination.
+// A Markdown image is never decorative: that needs an <img> tag.
+func (c *docChecker) mdImages(page string, n int, prose string, dests map[string]string) []image {
+	var found []image
+	for _, m := range mdImage.FindAllStringSubmatchIndex(prose, -1) {
+		alt := prose[m[2]:m[3]]
+		if strings.TrimSpace(alt) == "" {
+			c.add("IMAGE_ALT_MISSING", page, "line %d has an image without alt text; say what it shows (ADR-0027)", n)
+		}
+		if m[4] >= 0 {
+			found = append(found, image{src: prose[m[4]:m[5]]})
+			continue
+		}
+		label := prose[m[6]:m[7]]
+		if strings.TrimSpace(label) == "" {
+			label = alt
+		}
+		found = append(found, image{src: dests[refKey(label)]})
+	}
+	return found
+}
+
+// imgTags judges the <img> tags in prose (line n) and returns them. A tag
+// needs a non-blank alt, unless it is decorative: alt="" with
+// role="presentation" (ADR-0027). A tag's src is held to the link rules.
+func (c *docChecker) imgTags(page string, n int, prose string) []image {
+	var found []image
+	for _, tag := range imgTag.FindAllString(prose, -1) {
+		alt, hasAlt := attr(imgAlt, tag)
+		blank := strings.TrimSpace(alt) == ""
+		decorative := hasAlt && blank && imgDecorative.MatchString(tag)
+		if blank && !decorative {
+			c.add("IMAGE_ALT_MISSING", page, "line %d has an <img> without alt text; say what it shows, or mark it decorative with alt=\"\" role=\"presentation\" (ADR-0027)", n)
+		}
+		src, _ := attr(imgSrc, tag)
+		if src != "" {
+			c.link(page, src, false)
+		}
+		found = append(found, image{src, decorative})
+	}
+	return found
+}
+
+// attr is the value of the attribute re matches in tag, and whether it is
+// there.
+func attr(re *regexp.Regexp, tag string) (string, bool) {
+	m := re.FindStringSubmatch(tag)
+	if m == nil {
+		return "", false
+	}
+	return m[1] + m[2] + m[3], true
+}
+
+// refDests maps a page's reference labels, normalised by refKey, to their
+// destinations, outside fenced blocks.
+func refDests(lines []string) map[string]string {
+	dests := map[string]string{}
+	var code fenced
+	for _, line := range lines {
+		if code.step(line) {
+			continue
+		}
+		label, dest := refLabel.FindStringSubmatch(line), refLink.FindStringSubmatch(line)
+		if label != nil && dest != nil {
+			dests[refKey(label[1])] = strings.Trim(dest[1], "<>")
+		}
+	}
+	return dests
+}
+
+// svgRef judges an SVG that page shows (src as written): it fetches nothing
+// (DIAGRAM_EXTERNAL_REF). A source that is not a local .svg is not read; a
+// missing or escaping one is the link rules' (LINK_BROKEN).
+func (c *docChecker) svgRef(page, src string) {
+	full, ok := c.localSVG(page, src)
+	if !ok {
+		return
+	}
+	text, err := regularText(full)
+	if err != nil {
+		return
+	}
+	if hits := svgExternal.FindAllString(text, -1); len(hits) > 0 {
+		c.add("DIAGRAM_EXTERNAL_REF", page, "%s fetches from outside the page (`%s`); a committed SVG carries its fonts, styles and images itself (ADR-0013)", src, strings.Join(hits, "`, `"))
+	}
+}
+
+// localSVG is the file a relative or root-relative .svg source of page names,
+// when it stays inside the repository.
+func (c *docChecker) localSVG(page, src string) (string, bool) {
+	raw, _, _ := strings.Cut(src, "#")
+	p, err := url.PathUnescape(raw)
+	if err != nil || scheme.MatchString(p) || strings.HasPrefix(p, "//") || !strings.HasSuffix(strings.ToLower(p), ".svg") {
+		return "", false
+	}
+	resolved := path.Join(path.Dir(page), p)
+	if strings.HasPrefix(p, "/") {
+		resolved = path.Clean(strings.TrimPrefix(p, "/"))
+	}
+	full := filepath.Join(c.root, filepath.FromSlash(resolved))
+	return full, resolved != ".." && !strings.HasPrefix(resolved, "../") && c.inside(full)
 }
 
 func (c *docChecker) taskTargets(page, text string, code bool) {
