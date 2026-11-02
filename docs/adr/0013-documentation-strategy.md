@@ -1,7 +1,36 @@
 # ADR-0013: Documentation strategy
 - Status: Accepted
 - Date: 2026-10-06
-- Related: ADR-0002, ADR-0008, ADR-0012
+- Related: ADR-0002, ADR-0008, ADR-0012, ADR-0020, ADR-0027
+
+## Amendment (2026-11-02): a designed SVG may accompany a diagram
+
+Owner decision. Diagrams stay text first. A designed SVG may sit beside a diagram for the docs site.
+- **The Mermaid block is the source of truth.** It stays in the page, it is what GitHub shows, and
+  it is what review diffs. A diagram without an SVG is complete.
+- **The SVG is optional.** It is stored as `docs/assets/diagrams/<name>.svg`. Its design source,
+  the diagram-design HTML, sits beside it as `docs/assets/diagrams/src/<name>.html`. The SVG is
+  exported from that source, never edited by hand.
+- **Same facts, no more.** The SVG shows what the Mermaid block shows: the same nodes, edges and
+  labels. Layout, colour and icons may differ; facts may not. A fact the SVG needs goes into the
+  Mermaid block and its text equivalent first.
+- **The page places it** directly after the Mermaid block, as an image with meaningful alt text,
+  and the text equivalent follows both
+  ([ADR-0027](0027-documentation-accessibility.md#diagrams-and-images)). Which of the two a reader
+  sees on each surface is settled with the site tool; the text equivalent shows on every surface.
+- **Accessible and self-contained.** Contrast meets ADR-0027 (WCAG 2.2: 4.5:1 for text, 3:1 for
+  lines and shapes that carry meaning), and colour is never the only cue. The committed SVG
+  fetches nothing: no script, no stylesheet import, no external URL, no web fonts (Google Fonts
+  included). Text uses a system font stack. The design source uses the same stack, so the export
+  matches it.
+- **Regenerated with the Mermaid block.** A change to a Mermaid block that has an SVG re-exports
+  the SVG in the same change, or deletes it.
+- **Conceptual only.** Hand-designed diagrams explain the design. A per-installation map is
+  generated ([ADR-0020](0020-generated-landing-zone-documentation.md)), never drawn.
+- **Checked where it can be.** `docs:check` refuses an SVG a page shows that references anything
+  external (`DIAGRAM_EXTERNAL_REF`), a missing one (`LINK_BROKEN`), an image without alt text and
+  a diagram or image without a text equivalent after it (ADR-0027). Same facts, contrast and
+  regeneration stay with review until the site build can check them.
 
 ## Context
 Requirement: amazing documentation and readability. Prior art: AVM generated references, OCI and IBM
@@ -32,6 +61,7 @@ executed examples.
   illustrative snippets and expected-output fragments are labelled as such and checked according to
   their kind; no unlabelled hand-pasted HCL.
 - **Diagrams as text** (Mermaid or D2, checked in); a C4 context + container view per golden path.
+  A designed SVG may accompany a diagram, under the 2026-11-02 amendment above.
 - **Writing rules**: first page states "unofficial" and "what OVHcloud can't do", then "Which golden
   path am I?" (a decision tree) and the **negative paths** page (ADR-0016); every page carries
   front-matter `verified_against: { tofu, ovh }` compared with `mise.toml` — pages more than two
@@ -66,6 +96,14 @@ executed examples.
 
 ## Counterpoints
 - Strict generated docs can read mechanically; the tutorial and explanation sections carry the prose.
+- Designed SVGs (2026-11-02) drift. An exported SVG diffs like a binary: review cannot read it, so a
+  stale or embellished SVG passes unnoticed. The check catches external references, not wrong facts.
+  Keep them few, and prefer no SVG to a stale one.
+- Two sources per designed diagram, the Mermaid block and the HTML source, means two edits per change.
+  The Mermaid block wins any disagreement; the SVG is regenerated or deleted. If the pairs keep
+  drifting, generate the SVG from the Mermaid block instead and drop the HTML source.
+- Until the site tool decides which surface shows what, a page with both shows the diagram twice on
+  GitHub.
 - A freshness stamp creates upkeep. Two stamps, never one: `example_tested_at` is updated by
   automation when the example's tests pass; `claim_verified_at` (IAM, regions, compliance, security
   prose) is updated only by a human review with the evidence and scope recorded, and has an owner and
@@ -77,3 +115,4 @@ executed examples.
 
 ## Review log
 - 2026-10-01: round-2 external adversarial review applied.
+- 2026-11-02: amended by owner decision: a designed SVG may accompany a Mermaid diagram.

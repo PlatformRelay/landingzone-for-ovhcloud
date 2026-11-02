@@ -52,7 +52,11 @@ Option B.
 - Colour: keep the renderer's default theme. A diagram that sets its own colours meets WCAG 2.2
   contrast (4.5:1 for text, 3:1 for lines and shapes that carry meaning) and still does not use
   colour as the only cue.
-- Images need alt text that says what the image shows; a decorative image has empty alt text.
+- A designed SVG may accompany a Mermaid diagram (ADR-0013 amendment of 2026-11-02). It sits
+  directly after the Mermaid block, carries the same facts, and the text equivalent follows both.
+- Images need alt text that says what the image shows. A decorative image is marked, not left
+  blank: `<img src="…" alt="" role="presentation">`. A Markdown image cannot be marked, so
+  `![](…)` always lacks alt text. A decorative image needs no text equivalent.
   Screenshots are avoided where text or a table can say the same.
 
 ### Generated documentation (ADR-0020)
@@ -66,7 +70,8 @@ are text on the page.
 Each rule is a finding with its own name, a failing fixture first, and the trigger below:
 `IMAGE_ALT_MISSING`, `DIAGRAM_ACC_MISSING` (a Mermaid block without `accTitle` and `accDescr`),
 `DIAGRAM_TEXT_MISSING` (a diagram with no text equivalent after it; the metadata does not satisfy
-it, and whether the text carries the same facts stays with review), `HEADING_SKIP`, `LINK_TEXT_VAGUE` and `TABLE_HEADER_MISSING`. Prose rules (sentence length,
+it, and whether the text carries the same facts stays with review), `HEADING_SKIP`, `LINK_TEXT_VAGUE` and `TABLE_HEADER_MISSING`.
+All six are in force; *What the repository already does* defines them. Prose rules (sentence length,
 banned words such as LZ-DOC-004's) belong to the writing lint of ADR-0013, not to `docs:check`.
 Contrast and the full WCAG audit run on the built site once it exists.
 
@@ -81,9 +86,32 @@ Contrast and the full WCAG audit run on the built site once it exists.
   first row is followed by a delimiter row (`tools/cmd/lz-check/docs.go:458-644`; passing and
   failing fixtures in `tools/cmd/lz-check/docs_test.go:799-884`). Triggered by this ADR's
   acceptance (D128).
-- One diagram exists (`docs/explanation/architecture-overview.md:32-41`); it is followed by a
-  one-line reading of the arrows and a table of the layers (`:43-50`), which together are its text
-  equivalent. It has no `accTitle` or `accDescr` yet.
+- `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING`, `IMAGE_ALT_MISSING` and, for the designed SVGs
+  of the ADR-0013 amendment, `DIAGRAM_EXTERNAL_REF` hold on the same pages, outside front matter
+  and blocks nested in another fence. Triggered by the owner decision of 2026-11-02, ahead of the
+  second diagram. A line is read on its own, as for the link rules.
+  - `DIAGRAM_ACC_MISSING`: a block fenced as `mermaid`, in any case, has an `accTitle:` line with
+    a value and an `accDescr:` line with a value or a multi-line `accDescr {`. A `%%` comment
+    does not count.
+  - `DIAGRAM_TEXT_MISSING`: after a Mermaid block, or after a line that holds only images (links
+    around them aside), the first non-blank line that is not another image line is prose: a
+    paragraph, list, table or quote. A heading, a fence, HTML (a comment included), a thematic
+    break, a reference definition or the end of the page is not. An SVG twin can therefore sit
+    between a Mermaid block and its text. An image inside a sentence and a decorative image need
+    no text after them.
+  - `IMAGE_ALT_MISSING`: a Markdown image, inline or by reference, has alt text that is not blank;
+    an `<img>` has a non-blank `alt` unless it is marked decorative (`alt=""` and
+    `role="presentation"`).
+  - `DIAGRAM_EXTERNAL_REF`: an SVG a page shows, by a Markdown image, a reference or an `<img>`,
+    holds no `<script`, no `@import`, and no absolute or protocol-relative URL in an `href`, a
+    `src` or a CSS `url()`. An `<img>` source is held to the link rules too, so a missing SVG is
+    `LINK_BROKEN`.
+
+  Code: `tools/cmd/lz-check/docs.go:706-961`; passing and failing fixtures and the SVG cases in
+  `tools/cmd/lz-check/docs_test.go:886-1024`. 32 hand mutants of the rules all turn the tests red.
+- One diagram exists (`docs/explanation/architecture-overview.md:32-43`). It sets `accTitle` and
+  `accDescr`, and is followed by a one-line reading of the arrows and a table of the layers
+  (`:45-52`), which together are its text equivalent.
 - No page under `docs/` embeds an image.
 - A glossary exists (`docs/reference/glossary.md`); terms such as Pn, KD-n and Tnnn are defined
   there.
@@ -91,9 +119,6 @@ Contrast and the full WCAG audit run on the built site once it exists.
 ### Postponed, with triggers
 | Part | Trigger |
 | --- | --- |
-| `accTitle` and `accDescr` on the existing diagram | The next change to `architecture-overview.md` |
-| `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING` | A second Mermaid diagram under `docs/` |
-| `IMAGE_ALT_MISSING` | The first image under `docs/` |
 | Writing lint (Vale or similar, ADR-0013; spec 006 E4) | E4's trigger: the tool arrives in the offline entry |
 | Contrast and WCAG audit of the built site | The site tool is chosen (ADR-0013 spike) |
 | Renderer rules and their tests | `tools/lz-docs` exists (ADR-0020) |
@@ -109,6 +134,10 @@ Contrast and the full WCAG audit run on the built site once it exists.
 ## Counterpoints (kept even if overruled)
 - WCAG targets web content; much of this documentation is read as Markdown on a forge. The rules
   above are chosen because they also help there; the site audit only applies to the site.
+- An explicit decorative marker is stricter than WCAG, which accepts `alt=""` alone. Without the
+  marker a check cannot tell a decorative image from a forgotten alt text.
+- `DIAGRAM_TEXT_MISSING` judges position, not content: one sentence satisfies it for a large
+  diagram. Review still owns whether the text carries the same facts.
 - A text equivalent beside every diagram duplicates content and can drift from it. The mitigation
   is the same as for generated pages: generate both from one source where the renderer exists, and
   keep hand-drawn diagrams few.
@@ -123,3 +152,6 @@ Contrast and the full WCAG audit run on the built site once it exists.
 ## Review log
 - 2026-10-20: drafted; one independent review round, findings applied.
 - 2026-10-20: accepted (D128) after two further independent reviews; their changes applied.
+- 2026-11-02: `DIAGRAM_ACC_MISSING`, `DIAGRAM_TEXT_MISSING`, `IMAGE_ALT_MISSING` and
+  `DIAGRAM_EXTERNAL_REF` added ahead of their triggers (owner decision on designed SVGs, ADR-0013
+  amendment); the decorative-image marker set; the existing diagram given `accTitle` and `accDescr`.
