@@ -1,5 +1,14 @@
 # Landing Zone for OVHcloud
 
+[![foundation CI](https://github.com/PlatformRelay/landingzone-for-ovhcloud/actions/workflows/foundation.yml/badge.svg?branch=main)](https://github.com/PlatformRelay/landingzone-for-ovhcloud/actions/workflows/foundation.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/PlatformRelay/landingzone-for-ovhcloud/badge)](https://scorecard.dev/viewer/?uri=github.com/PlatformRelay/landingzone-for-ovhcloud)
+[![CodeQL](https://github.com/PlatformRelay/landingzone-for-ovhcloud/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/PlatformRelay/landingzone-for-ovhcloud/actions/workflows/codeql.yml)
+[![SonarCloud quality gate](https://sonarcloud.io/api/project_badges/measure?project=PlatformRelay_landingzone-for-ovhcloud&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=PlatformRelay_landingzone-for-ovhcloud)
+[![License: Apache-2.0](https://img.shields.io/github/license/PlatformRelay/landingzone-for-ovhcloud)](LICENSE)
+[![Documentation site](https://img.shields.io/badge/docs-GitHub%20Pages-2ea44f?logo=materialformkdocs&logoColor=white)](https://platformrelay.github.io/landingzone-for-ovhcloud/)
+
+**Pre-release, not for production use.** No version has been published; see [Status](#status).
+
 An open-source landing zone for OVHcloud Public Cloud, written in OpenTofu. It sets up the shared
 base that teams deploy onto (state storage, identity, projects, networks, and a runtime placeholder), and checks
 each piece with tests that run offline before anything touches an account.
@@ -109,11 +118,12 @@ the layers fit together.
 | --- | --- |
 | `docs/` | Architecture decision records (ADRs), how-tos, explanations, references and known issues. |
 | `specs/` | The delivery record: one folder per feature with its spec, plan, tasks and evidence. You do not need it to use the landing zone. |
-| `AGENTS.md`, `.github/CONTRIBUTING.md` | Working rules for contributors, human or automated; how to contribute. |
+| `AGENTS.md`, `.github/CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` | Working rules for contributors, human or automated; how to contribute; the code of conduct. |
 
 ## Where to go next
 
 - [Documentation index](docs/README.md) — every page, sorted by what you need from it.
+- [Documentation site](https://platformrelay.github.io/landingzone-for-ovhcloud/) — the same pages, published from `main`.
 - [Glossary](docs/reference/glossary.md) — the project's terms and ids (stage, stack, KD-1, T049 …).
 - [Architecture decisions](docs/adr/README.md) — start with ADR-0001, 0002, 0004, 0008 and 0009.
 - [Run the first slice](docs/how-to/run-the-first-slice.md) — the maintainer's runbook for a real account.
