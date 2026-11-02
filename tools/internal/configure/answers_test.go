@@ -40,7 +40,7 @@ func answersVlan(id int) *int { return &id }
 // answersSandboxWant is sandbox.yaml as data-model.md reads it, no default applied.
 func answersSandboxWant() Answers {
 	return Answers{
-		APIVersion: "lz.platformrelay.dev/v1alpha1", Kind: "DeploymentAnswers", Name: "sandbox", Org: "lz",
+		APIVersion: "lz.platformrelay.dev/v1alpha1", Kind: "DeploymentAnswers", Name: "sandbox", Org: "lz2",
 		Forge: "github.com/platformrelay/landingzone-for-ovhcloud", StateRegion: "gra", SharedStateProject: true,
 		Tenants: []Tenant{{Name: "demo", Environments: []Environment{
 			{Name: "dev", Regions: []Region{{Name: "GRA11", CIDR: "10.20.0.0/24"}}},
@@ -52,6 +52,7 @@ func answersSandboxWant() Answers {
 // (acceptance; exposes a decoder that drops or invents fields).
 func TestAnswersDecodeFixtures(t *testing.T) {
 	two := answersSandboxWant()
+	two.Org = "lz" // the two-tenant fixture keeps the first account's org
 	two.Tenants = append(two.Tenants, Tenant{Name: "lab", Environments: []Environment{
 		{Name: "dev", Regions: []Region{{Name: "GRA11", CIDR: "10.40.0.0/24"}}},
 	}})
@@ -128,7 +129,7 @@ func TestAnswersFixtureValueCounts(t *testing.T) {
 			t.Errorf("%s holds %d values, want %d", file, got, want)
 		}
 	}
-	more := strings.Replace(string(answersFixture(t, "sandbox.yaml")), `"org": "lz",`, `"org": "lz", "state_ref": "STATE",`, 1)
+	more := strings.Replace(string(answersFixture(t, "sandbox.yaml")), `"org": "lz2",`, `"org": "lz2", "state_ref": "STATE",`, 1)
 	if got := answersValueCount(t, []byte(more)); got != 12 {
 		t.Errorf("control: one value more counts %d, want 12", got)
 	}

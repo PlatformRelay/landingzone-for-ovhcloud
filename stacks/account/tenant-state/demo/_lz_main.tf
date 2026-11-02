@@ -3,7 +3,7 @@
 module "tenant_state" {
   instance         = "demo-state"
   managed_in       = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/account/tenant-state/demo"
-  org              = "lz"
+  org              = "lz2"
   source           = "../../../../stages/tenant-state"
   state_project_id = var.state_project_id
   state_region     = "GRA"

@@ -10,7 +10,9 @@
   "spec": {
     "scope": "platform",
     # naming discriminator (D87); bucket names are global, override if taken (P21, T010)
-    "org": "lz",
+    # lz2: the first account's lz-bkt-state still exists, so a fresh account needs another
+    # discriminator (docs/how-to/set-up-a-fresh-account.md, Before you start)
+    "org": "lz2",
     "forge": "github.com/platformrelay/landingzone-for-ovhcloud",
     "stage_source": {"kind": "local"},
     # KD-1 (spec.md Known deviations, D88): the sandbox account has one Public Cloud project, so the

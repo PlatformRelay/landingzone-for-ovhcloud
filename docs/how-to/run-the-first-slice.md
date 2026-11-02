@@ -13,7 +13,7 @@ references:
   - path: tools/internal/live/observe.go
     blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
   - path: stacks/deployments.yaml
-    blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
+    blob: 03c9c57f3b119083c4a45d697c90f2c06ea15cea
   - path: mise.toml
     blob: 2d63ee3ca1e7bb809bed04e4575609ffd4656542
   - path: mise.live.toml
@@ -21,7 +21,7 @@ references:
   - path: tests/live/probes/README.md
     blob: 61d42736bb1bf56e93907ba0fe34afe446689ce8
 verified_against: {task: "3.53", tofu: "1.13", ovhcloud: "0.15"}
-last_verified: 226ad84a05c4cc74ddbdbd4450866130ae149bf2
+last_verified: 25f806fe1bae5d02a46543220b5965b28528b7d8
 ---
 
 # Run the first slice on an OVHcloud account
@@ -217,9 +217,9 @@ The owner's step-by-step sheet for this, with two accounts side by side, is
    run. Root-bound keys bypass IAM (AGENTS.md).
 3. Bucket names are global across OVHcloud
    (`ovhcloud-docs/.../object-storage/s3-limitations.mdx:49-53`, P21). If the old account's
-   state buckets still exist, set a new `spec.org` in `stacks/deployments.yaml` (default `lz`).
-   Then run `task stacks:reconcile` and `task stacks:generate`, commit, get the change reviewed
-   and merged, and use the new reviewed SHA.
+   state buckets still exist, set a new `spec.org` in `stacks/deployments.yaml` (today `lz2`;
+   the first account used `lz`). Then run `task stacks:reconcile` and `task stacks:generate`,
+   commit, get the change reviewed and merged, and use the new reviewed SHA.
 4. Run:
 
    ```sh

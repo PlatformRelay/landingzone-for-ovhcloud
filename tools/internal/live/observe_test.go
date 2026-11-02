@@ -41,7 +41,7 @@ const (
 	canaryProject = "f0000000000000000000000000000048"
 	canaryRegion  = "GRA"
 	canaryRunID   = "20261008T120000Z-0048"
-	canaryOrg     = "lz"
+	canaryOrg     = "lz2"
 )
 
 // canaryCall is one request the fake answered, with what the world held when it arrived.
@@ -1017,24 +1017,24 @@ func (o *chainObserver) Observe(ctx context.Context, run ObserveRun) ([]Observat
 func chainPassing() []Observation {
 	urn := "urn:v1:eu:resource:publicCloudProject:" + laneProject
 	out := []Observation{
-		{Assertion: "state-bucket-versioned", Subject: "lz-bkt-state", Observed: "holds"},
-		{Assertion: "state-bucket-versioned", Subject: "lz-demo-bkt-state", Observed: "holds"},
+		{Assertion: "state-bucket-versioned", Subject: "lz2-bkt-state", Observed: "holds"},
+		{Assertion: "state-bucket-versioned", Subject: "lz2-demo-bkt-state", Observed: "holds"},
 		// Spec 006 FR-010: each state bucket's Object Lock.
-		{Assertion: "state-bucket-object-lock", Subject: "lz-bkt-state", Observed: "holds"},
-		{Assertion: "state-bucket-object-lock", Subject: "lz-demo-bkt-state", Observed: "holds"},
+		{Assertion: "state-bucket-object-lock", Subject: "lz2-bkt-state", Observed: "holds"},
+		{Assertion: "state-bucket-object-lock", Subject: "lz2-demo-bkt-state", Observed: "holds"},
 	}
-	for _, k := range []string{"lz-bkt-state/account/account-governance/terraform.tfstate", "lz-bkt-state/account/tenant-state/demo/terraform.tfstate",
-		"lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", "lz-demo-bkt-state/tenants/demo/dev/gra11/project-network/terraform.tfstate",
-		"lz-demo-bkt-state/tenants/demo/dev/gra11/runtime/terraform.tfstate"} {
+	for _, k := range []string{"lz2-bkt-state/account/account-governance/terraform.tfstate", "lz2-bkt-state/account/tenant-state/demo/terraform.tfstate",
+		"lz2-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", "lz2-demo-bkt-state/tenants/demo/dev/gra11/project-network/terraform.tfstate",
+		"lz2-demo-bkt-state/tenants/demo/dev/gra11/runtime/terraform.tfstate"} {
 		out = append(out, Observation{Assertion: "state-object-encrypted", Subject: k, Observed: "holds"})
 	}
 	out = append(out,
-		Observation{Assertion: "state-lock-contention", Subject: "lz-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", Observed: "holds"},
-		Observation{Assertion: "bucket-tags", Subject: "lz-bkt-state", Observed: "holds"},
-		Observation{Assertion: "bucket-tags", Subject: "lz-demo-bkt-state", Observed: "holds"},
+		Observation{Assertion: "state-lock-contention", Subject: "lz2-demo-bkt-state/tenants/demo/dev/project/terraform.tfstate", Observed: "holds"},
+		Observation{Assertion: "bucket-tags", Subject: "lz2-bkt-state", Observed: "holds"},
+		Observation{Assertion: "bucket-tags", Subject: "lz2-demo-bkt-state", Observed: "holds"},
 		Observation{Assertion: "project-tags", Subject: urn, Observed: "holds"},
 		Observation{Assertion: "tenant-iam-write", Subject: "demo", Observed: "denied"},
-		Observation{Assertion: "tenant-s3-read", Subject: "demo:lz-bkt-state", Observed: "denied"},
+		Observation{Assertion: "tenant-s3-read", Subject: "demo:lz2-bkt-state", Observed: "denied"},
 	)
 	for _, id := range []string{"account-bootstrap", "account-governance", "demo-state", "demo-dev-project", "demo-dev-gra11-network", "demo-dev-gra11-runtime"} {
 		out = append(out, Observation{Assertion: "outputs-schema", Subject: id, Observed: "holds"})
@@ -1098,7 +1098,7 @@ const chainOwnStateProject = "f0000000000000000000000000000059"
 func chainUnflagged(h *laneHarness, c chainExec) chainExec {
 	h.t.Helper()
 	h.m.SharedStateProject = false
-	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 		"LZ_PROJECT_ID_STATE": chainOwnStateProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject, "LZ_ADMIN_CLIENT_ID": laneAdminID, "LZ_ADMIN_POLICY_ID": chainAdminPolicy})
 	h.world.State = chainOwnStateProject // the fake tofu's state_project_id
 	h.save()
@@ -1286,7 +1286,7 @@ func TestObserveChainNotAfterFailure(t *testing.T) {
 // run naming the bucket and is never `pass`; whether the chain reports it `fail` or `blocked` is
 // left to T026 (FR-010 fixes the judge's `blocked`, review r1).
 func TestObserveChainObjectLock(t *testing.T) {
-	buckets := []string{"lz-bkt-state", "lz-demo-bkt-state"}
+	buckets := []string{"lz2-bkt-state", "lz2-demo-bkt-state"}
 	lock := func(subject, observed string) Observation {
 		return Observation{Assertion: "state-bucket-object-lock", Subject: subject, Observed: observed}
 	}
@@ -1350,14 +1350,14 @@ func TestObserveChainObjectLock(t *testing.T) {
 func TestObserveChainObjectLockBlocked(t *testing.T) {
 	h := newChainHarness(t)
 	o := &chainObserver{obs: chainWith(func(o Observation) *Observation {
-		if o.Assertion == "state-bucket-object-lock" && o.Subject == "lz-bkt-state" {
-			o.Observed, o.Detail = "blocked", "GetObjectLockConfiguration lz-bkt-state: answered 403 AccessDenied"
+		if o.Assertion == "state-bucket-object-lock" && o.Subject == "lz2-bkt-state" {
+			o.Observed, o.Detail = "blocked", "GetObjectLockConfiguration lz2-bkt-state: answered 403 AccessDenied"
 		}
 		return &o
 	})}
 	r := h.chain(chainExec{observer: o})
 	laneExit(t, r.laneRun, 1)
-	for _, s := range []string{"state-bucket-object-lock", "lz-bkt-state"} {
+	for _, s := range []string{"state-bucket-object-lock", "lz2-bkt-state"} {
 		if r.err == nil || !strings.Contains(r.err.Error(), s) {
 			t.Errorf("err %v, want one naming %s", r.err, s)
 		}

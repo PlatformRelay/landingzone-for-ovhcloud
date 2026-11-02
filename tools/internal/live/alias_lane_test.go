@@ -69,7 +69,7 @@ func (h *laneHarness) aliasTenants() {
 	for shop, demo := range map[string]string{"shop-state": "demo-state", "shop-dev-project": "demo-dev-project"} {
 		laneCopyTree(h.t, filepath.Join(h.checkout, filepath.FromSlash(h.row(demo).Path)), filepath.Join(h.checkout, filepath.FromSlash(h.row(shop).Path)))
 	}
-	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+	h.writeConfig("accounts/"+laneAccount+"/account.env", map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 		"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject, "LZ_PROJECT_ID_SHOP_DEV": laneProject,
 		"LZ_ADMIN_CLIENT_ID": laneAdminID, "LZ_ADMIN_POLICY_ID": chainAdminPolicy})
 }

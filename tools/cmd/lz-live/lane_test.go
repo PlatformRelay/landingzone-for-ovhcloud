@@ -111,7 +111,7 @@ func TestLaneEntryOptions(t *testing.T) {
 			if got.Checkout != w.checkout || got.ConfigRoot != cfg || got.Account != laneEntryAccount {
 				t.Errorf("checkout %q config %q account %q", got.Checkout, got.ConfigRoot, got.Account)
 			}
-			if got.Manifest == nil || got.Manifest.Org != "lz" || len(got.Manifest.Instances) == 0 {
+			if got.Manifest == nil || got.Manifest.Org != "lz2" || len(got.Manifest.Instances) == 0 {
 				t.Errorf("manifest %+v: not the checkout's stacks/deployments.yaml", got.Manifest)
 			}
 			if !live.RunIDPattern.MatchString(got.RunID) || got.RunDir != filepath.Join(w.checkout, ".local", "live", got.RunID) {
@@ -149,7 +149,7 @@ func TestLaneEntryOptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _ = st.Get(context.Background(), "lz-demo-bkt-state", stacks.ArtifactKey("demo-dev-project"))
+			_, _ = st.Get(context.Background(), "lz2-demo-bkt-state", stacks.ArtifactKey("demo-dev-project"))
 			if len(s3.seen) != 1 || !strings.Contains(s3.seen[0], "s3.gra.io.cloud.ovh.net") {
 				t.Errorf("store requests %q, want one to the gra endpoint", s3.seen)
 			}

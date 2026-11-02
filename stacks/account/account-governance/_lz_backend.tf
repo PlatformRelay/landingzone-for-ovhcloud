@@ -2,7 +2,7 @@
 
 terraform {
   backend "s3" {
-    bucket = "lz-bkt-state"
+    bucket = "lz2-bkt-state"
     endpoints = {
       s3 = "https://s3.gra.io.cloud.ovh.net"
     }

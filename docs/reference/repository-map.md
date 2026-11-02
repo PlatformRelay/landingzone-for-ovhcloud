@@ -1,7 +1,7 @@
 ---
 references:
   - path: stacks/deployments.yaml
-    blob: a4e4c7b24494733e88b0fb9e4d3baa3fa8b2d132
+    blob: 03c9c57f3b119083c4a45d697c90f2c06ea15cea
   - path: tools/internal/checks/dependencies.go
     blob: 793040e8a2f7c2e9d569428fbfe1788c79683a13
   - path: tools/cmd/lz-check/docs.go
@@ -9,7 +9,7 @@ references:
   - path: tools/internal/checks/offline.go
     blob: 761a61f38609c26f431c4ef80fcb35d85e3f067c
 verified_against: {task: "3.53"}
-last_verified: fb968189fcc70955232a704509663c595151aeeb
+last_verified: 25f806fe1bae5d02a46543220b5965b28528b7d8
 ---
 
 # Repository map

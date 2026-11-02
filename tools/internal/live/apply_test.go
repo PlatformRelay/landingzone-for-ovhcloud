@@ -51,8 +51,8 @@ const (
 	laneAccount    = "xx000058-ovh"
 	laneProject    = "f0000000000000000000000000000058" // KD-1: STATE and DEMO_DEV resolve to one project
 	laneRevision   = "5858585858585858585858585858585858585858"
-	laneAccountBkt = "lz-bkt-state"
-	laneTenantBkt  = "lz-demo-bkt-state"
+	laneAccountBkt = "lz2-bkt-state"
+	laneTenantBkt  = "lz2-demo-bkt-state"
 	// Fixture project id of the envelope fixtures, replaced by laneProject.
 	laneFixtureProject = "fedcba9876543210fedcba9876543210"
 )
@@ -932,7 +932,7 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	h.acctDir = filepath.Join(h.root, "accounts", laneAccount)
 	for rel, v := range map[string]map[string]string{
 		"sandbox.env": {"OVH_ENDPOINT": "ovh-eu", "OVH_CLIENT_ID": laneAdminID, "OVH_CLIENT_SECRET": laneAdminSecret},
-		"accounts/" + laneAccount + "/account.env": {"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+		"accounts/" + laneAccount + "/account.env": {"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 			"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject},
 		"accounts/" + laneAccount + "/state.env":            {"AWS_ACCESS_KEY_ID": laneAccountAK, "AWS_SECRET_ACCESS_KEY": laneAccountSK},
 		"accounts/" + laneAccount + "/state-passphrase.env": {"TF_VAR_state_passphrase": lanePassphrase},
@@ -1095,6 +1095,8 @@ func (h *laneHarness) outputsDoc(in stacks.Instance, project string) string {
 	text = strings.ReplaceAll(text, "0123456789abcdef0123456789abcdef", laneProject)
 	text = strings.ReplaceAll(text, "demo-dev-gra11-runtime-blue", "demo-dev-gra11-runtime")
 	text = strings.ReplaceAll(text, "lz-demo-dev-gra11-bkt-runtime-blue", "lz-demo-dev-gra11-bkt-runtime")
+	// The envelopes were made with org lz; their names follow this manifest's org.
+	text = strings.NewReplacer(`"lz-`, `"`+in.Naming.Org+`-`, `/lz-`, `/`+in.Naming.Org+`-`).Replace(text)
 	var env struct {
 		Values map[string]any `json:"values"`
 	}
@@ -1221,7 +1223,7 @@ func (h *laneHarness) boundAccount() stacks.BoundAccount {
 func (h *laneHarness) rebind(project string) {
 	h.t.Helper()
 	rel := filepath.Join("accounts", laneAccount, "account.env")
-	if err := WriteCredentialFile(h.root, rel, map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+	if err := WriteCredentialFile(h.root, rel, map[string]string{"LZ_ACCOUNT_ID": laneAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 		"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": project}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -2416,7 +2418,7 @@ func TestApplyBindsCredentials(t *testing.T) {
 		{"tenant-endpoint", VerbApply, "demo-dev-gra11-network", acct + "tenants/demo/deployer.env",
 			map[string]string{"OVH_ENDPOINT": "ovh-ca", "OVH_CLIENT_ID": laneTenantID, "OVH_CLIENT_SECRET": laneTenantSecret}, CondEndpoint, "demo-dev-gra11-network"},
 		{"org-mismatch", VerbApply, "demo-dev-project", acct + "account.env", accountEnv(laneAccount, "zz"), CondOrg, "demo-dev-project"},
-		{"account-env-other-id", VerbApply, "demo-dev-project", acct + "account.env", accountEnv(laneForeignAccount, "lz"), CondAccount, "demo-dev-project"},
+		{"account-env-other-id", VerbApply, "demo-dev-project", acct + "account.env", accountEnv(laneForeignAccount, "lz2"), CondAccount, "demo-dev-project"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2623,7 +2625,7 @@ func TestApplyAccountEnvNamesOtherAccount(t *testing.T) {
 	h.steady()
 	h.touch("demo-dev-project")
 	acct := "accounts/" + laneAccount + "/"
-	h.writeConfig(acct+"account.env", map[string]string{"LZ_ACCOUNT_ID": laneForeignAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz",
+	h.writeConfig(acct+"account.env", map[string]string{"LZ_ACCOUNT_ID": laneForeignAccount, "OVH_ENDPOINT": "ovh-eu", "LZ_ORG": "lz2",
 		"LZ_PROJECT_ID_STATE": laneProject, "LZ_PROJECT_ID_DEMO_DEV": laneProject})
 	h.writeConfig(acct+"platform-deployer.env", map[string]string{"OVH_ENDPOINT": "ovh-eu", "OVH_CLIENT_ID": laneForeignID, "OVH_CLIENT_SECRET": laneForeignSecret})
 	r := h.run(VerbApply, "demo-dev-project")
@@ -3435,7 +3437,7 @@ func boundedStoreControl(t *testing.T) {
 	}
 	r := h.run(VerbApply, boundedNetwork)
 	laneExit(t, r, 0)
-	if _, ok := r.puts()["lz-demo-bkt-state/artifacts/"+boundedNetwork+"/outputs.json"]; !ok {
+	if _, ok := r.puts()["lz2-demo-bkt-state/artifacts/"+boundedNetwork+"/outputs.json"]; !ok {
 		t.Errorf("the control apply published no envelope of %s: puts %v", boundedNetwork, r.puts())
 	}
 	if after, _ := os.ReadFile(record); bytes.Equal(after, before) {

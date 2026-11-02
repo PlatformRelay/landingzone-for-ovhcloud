@@ -7,7 +7,7 @@ module "project" {
   environment  = "dev"
   instance     = "demo-dev-project"
   managed_in   = "github.com/platformrelay/landingzone-for-ovhcloud//stacks/tenants/demo/dev/project"
-  org          = "lz"
+  org          = "lz2"
   project_id   = var.project_id
   project_mode = "reference"
   quota_guard = {

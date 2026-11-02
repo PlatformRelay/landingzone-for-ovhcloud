@@ -6,7 +6,7 @@
   "kind": "DeploymentAnswers",
   "name": "sandbox",
   # naming discriminator; bucket names are global, change it if one is taken
-  "org": "lz",
+  "org": "lz2",
   "forge": "github.com/platformrelay/landingzone-for-ovhcloud",
   "state_region": "gra",
   # KD-1: the sandbox account has one project, shared by the state buckets and demo/dev

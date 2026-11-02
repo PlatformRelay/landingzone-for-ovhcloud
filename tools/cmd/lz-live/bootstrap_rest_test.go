@@ -97,7 +97,7 @@ func TestBootstrapEntryRest(t *testing.T) {
 	if got.Rest == nil {
 		t.Fatal("lz-live bootstrap passes no Rest: state, publish and verify do not run")
 	}
-	if got.Checkout != w.checkout || got.Endpoint != "ovh-eu" || got.Org != "lz" {
+	if got.Checkout != w.checkout || got.Endpoint != "ovh-eu" || got.Org != "lz2" {
 		t.Errorf("Bootstrap options checkout %q endpoint %q org %q", got.Checkout, got.Endpoint, got.Org)
 	}
 	err := got.Rest(context.Background(), live.BootstrapAccount{ID: "xx000001-ovh", Dir: t.TempDir()})
@@ -162,7 +162,7 @@ func TestBootstrapEntryStateOptions(t *testing.T) {
 	if got.Rest == nil || got.Rest(context.Background(), live.BootstrapAccount{}) != nil || restCalls != 1 {
 		t.Fatal("the Rest handed to Bootstrap is not the one built from these state options")
 	}
-	if o.Region != "GRA" || o.Revision != fakeHead || o.Tofu != w.tofu || o.Checkout != w.checkout || o.Manifest == nil || o.Manifest.Org != "lz" || o.API.BaseURL != got.API.BaseURL || o.API.BaseURL == "" || o.Stdout == nil {
+	if o.Region != "GRA" || o.Revision != fakeHead || o.Tofu != w.tofu || o.Checkout != w.checkout || o.Manifest == nil || o.Manifest.Org != "lz2" || o.API.BaseURL != got.API.BaseURL || o.API.BaseURL == "" || o.Stdout == nil {
 		t.Errorf("state options region %q revision %q tofu %q checkout %q api %q (Bootstrap's %q)", o.Region, o.Revision, o.Tofu, o.Checkout, o.API.BaseURL, got.API.BaseURL)
 	}
 	if o.Schemas == nil {
@@ -178,14 +178,14 @@ func TestBootstrapEntryStateOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Put(context.Background(), "lz-bkt-state", "account/x/outputs.json", []byte("{}")); err != nil {
+	if err := store.Put(context.Background(), "lz2-bkt-state", "account/x/outputs.json", []byte("{}")); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if data, err := store.Get(context.Background(), "lz-bkt-state", "account/x/outputs.json"); err != nil || string(data) != "{}" {
+	if data, err := store.Get(context.Background(), "lz2-bkt-state", "account/x/outputs.json"); err != nil || string(data) != "{}" {
 		t.Errorf("Get = %q, %v", data, err)
 	}
 	for _, s := range s3.seen {
-		if !strings.HasPrefix(s, "s3.gra.io.cloud.ovh.net ") || !strings.Contains(s, " /lz-bkt-state/account/x/outputs.json AWS4-HMAC-SHA256 Credential=AKENTRY/") || !strings.Contains(s, "/gra/s3/aws4_request") {
+		if !strings.HasPrefix(s, "s3.gra.io.cloud.ovh.net ") || !strings.Contains(s, " /lz2-bkt-state/account/x/outputs.json AWS4-HMAC-SHA256 Credential=AKENTRY/") || !strings.Contains(s, "/gra/s3/aws4_request") {
 			t.Errorf("S3 request %q, want the derived host, path-style, signed for gra/s3 with state.env's key", s)
 		}
 		if strings.Contains(s, "SKENTRY0secret") {

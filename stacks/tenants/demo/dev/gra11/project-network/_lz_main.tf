@@ -7,7 +7,7 @@ module "project_network" {
     cidr    = "10.20.0.0/24"
     vlan_id = 0
   }
-  org     = "lz"
+  org     = "lz2"
   project = var.project
   region  = "GRA11"
   source  = "../../../../../../stages/project-network"
