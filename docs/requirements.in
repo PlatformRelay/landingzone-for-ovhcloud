@@ -1,0 +1,5 @@
+# Input for docs/requirements.txt, the hash-locked tools that build the documentation site
+# (mkdocs.yml, .github/workflows/docs.yml). Regenerate from the repository root with
+#   uv pip compile --python-version=3.12 --generate-hashes --exclude-newer=<date two weeks ago> --output-file=docs/requirements.txt docs/requirements.in
+# The cutoff keeps releases younger than two weeks out of the lock.
+mkdocs-material==9.7.7

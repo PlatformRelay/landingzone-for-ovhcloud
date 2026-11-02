@@ -1,0 +1,132 @@
+# The documentation site: docs/ rendered with MkDocs Material and deployed from main to GitHub
+# Pages by .github/workflows/docs.yml. docs/README.md is the home page; the navigation follows its
+# sections. `task docs:check` stays the judge of the pages themselves; this build adds that every
+# page is in the navigation and every link resolves on the site.
+site_name: Landing Zone for OVHcloud
+site_description: >-
+  An open-source landing zone for OVHcloud Public Cloud, written in OpenTofu. Pre-release, not for
+  production use. Not an OVHcloud product.
+site_url: https://platformrelay.github.io/landingzone-for-ovhcloud/
+repo_url: https://github.com/PlatformRelay/landingzone-for-ovhcloud
+repo_name: PlatformRelay/landingzone-for-ovhcloud
+# Edit links stay off: a page's references: header pins file blobs, so a change made in the
+# browser editor skips the docs rules contributors run (.github/CONTRIBUTING.md).
+edit_uri: ""
+copyright: Documentation licensed under CC BY 4.0; code under Apache-2.0. Not an OVHcloud product.
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-4
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.path
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+# Links from a page to a repository file outside docs/ point at that file on GitHub.
+hooks:
+  - overrides/hooks/repo_links.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+# The lock files of the site's own build tools are not pages.
+exclude_docs: |
+  /requirements.in
+  /requirements.txt
+
+# The only pages deliberately left out of the navigation: the known-issue template is a form to
+# copy, reachable from the known-issues index.
+not_in_nav: |
+  /known-issues/TEMPLATE.md
+
+validation:
+  omitted_files: warn
+  unrecognized_links: warn
+  absolute_links: warn
+  anchors: warn
+
+nav:
+  - Home: README.md
+  - How-to guides:
+      - how-to/run-the-first-slice.md
+      - how-to/set-up-a-fresh-account.md
+      - how-to/respond-to-an-incident.md
+      - how-to/prepare-deployments-from-answers.md
+  - Reference:
+      - reference/glossary.md
+      - reference/repository-map.md
+      - reference/verification-status.md
+      - reference/patterns-catalogue.md
+      - reference/upstream-reference-map.md
+      - reference/test-costs.md
+      - reference/provider-gaps.md
+  - Explanation:
+      - explanation/architecture-overview.md
+      - explanation/product-direction.md
+      - explanation/naming-and-labelling-design.md
+      - explanation/guided-setup-walkthrough.md
+  - Decisions:
+      - adr/README.md
+      - adr/0001-scope-positioning-and-unofficial-status.md
+      - adr/0002-repository-structure.md
+      - adr/0003-layered-taxonomy-and-module-naming.md
+      - adr/0004-staged-roots-and-output-contracts.md
+      - adr/0005-declarative-tenant-model-and-assent.md
+      - adr/0006-guardrails-without-org-level-policy.md
+      - adr/0007-pipeline-portability.md
+      - adr/0008-testing-strategy.md
+      - adr/0009-state-backend-bootstrap-and-credentials.md
+      - adr/0010-versioning-release-and-distribution.md
+      - adr/0011-provider-strategy-and-opentofu-first.md
+      - adr/0012-compliance-profiles.md
+      - adr/0013-documentation-strategy.md
+      - adr/0015-licence-and-project-name.md
+      - adr/0016-golden-paths-as-profiles.md
+      - adr/0017-runtime-families-and-output-contract.md
+      - adr/0018-identity-planes-roles-and-providers.md
+      - adr/0019-agent-experience-sensors-and-guides.md
+      - adr/0020-generated-landing-zone-documentation.md
+      - adr/0021-threat-model-authorisation-boundaries-and-supply-chain.md
+      - adr/0022-support-release-upgrade-and-succession-policy.md
+      - adr/0023-guided-repository-preconfiguration.md
+      - adr/0024-cost-and-sandbox-operations.md
+      - adr/0025-network-and-resilience.md
+      - adr/0026-observability-and-incident-response.md
+      - adr/0027-documentation-accessibility.md
+  - Known issues:
+      - known-issues/README.md
+      - known-issues/KI-001-ci-source-admission-unqualified.md
+      - known-issues/KI-002-offline-entry-memory-process-limits.md

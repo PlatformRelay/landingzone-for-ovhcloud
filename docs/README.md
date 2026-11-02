@@ -7,6 +7,9 @@ last_verified: 7406a5791afb1ea7049f63c3cae03583d3a3c3c0
 
 Every page under `docs/`, sorted by what you need from it. Words you do not know are in the
 [glossary](reference/glossary.md). The project's front page is the repository's `README.md`.
+The same pages are published as the
+[documentation site](https://platformrelay.github.io/landingzone-for-ovhcloud/), rebuilt from
+`main`.
 
 ## Start here
 
