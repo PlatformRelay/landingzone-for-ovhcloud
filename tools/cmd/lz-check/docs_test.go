@@ -922,6 +922,10 @@ func TestDocsDiagramsAccepted(t *testing.T) {
 		"mermaid inside an outer fence":  docsDiagramPage("\n````md\n```mermaid\nflowchart LR\n```\n![](x.png)\n````\n\n## After\n"),
 		"image in a code span":           docsDiagramPage("\nWrite `![](x.png)` and `<img src=x>` never.\n"),
 		"other fence languages":          docsDiagramPage("\n```text\nflowchart LR\n```\n\n## After\n"),
+		// Review round 1: a code span inside alt text is alt text; an
+		// autolink opens a paragraph.
+		"code span in alt text": docsDiagramPage("\n![`stack`](../assets/diagrams/layers.svg)\n" + textAfter),
+		"autolink as the text":  docsDiagramPage(mermaidOK + "\n<https://example.com/layers> shows that a stack calls a stage.\n"),
 		"a png is not read as an svg": func() map[string]string {
 			files := docsDiagramPage("\n![A screenshot](../assets/shot.png)\n" + textAfter)
 			files["docs/assets/shot.png"] = "<script>"
@@ -980,6 +984,10 @@ func TestDocsDiagramsRejected(t *testing.T) {
 		"second image on a line":     {docsDiagramPage("\nThe badges " + layersImg + " and ![](../assets/diagrams/layers.svg) here.\n"), alt, b, "line 15"},
 		"alt missing in an adr":      {map[string]string{adr: "# ADR\n\n![](../../tools/hello.txt)\n" + textAfter}, alt, adr, "line 3"},
 		"img to a missing file":      {docsA11yPage("\n<img src=\"../assets/diagrams/gone.svg\" alt=\"Gone\">\n" + textAfter), "LINK_BROKEN", b, "gone.svg does not exist"},
+		// Review round 1: a shortcut reference is an image; an attribute's
+		// name inside another attribute's value is not the attribute.
+		"shortcut image then heading": {docsDiagramPage("\n![Two layers]\n\n## After\n\n[two layers]: ../assets/diagrams/layers.svg\n"), text, b, "line 15 holds an image"},
+		"alt inside a title":          {docsDiagramPage("\n<img title=\"its alt='Layers' text\" src=\"../assets/diagrams/layers.svg\">\n" + textAfter), alt, b, "line 15"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := lzCheck(docsRepo(t, r.files), "docs")
@@ -1011,15 +1019,46 @@ func TestDocsDiagramsExternalRef(t *testing.T) {
 		"through a collapsed ref": {"<svg><script/></svg>", "\n![Two Layers][]\n" + textAfter + "\n[two layers]: ../assets/diagrams/layers.svg\n", "`<script`"},
 		"inline image":            {"<svg><script/></svg>", "\nThe badge " + layersImg + " sits in a sentence.\n", "`<script`"},
 		"decorative image":        {"<svg><script/></svg>", "\n<img src=\"../assets/diagrams/layers.svg\" alt=\"\" role=\"presentation\">\n", "`<script`"},
+		// Review round 1: a shortcut reference, the first of two definitions,
+		// the real src beside a decoy in a title, entity-encoded URLs and
+		// script without a script element.
+		"through a shortcut ref": {"<svg><script/></svg>", "\n![Two layers]\n" + textAfter + "\n[two layers]: ../assets/diagrams/layers.svg\n", "`<script`"},
+		"first definition wins":  {"<svg><script/></svg>", "\n![Two layers][r]\n" + textAfter + "\n[r]: ../assets/diagrams/layers.svg\n[r]: ../assets/diagrams/clean.svg\n", "`<script`"},
+		"src decoy in a title":   {"<svg><script/></svg>", "\n<img title=\"x src='../assets/diagrams/clean.svg'\" src=\"../assets/diagrams/layers.svg\" alt=\"Two layers\">\n" + textAfter, "`<script`"},
+		"entity-encoded url":     {"<svg><image href=\"https:&#47;&#47;x.example/a.png\"/></svg>", block, "`href=\"https://`"},
+		"event handler":          {"<svg onload=\"go()\"></svg>", block, "`onload=`"},
+		"javascript url":         {"<svg><a href=\"javascript:go()\"/></svg>", block, "`javascript:`"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := docsA11yPage(r.extra)
 			files[layersSVG] = r.svg
+			files["docs/assets/diagrams/clean.svg"] = cleanSVG
 			code, out := lzCheck(docsRepo(t, files), "docs")
 			if code != 1 || !docsFindingLine(out, ext, b, "../assets/diagrams/layers.svg") || !docsFindingLine(out, ext, b, r.detail) {
 				t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with %s naming the SVG and %s:\n%s", code, ext, r.detail, out)
 			}
 		})
+	}
+}
+
+// Review round 1: an SVG reached through a symbolic link that stays in the
+// repository is read like any other.
+func TestDocsDiagramsExternalRefLink(t *testing.T) {
+	root := docsRepo(t, docsDiagramPage("\n"+layersImg+"\n"+textAfter))
+	unsafe := filepath.Join(root, "docs", "assets", "diagrams", "unsafe.svg")
+	if err := os.WriteFile(unsafe, []byte("<svg><script/></svg>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, filepath.FromSlash(layersSVG))
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("unsafe.svg", link); err != nil {
+		t.Fatal(err)
+	}
+	code, out := lzCheck(root, "docs")
+	if code != 1 || !docsFindingLine(out, "DIAGRAM_EXTERNAL_REF", "docs/reference/b.md", "`<script`") {
+		t.Errorf("BEHAVIORAL_RED: code=%d, want 1 with DIAGRAM_EXTERNAL_REF through the link:\n%s", code, out)
 	}
 }
 
