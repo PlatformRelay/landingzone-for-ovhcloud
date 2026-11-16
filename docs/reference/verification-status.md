@@ -7,14 +7,14 @@ references:
   - path: tools/internal/live/apply.go
     blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
   - path: tools/internal/live/bootstrap.go
-    blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
+    blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
     blob: c10e5cb1cbd24317bf1508e70bffeb990a7dc92a
   - path: tools/internal/live/deadline.go
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go
     blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
-last_verified: 749281eff0fa0f1342a6f6817e273a6fcd4c1a76
+last_verified: 6a4ff84590664a5cf286257f89bd9d651c33dace
 ---
 
 # Verification status of the first slice

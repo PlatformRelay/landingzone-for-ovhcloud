@@ -7,7 +7,7 @@ references:
   - path: tools/internal/live/apply.go
     blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
   - path: tools/internal/live/bootstrap.go
-    blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
+    blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
     blob: c10e5cb1cbd24317bf1508e70bffeb990a7dc92a
   - path: tools/internal/live/observe.go
@@ -21,7 +21,7 @@ references:
   - path: tests/live/probes/README.md
     blob: 61d42736bb1bf56e93907ba0fe34afe446689ce8
 verified_against: {task: "3.53", tofu: "1.13", ovhcloud: "0.15"}
-last_verified: 25f806fe1bae5d02a46543220b5965b28528b7d8
+last_verified: 6a4ff84590664a5cf286257f89bd9d651c33dace
 ---
 
 # Run the first slice on an OVHcloud account
