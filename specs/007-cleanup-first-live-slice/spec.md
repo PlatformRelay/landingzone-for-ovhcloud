@@ -347,21 +347,27 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
 
 - **FR-014 Ephemeral destroy's read-only steps retried after a transient failure** — the chain's
   destroy of an ephemeral instance (destroy-on-exit and `live:destroy -- <instance>`) retries its
-  read-only steps — `init`, `plan -destroy` and `show -json` — after a transient failure; the
-  retained-resource guard runs on every plan shown. The inputs are written once, before the first
-  attempt. `apply` is never retried: a failed apply fails the destroy as today, and what it did not
-  destroy stays for `--cleanup`. A failure is transient only as the existing classifier judges the
-  failed step's captured error output (an HTTP 5xx, a token-fetch failure, a reset or timed-out
-  connection; any 4xx wins); a capture that reached its size limit, a guard refusal and a state-lock
-  error ("Error acquiring the state lock") are never transient, and the lock is never forced or
-  disabled. At most two retries, 20 s and 60 s later, each printing one
-  `LZ-LIVE retry destroy <instance> in <wait>: transient failure (attempt <n> of 3)` line. The
-  destroys of one run share a retry budget of their own, separate from the leftover check's, ending
-  at the destroy context's deadline (destroy-on-exit) or the run's deadline (`live:destroy`): a wait
-  is started only if, after it, the failed attempt's duration plus 5 minutes (kept for the apply,
-  the remaining destroys, the trap and the leftover check) is still left; a refused wait fails that
-  destroy at once and says so. (Evidence: run `20261116T120049Z-6301`, evidence/T032.md: an
-  OVHcloud 500 during the runtime destroy's `plan -destroy` refresh failed the final chain.)
+  planning steps — `init`, `plan -destroy` and `show -json` — after a transient failure; the
+  retained-resource guard judges every plan shown. The credential bind and the inputs (`prepare`,
+  the adapter) run once, before the first attempt, and are not retried. `apply` is never retried: a
+  failed apply fails the destroy as today, and what it did not destroy stays for `--cleanup`. A
+  failure is transient only as the existing classifier judges the failed step's captured stderr (an
+  HTTP 5xx, a token-fetch failure, a reset or timed-out connection; any 4xx wins). Never transient: a
+  capture that reached its size limit, a failure with no captured output, a guard refusal, and a
+  state-lock error on acquiring or releasing the lock; the lock is never forced or disabled. At most
+  two retries, 20 s and 60 s later, each printing one
+  `LZ-LIVE retry destroy <instance> in <wait>: transient failure (attempt <n> of <total>)` line. The
+  destroys of one run share a retry budget of their own, separate from the leftover check's, on the
+  same clock, ending at the destroy context's deadline (destroy-on-exit) or the run's deadline
+  (`live:destroy`): a wait is started only if, after it, the failed attempt's duration plus
+  5 minutes plus the baseline listing's duration is still left. That reserve is an estimate kept for
+  the apply, the remaining destroys, the trap and the leftover check, not a guarantee: an attempt
+  that overruns it ends as a spent destroy budget does today. A refused wait fails that destroy at
+  once and says so. Destroy-on-exit's waits are not cut short by a stop signal (its context is
+  detached, as today); a `live:destroy` wait ends when its run is cancelled. (Evidence: run
+  `20261116T120049Z-6301`, evidence/T032.md: `OVHcloud API error (status code 500):
+  Server::InternalServerError` during the runtime destroy's `plan -destroy` refresh failed the final
+  chain.)
 
 ### Key entities
 Listing attempt, run record archive (`attempts/<n>/`), probe baseline, unreconciled probe run,
