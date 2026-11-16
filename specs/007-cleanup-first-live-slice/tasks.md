@@ -329,6 +329,20 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: `go -C tools test ./internal/live/ -run 'TestInventoryIDForms|TestComplexityRealTree|TestFilesOnlyWriter'` from the repository root (shim note as T033); `lz-offline --candidate <worktree> -- task check` CHECK_PASS.
   - Evidence: `evidence/T035.md`; initial status `not-run`.
 
+## Follow-up: ephemeral destroy retried after a transient failure (FR-014, from T032)
+
+- [ ] T036 [US1] Write FR-014's tests in tools/internal/live/chain_destroy_retry_test.go
+  - Requirements: FR-014; ADRs: 0008, 0024. Depends on: T032 (the finding).
+  - Fixed signature the tests may use (a stub, committed with T037, no behaviour before it): a field `destroyBackoff []time.Duration` on `laneRunner` (nil: the default 20 s, 60 s), waiting on `stateReadClock` like `stateReadBackoff`.
+  - Cases, on the chain's fake `tofu`: (1) given an ephemeral destroy whose `plan -destroy` fails once with `OVHcloud API error (status code 500)`, then it is retried, the destroy ends `ok`, one `LZ-LIVE retry destroy` line is printed and the run passes (exposes today's immediate fail); (2) given its apply fails once with a 503, then the retry runs init, `plan -destroy`, `show -json` and apply again with a new plan file (exposes re-applying a stale plan or skipping the guard); (3) given output carrying a 403, or a 404 and a 500 together, then no retry and the destroy fails at once (exposes a retried refusal); (4) given a 500 on every attempt, then the destroy fails after 3 attempts and the error names the attempt count; (5) given a wait that would leave less than the reserve before the destroy context's deadline, then the wait is not started, the destroy fails at once naming the refused wait, and the leftover check still runs (exposes a retry eating the check's time); (6) `live:destroy -- <instance>` retries in the same way (exposes a retry only on destroy-on-exit).
+  - Verify: `go -C tools test ./internal/live/ -run TestChainDestroyRetry` from the repository root (where mise shims refuse the worktree as the current directory, the same command with `-C <worktree>/tools` from `$HOME`): every case fails for its stated reason, failure lines in the evidence, except any that already holds (the evidence says which). The tests and the stub field stay uncommitted until T037 commits them with the fix, so every commit is green (AGENTS.md); the evidence records the patch's sha256. T036 commits its evidence only and runs no whole-tree gate.
+  - Evidence: `evidence/T036.md`; initial status `not-run`.
+
+- [ ] T037 [US1] Retry the chain's ephemeral destroy in tools/internal/live/chain.go
+  - Requirements: FR-014; ADRs: 0008, 0024. Depends on: T036.
+  - Verify: T036's tests green and committed with the change, the patch unchanged from T036's hash or each change listed under *Test changes*; the destroy captures `tofu`'s error output through the existing `readTofu` and judges it with the existing `transient`, and the waits go through the existing `retryBudget` (no second classifier or budget type); `go -C tools test ./internal/live/` green; `lz-offline --candidate <worktree> -- task check` CHECK_PASS (complexity and files-only-writer gates, no baseline raised); docs/how-to/run-the-first-slice.md's retry paragraph names the destroy retry and its line (checked by the task's review; `task check` runs the docs gate).
+  - Evidence: `evidence/T037.md`; initial status `not-run`.
+
 ## Dependencies & execution order
 - Spec 006 T022–T026 (PR #123) on `main` → T003, T004. T001 → T017, T018.
 - US1: T003, T004 → T006; T005, T006 → T007. US2: T007 → T008 → T009.

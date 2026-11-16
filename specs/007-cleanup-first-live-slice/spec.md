@@ -345,6 +345,21 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   `ovh_cloud_quota` and `ovh_cloud_project` are never listed. A run-created bucket then reads
   `match: inventory`, not `prefix` (evidence/T032.md, D132 B1).
 
+- **FR-014 Ephemeral destroy retried after a transient failure** — the chain's destroy of an
+  ephemeral instance (destroy-on-exit and `live:destroy -- <instance>`) is retried after a
+  transient failure, as the probe companion's destroy is (T095): a failure is transient only as the
+  existing classifier judges `tofu`'s captured error output (an HTTP 5xx, a token-fetch failure, a
+  reset or timed-out connection; any 4xx wins and is never retried). A retry runs the whole destroy
+  again (init, `plan -destroy`, the retained-resource guard, apply of the new plan): a saved plan is
+  never applied twice. At most two retries, 20 s and 60 s later, each printing one
+  `LZ-LIVE retry destroy <instance> in <wait>: transient failure (attempt <n> of 3)` line. The
+  destroys of one run share one retry budget ending at the destroy context's deadline: a wait is
+  started only if the reserve (at least 30 s, raised by each attempt's duration) is still left
+  after it, so the leftover check keeps its time; a refused wait fails that destroy at once and
+  says so. Any other failure, or the last attempt's, fails the destroy as today, and what it did not
+  destroy stays for `--cleanup`. (Evidence: run `20261116T120049Z-6301`, evidence/T032.md: an
+  OVHcloud 500 during the runtime destroy's refresh failed the final chain.)
+
 ### Key entities
 Listing attempt, run record archive (`attempts/<n>/`), probe baseline, unreconciled probe run,
 budget-alert probe check (observe, sweep), project alias refusal, two-tenant sandbox fixture,
