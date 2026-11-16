@@ -2341,3 +2341,31 @@ func bssStateModes(t *testing.T, h *bssHarness) {
 		}
 	}
 }
+
+// TestBootstrapStateOpenStateDirRefused: an account whose state/ others can read (lz2 before the
+// fix, 0755) fails the state phase before tofu runs, names the remedy, and is left as it was: the
+// lane reports an open mode, never tightens it (review F2, F4).
+func TestBootstrapStateOpenStateDirRefused(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	h.mustRun()
+	dir := h.accountPath("state")
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := h.run(false)
+	if err == nil {
+		t.Fatal("an open state/ was accepted")
+	}
+	bsWantStatus(t, rs, PhaseState, StatusFail)
+	r, _ := bsResult(rs, PhaseState)
+	if !strings.Contains(r.Detail, "0755") || !strings.Contains(r.Detail, "chmod 700 "+dir) {
+		t.Errorf("detail %q does not name the mode and the remedy", r.Detail)
+	}
+	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o755 {
+		t.Errorf("state/ was changed to %04o; want it reported, not tightened", fi.Mode().Perm())
+	}
+	for _, c := range h.runCalls() {
+		t.Errorf("tofu %s ran after the refusal", c.Cmd)
+	}
+}
