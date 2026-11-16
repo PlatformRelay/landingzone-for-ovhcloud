@@ -71,16 +71,19 @@ type chainResource struct {
 // ovh_cloud_project_user_s3_credential `access_key_id`, ovh_cloud_project_user_s3_policy
 // `user_id`, ovh_me_api_oauth2_client `client_id`, ovh_iam_policy `id`, ovh_me_identity_group
 // `name`, ovh_cloud_project_alerting `id`, ovh_cloud_project_network_private(_subnet) `id`;
-// ovh_iam_resource_tags holds the tag keys in `tags`. The states also hold the secrets the
-// provider keeps there (client and S3 secrets): the chain must keep them out of every output.
+// ovh_iam_resource_tags holds the tag keys in `tags`. The id of each resource (its inventory
+// entry) is the provider's id as run 20261116T120049Z-6301's inventory records it (spec 007
+// FR-013): a bucket's is <project>/<region>/<name> and an S3 policy's <project>/<user-id>, which
+// differ from the listed id; every other kind's is its listed id. The states also hold the secrets
+// the provider keeps there (client and S3 secrets): the chain must keep them out of every output.
 func chainResources() map[string][]chainResource {
 	urn := "urn:v1:eu:resource:publicCloudProject:" + laneProject
 	return map[string][]chainResource{
 		"account-bootstrap": {
-			{"module.bootstrap.module.state_backend.ovh_cloud_project_storage.this", tStorage, "lz2-bkt-state", map[string]any{"name": "lz2-bkt-state", "region": "GRA"}},
+			{"module.bootstrap.module.state_backend.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-bkt-state", map[string]any{"name": "lz2-bkt-state", "region": "GRA"}},
 			{`module.bootstrap.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4711", map[string]any{"id": "4711", "description": "lz2-account-platform-s3"}},
 			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_credential.s3["platform"]`, tCred, laneAccountAK, map[string]any{"user_id": "4711", "access_key_id": laneAccountAK, "secret_access_key": laneAccountSK}},
-			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, "4711", map[string]any{"user_id": "4711", "policy": "{}"}},
+			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, laneProject + "/4711", map[string]any{"user_id": "4711", "policy": "{}"}},
 		},
 		"account-governance": {
 			{"module.account_governance.module.identity.ovh_me_api_oauth2_client.platform_deployer", tClient, lanePlatformID, map[string]any{"client_id": lanePlatformID, "name": "lz2-platform-deployer", "client_secret": lanePlatformSecret}},
@@ -90,13 +93,13 @@ func chainResources() map[string][]chainResource {
 			{`module.account_governance.module.identity.ovh_me_identity_group.tenant["demo"]`, tGroup, "lz2-demo-deployers", map[string]any{"name": "lz2-demo-deployers"}},
 		},
 		"demo-state": {
-			{"module.tenant_state.module.state_backend.ovh_cloud_project_storage.this", tStorage, "lz2-demo-bkt-state", map[string]any{"name": "lz2-demo-bkt-state", "region": "GRA"}},
+			{"module.tenant_state.module.state_backend.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-demo-bkt-state", map[string]any{"name": "lz2-demo-bkt-state", "region": "GRA"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["tenant"]`, tUser, "4712", map[string]any{"id": "4712", "description": "lz2-demo-tenant-s3"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4713", map[string]any{"id": "4713", "description": "lz2-demo-platform-s3"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_credential.s3["tenant"]`, tCred, laneTenantAK, map[string]any{"user_id": "4712", "access_key_id": laneTenantAK, "secret_access_key": laneTenantSK}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_credential.s3["platform"]`, tCred, lanePlatformAK, map[string]any{"user_id": "4713", "access_key_id": lanePlatformAK, "secret_access_key": lanePlatformSK}},
-			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["tenant"]`, tS3Pol, "4712", map[string]any{"user_id": "4712", "policy": "{}"}},
-			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, "4713", map[string]any{"user_id": "4713", "policy": "{}"}},
+			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["tenant"]`, tS3Pol, laneProject + "/4712", map[string]any{"user_id": "4712", "policy": "{}"}},
+			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, laneProject + "/4713", map[string]any{"user_id": "4713", "policy": "{}"}},
 		},
 		"demo-dev-project": {
 			{"module.project.ovh_iam_resource_tags.project", tTags, urn, map[string]any{"id": urn, "urn": urn, "tags": map[string]string{"lz:org": "lz2", "lz:tenant": "demo", "lz2-retained-tag": "demo"}}},
@@ -107,7 +110,7 @@ func chainResources() map[string][]chainResource {
 			{"module.project_network.module.network.ovh_cloud_project_network_private_subnet.this", tSubnet, "sn-chain-58", nil},
 		},
 		"demo-dev-gra11-runtime": {
-			{"module.runtime.ovh_cloud_project_storage.this", tStorage, "lz2-demo-dev-gra11-bkt-runtime", nil},
+			{"module.runtime.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-demo-dev-gra11-bkt-runtime", nil},
 		},
 	}
 }
@@ -1074,10 +1077,24 @@ func TestChainDestroyGuard(t *testing.T) {
 				t.Errorf("the destroy plan of %s was never judged", refused)
 			}
 			chainDestroyedAfter(t, h, r, want, "fail")
-			if got := leftoverKeys(chainReport(t, r.runDir).Leftovers); !slices.Equal(got, leftoverKeys(expect)) {
+			rep := chainReport(t, r.runDir)
+			if got := leftoverKeys(rep.Leftovers); !slices.Equal(got, leftoverKeys(expect)) {
 				t.Errorf("leftovers %v, want exactly the refused stack's %v", got, leftoverKeys(expect))
 			}
+			// The refused stack's resources are in the run's inventory, so each reads inventory
+			// (FR-013: the runtime bucket is recorded as <project>/GRA/<name>, listed by its name).
+			chainMatchAll(t, rep.Leftovers, MatchInventory)
 		})
+	}
+}
+
+// chainMatchAll checks that every leftover reads match want.
+func chainMatchAll(t *testing.T, ls []Leftover, want string) {
+	t.Helper()
+	for _, l := range ls {
+		if l.Match != want {
+			t.Errorf("leftover %s %s: match %q, want %q (FR-013)", l.Type, l.ID, l.Match, want)
+		}
 	}
 }
 
@@ -1142,7 +1159,9 @@ func TestChainLeftovers(t *testing.T) {
 		var out []Leftover
 		for _, r := range res[id] {
 			if r.typ != tTags {
-				out = append(out, Leftover{Type: r.typ, ID: r.id})
+				// The report names a resource by its listed id (FR-013), the state attribute
+				// stateIDAttr names.
+				out = append(out, Leftover{Type: r.typ, ID: fmt.Sprint(r.values[stateIDAttr[r.typ]])})
 				continue
 			}
 			// A tag is listed by its key; only the slice-prefixed key is a candidate (review r1:

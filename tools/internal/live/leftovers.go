@@ -300,7 +300,7 @@ type Leftover struct {
 // a resource the run's inventory recorded reads inventory even when its name also carries the
 // prefix, which retained infrastructure shares (D132): prefix alone is the weakest reason.
 const (
-	MatchInventory = "inventory"       // the run's inventory recorded its (type, id)
+	MatchInventory = "inventory"       // the run's inventory recorded it (inventoryKey)
 	MatchRunID     = "run-id"          // its id, name or a tag value holds the run id
 	MatchPrefix    = "prefix"          // its name starts with the run's prefix
 	MatchBaseline  = "not-in-baseline" // a nameless kind absent from the probe's baseline
@@ -355,6 +355,22 @@ type item struct {
 	values        []string
 	parent        *item
 	project       string // the project of a nameless kind's resource (Before is one project's)
+	// scope is what the provider's id composes before the listed id, outermost first (spec 007
+	// FR-013): a bucket's project and region, an S3 policy's project; nil for every other kind.
+	scope []string
+}
+
+// inventoryKey is the (type, id) under which the run's inventory records the listed resource it:
+// the provider's id, its scope joined to its listed id by "/" (a bucket <project>/<region>/<name>,
+// an S3 policy <project>/<user-id>, as run 20261116T120049Z-6301 recorded them; spec 007 FR-013),
+// so a composed id matches only the item whose project and region agree. A kind the stateIDAttr
+// register does not name has no inventory form ("", never matched): the tags, whose one URN
+// lists as one item per key, are matched by run id and prefix only.
+func inventoryKey(it *item) string {
+	if _, ok := stateIDAttr[it.typ]; !ok {
+		return ""
+	}
+	return it.typ + "\x00" + strings.Join(append(slices.Clone(it.scope), it.id), "/")
 }
 
 // apiLister is the leftover check's read-only client of the OVHcloud API: the bearer token of the
@@ -901,9 +917,9 @@ func (l lister) record(typ string, raw ...json.RawMessage) {
 }
 
 // Check lists every kind and reconciles it with inv. A listed resource is a candidate when its
-// name starts with Prefix, its id, name or tag value holds RunID, its (type, id) is in the
-// inventory, or its parent is a candidate; a candidate is a leftover unless it (or, for a child,
-// its parent) is retained, or it is the exempt admin client or policy (by id).
+// name starts with Prefix, its id, name or tag value holds RunID, the inventory recorded it
+// (inventoryKey), or its parent is a candidate; a candidate is a leftover unless it (or, for a
+// child, its parent) is retained, or it is the exempt admin client or policy (by id).
 func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	rep := Report{Listings: map[string][]json.RawMessage{}}
 	var errs []string
@@ -979,7 +995,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 // that kind to the matching above.
 func (c LeftoverCheck) candidate(it *item, created map[string]bool) string {
 	switch {
-	case created[it.typ+"\x00"+it.id]:
+	case created[inventoryKey(it)]:
 		return MatchInventory
 	case c.RunID != "" && slices.ContainsFunc(append([]string{it.id, it.name}, it.values...), func(v string) bool { return strings.Contains(v, c.RunID) }):
 		return MatchRunID
@@ -1075,7 +1091,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 					return b.Name
 				})
 				for _, b := range bs {
-					add(&item{typ: tStorage, id: b.Name, name: b.Name})
+					add(&item{typ: tStorage, id: b.Name, name: b.Name, scope: []string{p.ID, r}})
 				}
 			}
 			if listed == 0 {
@@ -1152,7 +1168,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 					} else if *pol.Policy != "" {
 						raw, _ := json.Marshal(pol)
 						l.record(tS3Pol, raw)
-						add(&item{typ: tS3Pol, id: u.ID.String(), parent: usr})
+						add(&item{typ: tS3Pol, id: u.ID.String(), parent: usr, scope: []string{p.ID}})
 					}
 				}
 			}
