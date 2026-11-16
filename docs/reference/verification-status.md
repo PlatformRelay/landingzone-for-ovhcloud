@@ -14,7 +14,7 @@ references:
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go
     blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
-last_verified: 6a4ff84590664a5cf286257f89bd9d651c33dace
+last_verified: 75a7c0e4627e58dc46754035fef5926b6474a407
 ---
 
 # Verification status of the first slice
