@@ -202,6 +202,12 @@ func (r *stateRun) setup(ctx context.Context) error {
 	if r.api, err = newBearer(ctx, o.API, r.a.Admin); err != nil {
 		return r.fail(PhaseState, err.Error())
 	}
+	// The local backend would create state/ 0755 itself, and the live lane refuses an account
+	// whose state/ others can read (privateDir): it is made 0700 here, before tofu first runs, and
+	// an existing open one is reported rather than tightened.
+	if _, _, err = credentialDir(r.a.Dir, filepath.Join("state", bootstrapStateFile)); err != nil {
+		return r.fail(PhaseState, err.Error())
+	}
 	return nil
 }
 
@@ -250,6 +256,11 @@ func (r *stateRun) tofu(ctx context.Context, root string, extra map[string]strin
 	// After a stop, what is left of the child's process group (provider plugins) is killed, as the
 	// run core does (review r1).
 	killGroup(ctx, cmd)
+	if root == "bootstrap" {
+		if perr := pinPrivateFile(filepath.Join(r.a.Dir, "state", bootstrapStateFile)); perr != nil && err == nil {
+			err = perr
+		}
+	}
 	if err != nil {
 		return stdout.Bytes(), fmt.Errorf("tofu %s (%s): %v: %s", args[0], root, err, r.red.Redact(strings.TrimSpace(stderr.String())))
 	}
