@@ -90,6 +90,12 @@ type ApplyOptions struct {
 	// Deadline bounds plan, apply and destroy from their first step (0: DefaultDeadline; spec 006
 	// FR-001). The chain ignores it: ChainOptions.Deadline bounds the chain.
 	Deadline time.Duration
+	// destroyBackoff are the waits before the retries of an ephemeral destroy's planning steps
+	// (spec 007 FR-014; nil: 20 s, 60 s), and destroyClock the time those retries read and wait
+	// on (nil: stateReadClock in the chain, else the wall clock); both the chain and
+	// `live:destroy` pass them through runLane. Tests shorten the waits.
+	destroyBackoff []time.Duration
+	destroyClock   waitClock
 }
 
 func stageOf(m *stacks.Manifest, id string) (stacks.Instance, stacks.Stage, error) {
@@ -138,6 +144,12 @@ type laneRunner struct {
 	stateReadBackoff []time.Duration
 	stateReadClock   waitClock
 	listTook         time.Duration
+	// the ephemeral destroys' retries (planDestroy, spec 007 FR-014): their waits and clock
+	// (ApplyOptions.destroyBackoff, destroyClock, defaulted by destroyRetries) and the one retry
+	// budget the destroys of a run share, separate from the leftover check's.
+	destroyBackoff []time.Duration
+	destroyClock   waitClock
+	destroyBudget  *retryBudget
 	// chain only: the L7 assessments (nil: not judged) and why the assertions were not run.
 	assessments []Assessment
 	notRun      string

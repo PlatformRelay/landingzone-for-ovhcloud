@@ -5,11 +5,11 @@ references:
   - path: tools/cmd/lz-live/lane.go
     blob: 51fed2933b252eb2c4ae16776074378d9da69228
   - path: tools/internal/live/apply.go
-    blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
+    blob: 6e68a323ba750c06067d0fcefdcb8496bc50ad8f
   - path: tools/internal/live/bootstrap.go
     blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
-    blob: 6c758406b496573674b67bd0e1ede57e34bcef20
+    blob: 479dd134ab7c8122b45c026d95bea72b83432766
   - path: tools/internal/live/observe.go
     blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
   - path: stacks/deployments.yaml
@@ -421,6 +421,20 @@ outcomes and the known deviations into the evidence or PR, never the record itse
   instance's objects: check each one by hand before you re-run anything. No verb runs the leftover check on its
   own. Before you conclude that something was left behind, read `leftovers.json` and look by
   hand (below).
+- An ephemeral destroy, on exit and through `task live:destroy -- <instance>`, retries its
+  planning steps (`init`, `plan -destroy`, `show -json`) after a transient failure (a 5xx, a
+  token-fetch failure, a reset or timed-out connection; any 4xx wins), at most twice, 20 s and
+  60 s later, each retry printing one
+  `LZ-LIVE retry destroy <instance> in <wait>: transient failure (attempt <n> of 3)` line; the
+  guard judges every plan shown. A state-lock error, a failure with no output and an output that
+  filled the 1 MiB capture are not retried, and the lock is never forced. `apply` is never
+  retried: a failed apply fails the destroy, and what it did not destroy stays for `--cleanup`.
+  The destroys of one run share a retry budget of their own, separate from the leftover check's
+  and ending at the destroy-on-exit's time (or the `live:destroy` run's deadline): a wait is
+  taken only if the failed attempt's duration, 5 minutes and the baseline listing's duration are
+  still left after it, and a refused wait fails that destroy at once, naming it. A stop signal
+  does not cut a destroy-on-exit's wait short; a `live:destroy` wait ends when you stop the run
+  (spec 007 FR-014).
 - If an ephemeral destroy failed, run `task live:destroy` for that instance in the same session.
 - If a probe's destroy failed, run
   `task live:probe -- --reviewed-sha "$S" --cleanup <run-id>`. Its state and passphrase under

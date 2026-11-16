@@ -210,6 +210,9 @@ type laneStack struct {
 	// calls of ReadFail.Call ("init", or "show-state": `show -json` without a plan file) print
 	// their answer on stderr and exit 1.
 	ReadFail *laneReadFail `json:"read_fail,omitempty"`
+	// DestroyFail (007 FR-014, T036) makes steps of the stack's ephemeral destroy fail for a while
+	// (laneDestroyFault).
+	DestroyFail []laneDestroyFault `json:"destroy_fail,omitempty"`
 	// PlanSays (T006) is printed on the plan's stdout before its summary, one write per element
 	// with a pause between, so a text split across them usually reaches the run as two writes
 	// (pipe reads may still merge them; the redactor's hold-back has its own test);
@@ -225,6 +228,124 @@ const laneBearerHead, laneBearerTail = "<bearer-head>", "<bearer-tail>"
 type laneReadFail struct {
 	Call    string   `json:"call"`
 	Answers []string `json:"answers"`
+}
+
+// laneReadFault is the answer of the stack's ReadFail to this call of failing (`show -json`
+// without a plan file is "show-state"), and whether the call fails; every call of ReadFail.Call
+// is counted.
+func laneReadFault(log string, st laneStack, failing string, positional []string) (string, string, bool) {
+	rf := st.ReadFail
+	if rf == nil {
+		return "", "", false
+	}
+	name := failing
+	if name == "show-json" && len(positional) == 0 {
+		name = "show-state"
+	}
+	if name != rf.Call {
+		return "", "", false
+	}
+	if n := laneCount(log + ".readfail-" + st.ID); n < len(rf.Answers) {
+		return name, rf.Answers[n], true
+	}
+	return "", "", false
+}
+
+// laneCount returns how often the counter file was counted before and counts this call.
+func laneCount(counter string) int {
+	raw, _ := os.ReadFile(counter)
+	n, _ := strconv.Atoi(string(raw))
+	_ = os.WriteFile(counter, []byte(strconv.Itoa(n+1)), 0o600)
+	return n
+}
+
+// laneDestroyFault is a run of failing calls of one step of a stack's ephemeral destroy
+// (laneStack.DestroyFail, 007 FR-014): the first len(Answers) destroy calls of Call ("init",
+// "plan", "show-json" or "apply") print their answer on stderr and nothing else, not even the
+// echo every other call prints (an empty answer: a failure with no output), and exit 1. A
+// destroy call is a `plan -destroy`, a `show -json` or an apply of a `plan -destroy` file, or an
+// init of a stack whose state holds resources (in these harnesses only a destroy inits an
+// applied stack). Faults are counted per stack and per fault, so one fault can fail a step on
+// every attempt while another fails a later step once.
+type laneDestroyFault struct {
+	Call    string   `json:"call"`
+	Answers []string `json:"answers"`
+}
+
+// laneDestroyHit is a destroy call a fault fails: the step, its answer, and what the call log
+// records of it (the plan file a show or apply read, a plan's var files).
+type laneDestroyHit struct {
+	cmd, answer string
+	plan        struct {
+		lanePlanFile
+		path string
+	}
+	varFiles []string
+}
+
+// laneDestroyFaultOf is the stack's destroy fault for this call (args: the subcommand and its
+// arguments), and whether the call fails.
+func laneDestroyFaultOf(w laneWorld, st laneStack, args []string) (laneDestroyHit, bool) {
+	var hit laneDestroyHit
+	if len(st.DestroyFail) == 0 || len(args) == 0 {
+		return hit, false
+	}
+	hit.cmd = laneDestroyStep(w, st, &hit, args[0], args[1:])
+	for i, f := range st.DestroyFail {
+		if hit.cmd == "" || f.Call != hit.cmd {
+			continue
+		}
+		if n := laneCount(fmt.Sprintf("%s.destroyfail-%s-%d", w.Log, st.ID, i)); n < len(f.Answers) {
+			hit.answer = f.Answers[n]
+			return hit, true
+		}
+	}
+	return hit, false
+}
+
+// laneDestroyStep names the destroy step a call of sub is ("" when it is not a destroy call) and
+// fills what hit records of it.
+func laneDestroyStep(w laneWorld, st laneStack, hit *laneDestroyHit, sub string, rest []string) string {
+	switch sub {
+	case "init":
+		var s laneState
+		raw, err := os.ReadFile(filepath.Join(w.States, st.ID+".json"))
+		if err == nil && json.Unmarshal(raw, &s) == nil && !s.Empty {
+			return "init"
+		}
+	case "plan":
+		for _, a := range rest {
+			if v, ok := strings.CutPrefix(a, "-var-file="); ok {
+				hit.varFiles = append(hit.varFiles, v)
+			}
+		}
+		if slices.Contains(rest, "-destroy") {
+			return "plan"
+		}
+	case "show", "apply":
+		return laneDestroyFileStep(hit, sub, rest)
+	}
+	return ""
+}
+
+// laneDestroyFileStep names a show or apply call on a `plan -destroy` file ("show-json" or
+// "apply"; "" for any other call) and records the plan file in hit.
+func laneDestroyFileStep(hit *laneDestroyHit, sub string, rest []string) string {
+	if len(rest) == 0 {
+		return ""
+	}
+	hit.plan.path = rest[len(rest)-1]
+	raw, err := os.ReadFile(hit.plan.path)
+	if err != nil || json.Unmarshal(raw, &hit.plan.lanePlanFile) != nil || !hit.plan.Destroy {
+		return ""
+	}
+	if sub == "apply" {
+		return "apply"
+	}
+	if slices.Contains(rest, "-json") {
+		return "show-json"
+	}
+	return ""
 }
 
 // laneCreate is one resource an apply creates: one `apply_complete` event of `tofu apply -json`
@@ -346,6 +467,13 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		fmt.Fprintf(os.Stderr, "Error: "+format+"\n", a...)
 		return done(1)
 	}
+	// A destroy fault (T036) prints its answer alone: before the echo, so an empty answer is a
+	// failure with no output at all.
+	if f, hit := laneDestroyFaultOf(w, st, args); hit {
+		call.Cmd, call.Destroy, call.Plan, call.Nonce, call.VarFiles = f.cmd, f.cmd != "init", f.plan.path, f.plan.Nonce, f.varFiles
+		fmt.Fprint(os.Stderr, f.answer)
+		return done(1)
+	}
 	// Every call repeats its environment's secrets on both streams.
 	echo := fmt.Sprintf("fake-lane-tofu client_secret=%s s3=%s passphrase=%s\n",
 		os.Getenv("OVH_CLIENT_SECRET"), os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("TF_VAR_state_passphrase"))
@@ -392,21 +520,9 @@ func fakeLaneTofu(worldPath string, args []string) int {
 		call.Cmd = failing
 		return fail("fake %s failure of %s", failing, st.ID)
 	}
-	if rf := st.ReadFail; rf != nil {
-		name := failing
-		if name == "show-json" && len(positional) == 0 {
-			name = "show-state"
-		}
-		if name == rf.Call {
-			counter := w.Log + ".readfail-" + st.ID
-			raw, _ := os.ReadFile(counter)
-			n, _ := strconv.Atoi(string(raw))
-			_ = os.WriteFile(counter, []byte(strconv.Itoa(n+1)), 0o600)
-			if n < len(rf.Answers) {
-				call.Cmd = name
-				return fail("%s", rf.Answers[n])
-			}
-		}
+	if name, answer, hit := laneReadFault(w.Log, st, failing, positional); hit {
+		call.Cmd = name
+		return fail("%s", answer)
 	}
 	// Block (review r1): the call announces itself next to the log and waits for SIGINT, as tofu
 	// stops gracefully on it; a kill is never logged.
@@ -882,6 +998,18 @@ type laneHarness struct {
 	chainRun bool
 	term     bytes.Buffer
 	runs     int
+	// destroyBackoff and destroyClock are the run's ApplyOptions.destroyBackoff (nil: testBackoff,
+	// never the production default) and destroyClock (nil: the wall clock) (007 FR-014, T036).
+	destroyBackoff []time.Duration
+	destroyClock   waitClock
+}
+
+// destroyWaits is the destroy retries' backoff exec passes (T036).
+func (h *laneHarness) destroyWaits() []time.Duration {
+	if h.destroyBackoff == nil {
+		return testBackoff
+	}
+	return h.destroyBackoff
 }
 
 // newLaneHarness: a checkout copy (generated stacks and their stage, component and module
@@ -1410,7 +1538,8 @@ func (h *laneHarness) exec(verb, target string) (laneRun, map[string]string) {
 	applyStart := time.Now()
 	err := Apply(ctx, ApplyOptions{Verb: verb, Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
-		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI(), Deadline: h.deadline})
+		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: h.laneAPI(), Deadline: h.deadline,
+		destroyBackoff: h.destroyWaits(), destroyClock: h.destroyClock})
 	h.applyTook = time.Since(applyStart)
 	return laneRun{err: err, calls: h.logCalls()[from:], runDir: runDir, process: streams()}, before
 }

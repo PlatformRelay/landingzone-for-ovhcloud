@@ -5,11 +5,11 @@ references:
   - path: tools/cmd/lz-offline/limits.go
     blob: ca5bc42eb648870dc6776dc3e0b29b213cc8b33b
   - path: tools/internal/live/apply.go
-    blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
+    blob: 6e68a323ba750c06067d0fcefdcb8496bc50ad8f
   - path: tools/internal/live/bootstrap.go
     blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
-    blob: 6c758406b496573674b67bd0e1ede57e34bcef20
+    blob: 479dd134ab7c8122b45c026d95bea72b83432766
   - path: tools/internal/live/deadline.go
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go

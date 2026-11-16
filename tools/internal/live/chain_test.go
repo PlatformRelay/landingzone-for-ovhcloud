@@ -518,6 +518,19 @@ type chainExec struct {
 	wrapLister func(Lister) Lister
 	// destroyAt, when set, is the chain's destroyAt (T023; not with destroyAtBlock).
 	destroyAt chan struct{}
+	// destroyBackoff are the waits before an ephemeral destroy's retries (007 FR-014, T036; nil:
+	// testBackoff, never the production default); destroyClock is ApplyOptions.destroyClock (nil:
+	// the chain's default, the state reads' clock).
+	destroyBackoff []time.Duration
+	destroyClock   waitClock
+}
+
+// destroyWaits is the destroy retries' backoff the chain harness passes (T036).
+func (c chainExec) destroyWaits() []time.Duration {
+	if c.destroyBackoff == nil {
+		return testBackoff
+	}
+	return c.destroyBackoff
 }
 
 // chainDeadline is the deadline the chain harness runs under (never DefaultDeadline, T114):
@@ -767,7 +780,8 @@ func (h *laneHarness) chain(c chainExec) chainRun {
 	streams := laneCaptureStd(t)
 	err := Chain(ctx, ChainOptions{ApplyOptions: ApplyOptions{Target: target, Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
 		RunID: runID, RunDir: runDir, Records: h.recordsDir(), Revision: laneRevision, Tofu: filepath.Join(h.bin, "tofu"), Schemas: laneSchemas(),
-		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api},
+		Locks: laneLocks{inner: stacks.DirLocks(h.world.LockDir), log: h.world.Log, after: h.afterLock}, Store: h.store.open, Terminal: &h.term, API: api,
+		destroyBackoff: c.destroyWaits(), destroyClock: c.destroyClock},
 		Deadline: c.chainDeadline(), Signals: sigs, Lister: lister, Observer: observer, S3HTTP: h.chainS3(c), deadlineAt: c.deadlineAt(deadlineAt), destroyAt: destroyAtOpt,
 		childStarted: childStarted, stateReadBackoff: c.stateReadBackoff(), stateReadClock: c.clock})
 	process := streams()

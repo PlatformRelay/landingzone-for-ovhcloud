@@ -144,7 +144,7 @@
 43 tools/internal/live/apply_test.go TestBoundedApplyStopKeepsInventory
 18 tools/internal/live/apply_test.go TestBoundedRunContextDefaultDeadline
 15 tools/internal/live/apply_test.go TestBoundedVerbHangStops
-208 tools/internal/live/apply_test.go fakeLaneTofu
+201 tools/internal/live/apply_test.go fakeLaneTofu
 17 tools/internal/live/apply_test.go newLaneHarness
 19 tools/internal/live/binding_test.go TestBindingAllClassesBind
 19 tools/internal/live/bootstrap.go (*bootstrap).admin
