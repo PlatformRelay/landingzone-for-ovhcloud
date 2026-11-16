@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Account bootstrap, phases guard, identify, passphrase, admin and revoke (spec 005 FR-010,
@@ -162,7 +163,11 @@ func (b *bootstrap) run(ctx context.Context) (err error) {
 	}
 	if b.o.FreshAccount {
 		keys, kerr := b.readRootKeys()
-		if kerr != nil {
+		var short shortRootKey
+		switch {
+		case errors.As(kerr, &short):
+			return b.fail(PhaseIdentify, short.Error())
+		case kerr != nil:
 			return b.fail(PhaseIdentify, "root keys not entered")
 		}
 		b.red.Add(keys.secrets()...)
@@ -211,15 +216,37 @@ func configOutside(root, checkout string) error {
 	return nil
 }
 
+// rootKeyMin is far below any OVHcloud key (application keys have 16 characters, secrets and
+// consumer keys 32): it catches a stray keystroke or a paste that sent one character (lz2,
+// 2026-11-16) before the keys reach the API, without betting on an exact format.
+const rootKeyMin = 8
+
+// shortRootKey names the prompt and the length of a root key below rootKeyMin, never its value.
+type shortRootKey struct {
+	name string
+	n    int
+}
+
+func (e shortRootKey) Error() string {
+	unit := "characters"
+	if e.n == 1 {
+		unit = "character"
+	}
+	return fmt.Sprintf("the %s entered is %d %s long, want at least %d: nothing was sent; re-run and paste the whole key", e.name, e.n, unit, rootKeyMin)
+}
+
 func (b *bootstrap) readRootKeys() (RootKeys, error) {
 	var v [3]string
-	for i, prompt := range []string{"application key (AK): ", "application secret (AS): ", "consumer key (CK): "} {
-		s, err := b.o.Terminal.ReadSecret(prompt)
+	for i, name := range []string{"application key (AK)", "application secret (AS)", "consumer key (CK)"} {
+		s, err := b.o.Terminal.ReadSecret(name + ": ")
 		if err != nil {
 			return RootKeys{}, err
 		}
 		if v[i] = strings.TrimSpace(s); v[i] == "" {
 			return RootKeys{}, errors.New("empty")
+		}
+		if n := utf8.RuneCountInString(v[i]); n < rootKeyMin {
+			return RootKeys{}, shortRootKey{name: name, n: n}
 		}
 	}
 	return RootKeys{ak: v[0], as: v[1], ck: v[2]}, nil

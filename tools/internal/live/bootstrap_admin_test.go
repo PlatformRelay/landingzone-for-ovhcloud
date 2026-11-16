@@ -2638,3 +2638,31 @@ func TestBootstrapAdminHandOver(t *testing.T) {
 		}
 	})
 }
+
+// TestBootstrapRefusesShortRootKey: a root key far shorter than any OVHcloud key (a stray
+// keystroke, a paste that sent one character; lz2, 2026-11-16, a 1-character key) stops the run
+// before any API call, and the message names the prompt and the length, never the value.
+func TestBootstrapRefusesShortRootKey(t *testing.T) {
+	for i, prompt := range []string{"application key (AK)", "application secret (AS)", "consumer key (CK)"} {
+		t.Run(prompt, func(t *testing.T) {
+			h := newBSHarness(t)
+			k := h.api.rootKey(bsRootFirst)
+			v := []*string{&k.AK, &k.AS, &k.CK}
+			*v[i] = "V"
+			h.term.queueRoot(k)
+			from := len(h.api.Calls(0))
+			rs, err := h.run(true)
+			if err == nil {
+				t.Fatal("a 1-character root key was accepted")
+			}
+			bsWantStatus(t, rs, PhaseIdentify, StatusFail)
+			r, _ := bsResult(rs, PhaseIdentify)
+			if !strings.Contains(r.Detail, prompt) || !strings.Contains(r.Detail, "1 character") {
+				t.Errorf("detail %q does not name the prompt %q and the length", r.Detail, prompt)
+			}
+			if calls := h.api.Calls(from); len(calls) != 0 {
+				t.Errorf("%d API calls after a refused key, want none", len(calls))
+			}
+		})
+	}
+}
