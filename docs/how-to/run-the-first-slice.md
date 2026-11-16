@@ -21,7 +21,7 @@ references:
   - path: tests/live/probes/README.md
     blob: 61d42736bb1bf56e93907ba0fe34afe446689ce8
 verified_against: {task: "3.53", tofu: "1.13", ovhcloud: "0.15"}
-last_verified: 0a99eef2d82af8783612b0e9e210e7d9f4118032
+last_verified: dac91a80655799f3dd0839e5334b812ff5cbe285
 ---
 
 # Run the first slice on an OVHcloud account
