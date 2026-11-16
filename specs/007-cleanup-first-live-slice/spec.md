@@ -331,14 +331,18 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   is verified by a clean leftover check. A listing error in the record is not clean; the list says so.
 - **FR-012 Traceability** — `task check:specs` with no argument and CI's source check trace spec
   007; every requirement and task of this spec is traced through its `007/` registry keys.
-- **FR-013 Inventory ids compared as listed** — the leftover check compares a created resource's
-  inventory id with a listed resource in one form. Where the provider's id composes the listed id
-  with its project, region or parent (`ovh_cloud_project_storage` as `<project>/<region>/<name>`,
-  `ovh_cloud_project_user_s3_policy` as `<project>/<user-id>`, both as recorded in run
-  `20261116T120049Z-6301`), the listed resource matches only when every part agrees: a bucket of
-  the same name in another project or region is not the run's. Every kind of the kind matrix
-  declares its form. `ovh_iam_resource_tags`, whose one inventory URN lists as one item per tag key,
-  has none and is matched by run id and prefix only. A run-created bucket then reads
+- **FR-013 Inventory ids compared as listed** — the leftover check matches a created resource's
+  inventory id with a listed resource in the listed form. Where the provider's id composes the
+  listed id with its project, region or parent (`ovh_cloud_project_storage` as
+  `<project>/<region>/<name>`, `ovh_cloud_project_user_s3_policy` as `<project>/<user-id>`, as the
+  inventory of run `20261116T120049Z-6301` records them), the inventory id matches a listed item
+  only when every composing part agrees with that item's listing (its project and region): a
+  bucket of the same name in another project or region is not the run's. The listed form per kind
+  comes from one register, the one the retained side uses (`stateIDAttr`). Listed ids, the
+  report's `id`, the probe baseline and the retained lookup keep the listed form unchanged.
+  Every listed kind of the kind matrix has a form; `ovh_iam_resource_tags`, whose one inventory
+  URN lists as one item per tag key, has none and is matched by run id and prefix only;
+  `ovh_cloud_quota` and `ovh_cloud_project` are never listed. A run-created bucket then reads
   `match: inventory`, not `prefix` (evidence/T032.md, D132 B1).
 
 ### Key entities
