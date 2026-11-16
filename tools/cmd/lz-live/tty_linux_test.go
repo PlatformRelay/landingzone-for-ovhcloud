@@ -154,6 +154,49 @@ func TestBootstrapTerminalEcho(t *testing.T) {
 	}
 }
 
+// TestSecretPromptShowsReceipt (G2, FR-010; owner request 2026-11-16, a pasted key was rejected and
+// the hidden prompt gave no way to tell why): given a secret typed at a ReadSecret prompt / when
+// the line is read / then the prompt writer shows its length after trimming and, for a value of 12
+// or more characters, its last 4 characters, and never the value itself → exposes a receipt that
+// leaks the secret, counts the surrounding spaces readRootKeys drops, or is missing.
+func TestSecretPromptShowsReceipt(t *testing.T) {
+	cases := []struct {
+		typed, want, never string
+	}{
+		{"fakeRootSecret42\n", "received 16 characters, ending …et42\n", "fakeRootSecret42"},
+		{"  fakeRootSecret42 \t\n", "received 16 characters, ending …et42\n", "fakeRootSecret42"},
+		{"shortKey\n", "received 8 characters\n", "ortKey"},
+		{"\n", "received 0 characters\n", "ending"},
+	}
+	for _, c := range cases {
+		m, s := openPTY(t)
+		prompts := &promptWriter{t: t, tty: s}
+		term := newTTY(context.Background(), s, prompts)
+		done := make(chan error, 1)
+		go func() {
+			_, err := term.ReadSecret("application key (AK): ")
+			done <- err
+		}()
+		waitEcho(t, s, false)
+		if _, err := m.Write([]byte(c.typed)); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("ReadSecret(%q): %v", c.typed, err)
+		}
+		p := prompts.String()
+		if !strings.HasSuffix(p, c.want) {
+			t.Errorf("typed %q: prompt writer got %q, want it to end %q", c.typed, p, c.want)
+		}
+		if strings.Contains(p, c.never) {
+			t.Errorf("typed %q: prompt writer shows %q: %q", c.typed, c.never, p)
+		}
+		if shown := screen(m); strings.Contains(shown, strings.TrimSpace(c.typed)) && strings.TrimSpace(c.typed) != "" {
+			t.Errorf("typed %q: the secret was echoed: %q", c.typed, shown)
+		}
+	}
+}
+
 // promptWriter records each prompt with the terminal's echo state at the moment it is shown.
 type promptWriter struct {
 	t    *testing.T
