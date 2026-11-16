@@ -153,8 +153,12 @@ type swWorld struct {
 	// never created answers 404); s3Absent answers the S3 bucket names 404 on Swift (T025's
 	// observation); nativeAllow answers the other tenant's Swift-native container like the own
 	// one (default 403); createRefuse refuses a container create 403.
-	containers   map[string]swContainer
-	nextID       int
+	containers map[string]swContainer
+	nextID     int
+	// apiLag keeps a container the API deleted in the next apiLag listings (lz2, 2026-11-16:
+	// a listing right after the delete still showed both, a cleanup minutes later none).
+	apiLag       int
+	lagging      map[string]swLagging
 	s3Absent     bool
 	nativeAllow  bool
 	createRefuse bool
@@ -656,6 +660,16 @@ func (w *swWorld) containerAPI(rw http.ResponseWriter, r *http.Request, parts []
 			out = append(out, map[string]any{"id": c.ID, "name": c.Name, "region": c.Region, "archive": false,
 				"containerType": "private", "storedBytes": 0, "storedObjects": len(w.objects[c.Name])})
 		}
+		for _, id := range slices.Sorted(maps.Keys(w.lagging)) {
+			l := w.lagging[id]
+			out = append(out, map[string]any{"id": l.c.ID, "name": l.c.Name, "region": l.c.Region, "archive": false,
+				"containerType": "private", "storedBytes": 0, "storedObjects": 0})
+			if l.left--; l.left <= 0 {
+				delete(w.lagging, id)
+			} else {
+				w.lagging[id] = l
+			}
+		}
 		json.NewEncoder(rw).Encode(out)
 	case r.Method == http.MethodDelete && len(parts) == 2:
 		c, ok := w.containers[parts[1]]
@@ -670,6 +684,12 @@ func (w *swWorld) containerAPI(rw http.ResponseWriter, r *http.Request, parts []
 			if !w.apiKeep {
 				delete(w.containers, c.ID)
 				delete(w.objects, c.Name)
+				if w.apiLag > 0 {
+					if w.lagging == nil {
+						w.lagging = map[string]swLagging{}
+					}
+					w.lagging[c.ID] = swLagging{c: c, left: w.apiLag}
+				}
 			}
 			fmt.Fprint(rw, `null`)
 		}
@@ -2291,6 +2311,16 @@ func TestSwiftContainerUndo(t *testing.T) {
 		}
 		swKept(t, w, "undo", foreign)
 	})
+	t.Run("listing-lags", func(t *testing.T) {
+		w := newSwWorld(t)
+		w.apiLag = 2
+		w.mu.Lock()
+		w.addContainer(swContA, "GRA", swPrefix+"native-a")
+		w.mu.Unlock()
+		if _, err := run(t, w); err != nil {
+			t.Errorf("Undo = %v, want nil: the delete took, only the listing was behind", err)
+		}
+	})
 	t.Run("still-listed", func(t *testing.T) {
 		w := newSwWorld(t)
 		w.apiKeep = true
@@ -2505,3 +2535,12 @@ func TestSwiftNativeFakes(t *testing.T) {
 		t.Errorf("listing after the delete = %d %q, want []", st, b)
 	}
 }
+
+// swLagging is a deleted container the fake API still lists left more times.
+type swLagging struct {
+	c    swContainer
+	left int
+}
+
+// The probe's re-list waits are real seconds against the API; the fake answers at once.
+func init() { relistWait = 0 }
