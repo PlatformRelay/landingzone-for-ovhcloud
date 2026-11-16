@@ -293,7 +293,7 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: as T019: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` from the clean live clone; `baseline.json` before the apply; one alert created and read back; destroy, sweep and leftover check clean.
   - Evidence: `evidence/T031.md`; initial status `not-run`.
 
-- [ ] T032 [US5] Live, second window: the final chain over stacks/deployments.yaml on `lz2` (rerun of T022)
+- [x] T032 [US5] Live, second window: the final chain over stacks/deployments.yaml on `lz2` (rerun of T022) — closed 2026-11-16, evidence: evidence/T032.md
   - Requirements: FR-010, SC-002, SC-003; ADRs: 0024. Depends on: T031 (run or recorded as dropped) and spec 003 T044, each with a clean leftover check; T030.
   - Verify: as T022: before the start `state/probes/` holds no run directory; `mise exec -- task live:chain -- --reviewed-sha <sha> all` from the clean live clone passes apart from known deviations, with a clean leftover check; D132's B1 criteria are recorded for any create-wait failure.
   - Evidence: `evidence/T032.md`; initial status `not-run`.
