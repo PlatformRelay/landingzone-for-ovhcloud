@@ -43,9 +43,9 @@ default run has a 90-minute recovery allowance (window.md *Latest start*, verifi
 | # | Run | Who | Depends on | Creates | Status |
 |---|---|---|---|---|---|
 | 0 | Owner: `lz2` bootstrap (`bootstrap:account --fresh-account`) | owner | — | admin, state bucket (retained) | done 2026-11-16 at `873018d`, every phase `ran` |
-| 1 | T031: `task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` | coordinator | row 0; this file on `main` | one disposable budget alert | `not-run` |
-| 2 | spec 003 T044: `task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` | coordinator | row 1's leftover check clean | disposable bucket, S3 user, Swift container | `not-run` |
-| 3 | `retained.md` for this account from the latest run records, no API call | coordinator | rows 1–2 | nothing | `not-run` |
+| 1 | T031: `task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` | coordinator | row 0; this file on `main` | one disposable budget alert | pass 2026-11-16, run `20261116T105420Z-627f` (one refused start before it; `T031.md`) |
+| 2 | spec 003 T044: `task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` | coordinator | row 1's leftover check clean | disposable bucket, S3 user, Swift container | pass 2026-11-16, run `20261116T115812Z-a689` (a first run failed and was cleaned up; spec 003 `T044.md`) |
+| 3 | `retained.md` for this account from the latest run records, no API call | coordinator | rows 1–2 | nothing | done 2026-11-16: `retained-lz2.md`, no open blocker |
 | 4 | T032: `task live:chain -- --reviewed-sha <sha> all` | coordinator | row 3 with no open blocker; `state/probes/` empty | ephemeral instance, destroyed on exit | `not-run` |
 | 5 | Verification and cleanup until the leftover checks are clean; spend recorded | coordinator | row 4 | nothing | `not-run` |
 
