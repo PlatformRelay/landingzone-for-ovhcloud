@@ -238,9 +238,13 @@ func relistUntilGone(ctx context.Context, list func() ([]live.APIContainer, erro
 		if (err == nil && len(left) == 0) || try == relistTries {
 			return left, err
 		}
+		if cerr := ctx.Err(); cerr != nil {
+			return left, errors.Join(err, cerr)
+		}
 		select {
 		case <-ctx.Done():
-			return left, err
+			// Said, so a report tells a spent budget from a listing that lags (review F6).
+			return left, errors.Join(err, ctx.Err())
 		case <-time.After(wait):
 		}
 		wait *= 2

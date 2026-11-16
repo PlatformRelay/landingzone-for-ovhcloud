@@ -2544,3 +2544,21 @@ type swLagging struct {
 
 // The probe's re-list waits are real seconds against the API; the fake answers at once.
 func init() { relistWait = 0 }
+
+// TestRelistUntilGone: a listing that keeps showing the run's container is taken relistTries
+// times; a context already ended stops after the first and says so (review F3, F6).
+func TestRelistUntilGone(t *testing.T) {
+	still := []live.APIContainer{{ID: "c1", Name: swContA}}
+	n := 0
+	list := func() ([]live.APIContainer, error) { n++; return still, nil }
+	if left, err := relistUntilGone(context.Background(), list); len(left) != 1 || err != nil || n != relistTries {
+		t.Errorf("persisting: %d listings, left %v, err %v; want %d, the container, nil", n, left, err, relistTries)
+	}
+	n = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	left, err := relistUntilGone(ctx, list)
+	if n != 1 || len(left) != 1 || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: %d listings, left %v, err %v; want 1, the container, context.Canceled", n, left, err)
+	}
+}

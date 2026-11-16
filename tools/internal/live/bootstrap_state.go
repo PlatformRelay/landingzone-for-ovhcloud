@@ -199,13 +199,14 @@ func (r *stateRun) setup(ctx context.Context) error {
 		"OVH_ENDPOINT": r.a.Admin.Endpoint, "OVH_CLIENT_ID": r.a.Admin.ClientID, "OVH_CLIENT_SECRET": r.a.Admin.ClientSecret,
 		"TF_VAR_state_passphrase": pass["TF_VAR_state_passphrase"], "TF_VAR_lz_account_dir": r.a.Dir, "TF_VAR_state_project_id": r.project,
 	}
-	if r.api, err = newBearer(ctx, o.API, r.a.Admin); err != nil {
-		return r.fail(PhaseState, err.Error())
-	}
 	// The local backend would create state/ 0755 itself, and the live lane refuses an account
-	// whose state/ others can read (privateDir): it is made 0700 here, before tofu first runs, and
-	// an existing open one is reported rather than tightened.
+	// whose state/ others can read (privateDir): it is made 0700 here, before tofu first runs and
+	// before any network call, and an existing open one is reported rather than tightened.
 	if _, _, err = credentialDir(r.a.Dir, filepath.Join("state", bootstrapStateFile)); err != nil {
+		dir := filepath.Join(r.a.Dir, "state")
+		return r.fail(PhaseState, fmt.Sprintf("%v: check who could read it, then run chmod 700 %s and re-run (open modes are reported, never tightened)", err, dir))
+	}
+	if r.api, err = newBearer(ctx, o.API, r.a.Admin); err != nil {
 		return r.fail(PhaseState, err.Error())
 	}
 	return nil

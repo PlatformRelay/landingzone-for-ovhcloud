@@ -835,3 +835,43 @@ func TestFilesCredentialSetRemovesFlat(t *testing.T) {
 		})
 	}
 }
+
+// TestPinPrivateFile: a state file the local backend wrote 0666 less the umask becomes 0600, a
+// missing one is fine, and a symlink is refused without touching its target (review F1).
+func TestPinPrivateFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	open := filepath.Join(dir, "open")
+	if err := os.WriteFile(open, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if err := pinPrivateFile(open); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+	if fi, _ := os.Stat(open); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %04o, want 0600", fi.Mode().Perm())
+	}
+	if err := pinPrivateFile(filepath.Join(dir, "missing")); err != nil {
+		t.Errorf("missing file: %v, want nil", err)
+	}
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := pinPrivateFile(link); err == nil {
+		t.Error("a symlink was accepted")
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o644 {
+		t.Errorf("the symlink's target changed to %04o", fi.Mode().Perm())
+	}
+}
