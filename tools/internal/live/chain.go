@@ -649,7 +649,12 @@ func (r *laneRunner) prepare(ctx context.Context, in stacks.Instance) (*childEnv
 
 // stateIDAttr is, per provider type, the state attribute holding the id the listing reports
 // (provider docs, kb mirror terraform-provider-ovh/docs/resources; evidence/T046.md reading 5).
-// ovh_iam_resource_tags holds the listed tag keys in `tags`.
+// ovh_iam_resource_tags holds the listed tag keys in `tags`. The leftover check's inventory match
+// (inventoryKey, leftovers.go) reads this register only for whether a kind has an inventory form;
+// a kind whose provider id composes more than the listed id needs those composing parts set as
+// item.scope at its listing site: the bucket listing sets [project, region]
+// (<project>/<region>/<name>), the S3-policy listing sets [project] (<project>/<user-id>)
+// (spec 007 FR-013). A new composite kind added here without its scope never reads inventory.
 var stateIDAttr = map[string]string{tStorage: "name", tUser: "id", tCred: "access_key_id", tS3Pol: "user_id", tClient: "client_id",
 	tPolicy: "id", tGroup: "name", tAlert: "id", tNetwork: "id", tSubnet: "id"}
 

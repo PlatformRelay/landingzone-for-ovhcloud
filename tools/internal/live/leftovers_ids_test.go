@@ -147,7 +147,8 @@ func inv(typ, id string) InventoryEntry {
 // idBucket is the run's runtime bucket (run 20261116T120049Z-6301).
 const idBucket = "lz2-demo-dev-gra11-bkt-runtime"
 
-// TestInventoryIDForms runs T033's cases (1) to (5); case (6) is TestChainDestroyGuard's.
+// TestInventoryIDForms runs T033's cases (1) to (5) and T035's case (1); T033's case (6) is
+// TestChainDestroyGuard's.
 func TestInventoryIDForms(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -161,6 +162,7 @@ func TestInventoryIDForms(t *testing.T) {
 		{"s3-policy-other-project", idCaseS3PolicyOtherProject},
 		{"forms", idCaseForms},
 		{"tags-by-run-id", idCaseTags},
+		{"tags-key-equals-urn", idCaseTagsKeyEqualsURN},
 	} {
 		t.Run(c.name, c.run)
 	}
@@ -295,5 +297,22 @@ func idCaseTags(t *testing.T) {
 	rep := w.check([]InventoryEntry{inv(tTags, idURN(idProject))}, idProject)
 	if got := idMatch(rep, tTags, key); got != MatchRunID {
 		t.Errorf("tag key holding the run id: match %q, want %q", got, MatchRunID)
+	}
+}
+
+// T035 (1): a tag key equal to the inventory's URN still does not read inventory: tags have no
+// form, so the key is matched by run id and prefix only. A second key holding the run id proves
+// the tags were listed.
+func idCaseTagsKeyEqualsURN(t *testing.T) {
+	t.Parallel()
+	w := newIDWorld(t, idProject)
+	urn, runKey := idURN(idProject), "demo-run-"+idRun
+	w.tags(idProject, map[string]string{urn: "x", runKey: "x"})
+	rep := w.check([]InventoryEntry{inv(tTags, urn)}, idProject)
+	if got := idMatch(rep, tTags, runKey); got != MatchRunID {
+		t.Fatalf("tag key holding the run id: match %q, want %q (tags not listed?)", got, MatchRunID)
+	}
+	if got := idMatch(rep, tTags, urn); got == MatchInventory {
+		t.Errorf("tag key equal to the inventory URN: match %q, want no inventory match (FR-013: tags have no form)", got)
 	}
 }
