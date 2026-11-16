@@ -120,13 +120,33 @@ func (t *tty) ReadSecret(prompt string) (string, error) {
 	if err := setTermios(t.in.Fd(), quiet); err != nil {
 		return "", fmt.Errorf("terminal: echo not turned off: %w", err)
 	}
-	defer func() {
-		setTermios(t.in.Fd(), saved)
-		fmt.Fprintln(t.prompt) // the operator's Enter was not echoed either
-	}()
+	defer setTermios(t.in.Fd(), saved)
 	// Shown only once the echo is off, so an answer typed at once is not echoed.
 	fmt.Fprint(t.prompt, prompt)
-	return t.read()
+	s, err := t.read()
+	fmt.Fprintln(t.prompt) // the operator's Enter was not echoed either
+	if err == nil {
+		fmt.Fprintln(t.prompt, receipt(s))
+	}
+	return s, err
+}
+
+// receiptTailMin is the shortest value whose last receiptTail characters a receipt shows.
+const (
+	receiptTail    = 4
+	receiptTailMin = 12
+)
+
+// receipt says what a hidden prompt received, so the operator can compare it with the page the
+// key was copied from (owner request 2026-11-16): the length after trimming, as readRootKeys
+// trims, and the last 4 characters of a value of 12 or more. It goes to the prompt writer only,
+// never to stdout's LZ-LIVE lines or a run record.
+func receipt(s string) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) < receiptTailMin {
+		return fmt.Sprintf("received %d characters", len(r))
+	}
+	return fmt.Sprintf("received %d characters, ending …%s", len(r), string(r[len(r)-receiptTail:]))
 }
 
 // ReadLine reads one line with the echo as the terminal has it (on), discarding what was typed
