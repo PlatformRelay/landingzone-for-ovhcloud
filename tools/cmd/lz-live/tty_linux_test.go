@@ -161,12 +161,13 @@ func TestBootstrapTerminalEcho(t *testing.T) {
 // leaks the secret, counts the surrounding spaces readRootKeys drops, or is missing.
 func TestSecretPromptShowsReceipt(t *testing.T) {
 	cases := []struct {
-		typed, want, never string
+		typed, want string
+		never       []string // the value, one character past the tail, the head
 	}{
-		{"fakeRootSecret42\n", "received 16 characters, ending …et42\n", "fakeRootSecret42"},
-		{"  fakeRootSecret42 \t\n", "received 16 characters, ending …et42\n", "fakeRootSecret42"},
-		{"shortKey\n", "received 8 characters\n", "ortKey"},
-		{"\n", "received 0 characters\n", "ending"},
+		{"fakeRootSecret42\n", "received 16 characters, ending …et42\n", []string{"fakeRootSecret42", "ret42", "fake"}},
+		{"  fakeRootSecret42 \t\n", "received 16 characters, ending …et42\n", []string{"fakeRootSecret42", "ret42", "fake"}},
+		{"shortKey\n", "received 8 characters\n", []string{"shortKey", "Key", "short"}},
+		{"\n", "received 0 characters\n", []string{"ending"}},
 	}
 	for _, c := range cases {
 		m, s := openPTY(t)
@@ -188,8 +189,10 @@ func TestSecretPromptShowsReceipt(t *testing.T) {
 		if !strings.HasSuffix(p, c.want) {
 			t.Errorf("typed %q: prompt writer got %q, want it to end %q", c.typed, p, c.want)
 		}
-		if strings.Contains(p, c.never) {
-			t.Errorf("typed %q: prompt writer shows %q: %q", c.typed, c.never, p)
+		for _, n := range c.never {
+			if strings.Contains(p, n) {
+				t.Errorf("typed %q: prompt writer shows %q: %q", c.typed, n, p)
+			}
 		}
 		if shown := screen(m); strings.Contains(shown, strings.TrimSpace(c.typed)) && strings.TrimSpace(c.typed) != "" {
 			t.Errorf("typed %q: the secret was echoed: %q", c.typed, shown)

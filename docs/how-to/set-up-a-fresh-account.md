@@ -144,7 +144,8 @@ What the run asks and prints:
    After each, a line such as `received 16 characters, ending …et42` (the length after trimming
    spaces, and the last 4 characters of a value of 12 or more; `tools/cmd/lz-live/tty_linux.go`):
    compare it with the token page before you go on. A wrong count is a bad paste; press Ctrl-C and
-   start again, then delete the unused keys on the same page.
+   start again, then delete the unused keys on the same page. Run the bootstrap in a plain terminal:
+   do not pipe it through `tee` or record it with `script`, or the receipts are kept with the output.
 2. `LZ-LIVE identify bootstrap info moved the previous sandbox.env to accounts/<old account>/`.
 3. The new account's project list, then one prompt for each project reference:
    `LZ_PROJECT_ID_STATE` and `LZ_PROJECT_ID_DEMO_DEV`. Give the same project id for both: the
