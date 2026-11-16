@@ -660,8 +660,8 @@ func (r *laneRunner) planDestroy(ctx context.Context, child *childEnv, id, dir, 
 		}
 		wait := backoff[attempt]
 		if now := clk.Now(); !r.destroyBudget.admit(now, wait+now.Sub(start)) {
-			return fmt.Errorf("%w; destroy %s: a retry wait of %v refused, it would leave less than the time kept after it (5 min, the failed attempt and the baseline listing)",
-				err, id, wait)
+			return fmt.Errorf("%w; destroy %s: a retry wait of %v refused, it would leave less than the time kept after it (%v, the failed attempt and the baseline listing)",
+				err, id, wait, destroyRetryReserve)
 		}
 		fmt.Fprintf(r.term, "LZ-LIVE retry destroy %s in %v: transient failure (attempt %d of %d)\n", id, wait, attempt+2, total)
 		select {
