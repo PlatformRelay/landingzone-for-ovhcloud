@@ -39,3 +39,9 @@ The other listed objects are OVHcloud's own and are never candidates: policy `ov
 deployer client, policy, group or tenant bucket in the record). T032's `chain -- all` applies them
 and they stay: the rows R6–R18 of retained.md, with `lz2` in place of `lz`. T032's record confirms
 them, and its leftover check must show none of them as a leftover.
+
+**Confirmed by T032** (`20261116T121429Z-ecca`, leftover check `pass`): the record lists
+`lz2-demo-bkt-state`, `lz2-demo-s3u-state-platform`, `lz2-demo-s3u-state-tenant`,
+`lz2-sa-platform-deployer`, `lz2-pol-platform-deployer`, `lz2-demo-sa-deployer`,
+`lz2-demo-pol-deployer` and `lz2-demo-grp-tenant`; none is a leftover. No network, subnet or runtime
+bucket is left.
