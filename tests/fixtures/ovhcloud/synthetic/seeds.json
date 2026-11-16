@@ -349,7 +349,7 @@
      "stack": "probe",
      "address": "ovh_cloud_project_user_s3_policy.probe",
      "type": "ovh_cloud_project_user_s3_policy",
-     "id": "900"
+     "id": "p1/900"
     }
    ],
    "expect": [

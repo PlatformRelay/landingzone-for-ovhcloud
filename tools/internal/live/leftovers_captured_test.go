@@ -454,7 +454,8 @@ func capturedSeeds(p capturedProvenance, w syntheticWorld) map[string]syntheticS
 			pr + "/user":                    pages("[" + plainUser("4244") + "]"),
 			pr + "/user/4244/s3Credentials": pages(`[]`),
 			pr + "/user/4244/policy":        pages(`{"policy":"{\"Statement\":[]}"}`),
-		}, Inventory: []InventoryEntry{{Stack: "probe", Address: "ovh_cloud_project_user_s3_policy.p", Type: tS3Pol, ID: "4244"}},
+			// The provider's id of an S3 policy is <project>/<user-id> (spec 007 FR-013).
+		}, Inventory: []InventoryEntry{{Stack: "probe", Address: "ovh_cloud_project_user_s3_policy.p", Type: tS3Pol, ID: p.Project.ID + "/4244"}},
 			Expect: exp(tS3Pol, "4244")},
 		"oauth2-client": {Replace: map[string][]json.RawMessage{
 			"/me/api/oauth2/client":                     pages(`["` + p.Exempt.ClientID + `","EU.00000000000000a1"]`),
