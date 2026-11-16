@@ -323,6 +323,12 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: T033's tests green and committed with the change, the patch unchanged from T033's hash or each change listed under *Test changes*; `go -C tools test ./internal/live/` green, including the existing report, baseline and retained tests (listed ids unchanged); `lz-offline --candidate <worktree> -- task check` CHECK_PASS (complexity and files-only-writer gates included, no baseline raised); docs/how-to/run-the-first-slice.md's `match` paragraph says what `inventory` covers and names the tags exception (checked by the task's review; `task check` runs the docs gate). Known limit recorded in the evidence, not fixed: the retained lookup still matches buckets by name only.
   - Evidence: `evidence/T034.md`; initial status `not-run`.
 
+- [ ] T035 [US1] Branch-review fixes for FR-013 in tools/internal/live/leftovers_ids_test.go, tools/internal/live/chain.go and evidence/T034.md
+  - Requirements: FR-013; ADRs: 0008, 0024. Depends on: T034.
+  - Cases: (1) given a tags inventory entry whose URN equals a listed tag key, then that key does not read `inventory` (exposes an inventory match for tags, which the current tags case cannot, as its URN differs from the key); (2) a comment at `stateIDAttr` says a kind whose provider id is composite needs its composing parts set at its listing site, naming the bucket and S3-policy sites; (3) evidence/T034.md says the provider form was observed in every run record on the workstation (42 records, 39 bucket and 31 S3-policy ids, none bare; 2026-11-16) instead of "the provider never records" the listed form.
+  - Verify: `go -C tools test ./internal/live/ -run 'TestInventoryIDForms|TestComplexityRealTree|TestFilesOnlyWriter'` from the repository root (shim note as T033); `lz-offline --candidate <worktree> -- task check` CHECK_PASS.
+  - Evidence: `evidence/T035.md`; initial status `not-run`.
+
 ## Dependencies & execution order
 - Spec 006 T022–T026 (PR #123) on `main` → T003, T004. T001 → T017, T018.
 - US1: T003, T004 → T006; T005, T006 → T007. US2: T007 → T008 → T009.
