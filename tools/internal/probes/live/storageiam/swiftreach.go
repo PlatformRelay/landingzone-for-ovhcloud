@@ -221,6 +221,32 @@ func judgeStep(control, other, repeat SwiftAnswer, native SwiftControl) (observe
 	return blocked, whyBlocked(control, other, repeat)
 }
 
+// relistWait is the first pause before a container listing is taken again (doubling), and
+// relistTries the number of listings after the deletes. The API's listing can lag a delete it
+// already answered (lz2, 2026-11-16: both containers listed right after, none minutes later), so
+// only a container still listed after about 45 s counts as left.
+var relistWait = 3 * time.Second
+
+const relistTries = 5
+
+// relistUntilGone lists until nothing of the run's is listed, the tries run out or ctx ends; it
+// returns the last listing and its error.
+func relistUntilGone(ctx context.Context, list func() ([]live.APIContainer, error)) ([]live.APIContainer, error) {
+	wait := relistWait
+	for try := 1; ; try++ {
+		left, err := list()
+		if (err == nil && len(left) == 0) || try == relistTries {
+			return left, err
+		}
+		select {
+		case <-ctx.Done():
+			return left, err
+		case <-time.After(wait):
+		}
+		wait *= 2
+	}
+}
+
 // cleanContainers deletes, with the sandbox admin, the run's two Swift-native containers that a
 // listing of the project shows (by id, recursively), then lists again; either left, or a listing
 // or delete that fails, is an error naming the container. None of the run's listed (the create
@@ -254,7 +280,7 @@ func cleanContainers(ctx context.Context, admin *live.APIChecker, project, runID
 			removed++
 		}
 	}
-	left, err := list()
+	left, err := relistUntilGone(ctx, list)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("%s containers, listed again: %w", who, err))
 	}
