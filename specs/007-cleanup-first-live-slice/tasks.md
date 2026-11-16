@@ -288,7 +288,7 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: exempt — docs-only; the file states every limit of FR-010 and names who checks it.
   - Evidence: `evidence/window-lz2.md`; initial status `not-run`.
 
-- [ ] T031 [US3] Live, second window: the budget-alert probe with tests/live/probes/budget-alert/ on `lz2` (rerun of T019)
+- [x] T031 [US3] Live, second window: the budget-alert probe with tests/live/probes/budget-alert/ on `lz2` (rerun of T019) — closed 2026-11-16, evidence: evidence/T031.md
   - Requirements: FR-005, FR-006, FR-007, FR-008, FR-010, SC-002, SC-003; ADRs: 0006, 0024. Depends on: T030; T019's dependencies on `main` at a reviewed SHA.
   - Verify: as T019: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` from the clean live clone; `baseline.json` before the apply; one alert created and read back; destroy, sweep and leftover check clean.
   - Evidence: `evidence/T031.md`; initial status `not-run`.
