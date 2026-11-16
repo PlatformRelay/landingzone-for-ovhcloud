@@ -343,6 +343,7 @@ func (r *laneRunner) chain(ctx context.Context, c *ChainOptions, ids []string) (
 	budget := destroyBudget(deadline)
 	dctx, dcancel := destroyContext(ctx, budget, c.destroyAt)
 	defer dcancel()
+	r.destroyRetries(dctx)
 	var destroyErr error
 	for i := len(eph) - 1; i >= 0; i-- {
 		id := eph[i]
@@ -551,6 +552,7 @@ func (r *laneRunner) destroyOne(ctx context.Context) (err error) {
 		return err
 	}
 	defer removeTree(r.home)
+	r.destroyRetries(ctx)
 	fmt.Fprintf(r.term, "LZ-LIVE destroy %s start\n", o.Target)
 	if err := r.destroyStack(ctx, o.Target); err != nil {
 		fmt.Fprintf(r.term, "LZ-LIVE destroy %s fail\n", o.Target)
@@ -563,9 +565,11 @@ func (r *laneRunner) destroyOne(ctx context.Context) (err error) {
 // destroyStack destroys one ephemeral stack with its authority's credential, bound first: init,
 // `plan -destroy` to a file in the scratch HOME (it holds the root's variable values) with the
 // stack's consumed inputs, `show -json` of that file through protect.go, exactly that file applied;
-// then its record is removed, so the next selection picks it again. A retained instance is refused
-// before anything runs; that refusal, not protect.go (no retained set applies to an ephemeral
-// root), is what keeps a retained instance from being destroyed.
+// then its record is removed, so the next selection picks it again. The credential and the inputs
+// are prepared once; the planning steps are retried after a transient failure (planDestroy, spec
+// 007 FR-014); apply is never retried. A retained instance is refused before anything runs; that
+// refusal, not protect.go (no retained set applies to an ephemeral root), is what keeps a retained
+// instance from being destroyed.
 func (r *laneRunner) destroyStack(ctx context.Context, id string) (err error) {
 	o, m := r.o, r.o.Manifest
 	in, st, err := stageOf(m, id)
@@ -587,23 +591,13 @@ func (r *laneRunner) destroyStack(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := r.tofu(ctx, child, id, dir, r.term, initArgs...); err != nil {
-		return err
-	}
 	plan := filepath.Join(r.home, "destroy-"+id+".tfplan")
 	defer func() { err = errors.Join(err, removeFiles(plan)) }()
 	args := []string{"plan", "-destroy", "-input=false", "-out=" + plan}
 	for _, f := range inputs.Files {
 		args = append(args, "-var-file="+f)
 	}
-	if err := r.tofu(ctx, child, id, dir, r.term, args...); err != nil {
-		return err
-	}
-	var js bytes.Buffer
-	if err := r.tofu(ctx, child, id, dir, &js, "show", "-json", plan); err != nil {
-		return err
-	}
-	if err := Protect(js.Bytes(), nil); err != nil {
+	if err := r.planDestroy(ctx, child, id, dir, plan, args); err != nil {
 		return err
 	}
 	applied := &dropOutputs{w: r.term}
@@ -613,6 +607,107 @@ func (r *laneRunner) destroyStack(ctx context.Context, id string) (err error) {
 		return err
 	}
 	return RemoveRecord(o.Records, id)
+}
+
+// defaultDestroyBackoff are the waits before the second and third attempt of an ephemeral
+// destroy's planning steps (spec 007 FR-014).
+var defaultDestroyBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
+
+// destroyRetryReserve is the fixed part of what a destroy retry's wait must leave of the destroy
+// budget (spec 007 FR-014): an estimate for the apply, the remaining destroys, the trap and the
+// leftover check, beside the failed attempt's and the baseline listing's durations.
+const destroyRetryReserve = 5 * time.Minute
+
+// destroyRetries sets up the destroys' retries for a run whose destroys run under ctx: the waits,
+// the clock (the state reads' in the chain, else the wall clock) and one retry budget ending at
+// ctx's deadline (the destroy context's on exit, the run's for `live:destroy`; none: no wait
+// admitted), keeping destroyRetryReserve and the baseline listing's duration.
+func (r *laneRunner) destroyRetries(ctx context.Context) {
+	r.destroyBackoff, r.destroyClock = r.o.destroyBackoff, r.o.destroyClock
+	if r.destroyBackoff == nil {
+		r.destroyBackoff = defaultDestroyBackoff
+	}
+	if r.destroyClock == nil {
+		r.destroyClock = r.stateReadClock
+	}
+	if r.destroyClock == nil {
+		r.destroyClock = wallClock{}
+	}
+	end, _ := ctx.Deadline()
+	r.destroyBudget = newRetryBudget(end, destroyRetryReserve+r.listTook)
+}
+
+// planDestroy is destroyAttempt retried after a transient failure (spec 007 FR-014, evidence/T032.md
+// run 20261116T120049Z-6301): at most len(r.destroyBackoff) retries, each after its wait. A wait is
+// started only if r.destroyBudget admits it with the failed attempt's duration on top of its
+// reserve; a refused wait fails the destroy at once. Each retry prints one line naming the
+// instance, nothing of tofu's output. A wait ends early only when ctx does (on exit ctx is
+// detached from the run's stop signal).
+func (r *laneRunner) planDestroy(ctx context.Context, child *childEnv, id, dir, plan string, args []string) error {
+	backoff, clk := r.destroyBackoff, r.destroyClock
+	total := len(backoff) + 1
+	for attempt := 0; ; attempt++ {
+		start := clk.Now()
+		err := r.destroyAttempt(ctx, child, id, dir, plan, args)
+		if err == nil {
+			return nil
+		}
+		if attempt >= len(backoff) || ctx.Err() != nil || !retryableDestroy(err) {
+			if attempt > 0 {
+				err = fmt.Errorf("%w (attempt %d of %d)", err, attempt+1, total)
+			}
+			return err
+		}
+		wait := backoff[attempt]
+		if now := clk.Now(); !r.destroyBudget.admit(now, wait+now.Sub(start)) {
+			return fmt.Errorf("%w; destroy %s: a retry wait of %v refused, it would leave less than the time kept after it (5 min, the failed attempt and the baseline listing)",
+				err, id, wait)
+		}
+		fmt.Fprintf(r.term, "LZ-LIVE retry destroy %s in %v: transient failure (attempt %d of %d)\n", id, wait, attempt+2, total)
+		select {
+		case <-clk.After(wait):
+		case <-ctx.Done():
+			return errors.Join(err, context.Cause(ctx))
+		}
+	}
+}
+
+// destroyAttempt is one attempt of a destroy's planning steps: init, `plan -destroy` (args) writing
+// plan, `show -json` of that file judged by protect.go. Each step's stderr is kept for
+// retryableDestroy (readTofu).
+func (r *laneRunner) destroyAttempt(ctx context.Context, child *childEnv, id, dir, plan string, args []string) error {
+	if err := r.readTofu(ctx, child, id, dir, r.term, initArgs...); err != nil {
+		return err
+	}
+	if err := r.readTofu(ctx, child, id, dir, r.term, args...); err != nil {
+		return err
+	}
+	var js bytes.Buffer
+	if err := r.readTofu(ctx, child, id, dir, &js, "show", "-json", plan); err != nil {
+		return err
+	}
+	return Protect(js.Bytes(), nil)
+}
+
+// stateLockMarks are OpenTofu's state-lock errors (acquiring or releasing the lock), lowercased:
+// never transient, as a retry would contend for, or leave behind, a lock that is never forced.
+var stateLockMarks = []string{"error acquiring the state lock", "error releasing the state lock", "error locking state",
+	"error unlocking state", "failed to unlock state"}
+
+// retryableDestroy judges a failed destroy planning step (spec 007 FR-014): a tofu failure whose
+// captured stderr the classifier (transient) judges transient, except a capture that reached
+// errLimit (its end, maybe a 4xx, is lost), a failure with no captured output and a state-lock
+// error. Anything that is not a tofu failure (the guard's refusal) is never retried.
+func retryableDestroy(err error) bool {
+	var f *tofuFailure
+	if !errors.As(err, &f) || len(f.output) >= errLimit || strings.TrimSpace(f.output) == "" {
+		return false
+	}
+	low := strings.ToLower(f.output)
+	if slices.ContainsFunc(stateLockMarks, func(m string) bool { return strings.Contains(low, m) }) {
+		return false
+	}
+	return transient(f.output)
 }
 
 // prepare loads and binds a stack's credential and returns its child environment, root directory

@@ -5,7 +5,7 @@ references:
   - path: tools/cmd/lz-live/probe.go
     blob: 7ff15ddec9934b5d0edb552b053ecdd4e4ffb70b
   - path: tools/internal/live/apply.go
-    blob: 8960463e6b9aa9b86917f237aa969ab2cfda9ae3
+    blob: 6e68a323ba750c06067d0fcefdcb8496bc50ad8f
   - path: Taskfile.yml
     blob: 8ce5ea0598855c9821fd40636e3e51ee05ea1f19
 verified_against: {task: "3.53", tofu: "1.13"}
