@@ -2369,3 +2369,24 @@ func TestBootstrapStateOpenStateDirRefused(t *testing.T) {
 		t.Errorf("tofu %s ran after the refusal", c.Cmd)
 	}
 }
+
+// TestBootstrapStateOpenAccountDirRemedy: when the open directory is the account's own, the
+// remedy names that directory, not state/ (re-review N1): chmod on state/ would not fix it.
+func TestBootstrapStateOpenAccountDirRemedy(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	h.mustRun()
+	acct := h.accountPath("")
+	acct = filepath.Clean(acct)
+	if err := os.Chmod(acct, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(acct, 0o700) })
+	_, err := h.run(false)
+	if err == nil {
+		t.Fatal("an open account directory was accepted")
+	}
+	if msg := err.Error(); strings.Contains(msg, "chmod 700 "+filepath.Join(acct, "state")) {
+		t.Errorf("the remedy names state/ for an open account directory: %s", msg)
+	}
+}
