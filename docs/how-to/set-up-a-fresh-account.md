@@ -2,6 +2,8 @@
 references:
   - path: tools/internal/live/bootstrap.go
     blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
+  - path: tools/cmd/lz-live/tty_linux.go
+    blob: 33ff331275136df44640e0e2670f2768c69ec75d
   - path: tools/cmd/lz-live/bootstrap.go
     blob: feda64aa61134e79c189b1ece984ff607ae356a3
   - path: tools/internal/live/files.go
@@ -9,7 +11,7 @@ references:
   - path: tools/internal/stacks/adapter.go
     blob: 353a4b6b62176345db1a9466df79988f980dd6a4
 verified_against: {task: "3.53"}
-last_verified: fce4bb5b4b9a46e9c08d33173b79642faa91ecae
+last_verified: 5338849129a0725771003e5bb53e738937fc42c8
 ---
 
 # Set up a fresh OVHcloud account
@@ -139,6 +141,10 @@ MISE_ENV=live mise exec -- task bootstrap:account -- --reviewed-sha "$S" --fresh
 What the run asks and prints:
 
 1. Three prompts with echo off: application key (AK), application secret (AS), consumer key (CK).
+   After each, a line such as `received 16 characters, ending …et42` (the length after trimming
+   spaces, and the last 4 characters of a value of 12 or more; `tools/cmd/lz-live/tty_linux.go`):
+   compare it with the token page before you go on. A wrong count is a bad paste; press Ctrl-C and
+   start again, then delete the unused keys on the same page.
 2. `LZ-LIVE identify bootstrap info moved the previous sandbox.env to accounts/<old account>/`.
 3. The new account's project list, then one prompt for each project reference:
    `LZ_PROJECT_ID_STATE` and `LZ_PROJECT_ID_DEMO_DEV`. Give the same project id for both: the
