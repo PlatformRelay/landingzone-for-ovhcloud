@@ -292,7 +292,18 @@ type Leftover struct {
 	// Before marks a leftover the chain's baseline record listed (there before the run's first
 	// apply, T047); it never decides whether a resource is a leftover.
 	Before bool `json:"before_run,omitempty"`
+	// Match is why the resource was taken for the run's (D132 B1): one of the Match* values.
+	Match string `json:"match"`
 }
+
+// The reasons a listed resource is a candidate, in the order candidate tries them.
+const (
+	MatchPrefix    = "prefix"          // its name starts with the run's prefix
+	MatchRunID     = "run-id"          // its id, name or a tag value holds the run id
+	MatchInventory = "inventory"       // the run's inventory recorded its (type, id)
+	MatchBaseline  = "not-in-baseline" // a nameless kind absent from the probe's baseline
+	MatchParent    = "parent"          // its parent is a candidate
+)
 
 // Report is the outcome of a leftover check: "pass" only with no leftover and no error.
 type Report struct {
@@ -929,7 +940,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 			retained[typ+"\x00"+id] = true
 		}
 	}
-	candidate := func(it *item) bool { return c.candidate(it, created) }
+	candidate := func(it *item) string { return c.candidate(it, created) }
 	var isRetained func(*item) bool
 	isRetained = func(it *item) bool {
 		if it.parent != nil {
@@ -938,7 +949,8 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		return retained[it.typ+"\x00"+it.id]
 	}
 	for _, it := range items {
-		if !candidate(it) || isRetained(it) {
+		match := candidate(it)
+		if match == "" || isRetained(it) {
 			continue
 		}
 		if it.typ == tClient && c.Exempt.ClientID != "" && it.id == c.Exempt.ClientID {
@@ -947,7 +959,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		if it.typ == tPolicy && c.Exempt.PolicyID != "" && it.id == c.Exempt.PolicyID {
 			continue
 		}
-		rep.Leftovers = append(rep.Leftovers, Leftover{Type: it.typ, ID: it.id, Name: it.name})
+		rep.Leftovers = append(rep.Leftovers, Leftover{Type: it.typ, ID: it.id, Name: it.name, Match: match})
 	}
 	rep.Errors = errs
 	rep.Outcome = "pass"
@@ -957,26 +969,31 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	return rep
 }
 
-// candidate reports whether a listed resource may be the run's: its name starts with Prefix, its
+// candidate names why a listed resource may be the run's ("" when it may not): its name starts with Prefix, its
 // id, name or a tag value holds RunID, it is in the inventory (created), or its parent is a
 // candidate. For a nameless kind for which Before has an entry (a probe's baseline, spec 007
 // FR-006) an id of beforeProject absent from that entry is a candidate and one in it is not;
 // Before never decides a named kind or another project's resource, and nil or no entry leaves
 // that kind to the matching above.
-func (c LeftoverCheck) candidate(it *item, created map[string]bool) bool {
-	if c.Prefix != "" && strings.HasPrefix(it.name, c.Prefix) {
-		return true
-	}
-	if c.RunID != "" && slices.ContainsFunc(append([]string{it.id, it.name}, it.values...), func(v string) bool { return strings.Contains(v, c.RunID) }) {
-		return true
-	}
-	if created[it.typ+"\x00"+it.id] {
-		return true
+func (c LeftoverCheck) candidate(it *item, created map[string]bool) string {
+	switch {
+	case c.Prefix != "" && strings.HasPrefix(it.name, c.Prefix):
+		return MatchPrefix
+	case c.RunID != "" && slices.ContainsFunc(append([]string{it.id, it.name}, it.values...), func(v string) bool { return strings.Contains(v, c.RunID) }):
+		return MatchRunID
+	case created[it.typ+"\x00"+it.id]:
+		return MatchInventory
 	}
 	if ids, ok := c.Before[it.typ]; ok && slices.Contains(namelessKinds, it.typ) && (c.beforeProject == "" || it.project == c.beforeProject) {
-		return !slices.Contains(ids, it.id)
+		if slices.Contains(ids, it.id) {
+			return ""
+		}
+		return MatchBaseline
 	}
-	return it.parent != nil && c.candidate(it.parent, created)
+	if it.parent != nil && c.candidate(it.parent, created) != "" {
+		return MatchParent
+	}
+	return ""
 }
 
 // listContainers lists the project's Swift containers (GET /cloud/project/{serviceName}/storage,
