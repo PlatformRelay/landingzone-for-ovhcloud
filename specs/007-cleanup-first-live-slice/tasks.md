@@ -282,7 +282,7 @@ Independent test: V005. Every live task here is run by the coordinator under D11
 
 Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The closed lines T019 and T022 and their evidence stay as the record of the first window. Run by the coordinator under the second-account extension (AGENTS.md *Second account*); spend about 5 € of voucher, 0 € card, no new start below 20 € remaining (D135, carrying D119).
 
-- [ ] T030 Record the second window's plan in specs/007-cleanup-first-live-slice/evidence/window-lz2.md before its first live run
+- [x] T030 Record the second window's plan in specs/007-cleanup-first-live-slice/evidence/window-lz2.md before its first live run — closed 2026-11-16, evidence: evidence/window-lz2.md
   - Requirements: FR-010; ADRs: 0019, 0024. Depends on: T018; the owner's credit reading for `lz2` (voucher amount and expiry).
   - Scope: as T018 for the new account: the runs T031, spec 003 T044 and T032 in that order, cut-offs from the voucher expiry, the floor and the ceiling, each marked "coordinator procedure, no sensor" or "lz-live host guard".
   - Verify: exempt — docs-only; the file states every limit of FR-010 and names who checks it.
