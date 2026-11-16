@@ -9,12 +9,12 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
-    blob: c10e5cb1cbd24317bf1508e70bffeb990a7dc92a
+    blob: 6c758406b496573674b67bd0e1ede57e34bcef20
   - path: tools/internal/live/deadline.go
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go
     blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
-last_verified: 75a7c0e4627e58dc46754035fef5926b6474a407
+last_verified: 0a99eef2d82af8783612b0e9e210e7d9f4118032
 ---
 
 # Verification status of the first slice
