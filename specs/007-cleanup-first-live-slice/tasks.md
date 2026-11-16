@@ -278,6 +278,26 @@ Independent test: V005. Every live task here is run by the coordinator under D11
   - Verify: `task test:live-lane`: a cleanup beside a held start lock is refused naming the run, and a start beside a held cleanup lock likewise; a lock left by a dead process is taken over, one held by a live process is not; an empty claim is retired by plain `--cleanup` and a claim with any other file is not; the unreconciled-run refusal names the cleanup. Mutation proof on the changed lines.
   - Evidence: `evidence/T029.md`; initial status `not-run`.
 
+### Second live window, account `lz2` (D135)
+
+Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The closed lines T019 and T022 and their evidence stay as the record of the first window. Run by the coordinator under the second-account extension (AGENTS.md *Second account*); spend about 5 € of voucher, 0 € card, no new start below 20 € remaining (D135, carrying D119).
+
+- [ ] T030 Record the second window's plan in specs/007-cleanup-first-live-slice/evidence/window-lz2.md before its first live run
+  - Requirements: FR-010; ADRs: 0019, 0024. Depends on: T018; the owner's credit reading for `lz2` (voucher amount and expiry).
+  - Scope: as T018 for the new account: the runs T031, spec 003 T044 and T032 in that order, cut-offs from the voucher expiry, the floor and the ceiling, each marked "coordinator procedure, no sensor" or "lz-live host guard".
+  - Verify: exempt — docs-only; the file states every limit of FR-010 and names who checks it.
+  - Evidence: `evidence/window-lz2.md`; initial status `not-run`.
+
+- [ ] T031 [US3] Live, second window: the budget-alert probe with tests/live/probes/budget-alert/ on `lz2` (rerun of T019)
+  - Requirements: FR-005, FR-006, FR-007, FR-008, FR-010, SC-002, SC-003; ADRs: 0006, 0024. Depends on: T030; T019's dependencies on `main` at a reviewed SHA.
+  - Verify: as T019: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/budget-alert` from the clean live clone; `baseline.json` before the apply; one alert created and read back; destroy, sweep and leftover check clean.
+  - Evidence: `evidence/T031.md`; initial status `not-run`.
+
+- [ ] T032 [US5] Live, second window: the final chain over stacks/deployments.yaml on `lz2` (rerun of T022)
+  - Requirements: FR-010, SC-002, SC-003; ADRs: 0024. Depends on: T031 (run or recorded as dropped) and spec 003 T044, each with a clean leftover check; T030.
+  - Verify: as T022: before the start `state/probes/` holds no run directory; `mise exec -- task live:chain -- --reviewed-sha <sha> all` from the clean live clone passes apart from known deviations, with a clean leftover check; D132's B1 criteria are recorded for any create-wait failure.
+  - Evidence: `evidence/T032.md`; initial status `not-run`.
+
 ## Final phase: Polish
 
 - [x] T024 Record spec 007's state in specs/README.md and specs/007-cleanup-first-live-slice/spec.md — closed 2026-10-25 (T023 still the owner's), evidence: evidence/T024.md

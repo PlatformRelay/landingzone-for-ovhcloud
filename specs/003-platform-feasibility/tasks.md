@@ -419,6 +419,11 @@ apply to T040.
   - Verify: `task docs:check` green; `task test:traceability` green.
   - Evidence: `specs/003-platform-feasibility/evidence/T043.md`; initial status `not-run`.
 
+- [ ] T044 [US2] Live run, second window (D135): the swift-reach probe with tests/live/probes/swift-reach/ on account `lz2` (rerun of T042)
+  - Requirements: FR-005 (C005.1), FR-006 (C006.4, C006.5); ADRs: 0004, 0009, 0018. Depends on: T041 on `main` at a reviewed SHA; spec 007 T030 (the second window's plan).
+  - Verify: as T042: `mise exec -- task live:probe -- --reviewed-sha <sha> tests/live/probes/swift-reach` from the clean live clone, within the second-account extension's bounds; the Swift-native control and each S3-bucket step recorded; leftover check clean.
+  - Evidence: `specs/003-platform-feasibility/evidence/T044.md`; initial status `not-run`.
+
 ## Planned command creators
 
 | Task target | Creating task |
