@@ -1,17 +1,17 @@
 ---
 references:
   - path: tools/internal/live/bootstrap.go
-    blob: 60d561756d64e3d1b45349988d4856f5406b7b2f
+    blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/cmd/lz-live/tty_linux.go
     blob: 33ff331275136df44640e0e2670f2768c69ec75d
   - path: tools/cmd/lz-live/bootstrap.go
     blob: feda64aa61134e79c189b1ece984ff607ae356a3
   - path: tools/internal/live/files.go
-    blob: 8a69d9f50fc140a8e11ef02b4f94bd377c0583c2
+    blob: f06ef5ed4a6df5fdcb89ba41174d21138f830f1b
   - path: tools/internal/stacks/adapter.go
     blob: 353a4b6b62176345db1a9466df79988f980dd6a4
 verified_against: {task: "3.53"}
-last_verified: 5338849129a0725771003e5bb53e738937fc42c8
+last_verified: 6a4ff84590664a5cf286257f89bd9d651c33dace
 ---
 
 # Set up a fresh OVHcloud account
@@ -146,6 +146,8 @@ What the run asks and prints:
    compare it with the token page before you go on. A wrong count is a bad paste; press Ctrl-C and
    start again, then delete the unused keys on the same page. Run the bootstrap in a plain terminal:
    do not pipe it through `tee` or record it with `script`, or the receipts are kept with the output.
+   A key shorter than 8 characters stops the run before anything is sent (`identify bootstrap fail
+   the … entered is 1 character long, want at least 8`); re-run and paste the whole key.
 2. `LZ-LIVE identify bootstrap info moved the previous sandbox.env to accounts/<old account>/`.
 3. The new account's project list, then one prompt for each project reference:
    `LZ_PROJECT_ID_STATE` and `LZ_PROJECT_ID_DEMO_DEV`. Give the same project id for both: the
@@ -153,6 +155,10 @@ What the run asks and prints:
 4. One `LZ-LIVE <phase> bootstrap <status>` line per phase: `guard`, `identify`, `passphrase`,
    `admin`, `state`, `publish`, `verify`, and `revoke` last. On a first run, each one after
    `guard` should read `ran`.
+   The `state` phase keeps `accounts/<new account>/state/` at 0700 and its state file at 0600, as
+   the live lane requires. An account bootstrapped before that may have an open `state/`: the phase
+   then fails before any network call and names the `chmod 700 <dir>` to run; it never tightens
+   the mode itself.
 
 If it stops, the runbook's [fresh-account steps](run-the-first-slice.md#a-fresh-account-migration)
 (step 5) say whether to re-run with or without `--fresh-account`. A bucket name that is already
