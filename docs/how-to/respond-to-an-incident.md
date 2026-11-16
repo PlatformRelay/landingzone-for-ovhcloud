@@ -156,7 +156,8 @@ resource no run created.
    ([Run the chain](run-the-first-slice.md#run-the-chain), exit code table).
 2. Read the run record ([Read a run record](run-the-first-slice.md#read-a-run-record)). For a
    chain, read `leftovers.json`: a leftover, a listing error, or `blocked waiting-for=…`.
-   `before_run` marks what was there before the run.
+   `before_run` marks what was there before the run; `match` says why an item was taken for the
+   run's (`inventory` is the run's own record; `prefix` alone can be retained infrastructure).
 3. Clean up by the existing procedure
    ([Clean up and check for leftovers](run-the-first-slice.md#clean-up-and-check-for-leftovers)):
    - An ephemeral destroy failed: `task live:destroy -- --reviewed-sha "$S" <instance>`.

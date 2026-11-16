@@ -383,7 +383,7 @@ What a run writes depends on the verb:
 | --- | --- |
 | `run.json` | `plan`, `apply`, `destroy` only: `run_id`, `verb`, `instances`, `deadline_seconds`, `outcome` (`pass`, `fail`, `blocked`), `reviewed_sha` |
 | `summary.json` | `outcome` (`pass`, `fail`, `blocked`), `deadline`, `known_deviations` (e.g. `["KD-1"]`), `assertions` (one `{assertion, outcome, deviation, detail}` each, `not-run` with a reason when the chain did not judge it) |
-| `leftovers.json` | the leftover check: every leftover and every listing error; `before_run` marks what the baseline already listed |
+| `leftovers.json` | the leftover check: every leftover and every listing error; `before_run` marks what the baseline already listed; `match` says why each was taken for the run's, strongest evidence first: `inventory` (the run recorded it), `run-id`, `prefix` (name only; retained infrastructure shares it), `not-in-baseline`, `parent` |
 | `baseline.json`, `listings-before/<kind>.json` | the chain's listings before its first apply |
 | `listings/<kind>.json` | the final listings, one file per kind |
 | `observations.json` | the raw L7 observations and the subjects the manifest requires (`chain -- all` only) |

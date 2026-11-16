@@ -25,6 +25,11 @@ func TestLeftoverMatchReason(t *testing.T) {
 		{"absent from the baseline", &item{typ: tAlert, id: "alert-new"}, MatchBaseline},
 		{"parent", &item{typ: tCred, id: "u-1", name: "user", parent: parent}, MatchParent},
 		{"in the baseline", &item{typ: tAlert, id: "alert-before"}, ""},
+		// Several rules match: the strongest evidence wins (review F1). A chain's prefix is shared
+		// with retained infrastructure, so a recorded resource must not read prefix.
+		{"inventory over prefix", &item{typ: tNetwork, id: "pn-7", name: "lzprobe-net"}, MatchInventory},
+		{"inventory over run id", &item{typ: tNetwork, id: "pn-7", name: "net-" + run}, MatchInventory},
+		{"run id over prefix", &item{typ: tStorage, id: "b", name: "lzprobe-" + run}, MatchRunID},
 		{"nothing", &item{typ: tStorage, id: "backups", name: "backups"}, ""},
 	} {
 		if got := c.candidate(tc.it, created); got != tc.want {

@@ -296,11 +296,13 @@ type Leftover struct {
 	Match string `json:"match"`
 }
 
-// The reasons a listed resource is a candidate, in the order candidate tries them.
+// The reasons a listed resource is a candidate. candidate tries them strongest evidence first, so
+// a resource the run's inventory recorded reads inventory even when its name also carries the
+// prefix, which retained infrastructure shares (D132): prefix alone is the weakest reason.
 const (
-	MatchPrefix    = "prefix"          // its name starts with the run's prefix
-	MatchRunID     = "run-id"          // its id, name or a tag value holds the run id
 	MatchInventory = "inventory"       // the run's inventory recorded its (type, id)
+	MatchRunID     = "run-id"          // its id, name or a tag value holds the run id
+	MatchPrefix    = "prefix"          // its name starts with the run's prefix
 	MatchBaseline  = "not-in-baseline" // a nameless kind absent from the probe's baseline
 	MatchParent    = "parent"          // its parent is a candidate
 )
@@ -977,12 +979,12 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 // that kind to the matching above.
 func (c LeftoverCheck) candidate(it *item, created map[string]bool) string {
 	switch {
-	case c.Prefix != "" && strings.HasPrefix(it.name, c.Prefix):
-		return MatchPrefix
-	case c.RunID != "" && slices.ContainsFunc(append([]string{it.id, it.name}, it.values...), func(v string) bool { return strings.Contains(v, c.RunID) }):
-		return MatchRunID
 	case created[it.typ+"\x00"+it.id]:
 		return MatchInventory
+	case c.RunID != "" && slices.ContainsFunc(append([]string{it.id, it.name}, it.values...), func(v string) bool { return strings.Contains(v, c.RunID) }):
+		return MatchRunID
+	case c.Prefix != "" && strings.HasPrefix(it.name, c.Prefix):
+		return MatchPrefix
 	}
 	if ids, ok := c.Before[it.typ]; ok && slices.Contains(namelessKinds, it.typ) && (c.beforeProject == "" || it.project == c.beforeProject) {
 		if slices.Contains(ids, it.id) {
