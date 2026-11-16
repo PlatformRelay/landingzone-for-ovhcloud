@@ -170,22 +170,7 @@ func TestSecretPromptShowsReceipt(t *testing.T) {
 		{"\n", "received 0 characters\n", []string{"ending"}},
 	}
 	for _, c := range cases {
-		m, s := openPTY(t)
-		prompts := &promptWriter{t: t, tty: s}
-		term := newTTY(context.Background(), s, prompts)
-		done := make(chan error, 1)
-		go func() {
-			_, err := term.ReadSecret("application key (AK): ")
-			done <- err
-		}()
-		waitEcho(t, s, false)
-		if _, err := m.Write([]byte(c.typed)); err != nil {
-			t.Fatal(err)
-		}
-		if err := <-done; err != nil {
-			t.Fatalf("ReadSecret(%q): %v", c.typed, err)
-		}
-		p := prompts.String()
+		p, shown := readSecretOnce(t, c.typed)
 		if !strings.HasSuffix(p, c.want) {
 			t.Errorf("typed %q: prompt writer got %q, want it to end %q", c.typed, p, c.want)
 		}
@@ -194,10 +179,32 @@ func TestSecretPromptShowsReceipt(t *testing.T) {
 				t.Errorf("typed %q: prompt writer shows %q: %q", c.typed, n, p)
 			}
 		}
-		if shown := screen(m); strings.Contains(shown, strings.TrimSpace(c.typed)) && strings.TrimSpace(c.typed) != "" {
+		if v := strings.TrimSpace(c.typed); v != "" && strings.Contains(shown, v) {
 			t.Errorf("typed %q: the secret was echoed: %q", c.typed, shown)
 		}
 	}
+}
+
+// readSecretOnce types line at one ReadSecret prompt on a fresh pseudo-terminal and returns what
+// the prompt writer received and what the terminal showed.
+func readSecretOnce(t *testing.T, line string) (prompts, shown string) {
+	t.Helper()
+	m, s := openPTY(t)
+	w := &promptWriter{t: t, tty: s}
+	term := newTTY(context.Background(), s, w)
+	done := make(chan error, 1)
+	go func() {
+		_, err := term.ReadSecret("application key (AK): ")
+		done <- err
+	}()
+	waitEcho(t, s, false)
+	if _, err := m.Write([]byte(line)); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("ReadSecret(%q): %v", line, err)
+	}
+	return w.String(), screen(m)
 }
 
 // promptWriter records each prompt with the terminal's echo state at the moment it is shown.
