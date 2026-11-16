@@ -324,10 +324,14 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 		}
 		saveState := func() int {
 			st.Envelope, st.PassSHA = "fake-aes-gcm", pass
-			if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
+			// As the real local backend does: missing directories 0755, the file 0666 less the
+			// umask, an existing file's mode kept (observed on lz2, 2026-11-16: state/ 0755, the
+			// file 0664). The modes the lane needs are the bootstrap's job, not the fake's.
+			if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 				return fail("cannot write the state")
 			}
-			if bssSave(statePath, st) != nil {
+			raw, err := json.MarshalIndent(st, "", " ")
+			if err != nil || os.WriteFile(statePath, raw, 0o666) != nil {
 				return fail("cannot write the state")
 			}
 			return 0
@@ -1670,6 +1674,7 @@ func TestBootstrapStateFreshAccount(t *testing.T) {
 	bssEnvelope(t, h)
 	bssVerified(t, h)
 	bssNoDeployerFile(t, h)
+	bssStateModes(t, h)
 	bssNoLeak(t, h, rs, err)
 
 	rs, err = h.run(false)
@@ -2315,6 +2320,24 @@ func TestBootstrapStateChildHome(t *testing.T) {
 	for _, root := range []string{"bootstrap", "account-governance"} {
 		if !roots[root] {
 			t.Errorf("no child ran in the %s root", root)
+		}
+	}
+}
+
+// bssStateModes checks that the bootstrap leaves its state directory 0700 and the state file 0600:
+// the live lane refuses an account whose state/ others can read (privateDir), so a mode the local
+// backend chose would stop the first probe on a fresh account (lz2, 2026-11-16).
+func bssStateModes(t *testing.T, h *bssHarness) {
+	t.Helper()
+	dir := h.accountPath("state")
+	for path, want := range map[string]os.FileMode{dir: 0o700, filepath.Join(dir, bssStateFile): 0o600} {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("stat %s: %v", path, err)
+			continue
+		}
+		if got := fi.Mode().Perm(); got != want {
+			t.Errorf("%s has mode %04o, want %04o", path, got, want)
 		}
 	}
 }

@@ -146,6 +146,24 @@ func credentialDir(root, rel string) (string, string, error) {
 	return dir, parts[len(parts)-1], nil
 }
 
+// pinPrivateFile sets a regular file the run's child wrote to 0600: the local backend creates its
+// state file 0666 less the umask. A missing file is fine (before the first apply); a symlink or
+// other non-regular entry is left alone and reported.
+func pinPrivateFile(path string) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case !fi.Mode().IsRegular():
+		return fmt.Errorf("%s is not a regular file (symlinks are not followed)", path)
+	case fi.Mode().Perm() == 0o600:
+		return nil
+	}
+	return os.Chmod(path, 0o600)
+}
+
 // makePrivateDir creates dir (which must not exist) with mode 0700 and fsyncs its parent, so the
 // new entry survives a crash (spec 007 FR-006: each start-up phase synced before the next).
 func makePrivateDir(dir string) error {
