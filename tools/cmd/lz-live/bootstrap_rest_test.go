@@ -113,7 +113,7 @@ func TestBootstrapEntryRest(t *testing.T) {
 	// With the passphrase file and account.env present, the default Rest gets past its own checks
 	// (manifest, region) with the entry's options and asks the entry's API for the admin's token,
 	// which the fake refuses: the phase fails there, before any tofu or S3 request (review r1).
-	dir := t.TempDir()
+	dir := privateTempDir(t)
 	for name, body := range map[string]string{"state-passphrase.env": "TF_VAR_state_passphrase=p0123456789abcdef\n", "account.env": "OVH_ENDPOINT=ovh-eu\nLZ_PROJECT_ID_STATE=0123456789abcdef0123456789abcdef\n"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -233,4 +233,15 @@ func TestBootstrapEntryStateRefusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// privateTempDir is a temporary account directory at 0700, as the bootstrap creates one: the state
+// phase refuses an open one before any request, and TempDir's directories follow the umask.
+func privateTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }

@@ -191,6 +191,16 @@ func bssLoad(path string, v any) error {
 	return json.Unmarshal(raw, v)
 }
 
+// bssSaveAsBackend writes v as the real local backend writes its state: 0666 less the umask, an
+// existing file's mode kept.
+func bssSaveAsBackend(path string, v any) error {
+	raw, err := json.MarshalIndent(v, "", " ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o666)
+}
+
 func bssSave(path string, v any) error {
 	raw, err := json.MarshalIndent(v, "", " ")
 	if err != nil {
@@ -330,8 +340,7 @@ func fakeBootstrapTofu(worldPath string, args []string) int {
 			if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 				return fail("cannot write the state")
 			}
-			raw, err := json.MarshalIndent(st, "", " ")
-			if err != nil || os.WriteFile(statePath, raw, 0o666) != nil {
+			if bssSaveAsBackend(statePath, st) != nil {
 				return fail("cannot write the state")
 			}
 			return 0
@@ -2386,7 +2395,7 @@ func TestBootstrapStateOpenAccountDirRemedy(t *testing.T) {
 	if err == nil {
 		t.Fatal("an open account directory was accepted")
 	}
-	if msg := err.Error(); strings.Contains(msg, "chmod 700 "+filepath.Join(acct, "state")) {
-		t.Errorf("the remedy names state/ for an open account directory: %s", msg)
+	if msg := err.Error(); strings.Contains(msg, "chmod 700 "+filepath.Join(acct, "state")) || !strings.Contains(msg, "chmod 700 "+acct) {
+		t.Errorf("the remedy does not name the open account directory: %s", msg)
 	}
 }
