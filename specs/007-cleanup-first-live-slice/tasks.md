@@ -310,6 +310,19 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: `task check:specs; task test:traceability; task test:foundation-ci`: green, with `TRACE_OK` for 007; V001–V005 evidence linked from their tasks.
   - Evidence: `evidence/T025.md`; initial status `not-run`.
 
+## Follow-up: inventory ids compared as listed (FR-013, from T032)
+
+- [ ] T033 [US1] Write FR-013's tests in tools/internal/live/leftovers_ids_test.go
+  - Requirements: FR-013; ADRs: 0008, 0024. Depends on: T032 (the finding).
+  - Cases, each against `LeftoverCheck.Check` on the fake API with `Prefix` `lz2-`: (1) given an inventory entry `ovh_cloud_project_storage` `<P>/GRA/lz2-demo-dev-gra11-bkt-runtime` and that bucket listed in project P, region GRA, then its leftover reads `match: inventory` (exposes today's `prefix`); (2) given `ovh_cloud_project_user_s3_policy` `<P>/981445` and user 981445's policy listed, then `inventory` (exposes today's `parent`); (3) given the same bucket name listed in another region, or in another project, then not `inventory` (exposes a form that drops the project or region); (4) every kind of `matrix` has a declared id form or is the named tags exception (exposes a kind added without one); (5) given a tags inventory URN and a listed key carrying the run id, then `run-id` (documents the exception).
+  - Verify: `go -C tools test ./internal/live/ -run TestInventoryIDForms` from `$HOME`: cases 1, 2 and 4 fail for the stated reason; 3 and 5 may already hold, and the evidence says which. The test file stays uncommitted until T034, so the tree is green at every commit (AGENTS.md); T033 commits its evidence only.
+  - Evidence: `evidence/T033.md`; initial status `not-run`.
+
+- [ ] T034 [US1] Compare inventory ids in their listed form in tools/internal/live/leftovers.go
+  - Requirements: FR-013; ADRs: 0008, 0024. Depends on: T033.
+  - Verify: T033's tests green and committed with the change; `go -C tools test ./internal/live/` green; `lz-offline --candidate <worktree> -- task check` CHECK_PASS (complexity and files-only-writer gates included, no baseline raised); docs/how-to/run-the-first-slice.md's `match` paragraph says what `inventory` covers and names the tags exception (checked by the task's review; `task check` runs the docs gate).
+  - Evidence: `evidence/T034.md`; initial status `not-run`.
+
 ## Dependencies & execution order
 - Spec 006 T022–T026 (PR #123) on `main` → T003, T004. T001 → T017, T018.
 - US1: T003, T004 → T006; T005, T006 → T007. US2: T007 → T008 → T009.
