@@ -103,9 +103,20 @@ func privateDir(dir string) error {
 		return err
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
-		return fmt.Errorf("%s has mode %04o, want 0700", dir, perm)
+		return openDirError{dir: dir, perm: perm}
 	}
 	return nil
+}
+
+// openDirError is a directory others can use: it carries the path, so a caller can name the
+// directory to tighten (never tightened here).
+type openDirError struct {
+	dir  string
+	perm os.FileMode
+}
+
+func (e openDirError) Error() string {
+	return fmt.Sprintf("%s has mode %04o, want 0700", e.dir, e.perm)
 }
 
 // credentialDir checks that rel stays below root and creates its missing directories with mode
