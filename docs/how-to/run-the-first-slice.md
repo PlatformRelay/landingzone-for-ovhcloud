@@ -9,7 +9,7 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
-    blob: 479dd134ab7c8122b45c026d95bea72b83432766
+    blob: c8a20288d67cca0991d72c2209cfdba688de37a3
   - path: tools/internal/live/observe.go
     blob: 6c42824f57d4c9c51d6af112940ebce60d9879f8
   - path: stacks/deployments.yaml
