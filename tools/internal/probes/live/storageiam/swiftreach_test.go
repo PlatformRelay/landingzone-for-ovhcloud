@@ -654,49 +654,62 @@ func (w *swWorld) containerAPI(rw http.ResponseWriter, r *http.Request, parts []
 	case r.Method == http.MethodPost && len(parts) == 1:
 		w.createContainer(rw, body)
 	case r.Method == http.MethodGet && len(parts) == 1:
-		out := []map[string]any{}
-		for _, id := range slices.Sorted(maps.Keys(w.containers)) {
-			c := w.containers[id]
-			out = append(out, map[string]any{"id": c.ID, "name": c.Name, "region": c.Region, "archive": false,
-				"containerType": "private", "storedBytes": 0, "storedObjects": len(w.objects[c.Name])})
-		}
-		for _, id := range slices.Sorted(maps.Keys(w.lagging)) {
-			l := w.lagging[id]
-			out = append(out, map[string]any{"id": l.c.ID, "name": l.c.Name, "region": l.c.Region, "archive": false,
-				"containerType": "private", "storedBytes": 0, "storedObjects": 0})
-			if l.left--; l.left <= 0 {
-				delete(w.lagging, id)
-			} else {
-				w.lagging[id] = l
-			}
-		}
-		json.NewEncoder(rw).Encode(out)
+		json.NewEncoder(rw).Encode(w.listedContainers())
 	case r.Method == http.MethodDelete && len(parts) == 2:
-		c, ok := w.containers[parts[1]]
-		switch {
-		case !ok:
-			rw.WriteHeader(http.StatusNotFound)
-			fmt.Fprint(rw, `{"message":"not found"}`)
-		case len(w.objects[c.Name]) > 0 && r.URL.Query().Get("recursive") != "true":
-			rw.WriteHeader(http.StatusConflict)
-			fmt.Fprint(rw, `{"message":"container not empty"}`)
-		default:
-			if !w.apiKeep {
-				delete(w.containers, c.ID)
-				delete(w.objects, c.Name)
-				if w.apiLag > 0 {
-					if w.lagging == nil {
-						w.lagging = map[string]swLagging{}
-					}
-					w.lagging[c.ID] = swLagging{c: c, left: w.apiLag}
-				}
-			}
-			fmt.Fprint(rw, `null`)
-		}
+		w.deleteContainer(rw, parts[1], r.URL.Query().Get("recursive") == "true")
 	default:
 		rw.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(rw, `{"message":"This call has not been granted"}`)
 	}
+}
+
+// listedContainers is GET /storage's answer: the containers, then the deleted ones apiLag still
+// lists (each listing uses one of their turns).
+func (w *swWorld) listedContainers() []map[string]any {
+	out := []map[string]any{}
+	for _, id := range slices.Sorted(maps.Keys(w.containers)) {
+		c := w.containers[id]
+		out = append(out, map[string]any{"id": c.ID, "name": c.Name, "region": c.Region, "archive": false,
+			"containerType": "private", "storedBytes": 0, "storedObjects": len(w.objects[c.Name])})
+	}
+	for _, id := range slices.Sorted(maps.Keys(w.lagging)) {
+		l := w.lagging[id]
+		out = append(out, map[string]any{"id": l.c.ID, "name": l.c.Name, "region": l.c.Region, "archive": false,
+			"containerType": "private", "storedBytes": 0, "storedObjects": 0})
+		if l.left--; l.left <= 0 {
+			delete(w.lagging, id)
+		} else {
+			w.lagging[id] = l
+		}
+	}
+	return out
+}
+
+// deleteContainer is DELETE /storage/{id}: 404 for an unknown id, 409 for a non-empty one without
+// recursive; apiKeep answers without removing, apiLag keeps it in the next listings.
+func (w *swWorld) deleteContainer(rw http.ResponseWriter, id string, recursive bool) {
+	c, ok := w.containers[id]
+	switch {
+	case !ok:
+		rw.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(rw, `{"message":"not found"}`)
+		return
+	case len(w.objects[c.Name]) > 0 && !recursive:
+		rw.WriteHeader(http.StatusConflict)
+		fmt.Fprint(rw, `{"message":"container not empty"}`)
+		return
+	}
+	if !w.apiKeep {
+		delete(w.containers, c.ID)
+		delete(w.objects, c.Name)
+		if w.apiLag > 0 {
+			if w.lagging == nil {
+				w.lagging = map[string]swLagging{}
+			}
+			w.lagging[c.ID] = swLagging{c: c, left: w.apiLag}
+		}
+	}
+	fmt.Fprint(rw, `null`)
 }
 
 // createContainer is POST /storage: a body without a name, a region or the archive flag is a
