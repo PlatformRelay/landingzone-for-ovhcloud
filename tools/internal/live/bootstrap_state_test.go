@@ -771,6 +771,9 @@ type bssHarness struct {
 	callsFrom int             // fake tofu calls before the current run
 	evFrom    int             // cloud events before the current run
 	stores    []string        // access key of every store opened
+	// planted is a config-root path the test itself made (a symlink in place of state/): the
+	// account-table judge skips it, and the test checks it is left as planted.
+	planted string
 	// storeFor, when set, opens the account bucket instead of bssStore (T089: the S3 store against
 	// a fake S3 endpoint).
 	storeFor func(keys map[string]string) (ObjectStore, error)
@@ -1471,7 +1474,7 @@ func bssNoDeployerFile(t *testing.T, h *bssHarness) {
 			t.Errorf("bootstrap wrote %s: deployer files are the live lane's", rel)
 			continue
 		}
-		if strings.HasSuffix(rel, "/") || slices.Contains(allowed, rel) || strings.HasPrefix(rel, acct+"state/") ||
+		if strings.HasSuffix(rel, "/") || slices.Contains(allowed, rel) || strings.HasPrefix(rel, acct+"state/") || rel == h.planted ||
 			strings.HasPrefix(rel, "accounts/"+bsOldAccount+"/") && h.world.Account != bsOldAccount {
 			continue
 		}
@@ -2373,6 +2376,49 @@ func TestBootstrapStateOpenStateDirRefused(t *testing.T) {
 	}
 	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o755 {
 		t.Errorf("state/ was changed to %04o; want it reported, not tightened", fi.Mode().Perm())
+	}
+	for _, c := range h.runCalls() {
+		t.Errorf("tofu %s ran after the refusal", c.Cmd)
+	}
+}
+
+// TestBootstrapStateSymlinkedStateDirRefused: a state/ that is a symlink fails the state phase
+// as not followed, with no chmod remedy and its target left as it was, even when the target is
+// open (#189 review N4): following the link would report the target and advise tightening it.
+func TestBootstrapStateSymlinkedStateDirRefused(t *testing.T) {
+	h := newBSSHarness(t)
+	h.seedCurrentSandbox()
+	h.mustRun()
+	dir := h.accountPath("state")
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.Rename(dir, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, dir); err != nil {
+		t.Fatal(err)
+	}
+	h.planted = "accounts/" + h.world.Account + "/state"
+	before, _ := os.ReadDir(target)
+	rs, err := h.run(false)
+	if err == nil {
+		t.Fatal("a symlinked state/ was accepted")
+	}
+	bsWantStatus(t, rs, PhaseState, StatusFail)
+	r, _ := bsResult(rs, PhaseState)
+	if !strings.Contains(r.Detail, "symlinks are not followed") || strings.Contains(r.Detail, "chmod 700") {
+		t.Errorf("detail %q: want the symlink refusal and no chmod remedy", r.Detail)
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o755 {
+		t.Errorf("the link's target was changed to %04o; want it left alone", fi.Mode().Perm())
+	}
+	if after, _ := os.ReadDir(target); len(after) != len(before) {
+		t.Errorf("the link's target holds %d entries, had %d: something was written through the link", len(after), len(before))
+	}
+	if got, err := os.Readlink(dir); err != nil || got != target {
+		t.Errorf("state/ is no longer the planted link to %s (readlink %q, %v)", target, got, err)
 	}
 	for _, c := range h.runCalls() {
 		t.Errorf("tofu %s ran after the refusal", c.Cmd)
