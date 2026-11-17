@@ -369,6 +369,17 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   Server::InternalServerError` during the runtime destroy's `plan -destroy` refresh failed the final
   chain.)
 
+- **FR-015 A parent-matched leftover names its parent** — a leftover taken for the run's because
+  its parent is a candidate (`match: parent`: a subnet under a network, an S3 credential or an S3
+  policy under a user) also carries `parent_id`, the parent's listed id, and `parent_match`, the
+  reason the parent was taken (one of the other `match` values; parents are one level deep, so
+  never `parent`). Both fields appear only on `match: parent` leftovers; every other field and
+  leftover is unchanged, so a reader of `leftovers.json` that ignores unknown fields reads the
+  report as before. A parent-matched leftover's parent is itself a leftover of the same report
+  (a retained parent excludes its children). Before this, a reader could not tell which of
+  several users a credential belonged to, nor whether that user matched on the run's inventory or
+  only on the name prefix (review note F4 on the match reason, D132 B1).
+
 ### Key entities
 Listing attempt, run record archive (`attempts/<n>/`), probe baseline, unreconciled probe run,
 budget-alert probe check (observe, sweep), project alias refusal, two-tenant sandbox fixture,
