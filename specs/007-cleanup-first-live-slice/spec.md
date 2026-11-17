@@ -371,9 +371,12 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
 
 - **FR-015 A parent-matched leftover names its parent** — a leftover taken for the run's because
   its parent is a candidate (`match: parent`: a subnet under a network, an S3 credential or an S3
-  policy under a user) also carries `parent_id`, the parent's listed id, and `parent_match`, the
-  reason the parent was taken (one of the other `match` values; parents are one level deep, so
-  never `parent`). Both fields appear only on `match: parent` leftovers; every other field and
+  policy under a user) also carries `parent_id`, the parent's listed id as the report's `id` lists it,
+  and `parent_match`, the reason the parent was taken, from the same judgement that took it (one
+  of the other `match` values; parents are one level deep, so never `parent`). The parent's type
+  follows from the child's: a subnet's is a network, an S3 credential's and an S3 policy's a user.
+  Like the report's `id`, `parent_id` carries no project: two projects listing a parent of the
+  same id are not told apart (the same limit as same-name buckets in two regions). Both fields appear only on `match: parent` leftovers; every other field and
   leftover is unchanged, so a reader of `leftovers.json` that ignores unknown fields reads the
   report as before. A parent-matched leftover's parent is itself a leftover of the same report
   (a retained parent excludes its children). Before this, a reader could not tell which of
