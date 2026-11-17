@@ -352,7 +352,7 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: `go -C tools test ./internal/live/ -run TestLeftoverParent -v` from the repository root (where mise shims refuse the worktree as the current directory, the same command with `-C <worktree>/tools` from `$HOME`): each named subtest runs and fails for its stated reason (an assertion, not a compile error), failure lines in the evidence, except any that already holds (the evidence says which). The tests and the stub fields stay uncommitted until T039 commits them with the fix (AGENTS.md); the evidence records the patch's sha256. T038 commits its evidence only and runs no whole-tree gate.
   - Evidence: `evidence/T038.md`; initial status `not-run`.
 
-- [ ] T039 [US1] Name a parent-matched leftover's parent in tools/internal/live/leftovers.go
+- [x] T039 [US1] Name a parent-matched leftover's parent in tools/internal/live/leftovers.go — closed 2026-11-17, evidence: evidence/T039.md
   - Requirements: FR-015; ADRs: 0008, 0024. Depends on: T038.
   - Verify: T038's tests green and committed with the change, the patch unchanged from T038's hash or each change listed under *Test changes*; the parent's reason comes from the same `candidate` judgement that decides the parent (not a second matcher); `go -C tools test ./internal/live/` green; `lz-offline --candidate <worktree> -- task check` CHECK_PASS (complexity and files-only-writer gates, no baseline raised); docs/how-to/run-the-first-slice.md's `leftovers.json` row names `parent_id` and `parent_match`, and every docs page pinning a changed Go file is re-pinned in the same commit (`task check` runs the docs gate).
   - Evidence: `evidence/T039.md`; initial status `not-run`.

@@ -294,6 +294,10 @@ type Leftover struct {
 	Before bool `json:"before_run,omitempty"`
 	// Match is why the resource was taken for the run's (D132 B1): one of the Match* values.
 	Match string `json:"match"`
+	// ParentID and ParentMatch name a parent-matched leftover's parent (spec 007 FR-015): its
+	// listed id and its match, set only when Match is MatchParent.
+	ParentID    string `json:"parent_id,omitempty"`
+	ParentMatch string `json:"parent_match,omitempty"`
 }
 
 // The reasons a listed resource is a candidate. candidate tries them strongest evidence first, so
@@ -977,7 +981,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		if it.typ == tPolicy && c.Exempt.PolicyID != "" && it.id == c.Exempt.PolicyID {
 			continue
 		}
-		rep.Leftovers = append(rep.Leftovers, Leftover{Type: it.typ, ID: it.id, Name: it.name, Match: match})
+		rep.Leftovers = append(rep.Leftovers, leftoverOf(it, match, candidate))
 	}
 	rep.Errors = errs
 	rep.Outcome = "pass"
@@ -985,6 +989,17 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		rep.Outcome = "fail"
 	}
 	return rep
+}
+
+// leftoverOf reports it, taken for the run's because of match. A parent-matched leftover also
+// names its parent: the parent's listed id and the reason the same candidate judgement took the
+// parent for (spec 007 FR-015). Parents are one level deep, so that reason is never MatchParent.
+func leftoverOf(it *item, match string, candidate func(*item) string) Leftover {
+	l := Leftover{Type: it.typ, ID: it.id, Name: it.name, Match: match}
+	if match == MatchParent {
+		l.ParentID, l.ParentMatch = it.parent.id, candidate(it.parent)
+	}
+	return l
 }
 
 // candidate names why a listed resource may be the run's ("" when it may not): its name starts with Prefix, its
