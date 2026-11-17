@@ -2401,7 +2401,7 @@ func TestBootstrapStateSymlinkedStateDirRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.planted = "accounts/" + h.world.Account + "/state"
-	before, _ := os.ReadDir(target)
+	before := treeSnapshot(t, target)
 	rs, err := h.run(false)
 	if err == nil {
 		t.Fatal("a symlinked state/ was accepted")
@@ -2411,11 +2411,11 @@ func TestBootstrapStateSymlinkedStateDirRefused(t *testing.T) {
 	if !strings.Contains(r.Detail, "symlinks are not followed") || strings.Contains(r.Detail, "chmod 700") {
 		t.Errorf("detail %q: want the symlink refusal and no chmod remedy", r.Detail)
 	}
-	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o755 {
-		t.Errorf("the link's target was changed to %04o; want it left alone", fi.Mode().Perm())
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("the link's target is not left at 0755 (%v, %v)", fi, err)
 	}
-	if after, _ := os.ReadDir(target); len(after) != len(before) {
-		t.Errorf("the link's target holds %d entries, had %d: something was written through the link", len(after), len(before))
+	if after := treeSnapshot(t, target); !maps.Equal(after, before) {
+		t.Errorf("something was written through the link: its target's tree changed")
 	}
 	if got, err := os.Readlink(dir); err != nil || got != target {
 		t.Errorf("state/ is no longer the planted link to %s (readlink %q, %v)", target, got, err)
