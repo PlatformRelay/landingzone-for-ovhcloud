@@ -377,7 +377,7 @@ Reruns of the window's live tasks on the fresh account `lz2` (D134, D135). The c
   - Verify: `go -C tools test ./internal/live/ -run 'TestLeftoverScope|TestLeftoverParent' -v` from the repository root (shim note as T040): each named case fails for its stated reason (an assertion, not a compile error), failure lines in the evidence, except any that already holds (the evidence says which). The tests and the stub fields stay uncommitted until T043 commits them with the fix; the evidence records the patch's sha256. T042 commits its evidence only and runs no whole-tree gate.
   - Evidence: `evidence/T042.md`; initial status `not-run`.
 
-- [ ] T043 [US1] Name a leftover's project and region in tools/internal/live/leftovers.go
+- [x] T043 [US1] Name a leftover's project and region in tools/internal/live/leftovers.go — closed 2026-11-21, evidence: evidence/T043.md
   - Requirements: FR-017; ADRs: 0008, 0024. Depends on: T042.
   - Verify: T042's tests green and committed with the change, the patch unchanged from T042's hash or each change listed under *Test changes*; the project and region come from the listing that returned the item (no second lookup), and the probe baseline's project judgement for nameless kinds is unchanged (its tests green); `go -C tools test ./internal/live/` green; `lz-offline --candidate <worktree> -- task check` CHECK_PASS (complexity and files-only-writer gates, no baseline raised); docs/how-to/run-the-first-slice.md's `leftovers.json` row names `project` and `region` and no longer says `parent_id` cannot be placed in a project, and every docs page pinning a changed Go file is re-pinned in the same commit.
   - Evidence: `evidence/T043.md`; initial status `not-run`.

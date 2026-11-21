@@ -298,6 +298,11 @@ type Leftover struct {
 	// listed id and its match, set only when Match is MatchParent.
 	ParentID    string `json:"parent_id,omitempty"`
 	ParentMatch string `json:"parent_match,omitempty"`
+	// Project and Region name where a leftover is listed (spec 007 FR-017): the project whose
+	// listing returned a project-listed kind (a child's is its parent's), and the region whose
+	// listing returned a bucket; an account-level kind carries neither.
+	Project string `json:"project,omitempty"`
+	Region  string `json:"region,omitempty"`
 }
 
 // The reasons a listed resource is a candidate. candidate tries them strongest evidence first, so
@@ -358,7 +363,10 @@ type item struct {
 	typ, id, name string
 	values        []string
 	parent        *item
-	project       string // the project of a nameless kind's resource (Before is one project's)
+	// project is the project whose listing returned a project-listed kind (a child's is its
+	// parent's), "" for an account-level kind; region is a bucket's listing region (spec 007
+	// FR-017). Before judges a nameless kind's resource by project only (beforeProject).
+	project, region string
 	// scope is what the provider's id composes before the listed id, outermost first (spec 007
 	// FR-013): a bucket's project and region, an S3 policy's project; nil for every other kind.
 	scope []string
@@ -1006,7 +1014,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 // names its parent: the parent's listed id and the reason the same candidate judgement took the
 // parent for (spec 007 FR-015). Parents are one level deep, so that reason is never MatchParent.
 func leftoverOf(it *item, match string, candidate func(*item) string) Leftover {
-	l := Leftover{Type: it.typ, ID: it.id, Name: it.name, Match: match}
+	l := Leftover{Type: it.typ, ID: it.id, Name: it.name, Match: match, Project: it.project, Region: it.region}
 	if match == MatchParent {
 		l.ParentID, l.ParentMatch = it.parent.id, candidate(it.parent)
 	}
@@ -1117,7 +1125,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 					return b.Name
 				})
 				for _, b := range bs {
-					add(&item{typ: tStorage, id: b.Name, name: b.Name, scope: []string{p.ID, r}})
+					add(&item{typ: tStorage, id: b.Name, name: b.Name, project: p.ID, region: r, scope: []string{p.ID, r}})
 				}
 			}
 			if listed == 0 {
@@ -1132,7 +1140,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 			l.record(tNetwork, raw...)
 			nets, _ := decode(l, base+"/network/private", raw, func(n named) string { return n.ID })
 			for _, n := range nets {
-				net := add(&item{typ: tNetwork, id: n.ID, name: n.Name})
+				net := add(&item{typ: tNetwork, id: n.ID, name: n.Name, project: p.ID})
 				np, ok := l.under(base+"/network/private", n.ID)
 				if !ok {
 					continue
@@ -1147,7 +1155,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 						return s.ID
 					})
 					for _, s := range subs {
-						add(&item{typ: tSubnet, id: s.ID, name: s.CIDR, parent: net})
+						add(&item{typ: tSubnet, id: s.ID, name: s.CIDR, parent: net, project: net.project})
 					}
 				}
 			}
@@ -1167,7 +1175,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 				if name == "" {
 					name = u.Username
 				}
-				usr := add(&item{typ: tUser, id: u.ID.String(), name: name})
+				usr := add(&item{typ: tUser, id: u.ID.String(), name: name, project: p.ID})
 				up, ok := l.under(base+"/user", u.ID.String())
 				if !ok {
 					continue
@@ -1181,7 +1189,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 						return c.Access
 					})
 					for _, cr := range creds {
-						add(&item{typ: tCred, id: cr.Access, parent: usr})
+						add(&item{typ: tCred, id: cr.Access, parent: usr, project: usr.project})
 					}
 				}
 				var pol struct {
@@ -1194,7 +1202,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 					} else if *pol.Policy != "" {
 						raw, _ := json.Marshal(pol)
 						l.record(tS3Pol, raw)
-						add(&item{typ: tS3Pol, id: u.ID.String(), parent: usr, scope: []string{p.ID}})
+						add(&item{typ: tS3Pol, id: u.ID.String(), parent: usr, project: usr.project, scope: []string{p.ID}})
 					}
 				}
 			}
@@ -1222,7 +1230,7 @@ func (c LeftoverCheck) list(l lister) []*item {
 			raw, _ := json.Marshal(res.Tags)
 			l.record(tTags, raw)
 			for k, v := range res.Tags {
-				add(&item{typ: tTags, id: k, name: k, values: []string{v}})
+				add(&item{typ: tTags, id: k, name: k, values: []string{v}, project: p.ID})
 			}
 		}
 	}
