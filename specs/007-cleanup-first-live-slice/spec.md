@@ -338,7 +338,8 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   inventory of run `20261116T120049Z-6301` records them), the inventory id matches a listed item
   only when every composing part agrees with that item's listing (its project and region): a
   bucket of the same name in another project or region is not the run's. The listed form per kind
-  comes from one register, the one the retained side uses (`stateIDAttr`). Listed ids, the
+  comes from one register, `stateIDAttr`, which keeps the listed attribute per kind; the retained
+  side reads a composite kind's `id` beside it (FR-016). Listed ids, the
   report's `id` and the probe baseline keep the listed form unchanged; the retained lookup compares
   composed ids the same way (FR-016).
   Every listed kind of the kind matrix has a form; `ovh_iam_resource_tags`, whose one inventory
@@ -384,21 +385,25 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   several users a credential belonged to, nor whether that user matched on the run's inventory or
   only on the name prefix (review note F4 on the match reason, D132 B1).
 
-- **FR-016 Retained ids compared as listed** — the leftover check excludes a listed resource as
+- **FR-016 Retained ids compared as listed** — the leftover check excludes a listed bucket as
   retained only when a retained instance's state holds it in the form the inventory uses
-  (FR-013). For a kind whose provider id composes the listed id with its project and region
-  (`ovh_cloud_project_storage` as `<project>/<region>/<name>`, `ovh_cloud_project_user_s3_policy`
-  as `<project>/<user-id>`), the retained side reads the state's `id`, the provider id the
-  inventory records, and that id excludes only the listed item whose project and region compose
-  it; every other kind keeps the listed id it reads from `stateIDAttr` today. A bucket of a
-  retained bucket's name in another project or region is judged like any other listed bucket:
-  with two projects in one account (D120), a run's `lz2-demo-bkt-state` in one project is no
-  longer hidden by another project's retained bucket of that name (bucket names are fixed by the
-  deployment, not by the run: run `20261116T120049Z-6301`'s inventory). A composite resource in a
-  retained state without a string `id` excludes nothing, so the bucket it holds reads as any
-  listed bucket does (fail closed). A child still follows its parent: a retained user excludes its
-  S3 credentials and S3 policies, a retained network its subnets. Before this, the lookup compared
-  a bucket by its name alone (evidence/T034.md, known limit).
+  (FR-013): the retained side reads the state's `id` of an `ovh_cloud_project_storage`, the
+  provider id `<project>/<region>/<name>` the inventory records, and that id excludes only the
+  listed bucket whose project and region compose it. A bucket of a retained bucket's name in
+  another project or region is judged like any other listed bucket: with two projects in one
+  account (D120), a run's `lz2-demo-bkt-state` in one project is no longer hidden by another
+  project's retained bucket of that name (bucket names are fixed by the deployment, not by the
+  run: run `20261116T120049Z-6301`'s inventory). The retained side reads an
+  `ovh_cloud_project_user_s3_policy`'s `id` (`<project>/<user-id>`) the same way, but a child never
+  decides for itself: an S3 policy, an S3 credential and a subnet are retained exactly when their
+  parent is, as today. `stateIDAttr` keeps the listed attribute of every kind; every kind but
+  these two keeps the listed id it reads today. A bucket or S3 policy in a retained state without
+  a string `id` excludes nothing and adds a report error `state of <instance>: <type> without id`
+  (fail closed, and said). Known limit, not fixed here: a retained network id and a retained tag
+  key still exclude a listed one of the same id or key in any project (a network's subnets with
+  it); networks list as `pn-<vrack>_<vlan>` and tag keys are fixed by the deployment, so a
+  two-project account can hit it. Before this, the lookup compared a bucket by its name alone
+  (evidence/T034.md, known limit).
 
 - **FR-017 A leftover names where it is listed** — a leftover of a kind listed under a project
   (a bucket, network, subnet, user, S3 credential, S3 policy, alert, Swift container or one of
@@ -407,8 +412,11 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   (OAuth client, IAM policy, group) carry neither. Both fields are omitted when empty; the
   report's `id` keeps the listed form and every other field is unchanged, so a reader of
   `leftovers.json` that ignores unknown fields reads the report as before. A child's `project` is
-  its parent's. Before this, a leftover bucket named only its name, so a reader had to search
-  every region of every listed project for it (deferred from FR-013 and FR-015).
+  its parent's. A Swift container carries no `region` (its listing is per project). `before_run`
+  still compares the listed id with the baseline's listed ids of every project, so a leftover
+  can carry `before_run` because another project listed that id (it never decides a verdict).
+  Before this, a leftover bucket named only its name, so a reader had to search every region of
+  every listed project for it (deferred from FR-013 and FR-015).
 
 ### Key entities
 Listing attempt, run record archive (`attempts/<n>/`), probe baseline, unreconciled probe run,
