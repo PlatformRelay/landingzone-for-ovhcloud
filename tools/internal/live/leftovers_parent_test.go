@@ -213,8 +213,9 @@ func TestLeftoverParentDirectChild(t *testing.T) {
 }
 
 // parentNoneJSON is leftovers.json for parentNone's report as the writer produced it before FR-015
-// (taken at 326e5da, before the stub fields existed).
-const parentNoneJSON = `{"outcome":"fail","leftovers":[{"type":"ovh_cloud_project_storage","id":"lz2-demo-bkt","name":"lz2-demo-bkt","match":"prefix"},{"type":"ovh_cloud_project_network_private","id":"pn-1500052_0","name":"demo-net","match":"inventory"},{"type":"ovh_cloud_project_user","id":"4852","name":"demo-20261116T120049Z-0013","match":"run-id"},{"type":"ovh_me_api_oauth2_client","id":"EU.0000000000004852","name":"lz2-deployer","match":"prefix"}],"errors":null,"attempts":null}`
+// (taken at 326e5da, before the stub fields existed), with FR-017's project of each project-listed
+// leftover and the bucket's region (T042).
+const parentNoneJSON = `{"outcome":"fail","leftovers":[{"type":"ovh_cloud_project_storage","id":"lz2-demo-bkt","name":"lz2-demo-bkt","match":"prefix","project":"a0000000000000000000000000000013","region":"GRA"},{"type":"ovh_cloud_project_network_private","id":"pn-1500052_0","name":"demo-net","match":"inventory","project":"a0000000000000000000000000000013"},{"type":"ovh_cloud_project_user","id":"4852","name":"demo-20261116T120049Z-0013","match":"run-id","project":"a0000000000000000000000000000013"},{"type":"ovh_me_api_oauth2_client","id":"EU.0000000000004852","name":"lz2-deployer","match":"prefix"}],"errors":null,"attempts":null}`
 
 // parentNone is a non-empty report without parent matches: a bucket by prefix, a network by the
 // inventory, a user by run id (no credential, no policy) and a client by prefix.
