@@ -18,8 +18,8 @@
  },
  "retained": {
   "ovh_cloud_project_storage": [
-   "lz-bkt-state",
-   "lz-demo-bkt-state"
+   "p1/GRA11/lz-bkt-state",
+   "p1/GRA11/lz-demo-bkt-state"
   ],
   "ovh_cloud_project_user": [
    "101",

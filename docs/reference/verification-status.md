@@ -9,7 +9,7 @@ references:
   - path: tools/internal/live/bootstrap.go
     blob: 5c3960e9e57fbaf1d1dbe543951d515d05d852df
   - path: tools/internal/live/chain.go
-    blob: c8a20288d67cca0991d72c2209cfdba688de37a3
+    blob: 82b598204026476d3b24f114cb23884c276d68d4
   - path: tools/internal/live/deadline.go
     blob: e0c5da9228a55023f61fecec87842e5d994425d0
   - path: tools/internal/live/observe.go

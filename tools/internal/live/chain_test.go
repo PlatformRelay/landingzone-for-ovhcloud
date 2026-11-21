@@ -74,16 +74,18 @@ type chainResource struct {
 // ovh_iam_resource_tags holds the tag keys in `tags`. The id of each resource (its inventory
 // entry) is the provider's id as run 20261116T120049Z-6301's inventory records it (spec 007
 // FR-013): a bucket's is <project>/<region>/<name> and an S3 policy's <project>/<user-id>, which
-// differ from the listed id; every other kind's is its listed id. The states also hold the secrets
+// differ from the listed id; every other kind's is its listed id. A retained bucket's and S3
+// policy's state values hold that id as `id` beside the listed attribute, as the provider's state
+// does (spec 007 FR-016: the retained side reads it). The states also hold the secrets
 // the provider keeps there (client and S3 secrets): the chain must keep them out of every output.
 func chainResources() map[string][]chainResource {
 	urn := "urn:v1:eu:resource:publicCloudProject:" + laneProject
 	return map[string][]chainResource{
 		"account-bootstrap": {
-			{"module.bootstrap.module.state_backend.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-bkt-state", map[string]any{"name": "lz2-bkt-state", "region": "GRA"}},
+			{"module.bootstrap.module.state_backend.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-bkt-state", map[string]any{"id": laneProject + "/GRA/lz2-bkt-state", "name": "lz2-bkt-state", "region": "GRA"}},
 			{`module.bootstrap.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4711", map[string]any{"id": "4711", "description": "lz2-account-platform-s3"}},
 			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_credential.s3["platform"]`, tCred, laneAccountAK, map[string]any{"user_id": "4711", "access_key_id": laneAccountAK, "secret_access_key": laneAccountSK}},
-			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, laneProject + "/4711", map[string]any{"user_id": "4711", "policy": "{}"}},
+			{`module.bootstrap.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, laneProject + "/4711", map[string]any{"id": laneProject + "/4711", "user_id": "4711", "policy": "{}"}},
 		},
 		"account-governance": {
 			{"module.account_governance.module.identity.ovh_me_api_oauth2_client.platform_deployer", tClient, lanePlatformID, map[string]any{"client_id": lanePlatformID, "name": "lz2-platform-deployer", "client_secret": lanePlatformSecret}},
@@ -93,13 +95,13 @@ func chainResources() map[string][]chainResource {
 			{`module.account_governance.module.identity.ovh_me_identity_group.tenant["demo"]`, tGroup, "lz2-demo-deployers", map[string]any{"name": "lz2-demo-deployers"}},
 		},
 		"demo-state": {
-			{"module.tenant_state.module.state_backend.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-demo-bkt-state", map[string]any{"name": "lz2-demo-bkt-state", "region": "GRA"}},
+			{"module.tenant_state.module.state_backend.ovh_cloud_project_storage.this", tStorage, laneProject + "/GRA/lz2-demo-bkt-state", map[string]any{"id": laneProject + "/GRA/lz2-demo-bkt-state", "name": "lz2-demo-bkt-state", "region": "GRA"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["tenant"]`, tUser, "4712", map[string]any{"id": "4712", "description": "lz2-demo-tenant-s3"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user.s3["platform"]`, tUser, "4713", map[string]any{"id": "4713", "description": "lz2-demo-platform-s3"}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_credential.s3["tenant"]`, tCred, laneTenantAK, map[string]any{"user_id": "4712", "access_key_id": laneTenantAK, "secret_access_key": laneTenantSK}},
 			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_credential.s3["platform"]`, tCred, lanePlatformAK, map[string]any{"user_id": "4713", "access_key_id": lanePlatformAK, "secret_access_key": lanePlatformSK}},
-			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["tenant"]`, tS3Pol, laneProject + "/4712", map[string]any{"user_id": "4712", "policy": "{}"}},
-			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, laneProject + "/4713", map[string]any{"user_id": "4713", "policy": "{}"}},
+			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["tenant"]`, tS3Pol, laneProject + "/4712", map[string]any{"id": laneProject + "/4712", "user_id": "4712", "policy": "{}"}},
+			{`module.tenant_state.module.state_backend.ovh_cloud_project_user_s3_policy.s3["platform"]`, tS3Pol, laneProject + "/4713", map[string]any{"id": laneProject + "/4713", "user_id": "4713", "policy": "{}"}},
 		},
 		"demo-dev-project": {
 			{"module.project.ovh_iam_resource_tags.project", tTags, urn, map[string]any{"id": urn, "urn": urn, "tags": map[string]string{"lz:org": "lz2", "lz:tenant": "demo", "lz2-retained-tag": "demo"}}},
@@ -1522,6 +1524,134 @@ func TestChainBaseline(t *testing.T) {
 				if len(rep.Leftovers) != 0 || !slices.ContainsFunc(rep.Errors, func(e string) bool { return strings.Contains(e, tc.errWord) }) {
 					t.Errorf("report leftovers %v, errors %v; want no leftover and an error naming the %s", leftoverKeys(rep.Leftovers), rep.Errors, tc.errWord)
 				}
+			}
+		})
+	}
+}
+
+// chainStateReader is a chain runner as far as the leftover check's retained state reads need
+// one (the run's binding, passphrase, scratch home and fake tofu), over h after h.steady(): every
+// retained stack's state and credentials are in place.
+func chainStateReader(h *laneHarness) *laneRunner {
+	return &laneRunner{o: ApplyOptions{Checkout: h.checkout, Manifest: h.m, ConfigRoot: h.root, Account: laneAccount,
+		Tofu: filepath.Join(h.bin, "tofu"), Store: h.store.open, API: h.laneAPI()},
+		red: NewRedactor(), term: io.Discard, bound: map[Credential]bool{}, home: h.t.TempDir(), pass: lanePassphrase,
+		binding: Binding{AccountID: laneAccount, Endpoint: "ovh-eu", Org: h.m.Org}}
+}
+
+// chainRetainedNetwork is a network and its subnet that case (3) adds to demo-dev-project's state,
+// so the retained read meets every kind stateIDAttr names (no retained stack of the chain holds
+// either; review r1).
+var chainRetainedNetwork = []chainResource{
+	{"module.project.ovh_cloud_project_network_private.retained", tNetwork, "pn-0000059_0", map[string]any{"id": "pn-0000059_0", "name": "lz2-retained-net"}},
+	{"module.project.ovh_cloud_project_network_private_subnet.retained", tSubnet, "sn-retained-59", map[string]any{"id": "sn-retained-59", "network_id": "pn-0000059_0"}},
+}
+
+// chainRetainedWant is, per provider type, the ids the retained stacks' states (with
+// chainRetainedNetwork) must yield to the leftover check (spec 007 FR-016): a bucket's and an S3
+// policy's composed id (the inventory's, chainResource.id), every other kind's listed id
+// (chainResource.id too), a tag by its key.
+func chainRetainedWant() map[string][]string {
+	want := map[string][]string{}
+	res := chainResources()
+	rs := slices.Clone(chainRetainedNetwork)
+	for _, id := range chainRetained {
+		rs = append(rs, res[id]...)
+	}
+	for _, r := range rs {
+		if r.typ != tTags {
+			want[r.typ] = append(want[r.typ], r.id)
+			continue
+		}
+		for k := range r.values["tags"].(map[string]string) {
+			want[tTags] = append(want[tTags], k)
+		}
+	}
+	return want
+}
+
+// FR-016 case (3) (T040): the chain's retained read of a state holding a bucket (`id`
+// <project>/<region>/<name> beside `name`) and an S3 policy (`id` <project>/<user-id> beside
+// `user_id`) yields their composed ids, and the listed id stateIDAttr names for every other kind.
+func TestChainRetainedIDs(t *testing.T) {
+	h := newChainHarness(t)
+	rs := append(chainResources()["demo-dev-project"], chainRetainedNetwork...)
+	h.setStack("demo-dev-project", func(s *laneStack) { s.StateDoc = h.writeFake("state-demo-dev-project-net.json", chainStateDoc(rs)) })
+	h.steady()
+	r := chainStateReader(h)
+	got := map[string][]string{}
+	for _, id := range chainRetained {
+		if err := r.retainedIDs(context.Background(), h.row(id), got); err != nil {
+			t.Fatalf("state of %s: %v", id, err)
+		}
+	}
+	want := chainRetainedWant()
+	for _, typ := range slices.Sorted(maps.Keys(want)) {
+		g, w := slices.Sorted(slices.Values(got[typ])), slices.Sorted(slices.Values(want[typ]))
+		if !slices.Equal(g, w) {
+			t.Errorf("%s: retained ids %v, want %v (FR-016)", typ, g, w)
+		}
+	}
+	if len(want) != len(stateIDAttr)+1 || len(got) != len(want) {
+		t.Errorf("retained kinds %v, want %v: every stateIDAttr kind and the tags", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	}
+}
+
+// chainDemoStateEdited runs a chain whose demo-state state has edit applied to the values of its
+// resources of type typ.
+func chainDemoStateEdited(t *testing.T, typ string, edit func(map[string]any)) Report {
+	t.Helper()
+	h := newChainHarness(t)
+	var rs []chainResource
+	for _, r := range chainResources()["demo-state"] {
+		if r.typ == typ {
+			r.values = maps.Clone(r.values)
+			edit(r.values)
+		}
+		rs = append(rs, r)
+	}
+	h.setStack("demo-state", func(s *laneStack) { s.StateDoc = h.writeFake("state-demo-state-edited.json", chainStateDoc(rs)) })
+	r := h.chain(chainExec{})
+	rep := chainReport(t, r.runDir)
+	if want := map[bool]int{true: 0, false: 1}[len(rep.Leftovers) == 0 && len(rep.Errors) == 0]; ExitCode(r.err) != want {
+		t.Errorf("exit %d (%v), want %d for leftovers %v, errors %q", ExitCode(r.err), r.err, want, leftoverKeys(rep.Leftovers), rep.Errors)
+	}
+	return rep
+}
+
+// chainNoStringID are the ways a state's `id` is not a string: absent, null, a number (review r1).
+var chainNoStringID = map[string]func(map[string]any){
+	"absent": func(v map[string]any) { delete(v, "id") },
+	"null":   func(v map[string]any) { v["id"] = nil },
+	"number": func(v map[string]any) { v["id"] = 4711 },
+}
+
+// FR-016 case (4) (T040): demo-state's bucket without a string `id` excludes nothing (the listed
+// lz2-demo-bkt-state is a leftover, not taken by its `name`), the state's other ids are still read
+// (its users, with their credentials and policies, stay excluded), and the report carries one
+// error, `ovh_cloud_project_storage without id` after the `state of <instance>: ` prefix.
+func TestChainRetainedBucketWithoutID(t *testing.T) {
+	for name, edit := range chainNoStringID {
+		t.Run(name, func(t *testing.T) {
+			rep := chainDemoStateEdited(t, tStorage, edit)
+			wantKeys(t, "demo-state's bucket, id "+name, leftoverKeys(rep.Leftovers), []string{tStorage + " lz2-demo-bkt-state"})
+			const prefix, suffix = "state of demo-state: ", "ovh_cloud_project_storage without id"
+			if len(rep.Errors) != 1 || !strings.HasPrefix(rep.Errors[0], prefix) || !strings.HasSuffix(rep.Errors[0], suffix) {
+				t.Errorf("errors %q, want one %q…%q (FR-016: fail closed, and said)", rep.Errors, prefix, suffix)
+			}
+		})
+	}
+}
+
+// FR-016 (T040, review r1): an S3 policy without a string `id` in a retained state adds no error
+// and excludes as before: its id never decides (a child follows its parent), so demo-state's
+// users, credentials and policies stay excluded and the run passes (holds before FR-016).
+func TestChainRetainedPolicyWithoutID(t *testing.T) {
+	for name, edit := range chainNoStringID {
+		t.Run(name, func(t *testing.T) {
+			rep := chainDemoStateEdited(t, tS3Pol, edit)
+			if len(rep.Leftovers) != 0 || len(rep.Errors) != 0 {
+				t.Errorf("S3 policies' id %s: leftovers %v, errors %q; want none", name, leftoverKeys(rep.Leftovers), rep.Errors)
 			}
 		})
 	}

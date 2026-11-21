@@ -750,8 +750,72 @@ func (r *laneRunner) prepare(ctx context.Context, in stacks.Instance) (*childEnv
 // item.scope at its listing site: the bucket listing sets [project, region]
 // (<project>/<region>/<name>), the S3-policy listing sets [project] (<project>/<user-id>)
 // (spec 007 FR-013). A new composite kind added here without its scope never reads inventory.
+// The retained side reads such a kind's provider id instead (retainedIDAttr, FR-016), so it
+// compares by the same composition (providerKey); the listed attribute here stays every kind's.
 var stateIDAttr = map[string]string{tStorage: "name", tUser: "id", tCred: "access_key_id", tS3Pol: "user_id", tClient: "client_id",
 	tPolicy: "id", tGroup: "name", tAlert: "id", tNetwork: "id", tSubnet: "id"}
+
+// retainedIDAttr is, per composite kind, the state attribute a retained state is read by in place
+// of stateIDAttr's: the provider's id, composed as providerKey composes the listed item (spec 007
+// FR-016). An S3 policy's id never decides (a child is retained exactly when its parent is).
+var retainedIDAttr = map[string]string{tStorage: "id", tS3Pol: "id"}
+
+// stateModule is a module of `tofu show -json`'s values, its child modules nested.
+type stateModule struct {
+	Resources []stateResource `json:"resources"`
+	Children  []*stateModule  `json:"child_modules"`
+}
+
+type stateResource struct {
+	Type   string         `json:"type"`
+	Values map[string]any `json:"values"`
+}
+
+// retainedOf appends the ids m and its child modules hold to into, per provider type
+// (resourceIDs). It reports whether a bucket held no string id: that bucket is read as nothing,
+// so it excludes nothing (spec 007 FR-016: fail closed, and said by the caller).
+func retainedOf(m *stateModule, into map[string][]string) (bucketWithoutID bool) {
+	for _, rs := range m.Resources {
+		ids, ok := resourceIDs(rs)
+		if !ok && rs.Type == tStorage {
+			bucketWithoutID = true
+		}
+		if len(ids) > 0 {
+			into[rs.Type] = append(into[rs.Type], ids...)
+		}
+	}
+	for _, c := range m.Children {
+		if retainedOf(c, into) {
+			bucketWithoutID = true
+		}
+	}
+	return bucketWithoutID
+}
+
+// resourceIDs are the ids a retained state's resource rs is read by: the tag keys of
+// ovh_iam_resource_tags, a composite kind's provider id (retainedIDAttr), every other kind's listed
+// id (stateIDAttr); ok is false when the attribute read holds no string (or the kind has none).
+func resourceIDs(rs stateResource) (ids []string, ok bool) {
+	if rs.Type == tTags {
+		tags, ok := rs.Values["tags"].(map[string]any)
+		for k := range tags {
+			ids = append(ids, k)
+		}
+		return ids, ok
+	}
+	a, ok := retainedIDAttr[rs.Type]
+	if !ok {
+		a, ok = stateIDAttr[rs.Type]
+	}
+	if !ok {
+		return nil, false
+	}
+	v, ok := rs.Values[a].(string)
+	if !ok {
+		return nil, false
+	}
+	return []string{v}, true
+}
 
 // readRetained is retainedIDs retried after a transient failure of its `init` or `show -json`
 // (T110, evidence/T049.md run 3: a read failing once turned the instance's objects into
@@ -818,7 +882,10 @@ func (r *laneRunner) readTofu(ctx context.Context, child *childEnv, id, dir stri
 }
 
 // retainedIDs reads a retained instance's state (`tofu show -json`, nested modules included) into
-// provider type -> listing ids; into is written only once the state decoded.
+// provider type -> ids (retainedOf: a bucket's and an S3 policy's composed, every other kind's
+// listed); into is written only once the state decoded. A bucket without a string id is an error
+// returned after the whole state was read, so its other ids still exclude (spec 007 FR-016); the
+// caller names the instance.
 func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into map[string][]string) error {
 	child, dir, _, err := r.prepare(ctx, in)
 	if err != nil {
@@ -831,17 +898,9 @@ func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into m
 	if err := r.readTofu(ctx, child, in.ID, dir, &js, "show", "-json"); err != nil {
 		return err
 	}
-	type res struct {
-		Type   string         `json:"type"`
-		Values map[string]any `json:"values"`
-	}
-	type mod struct {
-		Resources []res  `json:"resources"`
-		Children  []*mod `json:"child_modules"`
-	}
 	var doc struct {
 		Values *struct {
-			Root mod `json:"root_module"`
+			Root stateModule `json:"root_module"`
 		} `json:"values"`
 	}
 	if err := json.Unmarshal(js.Bytes(), &doc); err != nil {
@@ -850,28 +909,9 @@ func (r *laneRunner) retainedIDs(ctx context.Context, in stacks.Instance, into m
 	if doc.Values == nil {
 		return nil // an empty state
 	}
-	var walk func(m *mod)
-	walk = func(m *mod) {
-		for _, rs := range m.Resources {
-			if rs.Type == tTags {
-				if tags, ok := rs.Values["tags"].(map[string]any); ok {
-					for k := range tags {
-						into[tTags] = append(into[tTags], k)
-					}
-				}
-				continue
-			}
-			if a, ok := stateIDAttr[rs.Type]; ok {
-				if v, ok := rs.Values[a].(string); ok {
-					into[rs.Type] = append(into[rs.Type], v)
-				}
-			}
-		}
-		for _, c := range m.Children {
-			walk(c)
-		}
+	if retainedOf(&doc.Values.Root, into) {
+		return fmt.Errorf("%s without id", tStorage)
 	}
-	walk(&doc.Values.Root)
 	return nil
 }
 
