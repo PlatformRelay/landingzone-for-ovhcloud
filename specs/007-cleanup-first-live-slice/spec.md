@@ -341,7 +341,7 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   comes from one register, `stateIDAttr`, which keeps the listed attribute per kind; the retained
   side reads a composite kind's `id` beside it (FR-016). Listed ids, the
   report's `id` and the probe baseline keep the listed form unchanged; the retained lookup compares
-  composed ids the same way (FR-016).
+  a bucket's composed id (FR-016).
   Every listed kind of the kind matrix has a form; `ovh_iam_resource_tags`, whose one inventory
   URN lists as one item per tag key, has none and is matched by run id and prefix only;
   `ovh_cloud_quota` and `ovh_cloud_project` are never listed. A run-created bucket then reads
@@ -397,9 +397,10 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   `ovh_cloud_project_user_s3_policy`'s `id` (`<project>/<user-id>`) the same way, but a child never
   decides for itself: an S3 policy, an S3 credential and a subnet are retained exactly when their
   parent is, as today. `stateIDAttr` keeps the listed attribute of every kind; every kind but
-  these two keeps the listed id it reads today. A bucket or S3 policy in a retained state without
-  a string `id` excludes nothing and adds a report error `state of <instance>: <type> without id`
-  (fail closed, and said). Known limit, not fixed here: a retained network id and a retained tag
+  these two keeps the listed id it reads today. A bucket in a retained state without a string `id` excludes nothing, while
+  the instance's other ids are still read, and the report carries the error
+  `state of <instance>: ovh_cloud_project_storage without id` (fail closed, and said; an S3
+  policy without one adds no error, since its id never decides). Known limit, not fixed here: a retained network id and a retained tag
   key still exclude a listed one of the same id or key in any project (a network's subnets with
   it); networks list as `pn-<vrack>_<vlan>` and tag keys are fixed by the deployment, so a
   two-project account can hit it. Before this, the lookup compared a bucket by its name alone
