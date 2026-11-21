@@ -185,7 +185,6 @@
 52 tools/internal/live/chain.go (*laneRunner).chain
 20 tools/internal/live/chain.go (*laneRunner).leftovers
 18 tools/internal/live/chain.go (*laneRunner).observe
-28 tools/internal/live/chain.go (*laneRunner).retainedIDs
 35 tools/internal/live/chain_retry_budget_test.go TestProbeListingRetryBudget
 81 tools/internal/live/chain_state_test.go TestChainStateObjectCheck
 63 tools/internal/live/chain_test.go (*laneHarness).chain

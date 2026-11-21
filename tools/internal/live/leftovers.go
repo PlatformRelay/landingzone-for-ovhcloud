@@ -75,7 +75,7 @@ type LeftoverCheck struct {
 	Projects []Project
 	Prefix   string              // name prefix of what the run creates ("<org>-", "lzprobe-")
 	RunID    string              // the run id; a name, id or tag value holding it matches
-	Retained map[string][]string // provider type -> ids held in retained instances' states
+	Retained map[string][]string // provider type -> ids held in retained instances' states (a bucket's and an S3 policy's composed, FR-016)
 	Exempt   Exemption
 	// API and Cred are lz-live's own API client and the credential the run binds: when Lister is
 	// nil the check lists through them, GET only (T083, T084).
@@ -364,17 +364,25 @@ type item struct {
 	scope []string
 }
 
-// inventoryKey is the (type, id) under which the run's inventory records the listed resource it:
-// the provider's id, its scope joined to its listed id by "/" (a bucket <project>/<region>/<name>,
-// an S3 policy <project>/<user-id>, as run 20261116T120049Z-6301 recorded them; spec 007 FR-013),
-// so a composed id matches only the item whose project and region agree. A kind the stateIDAttr
-// register does not name has no inventory form ("", never matched): the tags, whose one URN
-// lists as one item per key, are matched by run id and prefix only.
+// providerKey is the (type, id) of the listed resource it in the provider's form: its scope joined
+// to its listed id by "/" (a bucket <project>/<region>/<name>, an S3 policy <project>/<user-id>,
+// as run 20261116T120049Z-6301 recorded them; spec 007 FR-013), so a composed id matches only the
+// item whose project and region agree; a kind without a scope keys by its listed id. It is the
+// one composition both the inventory match (inventoryKey) and the retained lookup (Check,
+// FR-016) compare by.
+func providerKey(it *item) string {
+	return it.typ + "\x00" + strings.Join(append(slices.Clone(it.scope), it.id), "/")
+}
+
+// inventoryKey is the (type, id) under which the run's inventory records the listed resource it,
+// its providerKey. A kind the stateIDAttr register does not name has no inventory form ("", never
+// matched): the tags, whose one URN lists as one item per key, are matched by run id and prefix
+// only.
 func inventoryKey(it *item) string {
 	if _, ok := stateIDAttr[it.typ]; !ok {
 		return ""
 	}
-	return it.typ + "\x00" + strings.Join(append(slices.Clone(it.scope), it.id), "/")
+	return providerKey(it)
 }
 
 // apiLister is the leftover check's read-only client of the OVHcloud API: the bearer token of the
@@ -923,7 +931,10 @@ func (l lister) record(typ string, raw ...json.RawMessage) {
 // Check lists every kind and reconciles it with inv. A listed resource is a candidate when its
 // name starts with Prefix, its id, name or tag value holds RunID, the inventory recorded it
 // (inventoryKey), or its parent is a candidate; a candidate is a leftover unless it (or, for a
-// child, its parent) is retained, or it is the exempt admin client or policy (by id).
+// child, its parent) is retained, or it is the exempt admin client or policy (by id). A retained
+// id is compared with the listed item's providerKey: a retained bucket's <project>/<region>/<name>
+// excludes only the bucket listed in that project and region; a tag key, a network and every
+// other kind without a scope by its listed id (spec 007 FR-016).
 func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 	rep := Report{Listings: map[string][]json.RawMessage{}}
 	var errs []string
@@ -968,7 +979,7 @@ func (c LeftoverCheck) Check(ctx context.Context, inv []InventoryEntry) Report {
 		if it.parent != nil {
 			return isRetained(it.parent)
 		}
-		return retained[it.typ+"\x00"+it.id]
+		return retained[providerKey(it)]
 	}
 	for _, it := range items {
 		match := candidate(it)
