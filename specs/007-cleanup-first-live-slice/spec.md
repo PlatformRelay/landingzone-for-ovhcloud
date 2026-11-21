@@ -339,7 +339,8 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   only when every composing part agrees with that item's listing (its project and region): a
   bucket of the same name in another project or region is not the run's. The listed form per kind
   comes from one register, the one the retained side uses (`stateIDAttr`). Listed ids, the
-  report's `id`, the probe baseline and the retained lookup keep the listed form unchanged.
+  report's `id` and the probe baseline keep the listed form unchanged; the retained lookup compares
+  composed ids the same way (FR-016).
   Every listed kind of the kind matrix has a form; `ovh_iam_resource_tags`, whose one inventory
   URN lists as one item per tag key, has none and is matched by run id and prefix only;
   `ovh_cloud_quota` and `ovh_cloud_project` are never listed. A run-created bucket then reads
@@ -375,13 +376,39 @@ read-back differs from the plan (the observation fails, the destroy and sweep st
   and `parent_match`, the reason the parent was taken, from the same judgement that took it (one
   of the other `match` values; parents are one level deep, so never `parent`). The parent's type
   follows from the child's: a subnet's is a network, an S3 credential's and an S3 policy's a user.
-  Like the report's `id`, `parent_id` carries no project: two projects listing a parent of the
-  same id are not told apart (the same limit as same-name buckets in two regions). Both fields appear only on `match: parent` leftovers; every other field and
+  Like the report's `id`, `parent_id` carries no project; the child's `project` (FR-017) is its
+  parent's, which tells two projects listing a parent of the same id apart. Both fields appear only on `match: parent` leftovers; every other field and
   leftover is unchanged, so a reader of `leftovers.json` that ignores unknown fields reads the
   report as before. A parent-matched leftover's parent is itself a leftover of the same report
   (a retained parent excludes its children). Before this, a reader could not tell which of
   several users a credential belonged to, nor whether that user matched on the run's inventory or
   only on the name prefix (review note F4 on the match reason, D132 B1).
+
+- **FR-016 Retained ids compared as listed** — the leftover check excludes a listed resource as
+  retained only when a retained instance's state holds it in the form the inventory uses
+  (FR-013). For a kind whose provider id composes the listed id with its project and region
+  (`ovh_cloud_project_storage` as `<project>/<region>/<name>`, `ovh_cloud_project_user_s3_policy`
+  as `<project>/<user-id>`), the retained side reads the state's `id`, the provider id the
+  inventory records, and that id excludes only the listed item whose project and region compose
+  it; every other kind keeps the listed id it reads from `stateIDAttr` today. A bucket of a
+  retained bucket's name in another project or region is judged like any other listed bucket:
+  with two projects in one account (D120), a run's `lz2-demo-bkt-state` in one project is no
+  longer hidden by another project's retained bucket of that name (bucket names are fixed by the
+  deployment, not by the run: run `20261116T120049Z-6301`'s inventory). A composite resource in a
+  retained state without a string `id` excludes nothing, so the bucket it holds reads as any
+  listed bucket does (fail closed). A child still follows its parent: a retained user excludes its
+  S3 credentials and S3 policies, a retained network its subnets. Before this, the lookup compared
+  a bucket by its name alone (evidence/T034.md, known limit).
+
+- **FR-017 A leftover names where it is listed** — a leftover of a kind listed under a project
+  (a bucket, network, subnet, user, S3 credential, S3 policy, alert, Swift container or one of
+  the project's tag keys) carries `project`, the id of the project whose listing returned it, and
+  a bucket also carries `region`, the region whose listing returned it. The account-level kinds
+  (OAuth client, IAM policy, group) carry neither. Both fields are omitted when empty; the
+  report's `id` keeps the listed form and every other field is unchanged, so a reader of
+  `leftovers.json` that ignores unknown fields reads the report as before. A child's `project` is
+  its parent's. Before this, a leftover bucket named only its name, so a reader had to search
+  every region of every listed project for it (deferred from FR-013 and FR-015).
 
 ### Key entities
 Listing attempt, run record archive (`attempts/<n>/`), probe baseline, unreconciled probe run,
